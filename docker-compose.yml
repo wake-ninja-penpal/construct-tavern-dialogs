@@ -4,15 +4,22 @@
 # Запуск:      sudo docker-compose up --build   (старый docker-compose v1)
 #              docker compose up --build        (новый docker compose v2)
 # Приложение:  http://localhost:8080
-#              (порт меняется: APP_PORT=81 sudo docker-compose up -d)
+#              (порт меняется: APP_PORT=8081 в файле .env рядом с compose —
+#               править сам файл не нужно)
 # Стоп:        sudo docker-compose down         (данные sync сохранятся в volume sync-data)
 #
 # Формат: version 2.4 — работает и в docker-compose v1 (1.29+), и в
 # docker compose v2 (v2 лишь предупредит, что version устарел — это нормально).
 #
+# Сети:
+#   internal     — внутренняя сеть стека (web ↔ sync ↔ gateway)
+#   nginxnetwork — ВНЕШНЯЯ сеть (создана compose-файлом вашего nginx):
+#                  gateway подключён к ней, поэтому nginx достаёт шлюз
+#                  по имени контейнера:  http://vetvi-gateway:80
+#
 # Схема повторяет Caddy-шлюз песочницы:
-#   браузер → gateway(:80) ─┬─ /  (всё остальное)        → web:3000   (Next.js, отдаёт /vetvi/index.html)
-#                           └─ /?XTransformPort=3003     → sync:3003  (socket.io realtime-сервер)
+#   браузер → gateway(:80) ─┬─ /  (всё остальное)        → vetvi-web:3000   (Next.js, /vetvi/index.html)
+#                           └─ /?XTransformPort=3003     → vetvi-sync:3003  (socket.io realtime)
 # ─────────────────────────────────────────────────────────────────────────────
 version: "2.4"
 
@@ -23,6 +30,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: vetvi-web:latest
+    container_name: vetvi-web
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -31,6 +39,8 @@ services:
       NEXT_TELEMETRY_DISABLED: 1
     expose:
       - "3000"
+    networks:
+      - internal
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -46,11 +56,14 @@ services:
       context: ./mini-services/vetvi-sync
       dockerfile: Dockerfile
     image: vetvi-sync:latest
+    container_name: vetvi-sync
     restart: unless-stopped
     volumes:
       - sync-data:/app/data
     expose:
       - "3003"
+    networks:
+      - internal
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3003/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -59,9 +72,11 @@ services:
       start_period: 15s
 
   # Шлюз (Caddy) — единственная точка входа, как в песочнице.
-  # При добавлении новых мини-сервисов допишите матчер в docker/caddy/Caddyfile.
+  # Подключён и к internal (доступ к web/sync), и к внешней сети nginx,
+  # чтобы ваш nginx мог проксировать на http://vetvi-gateway:80 по имени.
   gateway:
     image: caddy:2-alpine
+    container_name: vetvi-gateway
     restart: unless-stopped
     depends_on:
       - web
@@ -70,6 +85,15 @@ services:
       - "${APP_PORT:-8080}:80"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - internal
+      - nginxnetwork
+
+networks:
+  internal:
+    driver: bridge
+  nginxnetwork:
+    external: true
 
 volumes:
   sync-data:

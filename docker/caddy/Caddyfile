@@ -1,9 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # «Ветви» — шлюз контейнерной сборки (повторяет Caddy-шлюз песочницы).
 #
-#   ?XTransformPort=3003  →  realtime-сервер socket.io (контейнер sync)
-#   всё остальное         →  Next.js (контейнер web)
+#   ?XTransformPort=3003  →  realtime-сервер socket.io (контейнер vetvi-sync)
+#   всё остальное         →  Next.js (контейнер vetvi-web)
 #
+# Имена контейнеров заданы в docker-compose.yml (container_name), поэтому
+# DNS между контейнерами сети internal работает всегда.
 # При добавлении новых мини-сервисов скопируйте блок handle и добавьте
 # соответствие порта имени контейнера.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -12,10 +14,10 @@
 	@vetvi_sync query XTransformPort=3003
 
 	handle @vetvi_sync {
-		reverse_proxy sync:3003
+		reverse_proxy vetvi-sync:3003
 	}
 
 	handle {
-		reverse_proxy web:3000
+		reverse_proxy vetvi-web:3000
 	}
 }
