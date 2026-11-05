@@ -144,6 +144,21 @@ body.panning #canvas,body.panning .groupbox,body.panning .gcard,body.panning .no
 .node.lkb{border-color:var(--lkc,#8b929c)!important;box-shadow:0 0 0 1.5px var(--lkc,#8b929c),0 0 18px -4px var(--lkc,#8b929c),0 6px 18px rgba(0,0,0,.38)!important}
 .groupbox.lkb,.gcard.lkb{border-color:var(--lkc,#8b929c)!important;border-style:solid!important;box-shadow:0 0 0 2px var(--lkc,#8b929c),0 0 24px -6px var(--lkc,#8b929c)!important}
 #edges .edge.lkb .line{stroke:var(--lkc,#8b929c)!important;filter:drop-shadow(0 0 5px var(--lkc,#8b929c))}
+/* список проектов */
+.pj-list{max-height:340px;overflow-y:auto;margin:10px 0 4px;display:flex;flex-direction:column;gap:6px}
+.pj-row{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid #262a31;border-radius:10px;background:#191c21;cursor:pointer;transition:all .15s}
+.pj-row:hover{background:#1e222a;border-color:#3a404b}
+.pj-row.cur{border-color:rgba(226,165,78,.45);background:rgba(226,165,78,.08)}
+.pj-main{flex:1;min-width:0}
+.pj-name{font:600 13px var(--body);color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pj-meta{font:500 11px var(--body);color:var(--tx3);margin-top:2px}
+.pj-badge{font:600 10px var(--mono);color:#7fb5a2;border:1px solid rgba(127,181,162,.4);border-radius:5px;padding:1px 6px;flex:none}
+.pj-acts{display:flex;gap:4px;flex:none}
+.pj-ib{width:28px;height:28px;border:none;border-radius:7px;background:none;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.pj-ib:hover{background:#262b33;color:var(--tx)}
+.pj-ib.danger:hover{color:#e08a7a;background:rgba(207,107,90,.12)}
+.pj-empty{font-size:12px;color:var(--tx3);text-align:center;padding:18px 10px}
+.pj-foot{display:flex;gap:8px;margin-top:10px}
 body.knife #canvas{cursor:crosshair}
 body.carry #canvas{cursor:copy}
 #canvas::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(900px 560px at 55% 38%,rgba(226,165,78,.045),transparent 65%),radial-gradient(140% 120% at 50% 120%,rgba(0,0,0,.5),transparent 55%)}
@@ -956,7 +971,10 @@ function scheduleAutosave(){
   clearTimeout(flashT);
   flashT=setTimeout(function(){
     if(typeof syncState!=='undefined'&&syncState&&syncState.mode==='copy'){syncPersistCopyTick();}
-    else{try{localStorage.setItem(LS_KEY,JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){}}
+    else{
+      try{localStorage.setItem(LS_KEY,JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){}
+      try{projSaveCurrent();}catch(e){}
+    }
     var a=$('#stAuto');a.classList.add('flash');setTimeout(function(){a.classList.remove('flash');},1100);
   },700);
 }
@@ -5113,8 +5131,8 @@ window.addEventListener('keydown',function(e){
   if(mod&&code==='KeyZ'&&!e.shiftKey){e.preventDefault();undo();return;}
   if(mod&&(code==='KeyY'||(code==='KeyZ'&&e.shiftKey))){e.preventDefault();redo();return;}
   if(mod&&code==='KeyS'){e.preventDefault();if(e.shiftKey)saveAs();else save();return;}
-  if(mod&&code==='KeyO'){e.preventDefault();guardOpen();return;}
-  if(mod&&e.altKey&&code==='KeyN'){e.preventDefault();newProject();return;}
+  if(mod&&code==='KeyO'){e.preventDefault();showProjectsModal();return;}
+  if(mod&&e.altKey&&code==='KeyN'){e.preventDefault();projCreate();return;}
   if(mod&&code==='KeyD'){e.preventDefault();var r=duplicateSel();if(r)startCarry(r.ids,r.pre);return;}
   if(mod&&e.shiftKey&&code==='KeyA'){e.preventDefault();alignSelH();return;}
   if(mod&&!e.shiftKey&&code==='KeyG'){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+Shift+ЛКМ)','warn');return;}
@@ -5650,8 +5668,8 @@ function demoProject(){
       E(n5,n11,'вызов принят','cond'),E(n11,n7,'ключ от Башни'),E(n3,n12,'довериться Вейсу','choice'),E(n12,n8,'припасы')]};
 }
 /* ═══ привязка панели ═══ */
-$('#bNew').onclick=newProject;
-$('#bOpen').onclick=guardOpen;
+$('#bNew').onclick=projCreate;
+$('#bOpen').onclick=showProjectsModal;
 $('#bSave').onclick=save;
 $('#bSaveMenu').onclick=function(e){
   e.stopPropagation();
@@ -5729,6 +5747,239 @@ $('#sQ').addEventListener('input',renderList);
 window.addEventListener('beforeunload',function(e){
   if(dirty){e.preventDefault();e.returnValue='';}
 });
+/* ═══ менеджер проектов: список, переключение, автосохранение каждого ═══ */
+var LS_PROJECTS='vetvi-projects-v1',LS_CURPROJ='vetvi-cur-v1';
+var projSkipSaveId=null; /* id удаляемого проекта — не пересохранять его при переключении */
+function projRegistry(){
+  try{return JSON.parse(localStorage.getItem(LS_PROJECTS)||'[]')||[];}catch(e){return[];}
+}
+function projSaveRegistry(list){
+  try{localStorage.setItem(LS_PROJECTS,JSON.stringify(list));}catch(e){toast('Хранилище переполнено — список проектов не сохранён','err');}
+}
+function projSlotKey(id){return 'vetvi-project-'+id;}
+function projCurId(){
+  try{return localStorage.getItem(LS_CURPROJ)||'';}catch(e){return'';}
+}
+function projSetCur(id){
+  try{localStorage.setItem(LS_CURPROJ,id||'');}catch(e){}
+}
+/* сохранить текущий проект в свой слот + обновить запись реестра */
+function projSaveCurrent(){
+  if(typeof syncState!=='undefined'&&syncState&&syncState.mode==='copy')return; /* копия хранится отдельно */
+  if(!project||!project.meta)return;
+  if(projSkipSaveId&&project.meta.projectId===projSkipSaveId)return;
+  if(!project.meta.projectId)project.meta.projectId=uid()+uid();
+  var list=projRegistry();
+  var now=new Date().toISOString();
+  var entry=null;
+  for(var i=0;i<list.length;i++)if(list[i].id===project.meta.projectId){entry=list[i];break;}
+  if(!entry){entry={id:project.meta.projectId,created:project.meta.created||now};list.push(entry);}
+  entry.name=project.meta.name||'Без названия';
+  entry.modified=project.meta.modified||now;
+  entry.nodes=project.nodes?project.nodes.length:0;
+  if(typeof syncState!=='undefined'&&syncState&&syncState.enabled&&syncState.room)entry.roomId=syncState.room;
+  entry.at=now;
+  list.sort(function(a,b){return (b.modified||b.at||'').localeCompare(a.modified||a.at||'');});
+  projSaveRegistry(list);
+  try{localStorage.setItem(projSlotKey(entry.id),JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){toast('Хранилище переполнено — проект не сохранён','err');}
+  projSetCur(entry.id);
+}
+/* миграция старого одиночного автосейва в реестр */
+function projMigrateLegacy(){
+  var list=projRegistry();
+  if(list.length)return list;
+  var raw=null;
+  try{raw=localStorage.getItem(LS_KEY)||localStorage.getItem('vetvi-autosave-v16')||localStorage.getItem('vetvi-autosave-v15');}catch(e){}
+  if(raw){
+    try{
+      var d=JSON.parse(raw);
+      if(d&&d.project&&Array.isArray(d.project.nodes)){
+        var p=d.project;
+        if(!p.meta)p.meta={};
+        if(!p.meta.projectId)p.meta.projectId=uid()+uid();
+        if(!p.meta.created)p.meta.created=new Date().toISOString();
+        var now=new Date().toISOString();
+        var entry={id:p.meta.projectId,name:p.meta.name||'Без названия',created:p.meta.created,modified:p.meta.modified||now,nodes:(p.nodes||[]).length,roomId:null,at:now};
+        try{localStorage.setItem(projSlotKey(entry.id),JSON.stringify({project:p,vp:d.viewport||null,bend:d.bend||null}));}catch(e){}
+        list=[entry];
+        projSaveRegistry(list);
+        return list;
+      }
+    }catch(e){}
+  }
+  return [];
+}
+/* запуск: миграция, загрузка текущего (или последнего) проекта, подключение к его комнате */
+function projInitStartup(){
+  var list=projMigrateLegacy();
+  if(!list.length){
+    var now=new Date().toISOString();
+    list=[{id:uid()+uid(),name:'Без названия',created:now,modified:now,nodes:0,roomId:null,at:now}];
+    projSaveRegistry(list);
+  }
+  var cur=projCurId(),entry=null;
+  for(var i=0;i<list.length;i++)if(list[i].id===cur)entry=list[i];
+  if(!entry)entry=list[0];
+  var data=null;
+  try{data=JSON.parse(localStorage.getItem(projSlotKey(entry.id))||'null');}catch(e){}
+  var p=(data&&data.project)||null;
+  if(!p||!Array.isArray(p.nodes)){
+    p={meta:{name:entry.name||'Без названия',created:entry.created||new Date().toISOString(),modified:entry.modified||new Date().toISOString(),projectId:entry.id},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
+  }
+  if(!p.meta)p.meta={};
+  if(!p.meta.projectId)p.meta.projectId=entry.id;
+  p.viewport=(data&&data.vp)?data.vp:null;
+  p.bend=(data&&data.bend)?data.bend:null;
+  loadProject(p,null);
+  projSetCur(entry.id);
+  if(entry.roomId&&!syncHashParams().room){
+    syncConnect(entry.roomId,entry.id,{});
+    syncSetHash(entry.roomId,entry.id);
+  }
+  return entry;
+}
+/* открыть проект из списка (текущий предварительно сохраняется) */
+function projOpen(id,silent){
+  var list=projRegistry();
+  var entry=null;
+  for(var i=0;i<list.length;i++)if(list[i].id===id)entry=list[i];
+  if(!entry){toast('Проект не найден','err');return;}
+  if(entry.id===projCurId()&&syncState.mode!=='copy'){toast('Этот проект уже открыт');return;}
+  var data=null;
+  try{data=JSON.parse(localStorage.getItem(projSlotKey(id))||'null');}catch(e){}
+  if(!data||!data.project||!Array.isArray(data.project.nodes)){
+    /* битая запись — убираем из списка, чтобы не мешала */
+    var rest=list.filter(function(e){return e.id!==id;});
+    projSaveRegistry(rest);
+    toast('Данные проекта не найдены — запись убрана из списка','err');
+    return;
+  }
+  projSaveCurrent();
+  data.project.viewport=data.vp||null;
+  data.project.bend=data.bend||null;
+  loadProject(data.project,null);
+  $('#projName').value=project.meta.name;
+  projSetCur(entry.id);
+  if(entry.roomId){
+    syncState.mode='room';
+    syncConnect(entry.roomId,entry.id,{});
+    syncSetHash(entry.roomId,entry.id);
+  }
+  if(!silent)toast('Открыт проект: '+(entry.name||'Без названия'));
+}
+/* создать действительно новый проект — старый остаётся в списке */
+function projCreate(){
+  projSaveCurrent();
+  var now=new Date().toISOString();
+  var pid=uid()+uid();
+  var p={meta:{name:'Новый проект',created:now,modified:now,projectId:pid},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
+  loadProject(p,null);
+  $('#projName').value=project.meta.name;
+  projSetCur(pid);
+  projSaveCurrent();
+  fitView(false);
+  addNode('scene',0,0,true);
+  history=[];future=[];updateHistUI();markSaved();
+  toast('Создан новый проект — предыдущий сохранён в списке («Открыть»)');
+}
+function projDelete(id){
+  var list=projRegistry();
+  var entry=null;
+  var left=list.filter(function(e){if(e.id===id){entry=e;return false;}return true;});
+  if(!entry)return;
+  projSkipSaveId=id;
+  projSaveRegistry(left);
+  try{localStorage.removeItem(projSlotKey(id));}catch(e){}
+  var wasCur=id===projCurId()&&syncState.mode!=='copy';
+  if(wasCur){
+    var next=left[0];
+    if(next)projOpen(next.id,true);
+    else projCreate();
+  }
+  projSkipSaveId=null;
+  toast('Проект удалён'+(wasCur?'':' : '+(entry.name||'Без названия')));
+}
+function projRenameModal(id){
+  var list=projRegistry(),entry=null;
+  list.forEach(function(e){if(e.id===id)entry=e;});
+  if(!entry)return;
+  showModal({title:'Переименовать проект',
+    text:'<label class="i-lab">Название</label><input class="inp" id="pjNameInp" maxlength="80" value="'+esc(entry.name||'Без названия')+'">',
+    buttons:[
+      {label:'Отмена',fn:function(){showProjectsModal();}},
+      {label:'Сохранить',primary:1,fn:function(){
+        var v=($('#pjNameInp').value||'').trim()||'Без названия';
+        entry.name=v;
+        projSaveRegistry(list);
+        if(id===projCurId()&&syncState.mode!=='copy'){project.meta.name=v;$('#projName').value=v;markDirty();}
+        toast('Переименовано: '+v);
+        showProjectsModal();
+      }}
+    ]});
+  var inp=$('#pjNameInp');
+  if(inp){inp.focus();inp.select();inp.addEventListener('keydown',function(ev){if(ev.key==='Enter'){var bs=$all('#mCard .m-btns .btn');if(bs[1])bs[1].click();}});}
+}
+function projDeleteConfirm(id){
+  var list=projRegistry(),entry=null;
+  list.forEach(function(e){if(e.id===id)entry=e;});
+  if(!entry)return;
+  var others=list.filter(function(e){return e.id!==id;}).length;
+  var isCur=id===projCurId()&&syncState.mode!=='copy';
+  if(others===0&&!isCur){
+    projDelete(id);
+    return;
+  }
+  showModal({title:'Удалить проект?',
+    text:'<p>«'+esc(entry.name||'Без названия')+'» будет удалён с этого устройства безвозвратно.'+(isCur?'<br>Вместо него откроется другой проект из списка.':'')+'</p>',
+    buttons:[
+      {label:'Удалить',danger:1,fn:function(){projDelete(id);showProjectsModal();}},
+      {label:'Отмена',primary:1,fn:function(){showProjectsModal();}}
+    ]});
+}
+function projFmtDate(iso){
+  if(!iso)return '';
+  try{
+    var d=new Date(iso);
+    return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){return '';}
+}
+/* модалка «Мои проекты» */
+function showProjectsModal(){
+  var list=projRegistry();
+  var cur=projCurId();
+  var rows=list.map(function(e){
+    var curFlag=e.id===cur&&syncState.mode!=='copy';
+    var meta=[projFmtDate(e.modified||e.at),(e.nodes||0)+' узл.'].filter(Boolean).join(' · ');
+    return '<div class="pj-row'+(curFlag?' cur':'')+'" data-open="'+esc(e.id)+'" title="Открыть проект">'+
+      '<div class="pj-main"><div class="pj-name">'+esc(e.name||'Без названия')+(curFlag?' <span style="color:var(--acc);font-size:10px;white-space:nowrap">· текущий</span>':'')+'</div>'+
+      '<div class="pj-meta">'+esc(meta)+'</div></div>'+
+      (e.roomId?'<span class="pj-badge">комната</span>':'')+
+      '<div class="pj-acts">'+
+      '<button class="pj-ib" data-ren="'+esc(e.id)+'" title="Переименовать">'+ic('pencil',14)+'</button>'+
+      '<button class="pj-ib danger" data-del="'+esc(e.id)+'" title="Удалить">'+ic('trash',14)+'</button>'+
+      '</div></div>';
+  }).join('');
+  showModal({title:'Мои проекты',
+    text:'<div class="pj-list">'+(rows||'<div class="pj-empty">Пока нет проектов — создайте первый</div>')+'</div>'+
+      '<div class="pj-foot"><button class="btn" id="pjNewBtn">+ Новый проект</button><button class="btn" id="pjImpBtn">Импорт из файла…</button></div>',
+    buttons:[{label:'Закрыть',primary:1}]});
+  $all('#mCard .pj-row').forEach(function(r){
+    r.onclick=function(ev){
+      if(ev.target.closest&&ev.target.closest('.pj-ib'))return;
+      var id=r.dataset.open;
+      closeModal();
+      projOpen(id);
+    };
+  });
+  $all('#mCard [data-ren]').forEach(function(b){
+    b.onclick=function(ev){ev.stopPropagation();projRenameModal(b.dataset.ren);};
+  });
+  $all('#mCard [data-del]').forEach(function(b){
+    b.onclick=function(ev){ev.stopPropagation();projDeleteConfirm(b.dataset.del);};
+  });
+  var nb=$('#pjNewBtn');if(nb)nb.onclick=function(){closeModal();projCreate();};
+  var ib=$('#pjImpBtn');if(ib)ib.onclick=function(){closeModal();openProject();};
+}
 /* ═══ realtime-коллаборация ═══
    Совместный доступ по ссылке (TD.md): комнаты на сервере, снапшот-синхронизация,
    presence, живые перетаскивания, локальные копии и merge-запросы через mailbox. */
@@ -6620,22 +6871,14 @@ function initSync(){
   },600);
 }
 /* ═══ запуск ═══ */
-try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key!=='Escape')return;if($('#noteModal').classList.contains('show')){closeNoteEditor();}if($('#noteViewModal').classList.contains('show')){closeNoteView();}},true);renderPalette();var restored=false;
+try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key!=='Escape')return;if($('#noteModal').classList.contains('show')){closeNoteEditor();}if($('#noteViewModal').classList.contains('show')){closeNoteView();}},true);renderPalette();
   try{
-    var raw=localStorage.getItem(LS_KEY)||localStorage.getItem('vetvi-autosave-v16')||localStorage.getItem('vetvi-autosave-v15');
-    if(raw){
-      var d=JSON.parse(raw);
-      if(d&&d.project&&Array.isArray(d.project.nodes)){
-loadProject(d.project);
-if(d.viewport&&d.viewport.z)vp={x:+d.viewport.x||0,y:+d.viewport.y||0,z:+d.viewport.z||1};
-if(d.bend==='ortho90'||d.bend==='ortho45'||d.bend==='smooth')bendMode=d.bend;
-syncBendButtons();
-applyView();
-restored=true;
-}
-    }
-  }catch(e){console.warn('Автосохранение не прочитано:',e);}
-  if(!restored){loadProject({meta:{name:'Без названия',created:new Date().toISOString(),modified:new Date().toISOString()},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]});fitView(false);}
+    projInitStartup();
+  }catch(e){
+    console.warn('Список проектов не прочитан:',e);
+    loadProject({meta:{name:'Без названия',created:new Date().toISOString(),modified:new Date().toISOString()},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]});
+    fitView(false);
+  }
   $('#projName').value=project.meta.name;
   updateHistUI();updateStatus();
   initSync();
@@ -6645,7 +6888,6 @@ restored=true;
     updateDlgRowStates();
     fitView(false);
   },350);
-  if(restored)setTimeout(function(){toast('Восстановлено автосохранение','warn');},600);
   console.info('Ветви: инициализация завершена. Узлов:',project.nodes.length,'Связей:',project.edges.length,'Групп:',project.groups.length);
 }catch(err){
   console.error(err);
