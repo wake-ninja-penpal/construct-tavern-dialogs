@@ -1,0 +1,702 @@
+    60→    60→    60→
+    61→    61→    61→const LS_USER_ID = 'vetvi:userId'
+    62→    62→    62→const LS_USER_NAME = 'vetvi:userName'
+    63→    63→    63→const LS_LAST_PROJECT = 'vetvi:lastProjectId'
+    64→    64→    64→
+    65→    65→    65→const NOTIFY_DEBOUNCE_MS = 60
+    66→    66→    66→
+    67→    67→    67→function safeLocalStorage(): Storage | null {
+    68→    68→    68→  try {
+    69→    69→    69→    if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
+    70→    70→    70→  } catch {
+    71→    71→    71→    // ignore
+    72→    72→    72→  }
+    73→    73→    73→  return null
+    74→    74→    74→}
+    75→    75→    75→
+    76→    76→    76→function randomId(len = 24): string {
+    77→    77→    77→  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    78→    78→    78→  const bytes = new Uint8Array(len)
+    79→    79→    79→  if (typeof crypto !== 'undefined' && 'getRandomValues' in crypto) {
+    80→    80→    80→    crypto.getRandomValues(bytes)
+    81→    81→    81→  } else {
+    82→    82→    82→    for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256)
+    83→    83→    83→  }
+    84→    84→    84→  return Array.from(bytes)
+    85→    85→    85→    .map((b) => alphabet[b % alphabet.length])
+    86→    86→    86→    .join('')
+    87→    87→    87→}
+    88→    88→    88→
+    89→    89→    89→function readHashParams(): URLSearchParams {
+    90→    90→    90→  if (typeof window === 'undefined') return new URLSearchParams()
+    91→    91→    91→  return new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    92→    92→    92→}
+    93→    93→    93→
+    94→    94→    94→function writeHashParams(paramsObject: Record<string, string | null>) {
+    95→    95→    95→  if (typeof window === 'undefined') return
+    96→    96→    96→  const params = readHashParams()
+    97→    97→    97→  for (const [key, value] of Object.entries(paramsObject)) {
+    98→    98→    98→    if (!value) params.delete(key)
+    99→    99→    99→    else params.set(key, value)
+   100→   100→   100→  }
+   101→   101→   101→  const hash = params.toString()
+   102→   102→   102→  const newUrl = `${window.location.pathname}${window.location.search}${hash ? `#${hash}` : ''}`
+   103→   103→   103→  try {
+   104→   104→   104→    window.history.replaceState(null, '', newUrl)
+   105→   105→   105→  } catch {
+   106→   106→   106→    window.location.hash = hash
+   107→   107→   107→  }
+   108→   108→   108→}
+   109→   109→   109→
+   110→   110→   110→export class VetviStore {
+   111→   111→   111→  private ydoc: Y.Doc | null = null
+   112→   112→   112→  private provider: VetviProvider | null = null
+   113→   113→   113→  private mailboxDoc: Y.Doc | null = null
+   114→   114→   114→  private mailboxProvider: VetviProvider | null = null
+   115→   115→   115→  private mailboxRoomId: string | null = null
+   116→   116→   116→
+   117→   117→   117→  private projectId: string | null = null
+   118→   118→   118→  private roomId: string | null = null
+   119→   119→   119→  private mode: VetviMode = 'project'
+   120→   120→   120→  private copyMeta: CopyMeta | null = null
+   121→   121→   121→  private currentCopyRecord: CopyRecord | null = null
+   122→   122→   122→
+   123→   123→   123→  private selectedId: string | null = null
+   124→   124→   124→  private connection: ConnectionState = 'offline'
+   125→   125→   125→  private mailboxConnection: ConnectionState = 'offline'
+   126→   126→   126→  private saveState: SaveState = 'saved'
+   127→   127→   127→
+   128→   128→   128→  private userId = ''
+   129→   129→   129→  private userName = ''
+   130→   130→   130→  private userColor = USER_COLORS[0]
+   131→   131→   131→
+   132→   132→   132→  private copies: CopyMeta[] = []
+   133→   133→   133→  private outbox: MergeRequest[] = []
+   134→   134→   134→  private backups: BackupMeta[] = []
+   135→   135→   135→  private shareUrl: string | null = null
+   136→   136→   136→
+   137→   137→   137→  private ready = false
+   138→   138→   138→  private bootstrapped = false
+   139→   139→   139→  private snapshot: VetviSnapshot
+   140→   140→   140→  private listeners = new Set<() => void>()
+   141→   141→   141→  private notifyTimer: ReturnType<typeof setTimeout> | null = null
+   142→   142→   142→  private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+   143→   143→   143→  private textTimer: ReturnType<typeof setTimeout> | null = null
+   144→   144→   144→
+   145→   145→   145→  /** Колбэк для toast-уведомлений (назначается UI). */
+   146→   146→   146→  onToast: ((message: string, kind?: ToastKind) => void) | null = null
+   147→   147→   147→
+   148→   148→   148→  constructor() {
+   149→   149→   149→    this.snapshot = this.buildSnapshot()
+   150→   150→   150→  }
+   151→   151→   151→
+   152→   152→   152→  // ---------------------------
+   153→   153→   153→  // Подписка / снапшот
+   154→   154→   154→  // ---------------------------
+   155→   155→   155→
+   156→   156→   156→  subscribe = (listener: () => void) => {
+   157→   157→   157→    this.listeners.add(listener)
+   158→   158→   158→    return () => {
+   159→   159→   159→      this.listeners.delete(listener)
+   160→   160→   160→    }
+   161→   161→   161→  }
+   162→   162→   162→
+   163→   163→   163→  getSnapshot = (): VetviSnapshot => this.snapshot
+   164→   164→   164→
+   165→   165→   165→  private toast(message: string, kind: ToastKind = 'ok') {
+   166→   166→   166→    this.onToast?.(message, kind)
+   167→   167→   167→  }
+   168→   168→   168→
+   169→   169→   169→  private notify(live = false) {
+   170→   170→   170→    if (live) {
+   171→   171→   171→      if (this.notifyTimer) {
+   172→   172→   172→        clearTimeout(this.notifyTimer)
+   173→   173→   173→        this.notifyTimer = null
+   174→   174→   174→      }
+   175→   175→   175→      this.rebuildAndEmit()
+   176→   176→   176→      return
+   177→   177→   177→    }
+   178→   178→   178→    if (this.notifyTimer) return
+   179→   179→   179→    this.notifyTimer = setTimeout(() => {
+   180→   180→   180→      this.notifyTimer = null
+   181→   181→   181→      this.rebuildAndEmit()
+   182→   182→   182→    }, NOTIFY_DEBOUNCE_MS)
+   183→   183→   183→  }
+   184→   184→   184→
+   185→   185→   185→  private rebuildAndEmit() {
+   186→   186→   186→    this.snapshot = this.buildSnapshot()
+   187→   187→   187→    this.listeners.forEach((listener) => listener())
+   188→   188→   188→  }
+   189→   189→   189→
+   190→   190→   190→  private buildSnapshot(): VetviSnapshot {
+   191→   191→   191→    const doc = this.ydoc
+   192→   192→   192→
+   193→   193→   193→    let meta: ProjectMeta | null = null
+   194→   194→   194→    const elements: ElementRecord[] = []
+   195→   195→   195→
+   196→   196→   196→    if (doc) {
+   197→   197→   197→      const metaPlain = yValueToPlain(doc.getMap('meta')) as Record<string, unknown>
+   198→   198→   198→      meta = {
+   199→   199→   199→        projectId: String(metaPlain.projectId ?? this.projectId ?? ''),
+   200→   200→   200→        name: String(metaPlain.name ?? ''),
+   201→   201→   201→        schemaVersion: Number(metaPlain.schemaVersion ?? SCHEMA_VERSION),
+   202→   202→   202→        createdAt: Number(metaPlain.createdAt ?? 0),
+   203→   203→   203→        updatedAt: Number(metaPlain.updatedAt ?? 0),
+   204→   204→   204→      }
+   205→   205→   205→
+   206→   206→   206→      doc.getMap('elements').forEach((value, id) => {
+   207→   207→   207→        const rec = yValueToPlain(value) as Record<string, unknown>
+   208→   208→   208→        elements.push({
+   209→   209→   209→          id,
+   210→   210→   210→          type: (rec.type as ElementType) ?? 'text',
+   211→   211→   211→          x: Number(rec.x ?? 0),
+   212→   212→   212→          y: Number(rec.y ?? 0),
+   213→   213→   213→          width: Number(rec.width ?? 220),
+   214→   214→   214→          height: Number(rec.height ?? 120),
+   215→   215→   215→          text: String(rec.text ?? ''),
+   216→   216→   216→          createdAt: Number(rec.createdAt ?? 0),
+   217→   217→   217→          updatedAt: Number(rec.updatedAt ?? 0),
+   218→   218→   218→        })
+   219→   219→   219→      })
+   220→   220→   220→
+   221→   221→   221→      elements.sort(
+   222→   222→   222→        (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id),
+   223→   223→   223→      )
+   224→   224→   224→    }
+   225→   225→   225→
+   226→   226→   226→    const peers: PeerInfo[] = []
+   227→   227→   227→    const activeProvider = this.provider ?? this.mailboxProvider
+   228→   228→   228→    if (activeProvider) {
+   229→   229→   229→      activeProvider.awareness.getStates().forEach((state, clientId) => {
+   230→   230→   230→        const user = (state as { user?: { name?: string; color?: string } } | undefined)?.user
+   231→   231→   231→        peers.push({
+   232→   232→   232→          clientId,
+   233→   233→   233→          name: user?.name || `Участник ${String(clientId).slice(-4)}`,
+   234→   234→   234→          color: user?.color || '#9aa0a6',
+   235→   235→   235→          isSelf: clientId === activeProvider.awareness.clientID,
+   236→   236→   236→        })
+   237→   237→   237→      })
+   238→   238→   238→      peers.sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.clientId - b.clientId))
+   239→   239→   239→    }
+   240→   240→   240→
+   241→   241→   241→    const connection = this.mode === 'copy' ? this.mailboxConnection : this.connection
+   242→   242→   242→
+   243→   243→   243→    return {
+   244→   244→   244→      ready: this.ready,
+   245→   245→   245→      mode: this.mode,
+   246→   246→   246→      meta,
+   247→   247→   247→      elements,
+   248→   248→   248→      selectedId: this.selectedId,
+   249→   249→   249→      connection,
+   250→   250→   250→      roomActive: this.provider !== null,
+   251→   251→   251→      mailboxActive: this.mailboxProvider !== null,
+   252→   252→   252→      peers,
+   253→   253→   253→      peersCount: peers.length,
+   254→   254→   254→      copies: this.copies,
+   255→   255→   255→      incoming: this.mode === 'project' ? this.readIncoming() : [],
+   256→   256→   256→      outgoing: this.outbox.filter((r) =>
+   257→   257→   257→        this.copyMeta ? r.copyId === this.copyMeta.copyId : false,
+   258→   258→   258→      ),
+   259→   259→   259→      backups: this.backups,
+   260→   260→   260→      shareUrl: this.shareUrl,
+   261→   261→   261→      roomId: this.roomId,
+   262→   262→   262→      copyMeta: this.copyMeta,
+   263→   263→   263→      saveState: this.saveState,
+   264→   264→   264→      userName: this.userName,
+   265→   265→   265→      userColor: this.userColor,
+   266→   266→   266→    }
+   267→   267→   267→  }
+   268→   268→   268→
+   269→   269→   269→  private readIncoming(): MergeRequest[] {
+   270→   270→   270→    if (!this.mailboxDoc) return []
+   271→   271→   271→    const requestsMap = this.mailboxDoc.getMap('requests')
+   272→   272→   272→    const requests: MergeRequest[] = []
+   273→   273→   273→    requestsMap.forEach((value, id) => {
+   274→   274→   274→      const plain = yValueToPlain(value) as Record<string, unknown> | null
+   275→   275→   275→      if (!plain) return
+   276→   276→   276→      requests.push({
+   277→   277→   277→        id: String(plain.id ?? id),
+   278→   278→   278→        senderId: String(plain.senderId ?? ''),
+   279→   279→   279→        senderName: String(plain.senderName ?? 'Неизвестный'),
+   280→   280→   280→        copyId: String(plain.copyId ?? ''),
+   281→   281→   281→        sourceRoomId: plain.sourceRoomId ? String(plain.sourceRoomId) : null,
+   282→   282→   282→        createdAt: Number(plain.createdAt ?? 0),
+   283→   283→   283→        delta: (plain.delta ?? {}) as MergeRequest['delta'],
+   284→   284→   284→        stats: (plain.stats ?? { added: 0, updated: 0, deleted: 0 }) as MergeRequest['stats'],
+   285→   285→   285→        status: (plain.status as MergeRequest['status']) ?? 'pending',
+   286→   286→   286→      })
+   287→   287→   287→    })
+   288→   288→   288→    requests.sort((a, b) => b.createdAt - a.createdAt)
+   289→   289→   289→    return requests
+   290→   290→   290→  }
+   291→   291→   291→
+   292→   292→   292→  // ---------------------------
+   293→   293→   293→  // Bootstrap / маршрутизация
+   294→   294→   294→  // ---------------------------
+   295→   295→   295→
+   296→   296→   296→  async bootstrap() {
+   297→   297→   297→    if (this.bootstrapped || typeof window === 'undefined') return
+   298→   298→   298→    this.bootstrapped = true
+   299→   299→   299→
+   300→   300→   300→    const storage = safeLocalStorage()
+   301→   301→   301→    this.userId = storage?.getItem(LS_USER_ID) || uid()
+   302→   302→   302→    storage?.setItem(LS_USER_ID, this.userId)
+   303→   303→   303→
+   304→   304→   304→    this.userName = storage?.getItem(LS_USER_NAME) || `Гость-${this.userId.slice(0, 4)}`
+   305→   305→   305→    storage?.setItem(LS_USER_NAME, this.userName)
+   306→   306→   306→
+   307→   307→   307→    let colorIndex = 0
+   308→   308→   308→    for (let i = 0; i < this.userId.length; i++) colorIndex += this.userId.charCodeAt(i)
+   309→   309→   309→    this.userColor = USER_COLORS[colorIndex % USER_COLORS.length]
+   310→   310→   310→
+   311→   311→   311→    await this.routeFromHash(readHashParams())
+   312→   312→   312→
+   313→   313→   313→    this.ready = true
+   314→   314→   314→
+   315→   315→   315→    window.addEventListener('hashchange', () => {
+   316→   316→   316→      void this.handleHashChange()
+   317→   317→   317→    })
+   318→   318→   318→
+   319→   319→   319→    this.rebuildAndEmit()
+   320→   320→   320→  }
+   321→   321→   321→
+   322→   322→   322→  private async handleHashChange() {
+   323→   323→   323→    const params = readHashParams()
+   324→   324→   324→    const room = params.get('room')
+   325→   325→   325→    const copyId = params.get('copy')
+   326→   326→   326→
+   327→   327→   327→    if (room && room !== this.roomId) {
+   328→   328→   328→      await this.routeFromHash(params)
+   329→   329→   329→      return
+   330→   330→   330→    }
+   331→   331→   331→    if (copyId && this.copyMeta?.copyId !== copyId) {
+   332→   332→   332→      await this.routeFromHash(params)
+   333→   333→   333→      return
+   334→   334→   334→    }
+   335→   335→   335→    if (!room && !copyId && (this.roomId || this.copyMeta)) {
+   336→   336→   336→      await this.routeFromHash(params)
+   337→   337→   337→    }
+   338→   338→   338→  }
+   339→   339→   339→
+   340→   340→   340→  private async routeFromHash(params: URLSearchParams) {
+   341→   341→   341→    const room = params.get('room')
+   342→   342→   342→    const project = params.get('project')
+   343→   343→   343→    const copyId = params.get('copy')
+   344→   344→   344→
+   345→   345→   345→    if (copyId) {
+   346→   346→   346→      const record = await getCopy(copyId)
+   347→   347→   347→      if (record) {
+   348→   348→   348→        await this.openCopy(copyId)
+   349→   349→   349→        return
+   350→   350→   350→      }
+   351→   351→   351→    }
+   352→   352→   352→
+   353→   353→   353→    if (room) {
+   354→   354→   354→      const projectId = project || uid()
+   355→   355→   355→      await this.openProject(projectId, { name: project ? 'Проект' : 'Проект из комнаты' })
+   356→   356→   356→      this.connectRoom(room)
+   357→   357→   357→      writeHashParams({ room, project: projectId, copy: null })
+   358→   358→   358→      return
+   359→   359→   359→    }
+   360→   360→   360→
+   361→   361→   361→    // Без параметров — последний локальный проект или новый.
+   362→   362→   362→    const storage = safeLocalStorage()
+   363→   363→   363→    const last = storage?.getItem(LS_LAST_PROJECT)
+   364→   364→   364→    if (last && (await getProjectUpdate(last))) {
+   365→   365→   365→      await this.openProject(last)
+   366→   366→   366→      return
+   367→   367→   367→    }
+   368→   368→   368→
+   369→   369→   369→    await this.newProject({ silent: true })
+   370→   370→   370→  }
+   371→   371→   371→
+   372→   372→   372→  // ---------------------------
+   373→   373→   373→  // Проекты
+   374→   374→   374→  // ---------------------------
+   375→   375→   375→
+   376→   376→   376→  async newProject(options: { silent?: boolean } = {}) {
+   377→   377→   377→    this.cleanupDoc()
+   378→   378→   378→    const projectId = uid()
+   379→   379→   379→    await this.createDoc(projectId, 'Новый проект')
+   380→   380→   380→    writeHashParams({ room: null, project: null, copy: null })
+   381→   381→   381→    safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
+   382→   382→   382→    this.mode = 'project'
+   383→   383→   383→    this.copyMeta = null
+   384→   384→   384→    this.ready = true
+   385→   385→   385→    if (!options.silent) this.toast('Создан новый проект')
+   386→   386→   386→    this.notify(true)
+   387→   387→   387→  }
+   388→   388→   388→
+   389→   389→   389→  private async createDoc(projectId: string, name: string) {
+   390→   390→   390→    const doc = new Y.Doc()
+   391→   391→   391→    this.ydoc = doc
+   392→   392→   392→    this.projectId = projectId
+   393→   393→   393→
+   394→   394→   394→    const saved = await getProjectUpdate(projectId)
+   395→   395→   395→    if (saved) {
+   396→   396→   396→      try {
+   397→   397→   397→        Y.applyUpdate(doc, saved, 'idb-load')
+   398→   398→   398→      } catch (error) {
+   399→   399→   399→        console.warn('Не удалось загрузить проект из IndexedDB', error)
+   400→   400→   400→      }
+   401→   401→   401→    }
+   402→   402→   402→
+   403→   403→   403→    ensureProjectSkeleton(doc, projectId, name)
+   404→   404→   404→    await addProjectId(projectId)
+   405→   405→   405→
+   406→   406→   406→    doc.on('update', () => this.notify())
+   407→   407→   407→    this.scheduleSave()
+   408→   408→   408→  }
+   409→   409→   409→
+   410→   410→   410→  async openProject(projectId: string, options: { name?: string } = {}) {
+   411→   411→   411→    this.cleanupDoc()
+   412→   412→   412→    await this.createDoc(projectId, options.name ?? 'Новый проект')
+   413→   413→   413→    safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
+   414→   414→   414→    this.mode = 'project'
+   415→   415→   415→    this.copyMeta = null
+   416→   416→   416→    this.notify(true)
+   417→   417→   417→  }
+   418→   418→   418→
+   419→   419→   419→  private cleanupDoc() {
+   420→   420→   420→    this.disconnectRoom()
+   421→   421→   421→
+   422→   422→   422→    if (this.autoSaveTimer) {
+   423→   423→   423→      clearTimeout(this.autoSaveTimer)
+   424→   424→   424→      this.autoSaveTimer = null
+   425→   425→   425→    }
+   426→   426→   426→    if (this.textTimer) {
+   427→   427→   427→      clearTimeout(this.textTimer)
+   428→   428→   428→      this.textTimer = null
+   429→   429→   429→    }
+   430→   430→   430→
+   431→   431→   431→    try {
+   432→   432→   432→      this.ydoc?.destroy()
+   433→   433→   433→    } catch {
+   434→   434→   434→      // ignore
+   435→   435→   435→    }
+   436→   436→   436→    this.ydoc = null
+   437→   437→   437→    this.selectedId = null
+   438→   438→   438→    this.saveState = 'saved'
+   439→   439→   439→  }
+   440→   440→   440→
+   441→   441→   441→  private scheduleSave() {
+   442→   442→   442→    if (this.autoSaveTimer) clearTimeout(this.autoSaveTimer)
+   443→   443→   443→    this.saveState = 'saving'
+   444→   444→   444→    this.autoSaveTimer = setTimeout(async () => {
+   445→   445→   445→      this.autoSaveTimer = null
+   446→   446→   446→      const doc = this.ydoc
+   447→   447→   447→      if (!doc) return
+   448→   448→   448→      try {
+   449→   449→   449→        const update = Y.encodeStateAsUpdate(doc)
+   450→   450→   450→        if (this.mode === 'copy' && this.currentCopyRecord) {
+   451→   451→   451→          await saveCopy({
+   452→   452→   452→            ...this.currentCopyRecord,
+   453→   453→   453→            snapshotUpdate: uint8ToBase64(update),
+   454→   454→   454→            meta: { ...this.currentCopyRecord.meta, lastOpenedAt: Date.now() },
+   455→   455→   455→          })
+   456→   456→   456→        } else if (this.projectId) {
+   457→   457→   457→          await saveProjectUpdate(this.projectId, update)
+   458→   458→   458→        }
+   459→   459→   459→        this.saveState = 'saved'
+   460→   460→   460→        this.notify()
+   461→   461→   461→      } catch (error) {
+   462→   462→   462→        console.warn('AutoSave error', error)
+   463→   463→   463→        this.saveState = 'saved'
+   464→   464→   464→      }
+   465→   465→   465→    }, 400)
+   466→   466→   466→  }
+   467→   467→   467→
+   468→   468→   468→  setProjectName(name: string) {
+   469→   469→   469→    const doc = this.ydoc
+   470→   470→   470→    if (!doc) return
+   471→   471→   471→    doc.transact(() => {
+   472→   472→   472→      doc.getMap('meta').set('name', name)
+   473→   473→   473→      doc.getMap('meta').set('updatedAt', Date.now())
+   474→   474→   474→    }, 'set-project-name')
+   475→   475→   475→    this.notify()
+   476→   476→   476→  }
+   477→   477→   477→
+   478→   478→   478→  setUserName(name: string) {
+   479→   479→   479→    const trimmed = name.trim() || this.userName
+   480→   480→   480→    this.userName = trimmed
+   481→   481→   481→    safeLocalStorage()?.setItem(LS_USER_NAME, trimmed)
+   482→   482→   482→    this.mailboxProvider?.awareness.setLocalStateField('user', {
+   483→   483→   483→      name: trimmed,
+   484→   484→   484→      color: this.userColor,
+   485→   485→   485→    })
+   486→   486→   486→    this.provider?.awareness.setLocalStateField('user', {
+   487→   487→   487→      name: trimmed,
+   488→   488→   488→      color: this.userColor,
+   489→   489→   489→    })
+   490→   490→   490→    this.notify(true)
+   491→   491→   491→  }
+   492→   492→   492→
+   493→   493→   493→  // ---------------------------
+   494→   494→   494→  // Элементы
+   495→   495→   495→  // ---------------------------
+   496→   496→   496→
+   497→   497→   497→  addElement(type: ElementType, position?: { x: number; y: number }) {
+   498→   498→   498→    const doc = this.ydoc
+   499→   499→   499→    if (!doc) return
+   500→   500→   500→    const now = Date.now()
+   501→   501→   501→    const id = uid()
+   502→   502→   502→    const count = doc.getMap('elements').size
+   503→   503→   503→    const fallback = { x: 140 + (count % 6) * 36, y: 120 + (count % 6) * 32 }
+   504→   504→   504→
+   505→   505→   505→    upsertRecord(doc, 'elements', {
+   506→   506→   506→      id,
+   507→   507→   507→      type,
+   508→   508→   508→      x: position?.x ?? fallback.x,
+   509→   509→   509→      y: position?.y ?? fallback.y,
+   510→   510→   510→      width: 220,
+   511→   511→   511→      height: 120,
+   512→   512→   512→      text: '',
+   513→   513→   513→      createdAt: now,
+   514→   514→   514→      updatedAt: now,
+   515→   515→   515→    })
+   516→   516→   516→
+   517→   517→   517→    this.selectedId = id
+   518→   518→   518→    this.notify(true)
+   519→   519→   519→  }
+   520→   520→   520→
+   521→   521→   521→  updateElement(id: string, patch: Partial<Omit<ElementRecord, 'id'>>, live = false) {
+   522→   522→   522→    const doc = this.ydoc
+   523→   523→   523→    if (!doc) return
+   524→   524→   524→    const existingValue = doc.getMap('elements').get(id)
+   525→   525→   525→    if (!(existingValue instanceof Y.Map)) return
+   526→   526→   526→    const existing = yValueToPlain(existingValue) as Record<string, unknown>
+   527→   527→   527→
+   528→   528→   528→    upsertRecord(doc, 'elements', {
+   529→   529→   529→      ...existing,
+   530→   530→   530→      ...patch,
+   531→   531→   531→      id,
+   532→   532→   532→      updatedAt: Date.now(),
+   533→   533→   533→    })
+   534→   534→   534→    this.scheduleSave()
+   535→   535→   535→    this.notify(live)
+   536→   536→   536→  }
+   537→   537→   537→
+   538→   538→   538→  deleteElement(id: string) {
+   539→   539→   539→    const doc = this.ydoc
+   540→   540→   540→    if (!doc) return
+   541→   541→   541→    deleteRecord(doc, 'elements', id)
+   542→   542→   542→    if (this.selectedId === id) this.selectedId = null
+   543→   543→   543→    this.scheduleSave()
+   544→   544→   544→    this.notify(true)
+   545→   545→   545→  }
+   546→   546→   546→
+   547→   547→   547→  selectElement(id: string | null) {
+   548→   548→   548→    if (this.selectedId === id) return
+   549→   549→   549→    this.selectedId = id
+   550→   550→   550→    this.notify(true)
+   551→   551→   551→  }
+   552→   552→   552→
+   553→   553→   553→  // ---------------------------
+   554→   554→   554→  // Realtime-комната
+   555→   555→   555→  // ---------------------------
+   556→   556→   556→
+   557→   557→   557→  async share(): Promise<string | null> {
+   558→   558→   558→    if (this.mode === 'copy') {
+   559→   559→   559→      this.toast('Это локальная копия — поделиться ссылкой нельзя', 'warn')
+   560→   560→   560→      return null
+   561→   561→   561→    }
+   562→   562→   562→    if (!this.ydoc || !this.projectId) return null
+   563→   563→   563→
+   564→   564→   564→    if (this.roomId && this.provider) {
+   565→   565→   565→      this.copyShareLink()
+   566→   566→   566→      return this.shareUrl
+   567→   567→   567→    }
+   568→   568→   568→
+   569→   569→   569→    const room = randomId(24)
+   570→   570→   570→    this.connectRoom(room)
+   571→   571→   571→    writeHashParams({ room, project: this.projectId, copy: null })
+   572→   572→   572→    this.toast('Комната открыта — отправьте ссылку соавтору')
+   573→   573→   573→    this.notify(true)
+   574→   574→   574→    return this.shareUrl
+   575→   575→   575→  }
+   576→   576→   576→
+   577→   577→   577→  private connectRoom(room: string) {
+   578→   578→   578→    this.disconnectRoom()
+   579→   579→   579→    if (!this.ydoc) return
+   580→   580→   580→
+   581→   581→   581→    this.roomId = room
+   582→   582→   582→
+   583→   583→   583→    this.provider = new VetviProvider(room, this.ydoc, {
+   584→   584→   584→      onStatus: (status) => {
+   585→   585→   585→        this.connection = status
+   586→   586→   586→        this.notify(true)
+   587→   587→   587→      },
+   588→   588→   588→      onPeerJoined: () => {
+   589→   589→   589→        this.toast('Участник подключился к проекту')
+   590→   590→   590→        this.notify(true)
+   591→   591→   591→      },
+   592→   592→   592→      onPeerLeft: () => {
+   593→   593→   593→        this.notify(true)
+   594→   594→   594→      },
+   595→   595→   595→      onAwareness: () => this.notify(true),
+   596→   596→   596→      onJoinAck: () => {
+   597→   597→   597→        this.notify(true)
+   598→   598→   598→      },
+   599→   599→   599→    })
+   600→   600→   600→
+   601→   601→   601→    this.provider.awareness.setLocalStateField('user', {
+   602→   602→   602→      name: this.userName,
+   603→   603→   603→      color: this.userColor,
+   604→   604→   604→    })
+   605→   605→   605→
+   606→   606→   606→    this.shareUrl = this.buildShareUrl(room, this.projectId ?? '')
+   607→   607→   607→
+   608→   608→   608→    // Владелец/участник слушает merge-mailbox оригинала.
+   609→   609→   609→    this.connectMailbox(`${room}::mailbox`)
+   610→   610→   610→  }
+   611→   611→   611→
+   612→   612→   612→  disconnectRoom() {
+   613→   613→   613→    if (this.provider) {
+   614→   614→   614→      try {
+   615→   615→   615→        this.provider.destroy()
+   616→   616→   616→      } catch {
+   617→   617→   617→        // ignore
+   618→   618→   618→      }
+   619→   619→   619→      this.provider = null
+   620→   620→   620→    }
+   621→   621→   621→    this.disconnectMailbox()
+   622→   622→   622→    this.roomId = null
+   623→   623→   623→    this.shareUrl = null
+   624→   624→   624→    this.connection = 'offline'
+   625→   625→   625→  }
+   626→   626→   626→
+   627→   627→   627→  private buildShareUrl(room: string, projectId: string): string {
+   628→   628→   628→    if (typeof window === 'undefined') return ''
+   629→   629→   629→    const params = new URLSearchParams({ room, project: projectId })
+   630→   630→   630→    return `${window.location.origin}${window.location.pathname}#${params.toString()}`
+   631→   631→   631→  }
+   632→   632→   632→
+   633→   633→   633→  async copyShareLink(): Promise<boolean> {
+   634→   634→   634→    const url = this.shareUrl ?? (this.roomId ? this.buildShareUrl(this.roomId, this.projectId ?? '') : null)
+   635→   635→   635→    if (!url) {
+   636→   636→   636→      this.toast('Сначала откройте доступ («Поделиться»)', 'warn')
+   637→   637→   637→      return false
+   638→   638→   638→    }
+   639→   639→   639→    try {
+   640→   640→   640→      if (navigator.clipboard && window.isSecureContext) {
+   641→   641→   641→        await navigator.clipboard.writeText(url)
+   642→   642→   642→      } else {
+   643→   643→   643→        const textarea = document.createElement('textarea')
+   644→   644→   644→        textarea.value = url
+   645→   645→   645→        textarea.style.position = 'fixed'
+   646→   646→   646→        textarea.style.opacity = '0'
+   647→   647→   647→        document.body.appendChild(textarea)
+   648→   648→   648→        textarea.select()
+   649→   649→   649→        document.execCommand('copy')
+   650→   650→   650→        textarea.remove()
+   651→   651→   651→      }
+   652→   652→   652→      this.toast('Ссылка скопирована')
+   653→   653→   653→      return true
+   654→   654→   654→    } catch {
+   655→   655→   655→      this.toast('Не удалось скопировать — скопируйте вручную', 'warn')
+   656→   656→   656→      return false
+   657→   657→   657→    }
+   658→   658→   658→  }
+   659→   659→   659→
+   660→   660→   660→  // ---------------------------
+   661→   661→   661→  // Mailbox (merge-комната)
+   662→   662→   662→  // ---------------------------
+   663→   663→   663→
+   664→   664→   664→  private connectMailbox(mailboxRoom: string) {
+   665→   665→   665→    this.disconnectMailbox()
+   666→   666→   666→    this.mailboxRoomId = mailboxRoom
+   667→   667→   667→    this.mailboxDoc = new Y.Doc()
+   668→   668→   668→
+   669→   669→   669→    this.mailboxDoc.getMap('requests').observe(() => {
+   670→   670→   670→      this.syncOutboxStatuses()
+   671→   671→   671→      this.notify()
+   672→   672→   672→    })
+   673→   673→   673→
+   674→   674→   674→    this.mailboxProvider = new VetviProvider(mailboxRoom, this.mailboxDoc, {
+   675→   675→   675→      onStatus: (status) => {
+   676→   676→   676→        this.mailboxConnection = status
+   677→   677→   677→        if (status === 'connected') void this.retryOutbox()
+   678→   678→   678→        this.notify(true)
+   679→   679→   679→      },
+   680→   680→   680→      onAwareness: () => this.notify(true),
+   681→   681→   681→      onJoinAck: () => {
+   682→   682→   682→        void this.retryOutbox()
+   683→   683→   683→      },
+   684→   684→   684→    })
+   685→   685→   685→
+   686→   686→   686→    this.mailboxProvider.awareness.setLocalStateField('user', {
+   687→   687→   687→      name: this.userName,
+   688→   688→   688→      color: this.userColor,
+   689→   689→   689→    })
+   690→   690→   690→  }
+   691→   691→   691→
+   692→   692→   692→  private disconnectMailbox() {
+   693→   693→   693→    if (this.mailboxProvider) {
+   694→   694→   694→      try {
+   695→   695→   695→        this.mailboxProvider.destroy()
+   696→   696→   696→      } catch {
+   697→   697→   697→        // ignore
+   698→   698→   698→      }
+   699→   699→   699→      this.mailboxProvider = null
+   700→   700→   700→    }
+   701→   701→   701→    if (this.mailboxDoc) {
+   702→   702→   702→      try {
+   703→   703→   703→        this.mailboxDoc.destroy()
+   704→   704→   704→      } catch {
+   705→   705→   705→        // ignore
+   706→   706→   706→      }
+   707→   707→   707→      this.mailboxDoc = null
+   708→   708→   708→    }
+   709→   709→   709→    this.mailboxRoomId = null
+   710→   710→   710→    this.mailboxConnection = 'offline'
+   711→   711→   711→  }
+   712→   712→   712→
+   713→   713→   713→  // ---------------------------
+   714→   714→   714→  // Копии
+   715→   715→   715→  // ---------------------------
+   716→   716→   716→
+   717→   717→   717→  async refreshCopies() {
+   718→   718→   718→    const records = await listCopies()
+   719→   719→   719→    this.copies = records.map((r) => r.meta)
+   720→   720→   720→    this.notify()
+   721→   721→   721→  }
+   722→   722→   722→
+   723→   723→   723→  async makeCopy(): Promise<boolean> {
+   724→   724→   724→    const doc = this.ydoc
+   725→   725→   725→    if (!doc) return false
+   726→   726→   726→
+   727→   727→   727→    if (this.mode === 'copy') {
+   728→   728→   728→      this.toast('Уже открыта копия — создавать вложенную копию нельзя', 'warn')
+   729→   729→   729→      return false
+   730→   730→   730→    }
+   731→   731→   731→
+   732→   732→   732→    try {
+   733→   733→   733→      const snapshotUpdate = Y.encodeStateAsUpdate(doc)
+   734→   734→   734→      const baseState = exportProjectToJson(doc).data as unknown as CopyRecord['baseState']
+   735→   735→   735→      const copyId = uid()
+   736→   736→   736→      const meta: CopyMeta = {
+   737→   737→   737→        copyId,
+   738→   738→   738→        name: `${(this.snapshot.meta?.name || 'Проект')} — копия`,
+   739→   739→   739→        sourceProjectId: this.projectId ?? '',
+   740→   740→   740→        sourceRoomId: this.roomId,
+   741→   741→   741→        createdAt: Date.now(),
+   742→   742→   742→        lastOpenedAt: Date.now(),
+   743→   743→   743→      }
+   744→   744→   744→      const record: CopyRecord = {
+   745→   745→   745→        meta,
+   746→   746→   746→        snapshotUpdate: uint8ToBase64(snapshotUpdate),
+   747→   747→   747→        baseState,
+   748→   748→   748→      }
+   749→   749→   749→      await saveCopy(record)
+   750→   750→   750→      await this.refreshCopies()
+   751→   751→   751→      this.toast('Копия сохранена локально')
+   752→   752→   752→      return true
+   753→   753→   753→    } catch (error) {
+   754→   754→   754→      console.error('makeCopy failed', error)
+   755→   755→   755→      this.toast('Не удалось создать копию', 'error')
+   756→   756→   756→      return false
+   757→   757→   757→    }
+   758→   758→   758→  }
+   759→   759→   759→
+
+[showing lines 60-759 of 1145; use offset=760 with limit to continue reading]

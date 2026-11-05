@@ -1,0 +1,1145 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * VetviStore — единый слой состояния «Ветвей» (ТЗ, Этап 1: adapter layer).
+     5→ *
+     6→ * Все изменения данных проходят через этот класс:
+     7→ *   UI  <->  VetviStore  <->  Yjs document  <->  (socket.io provider | IndexedDB)
+     8→ *
+     9→ * Подписка: subscribe(listener) + getSnapshot() — совместимо с useSyncExternalStore.
+    10→ */
+    11→
+    12→import * as Y from 'yjs'
+    13→import { VetviProvider } from './provider'
+    14→import {
+    15→  base64ToUint8,
+    16→  ensureProjectSkeleton,
+    17→  exportProjectToJson,
+    18→  importProjectFromJson,
+    19→  uid,
+    20→  uint8ToBase64,
+    21→  upsertRecord,
+    22→  deleteRecord,
+    23→  validateProjectJson,
+    24→  yValueToPlain,
+    25→} from './yjs-model'
+    26→import {
+    27→  addProjectId,
+    28→  deleteBackup,
+    29→  deleteCopy,
+    30→  getBackupUpdate,
+    31→  getCopy,
+    32→  getOutbox,
+    33→  getProjectUpdate,
+    34→  listBackups,
+    35→  listCopies,
+    36→  saveBackup,
+    37→  saveCopy,
+    38→  saveOutbox,
+    39→  saveProjectUpdate,
+    40→} from './idb'
+    41→import { applyDelta, computeDelta, deltaStats, isDeltaEmpty } from './merge'
+    42→import {
+    43→  SCHEMA_VERSION,
+    44→  type BackupMeta,
+    45→  type CopyMeta,
+    46→  type CopyRecord,
+    47→  type ElementType,
+    48→  type MergeRequest,
+    49→  type PeerInfo,
+    50→  type ProjectMeta,
+    51→  type SaveState,
+    52→  type ToastKind,
+    53→  type VetviMode,
+    54→  type ConnectionState,
+    55→  type ElementRecord,
+    56→  type VetviSnapshot,
+    57→} from './types'
+    58→
+    59→const USER_COLORS = ['#7c5cff', '#4cc9f0', '#2ecc71', '#f5a623', '#ff5a5f', '#ff6ec7', '#9ece6a', '#e0af68']
+    60→
+    61→const LS_USER_ID = 'vetvi:userId'
+    62→const LS_USER_NAME = 'vetvi:userName'
+    63→const LS_LAST_PROJECT = 'vetvi:lastProjectId'
+    64→
+    65→const NOTIFY_DEBOUNCE_MS = 60
+    66→
+    67→function safeLocalStorage(): Storage | null {
+    68→  try {
+    69→    if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
+    70→  } catch {
+    71→    // ignore
+    72→  }
+    73→  return null
+    74→}
+    75→
+    76→function randomId(len = 24): string {
+    77→  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    78→  const bytes = new Uint8Array(len)
+    79→  if (typeof crypto !== 'undefined' && 'getRandomValues' in crypto) {
+    80→    crypto.getRandomValues(bytes)
+    81→  } else {
+    82→    for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256)
+    83→  }
+    84→  return Array.from(bytes)
+    85→    .map((b) => alphabet[b % alphabet.length])
+    86→    .join('')
+    87→}
+    88→
+    89→function readHashParams(): URLSearchParams {
+    90→  if (typeof window === 'undefined') return new URLSearchParams()
+    91→  return new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    92→}
+    93→
+    94→function writeHashParams(paramsObject: Record<string, string | null>) {
+    95→  if (typeof window === 'undefined') return
+    96→  const params = readHashParams()
+    97→  for (const [key, value] of Object.entries(paramsObject)) {
+    98→    if (!value) params.delete(key)
+    99→    else params.set(key, value)
+   100→  }
+   101→  const hash = params.toString()
+   102→  const newUrl = `${window.location.pathname}${window.location.search}${hash ? `#${hash}` : ''}`
+   103→  try {
+   104→    window.history.replaceState(null, '', newUrl)
+   105→  } catch {
+   106→    window.location.hash = hash
+   107→  }
+   108→}
+   109→
+   110→export class VetviStore {
+   111→  private ydoc: Y.Doc | null = null
+   112→  private provider: VetviProvider | null = null
+   113→  private mailboxDoc: Y.Doc | null = null
+   114→  private mailboxProvider: VetviProvider | null = null
+   115→  private mailboxRoomId: string | null = null
+   116→
+   117→  private projectId: string | null = null
+   118→  private roomId: string | null = null
+   119→  private mode: VetviMode = 'project'
+   120→  private copyMeta: CopyMeta | null = null
+   121→  private currentCopyRecord: CopyRecord | null = null
+   122→
+   123→  private selectedId: string | null = null
+   124→  private connection: ConnectionState = 'offline'
+   125→  private mailboxConnection: ConnectionState = 'offline'
+   126→  private saveState: SaveState = 'saved'
+   127→
+   128→  private userId = ''
+   129→  private userName = ''
+   130→  private userColor = USER_COLORS[0]
+   131→
+   132→  private copies: CopyMeta[] = []
+   133→  private outbox: MergeRequest[] = []
+   134→  private backups: BackupMeta[] = []
+   135→  private shareUrl: string | null = null
+   136→
+   137→  private ready = false
+   138→  private bootstrapped = false
+   139→  private snapshot: VetviSnapshot
+   140→  private listeners = new Set<() => void>()
+   141→  private notifyTimer: ReturnType<typeof setTimeout> | null = null
+   142→  private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+   143→  private textTimer: ReturnType<typeof setTimeout> | null = null
+   144→
+   145→  /** Колбэк для toast-уведомлений (назначается UI). */
+   146→  onToast: ((message: string, kind?: ToastKind) => void) | null = null
+   147→
+   148→  constructor() {
+   149→    this.snapshot = this.buildSnapshot()
+   150→  }
+   151→
+   152→  // ---------------------------
+   153→  // Подписка / снапшот
+   154→  // ---------------------------
+   155→
+   156→  subscribe = (listener: () => void) => {
+   157→    this.listeners.add(listener)
+   158→    return () => {
+   159→      this.listeners.delete(listener)
+   160→    }
+   161→  }
+   162→
+   163→  getSnapshot = (): VetviSnapshot => this.snapshot
+   164→
+   165→  private toast(message: string, kind: ToastKind = 'ok') {
+   166→    this.onToast?.(message, kind)
+   167→  }
+   168→
+   169→  private notify(live = false) {
+   170→    if (live) {
+   171→      if (this.notifyTimer) {
+   172→        clearTimeout(this.notifyTimer)
+   173→        this.notifyTimer = null
+   174→      }
+   175→      this.rebuildAndEmit()
+   176→      return
+   177→    }
+   178→    if (this.notifyTimer) return
+   179→    this.notifyTimer = setTimeout(() => {
+   180→      this.notifyTimer = null
+   181→      this.rebuildAndEmit()
+   182→    }, NOTIFY_DEBOUNCE_MS)
+   183→  }
+   184→
+   185→  private rebuildAndEmit() {
+   186→    this.snapshot = this.buildSnapshot()
+   187→    this.listeners.forEach((listener) => listener())
+   188→  }
+   189→
+   190→  private buildSnapshot(): VetviSnapshot {
+   191→    const doc = this.ydoc
+   192→
+   193→    let meta: ProjectMeta | null = null
+   194→    const elements: ElementRecord[] = []
+   195→
+   196→    if (doc) {
+   197→      const metaPlain = yValueToPlain(doc.getMap('meta')) as Record<string, unknown>
+   198→      meta = {
+   199→        projectId: String(metaPlain.projectId ?? this.projectId ?? ''),
+   200→        name: String(metaPlain.name ?? ''),
+   201→        schemaVersion: Number(metaPlain.schemaVersion ?? SCHEMA_VERSION),
+   202→        createdAt: Number(metaPlain.createdAt ?? 0),
+   203→        updatedAt: Number(metaPlain.updatedAt ?? 0),
+   204→      }
+   205→
+   206→      doc.getMap('elements').forEach((value, id) => {
+   207→        const rec = yValueToPlain(value) as Record<string, unknown>
+   208→        elements.push({
+   209→          id,
+   210→          type: (rec.type as ElementType) ?? 'text',
+   211→          x: Number(rec.x ?? 0),
+   212→          y: Number(rec.y ?? 0),
+   213→          width: Number(rec.width ?? 220),
+   214→          height: Number(rec.height ?? 120),
+   215→          text: String(rec.text ?? ''),
+   216→          createdAt: Number(rec.createdAt ?? 0),
+   217→          updatedAt: Number(rec.updatedAt ?? 0),
+   218→        })
+   219→      })
+   220→
+   221→      elements.sort(
+   222→        (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id),
+   223→      )
+   224→    }
+   225→
+   226→    const peers: PeerInfo[] = []
+   227→    const activeProvider = this.provider ?? this.mailboxProvider
+   228→    if (activeProvider) {
+   229→      activeProvider.awareness.getStates().forEach((state, clientId) => {
+   230→        const user = (state as { user?: { name?: string; color?: string } } | undefined)?.user
+   231→        peers.push({
+   232→          clientId,
+   233→          name: user?.name || `Участник ${String(clientId).slice(-4)}`,
+   234→          color: user?.color || '#9aa0a6',
+   235→          isSelf: clientId === activeProvider.awareness.clientID,
+   236→        })
+   237→      })
+   238→      peers.sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.clientId - b.clientId))
+   239→    }
+   240→
+   241→    const connection = this.mode === 'copy' ? this.mailboxConnection : this.connection
+   242→
+   243→    return {
+   244→      ready: this.ready,
+   245→      mode: this.mode,
+   246→      meta,
+   247→      elements,
+   248→      selectedId: this.selectedId,
+   249→      connection,
+   250→      roomActive: this.provider !== null,
+   251→      mailboxActive: this.mailboxProvider !== null,
+   252→      peers,
+   253→      peersCount: peers.length,
+   254→      copies: this.copies,
+   255→      incoming: this.mode === 'project' ? this.readIncoming() : [],
+   256→      outgoing: this.outbox.filter((r) =>
+   257→        this.copyMeta ? r.copyId === this.copyMeta.copyId : false,
+   258→      ),
+   259→      backups: this.backups,
+   260→      shareUrl: this.shareUrl,
+   261→      roomId: this.roomId,
+   262→      copyMeta: this.copyMeta,
+   263→      saveState: this.saveState,
+   264→      userName: this.userName,
+   265→      userColor: this.userColor,
+   266→    }
+   267→  }
+   268→
+   269→  private readIncoming(): MergeRequest[] {
+   270→    if (!this.mailboxDoc) return []
+   271→    const requestsMap = this.mailboxDoc.getMap('requests')
+   272→    const requests: MergeRequest[] = []
+   273→    requestsMap.forEach((value, id) => {
+   274→      const plain = yValueToPlain(value) as Record<string, unknown> | null
+   275→      if (!plain) return
+   276→      requests.push({
+   277→        id: String(plain.id ?? id),
+   278→        senderId: String(plain.senderId ?? ''),
+   279→        senderName: String(plain.senderName ?? 'Неизвестный'),
+   280→        copyId: String(plain.copyId ?? ''),
+   281→        sourceRoomId: plain.sourceRoomId ? String(plain.sourceRoomId) : null,
+   282→        createdAt: Number(plain.createdAt ?? 0),
+   283→        delta: (plain.delta ?? {}) as MergeRequest['delta'],
+   284→        stats: (plain.stats ?? { added: 0, updated: 0, deleted: 0 }) as MergeRequest['stats'],
+   285→        status: (plain.status as MergeRequest['status']) ?? 'pending',
+   286→      })
+   287→    })
+   288→    requests.sort((a, b) => b.createdAt - a.createdAt)
+   289→    return requests
+   290→  }
+   291→
+   292→  // ---------------------------
+   293→  // Bootstrap / маршрутизация
+   294→  // ---------------------------
+   295→
+   296→  async bootstrap() {
+   297→    if (this.bootstrapped || typeof window === 'undefined') return
+   298→    this.bootstrapped = true
+   299→
+   300→    const storage = safeLocalStorage()
+   301→    this.userId = storage?.getItem(LS_USER_ID) || uid()
+   302→    storage?.setItem(LS_USER_ID, this.userId)
+   303→
+   304→    this.userName = storage?.getItem(LS_USER_NAME) || `Гость-${this.userId.slice(0, 4)}`
+   305→    storage?.setItem(LS_USER_NAME, this.userName)
+   306→
+   307→    let colorIndex = 0
+   308→    for (let i = 0; i < this.userId.length; i++) colorIndex += this.userId.charCodeAt(i)
+   309→    this.userColor = USER_COLORS[colorIndex % USER_COLORS.length]
+   310→
+   311→    await this.routeFromHash(readHashParams())
+   312→
+   313→    this.ready = true
+   314→
+   315→    window.addEventListener('hashchange', () => {
+   316→      void this.handleHashChange()
+   317→    })
+   318→
+   319→    this.rebuildAndEmit()
+   320→  }
+   321→
+   322→  private async handleHashChange() {
+   323→    const params = readHashParams()
+   324→    const room = params.get('room')
+   325→    const copyId = params.get('copy')
+   326→
+   327→    if (room && room !== this.roomId) {
+   328→      await this.routeFromHash(params)
+   329→      return
+   330→    }
+   331→    if (copyId && this.copyMeta?.copyId !== copyId) {
+   332→      await this.routeFromHash(params)
+   333→      return
+   334→    }
+   335→    if (!room && !copyId && (this.roomId || this.copyMeta)) {
+   336→      await this.routeFromHash(params)
+   337→    }
+   338→  }
+   339→
+   340→  private async routeFromHash(params: URLSearchParams) {
+   341→    const room = params.get('room')
+   342→    const project = params.get('project')
+   343→    const copyId = params.get('copy')
+   344→
+   345→    if (copyId) {
+   346→      const record = await getCopy(copyId)
+   347→      if (record) {
+   348→        await this.openCopy(copyId)
+   349→        return
+   350→      }
+   351→    }
+   352→
+   353→    if (room) {
+   354→      const projectId = project || uid()
+   355→      await this.openProject(projectId, { name: project ? 'Проект' : 'Проект из комнаты' })
+   356→      this.connectRoom(room)
+   357→      writeHashParams({ room, project: projectId, copy: null })
+   358→      return
+   359→    }
+   360→
+   361→    // Без параметров — последний локальный проект или новый.
+   362→    const storage = safeLocalStorage()
+   363→    const last = storage?.getItem(LS_LAST_PROJECT)
+   364→    if (last && (await getProjectUpdate(last))) {
+   365→      await this.openProject(last)
+   366→      return
+   367→    }
+   368→
+   369→    await this.newProject({ silent: true })
+   370→  }
+   371→
+   372→  // ---------------------------
+   373→  // Проекты
+   374→  // ---------------------------
+   375→
+   376→  async newProject(options: { silent?: boolean } = {}) {
+   377→    this.cleanupDoc()
+   378→    const projectId = uid()
+   379→    await this.createDoc(projectId, 'Новый проект')
+   380→    writeHashParams({ room: null, project: null, copy: null })
+   381→    safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
+   382→    this.mode = 'project'
+   383→    this.copyMeta = null
+   384→    this.ready = true
+   385→    if (!options.silent) this.toast('Создан новый проект')
+   386→    this.notify(true)
+   387→  }
+   388→
+   389→  private async createDoc(projectId: string, name: string) {
+   390→    const doc = new Y.Doc()
+   391→    this.ydoc = doc
+   392→    this.projectId = projectId
+   393→
+   394→    const saved = await getProjectUpdate(projectId)
+   395→    if (saved) {
+   396→      try {
+   397→        Y.applyUpdate(doc, saved, 'idb-load')
+   398→      } catch (error) {
+   399→        console.warn('Не удалось загрузить проект из IndexedDB', error)
+   400→      }
+   401→    }
+   402→
+   403→    ensureProjectSkeleton(doc, projectId, name)
+   404→    await addProjectId(projectId)
+   405→
+   406→    doc.on('update', () => this.notify())
+   407→    this.scheduleSave()
+   408→  }
+   409→
+   410→  async openProject(projectId: string, options: { name?: string } = {}) {
+   411→    this.cleanupDoc()
+   412→    await this.createDoc(projectId, options.name ?? 'Новый проект')
+   413→    safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
+   414→    this.mode = 'project'
+   415→    this.copyMeta = null
+   416→    this.notify(true)
+   417→  }
+   418→
+   419→  private cleanupDoc() {
+   420→    this.disconnectRoom()
+   421→
+   422→    if (this.autoSaveTimer) {
+   423→      clearTimeout(this.autoSaveTimer)
+   424→      this.autoSaveTimer = null
+   425→    }
+   426→    if (this.textTimer) {
+   427→      clearTimeout(this.textTimer)
+   428→      this.textTimer = null
+   429→    }
+   430→
+   431→    try {
+   432→      this.ydoc?.destroy()
+   433→    } catch {
+   434→      // ignore
+   435→    }
+   436→    this.ydoc = null
+   437→    this.selectedId = null
+   438→    this.saveState = 'saved'
+   439→  }
+   440→
+   441→  private scheduleSave() {
+   442→    if (this.autoSaveTimer) clearTimeout(this.autoSaveTimer)
+   443→    this.saveState = 'saving'
+   444→    this.autoSaveTimer = setTimeout(async () => {
+   445→      this.autoSaveTimer = null
+   446→      const doc = this.ydoc
+   447→      if (!doc) return
+   448→      try {
+   449→        const update = Y.encodeStateAsUpdate(doc)
+   450→        if (this.mode === 'copy' && this.currentCopyRecord) {
+   451→          await saveCopy({
+   452→            ...this.currentCopyRecord,
+   453→            snapshotUpdate: uint8ToBase64(update),
+   454→            meta: { ...this.currentCopyRecord.meta, lastOpenedAt: Date.now() },
+   455→          })
+   456→        } else if (this.projectId) {
+   457→          await saveProjectUpdate(this.projectId, update)
+   458→        }
+   459→        this.saveState = 'saved'
+   460→        this.notify()
+   461→      } catch (error) {
+   462→        console.warn('AutoSave error', error)
+   463→        this.saveState = 'saved'
+   464→      }
+   465→    }, 400)
+   466→  }
+   467→
+   468→  setProjectName(name: string) {
+   469→    const doc = this.ydoc
+   470→    if (!doc) return
+   471→    doc.transact(() => {
+   472→      doc.getMap('meta').set('name', name)
+   473→      doc.getMap('meta').set('updatedAt', Date.now())
+   474→    }, 'set-project-name')
+   475→    this.notify()
+   476→  }
+   477→
+   478→  setUserName(name: string) {
+   479→    const trimmed = name.trim() || this.userName
+   480→    this.userName = trimmed
+   481→    safeLocalStorage()?.setItem(LS_USER_NAME, trimmed)
+   482→    this.mailboxProvider?.awareness.setLocalStateField('user', {
+   483→      name: trimmed,
+   484→      color: this.userColor,
+   485→    })
+   486→    this.provider?.awareness.setLocalStateField('user', {
+   487→      name: trimmed,
+   488→      color: this.userColor,
+   489→    })
+   490→    this.notify(true)
+   491→  }
+   492→
+   493→  // ---------------------------
+   494→  // Элементы
+   495→  // ---------------------------
+   496→
+   497→  addElement(type: ElementType, position?: { x: number; y: number }) {
+   498→    const doc = this.ydoc
+   499→    if (!doc) return
+   500→    const now = Date.now()
+   501→    const id = uid()
+   502→    const count = doc.getMap('elements').size
+   503→    const fallback = { x: 140 + (count % 6) * 36, y: 120 + (count % 6) * 32 }
+   504→
+   505→    upsertRecord(doc, 'elements', {
+   506→      id,
+   507→      type,
+   508→      x: position?.x ?? fallback.x,
+   509→      y: position?.y ?? fallback.y,
+   510→      width: 220,
+   511→      height: 120,
+   512→      text: '',
+   513→      createdAt: now,
+   514→      updatedAt: now,
+   515→    })
+   516→
+   517→    this.selectedId = id
+   518→    this.notify(true)
+   519→  }
+   520→
+   521→  updateElement(id: string, patch: Partial<Omit<ElementRecord, 'id'>>, live = false) {
+   522→    const doc = this.ydoc
+   523→    if (!doc) return
+   524→    const existingValue = doc.getMap('elements').get(id)
+   525→    if (!(existingValue instanceof Y.Map)) return
+   526→    const existing = yValueToPlain(existingValue) as Record<string, unknown>
+   527→
+   528→    upsertRecord(doc, 'elements', {
+   529→      ...existing,
+   530→      ...patch,
+   531→      id,
+   532→      updatedAt: Date.now(),
+   533→    })
+   534→    this.scheduleSave()
+   535→    this.notify(live)
+   536→  }
+   537→
+   538→  deleteElement(id: string) {
+   539→    const doc = this.ydoc
+   540→    if (!doc) return
+   541→    deleteRecord(doc, 'elements', id)
+   542→    if (this.selectedId === id) this.selectedId = null
+   543→    this.scheduleSave()
+   544→    this.notify(true)
+   545→  }
+   546→
+   547→  selectElement(id: string | null) {
+   548→    if (this.selectedId === id) return
+   549→    this.selectedId = id
+   550→    this.notify(true)
+   551→  }
+   552→
+   553→  // ---------------------------
+   554→  // Realtime-комната
+   555→  // ---------------------------
+   556→
+   557→  async share(): Promise<string | null> {
+   558→    if (this.mode === 'copy') {
+   559→      this.toast('Это локальная копия — поделиться ссылкой нельзя', 'warn')
+   560→      return null
+   561→    }
+   562→    if (!this.ydoc || !this.projectId) return null
+   563→
+   564→    if (this.roomId && this.provider) {
+   565→      this.copyShareLink()
+   566→      return this.shareUrl
+   567→    }
+   568→
+   569→    const room = randomId(24)
+   570→    this.connectRoom(room)
+   571→    writeHashParams({ room, project: this.projectId, copy: null })
+   572→    this.toast('Комната открыта — отправьте ссылку соавтору')
+   573→    this.notify(true)
+   574→    return this.shareUrl
+   575→  }
+   576→
+   577→  private connectRoom(room: string) {
+   578→    this.disconnectRoom()
+   579→    if (!this.ydoc) return
+   580→
+   581→    this.roomId = room
+   582→
+   583→    this.provider = new VetviProvider(room, this.ydoc, {
+   584→      onStatus: (status) => {
+   585→        this.connection = status
+   586→        this.notify(true)
+   587→      },
+   588→      onPeerJoined: () => {
+   589→        this.toast('Участник подключился к проекту')
+   590→        this.notify(true)
+   591→      },
+   592→      onPeerLeft: () => {
+   593→        this.notify(true)
+   594→      },
+   595→      onAwareness: () => this.notify(true),
+   596→      onJoinAck: () => {
+   597→        this.notify(true)
+   598→      },
+   599→    })
+   600→
+   601→    this.provider.awareness.setLocalStateField('user', {
+   602→      name: this.userName,
+   603→      color: this.userColor,
+   604→    })
+   605→
+   606→    this.shareUrl = this.buildShareUrl(room, this.projectId ?? '')
+   607→
+   608→    // Владелец/участник слушает merge-mailbox оригинала.
+   609→    this.connectMailbox(`${room}::mailbox`)
+   610→  }
+   611→
+   612→  disconnectRoom() {
+   613→    if (this.provider) {
+   614→      try {
+   615→        this.provider.destroy()
+   616→      } catch {
+   617→        // ignore
+   618→      }
+   619→      this.provider = null
+   620→    }
+   621→    this.disconnectMailbox()
+   622→    this.roomId = null
+   623→    this.shareUrl = null
+   624→    this.connection = 'offline'
+   625→  }
+   626→
+   627→  private buildShareUrl(room: string, projectId: string): string {
+   628→    if (typeof window === 'undefined') return ''
+   629→    const params = new URLSearchParams({ room, project: projectId })
+   630→    return `${window.location.origin}${window.location.pathname}#${params.toString()}`
+   631→  }
+   632→
+   633→  async copyShareLink(): Promise<boolean> {
+   634→    const url = this.shareUrl ?? (this.roomId ? this.buildShareUrl(this.roomId, this.projectId ?? '') : null)
+   635→    if (!url) {
+   636→      this.toast('Сначала откройте доступ («Поделиться»)', 'warn')
+   637→      return false
+   638→    }
+   639→    try {
+   640→      if (navigator.clipboard && window.isSecureContext) {
+   641→        await navigator.clipboard.writeText(url)
+   642→      } else {
+   643→        const textarea = document.createElement('textarea')
+   644→        textarea.value = url
+   645→        textarea.style.position = 'fixed'
+   646→        textarea.style.opacity = '0'
+   647→        document.body.appendChild(textarea)
+   648→        textarea.select()
+   649→        document.execCommand('copy')
+   650→        textarea.remove()
+   651→      }
+   652→      this.toast('Ссылка скопирована')
+   653→      return true
+   654→    } catch {
+   655→      this.toast('Не удалось скопировать — скопируйте вручную', 'warn')
+   656→      return false
+   657→    }
+   658→  }
+   659→
+   660→  // ---------------------------
+   661→  // Mailbox (merge-комната)
+   662→  // ---------------------------
+   663→
+   664→  private connectMailbox(mailboxRoom: string) {
+   665→    this.disconnectMailbox()
+   666→    this.mailboxRoomId = mailboxRoom
+   667→    this.mailboxDoc = new Y.Doc()
+   668→
+   669→    this.mailboxDoc.getMap('requests').observe(() => {
+   670→      this.syncOutboxStatuses()
+   671→      this.notify()
+   672→    })
+   673→
+   674→    this.mailboxProvider = new VetviProvider(mailboxRoom, this.mailboxDoc, {
+   675→      onStatus: (status) => {
+   676→        this.mailboxConnection = status
+   677→        if (status === 'connected') void this.retryOutbox()
+   678→        this.notify(true)
+   679→      },
+   680→      onAwareness: () => this.notify(true),
+   681→      onJoinAck: () => {
+   682→        void this.retryOutbox()
+   683→      },
+   684→    })
+   685→
+   686→    this.mailboxProvider.awareness.setLocalStateField('user', {
+   687→      name: this.userName,
+   688→      color: this.userColor,
+   689→    })
+   690→  }
+   691→
+   692→  private disconnectMailbox() {
+   693→    if (this.mailboxProvider) {
+   694→      try {
+   695→        this.mailboxProvider.destroy()
+   696→      } catch {
+   697→        // ignore
+   698→      }
+   699→      this.mailboxProvider = null
+   700→    }
+   701→    if (this.mailboxDoc) {
+   702→      try {
+   703→        this.mailboxDoc.destroy()
+   704→      } catch {
+   705→        // ignore
+   706→      }
+   707→      this.mailboxDoc = null
+   708→    }
+   709→    this.mailboxRoomId = null
+   710→    this.mailboxConnection = 'offline'
+   711→  }
+   712→
+   713→  // ---------------------------
+   714→  // Копии
+   715→  // ---------------------------
+   716→
+   717→  async refreshCopies() {
+   718→    const records = await listCopies()
+   719→    this.copies = records.map((r) => r.meta)
+   720→    this.notify()
+   721→  }
+   722→
+   723→  async makeCopy(): Promise<boolean> {
+   724→    const doc = this.ydoc
+   725→    if (!doc) return false
+   726→
+   727→    if (this.mode === 'copy') {
+   728→      this.toast('Уже открыта копия — создавать вложенную копию нельзя', 'warn')
+   729→      return false
+   730→    }
+   731→
+   732→    try {
+   733→      const snapshotUpdate = Y.encodeStateAsUpdate(doc)
+   734→      const baseState = exportProjectToJson(doc).data as unknown as CopyRecord['baseState']
+   735→      const copyId = uid()
+   736→      const meta: CopyMeta = {
+   737→        copyId,
+   738→        name: `${(this.snapshot.meta?.name || 'Проект')} — копия`,
+   739→        sourceProjectId: this.projectId ?? '',
+   740→        sourceRoomId: this.roomId,
+   741→        createdAt: Date.now(),
+   742→        lastOpenedAt: Date.now(),
+   743→      }
+   744→      const record: CopyRecord = {
+   745→        meta,
+   746→        snapshotUpdate: uint8ToBase64(snapshotUpdate),
+   747→        baseState,
+   748→      }
+   749→      await saveCopy(record)
+   750→      await this.refreshCopies()
+   751→      this.toast('Копия сохранена локально')
+   752→      return true
+   753→    } catch (error) {
+   754→      console.error('makeCopy failed', error)
+   755→      this.toast('Не удалось создать копию', 'error')
+   756→      return false
+   757→    }
+   758→  }
+   759→
+   760→  async openCopy(copyId: string) {
+   761→    const record = await getCopy(copyId)
+   762→    if (!record) {
+   763→      this.toast('Копия не найдена', 'error')
+   764→      return
+   765→    }
+   766→
+   767→    this.cleanupDoc()
+   768→
+   769→    const doc = new Y.Doc()
+   770→    this.ydoc = doc
+   771→    this.projectId = record.meta.sourceProjectId || copyId
+   772→    this.mode = 'copy'
+   773→    this.copyMeta = record.meta
+   774→    this.currentCopyRecord = record
+   775→
+   776→    try {
+   777→      Y.applyUpdate(doc, base64ToUint8(record.snapshotUpdate), 'copy-load')
+   778→    } catch (error) {
+   779→      console.warn('Не удалось загрузить копию', error)
+   780→    }
+   781→
+   782→    ensureProjectSkeleton(doc, this.projectId, record.meta.name)
+   783→    doc.on('update', () => this.notify())
+   784→    this.scheduleSave()
+   785→
+   786→    writeHashParams({ room: null, project: null, copy: copyId })
+   787→
+   788→    if (record.meta.sourceRoomId) {
+   789→      this.connectMailbox(`${record.meta.sourceRoomId}::mailbox`)
+   790→    }
+   791→
+   792→    await Promise.all([this.refreshCopies(), this.refreshOutbox()])
+   793→    this.toast(`Открыта копия: ${record.meta.name}`)
+   794→    this.notify(true)
+   795→  }
+   796→
+   797→  async deleteCopy(copyId: string) {
+   798→    if (this.copyMeta?.copyId === copyId) {
+   799→      this.toast('Нельзя удалить открытую копию', 'warn')
+   800→      return
+   801→    }
+   802→    await deleteCopy(copyId)
+   803→    await this.refreshCopies()
+   804→    this.toast('Копия удалена')
+   805→  }
+   806→
+   807→  /** Вернуться из копии к оригиналу (если он есть локально) или к последнему проекту. */
+   808→  async exitCopy() {
+   809→    const sourceProjectId = this.copyMeta?.sourceProjectId
+   810→    const storage = safeLocalStorage()
+   811→    const last = storage?.getItem(LS_LAST_PROJECT)
+   812→
+   813→    const target =
+   814→      (sourceProjectId && (await getProjectUpdate(sourceProjectId)) ? sourceProjectId : null) ??
+   815→      (last && (await getProjectUpdate(last)) ? last : null)
+   816→
+   817→    writeHashParams({ room: null, project: null, copy: null })
+   818→
+   819→    if (target) {
+   820→      await this.openProject(target)
+   821→    } else {
+   822→      await this.newProject()
+   823→    }
+   824→  }
+   825→
+   826→  // ---------------------------
+   827→  // Merge
+   828→  // ---------------------------
+   829→
+   830→  async refreshOutbox() {
+   831→    this.outbox = await getOutbox()
+   832→    this.notify()
+   833→  }
+   834→
+   835→  private persistOutbox() {
+   836→    void saveOutbox(this.outbox)
+   837→  }
+   838→
+   839→  async sendMerge(): Promise<boolean> {
+   840→    const doc = this.ydoc
+   841→    if (!doc || this.mode !== 'copy' || !this.copyMeta) {
+   842→      this.toast('Merge доступен только из копии', 'warn')
+   843→      return false
+   844→    }
+   845→
+   846→    if (!this.copyMeta.sourceRoomId) {
+   847→      this.toast('У копии нет комнаты оригинала — используйте экспорт JSON', 'error')
+   848→      return false
+   849→    }
+   850→
+   851→    try {
+   852→      const current = exportProjectToJson(doc).data as unknown as CopyRecord['baseState']
+   853→      const base = this.currentCopyRecord?.baseState ?? ({} as CopyRecord['baseState'])
+   854→      const delta = computeDelta(this.copyMeta.sourceProjectId, base, current)
+   855→
+   856→      if (isDeltaEmpty(delta)) {
+   857→        this.toast('Нет изменений для merge — копия совпадает с базой', 'warn')
+   858→        return false
+   859→      }
+   860→
+   861→      const request: MergeRequest = {
+   862→        id: uid(),
+   863→        senderId: this.userId,
+   864→        senderName: this.userName,
+   865→        copyId: this.copyMeta.copyId,
+   866→        sourceRoomId: this.copyMeta.sourceRoomId,
+   867→        createdAt: Date.now(),
+   868→        delta,
+   869→        stats: deltaStats(delta),
+   870→        status: this.mailboxProvider ? 'sent' : 'queued',
+   871→      }
+   872→
+   873→      if (this.mailboxProvider && this.mailboxDoc) {
+   874→        this.mailboxDoc.transact(() => {
+   875→          this.mailboxDoc!.getMap('requests').set(request.id, request)
+   876→        }, 'merge-send')
+   877→      }
+   878→
+   879→      this.outbox = [request, ...this.outbox.filter((r) => r.id !== request.id)]
+   880→      this.persistOutbox()
+   881→
+   882→      if (request.status === 'queued') {
+   883→        this.toast('Владелец офлайн — merge-запрос в очереди, отправим при подключении', 'warn')
+   884→      } else {
+   885→        this.toast(`Merge-запрос отправлен (+${request.stats.added} / ~${request.stats.updated} / −${request.stats.deleted})`)
+   886→      }
+   887→      this.notify(true)
+   888→      return true
+   889→    } catch (error) {
+   890→      console.error('sendMerge failed', error)
+   891→      this.toast('Не удалось отправить merge-запрос', 'error')
+   892→      return false
+   893→    }
+   894→  }
+   895→
+   896→  private async retryOutbox() {
+   897→    const queued = this.outbox.filter((r) => r.status === 'queued')
+   898→    if (!queued.length) return
+   899→    if (!this.mailboxProvider || !this.mailboxDoc) return
+   900→
+   901→    for (const request of queued) {
+   902→      try {
+   903→        this.mailboxDoc.transact(() => {
+   904→          this.mailboxDoc!.getMap('requests').set(request.id, request)
+   905→        }, 'merge-retry')
+   906→        request.status = 'sent'
+   907→      } catch (error) {
+   908→        console.warn('retryOutbox failed', error)
+   909→        request.status = 'failed'
+   910→      }
+   911→    }
+   912→    this.persistOutbox()
+   913→    if (queued.some((r) => r.status === 'sent')) {
+   914→      this.toast('Отложенные merge-запросы отправлены')
+   915→    }
+   916→    this.notify(true)
+   917→  }
+   918→
+   919→  private syncOutboxStatuses() {
+   920→    if (!this.mailboxDoc) return
+   921→    const requestsMap = this.mailboxDoc.getMap('requests')
+   922→    let changed = false
+   923→
+   924→    for (const item of this.outbox) {
+   925→      const remote = requestsMap.get(item.id)
+   926→      if (!remote) continue
+   927→      const plain = yValueToPlain(remote) as Record<string, unknown>
+   928→      const status = plain.status as MergeRequest['status']
+   929→      if (status && status !== item.status && (status === 'applied' || status === 'rejected')) {
+   930→        item.status = status
+   931→        changed = true
+   932→        if (status === 'applied') {
+   933→          this.toast('Владелец принял ваш merge-запрос')
+   934→        } else {
+   935→          this.toast('Владелец отклонил ваш merge-запрос', 'warn')
+   936→        }
+   937→      }
+   938→    }
+   939→
+   940→    if (changed) this.persistOutbox()
+   941→  }
+   942→
+   943→  async acceptMerge(requestId: string) {
+   944→    if (!this.ydoc || !this.mailboxDoc) {
+   945→      this.toast('Merge-комната не подключена', 'error')
+   946→      return
+   947→    }
+   948→
+   949→    const remote = this.mailboxDoc.getMap('requests').get(requestId)
+   950→    if (!remote) {
+   951→      this.toast('Merge-запрос не найден', 'error')
+   952→      return
+   953→    }
+   954→
+   955→    const plain = yValueToPlain(remote) as Record<string, unknown>
+   956→    const delta = (plain.delta ?? {}) as MergeRequest['delta']
+   957→    const senderName = String(plain.senderName ?? 'Неизвестный')
+   958→
+   959→    try {
+   960→      // FR-11: backup перед применением.
+   961→      const backupId = uid()
+   962→      const backupMeta: BackupMeta = {
+   963→        id: backupId,
+   964→        projectId: this.projectId ?? 'unknown',
+   965→        createdAt: Date.now(),
+   966→        label: `Перед merge от ${senderName}`,
+   967→      }
+   968→      await saveBackup(backupMeta, Y.encodeStateAsUpdate(this.ydoc!))
+   969→      await this.refreshBackups()
+   970→
+   971→      applyDelta(this.ydoc!, delta)
+   972→      this.scheduleSave()
+   973→
+   974→      this.mailboxDoc.transact(() => {
+   975→        const existing = this.mailboxDoc!.getMap('requests').get(requestId)
+   976→        if (existing instanceof Y.Map) {
+   977→          existing.set('status', 'applied')
+   978→        } else {
+   979→          this.mailboxDoc!.getMap('requests').set(requestId, { ...plain, status: 'applied' })
+   980→        }
+   981→      }, 'merge-accept')
+   982→
+   983→      this.toast(`Merge от ${senderName} применён (создан backup)`)
+   984→      this.notify(true)
+   985→    } catch (error) {
+   986→      console.error('acceptMerge failed', error)
+   987→      this.toast('Ошибка применения merge-запроса', 'error')
+   988→    }
+   989→  }
+   990→
+   991→  async rejectMerge(requestId: string) {
+   992→    if (!this.mailboxDoc) return
+   993→    try {
+   994→      const plain = yValueToPlain(this.mailboxDoc.getMap('requests').get(requestId)) as
+   995→        | Record<string, unknown>
+   996→        | undefined
+   997→      if (!plain) {
+   998→        this.toast('Merge-запрос не найден', 'error')
+   999→        return
+  1000→      }
+  1001→      this.mailboxDoc.transact(() => {
+  1002→        const existing = this.mailboxDoc!.getMap('requests').get(requestId)
+  1003→        if (existing instanceof Y.Map) {
+  1004→          existing.set('status', 'rejected')
+  1005→        } else {
+  1006→          this.mailboxDoc!.getMap('requests').set(requestId, { ...plain, status: 'rejected' })
+  1007→        }
+  1008→      }, 'merge-reject')
+  1009→      this.toast('Merge-запрос отклонён')
+  1010→      this.notify(true)
+  1011→    } catch (error) {
+  1012→      console.error('rejectMerge failed', error)
+  1013→      this.toast('Не удалось отклонить merge-запрос', 'error')
+  1014→    }
+  1015→  }
+  1016→
+  1017→  // ---------------------------
+  1018→  // Backups
+  1019→  // ---------------------------
+  1020→
+  1021→  async refreshBackups() {
+  1022→    if (!this.projectId) return
+  1023→    this.backups = await listBackups(this.projectId)
+  1024→    this.notify()
+  1025→  }
+  1026→
+  1027→  async restoreBackup(backupId: string) {
+  1028→    const bytes = await getBackupUpdate(backupId)
+  1029→    if (!bytes) {
+  1030→      this.toast('Backup не найден', 'error')
+  1031→      return
+  1032→    }
+  1033→
+  1034→    try {
+  1035→      const roomId = this.roomId
+  1036→      const backupMeta = this.backups.find((b) => b.id === backupId)
+  1037→
+  1038→      this.cleanupDoc()
+  1039→
+  1040→      const doc = new Y.Doc()
+  1041→      this.ydoc = doc
+  1042→      this.projectId = backupMeta?.projectId ?? this.projectId
+  1043→      this.mode = 'project'
+  1044→      this.copyMeta = null
+  1045→      this.currentCopyRecord = null
+  1046→
+  1047→      Y.applyUpdate(doc, bytes, 'backup-restore')
+  1048→      doc.on('update', () => this.notify())
+  1049→      this.scheduleSave()
+  1050→
+  1051→      if (roomId) {
+  1052→        this.connectRoom(roomId)
+  1053→      }
+  1054→
+  1055→      this.selectedId = null
+  1056→      this.toast('Состояние восстановлено из backup')
+  1057→      this.notify(true)
+  1058→    } catch (error) {
+  1059→      console.error('restoreBackup failed', error)
+  1060→      this.toast('Не удалось восстановить backup', 'error')
+  1061→    }
+  1062→  }
+  1063→
+  1064→  // ---------------------------
+  1065→  // Экспорт / импорт
+  1066→  // ---------------------------
+  1067→
+  1068→  exportJson(): string | null {
+  1069→    if (!this.ydoc) return null
+  1070→    return JSON.stringify(exportProjectToJson(this.ydoc), null, 2)
+  1071→  }
+  1072→
+  1073→  exportTxt(): string | null {
+  1074→    const snap = this.snapshot
+  1075→    if (!snap.meta) return null
+  1076→    const lines: string[] = []
+  1077→    lines.push(`ВЕТВИ — ${snap.meta.name}`)
+  1078→    lines.push(`Экспорт: ${new Date().toLocaleString('ru-RU')}`)
+  1079→    lines.push('')
+  1080→
+  1081→    const dialogues = snap.elements.filter((e) => e.type === 'dialogue')
+  1082→    const notes = snap.elements.filter((e) => e.type === 'note')
+  1083→    const texts = snap.elements.filter((e) => e.type === 'text')
+  1084→
+  1085→    if (dialogues.length) {
+  1086→      lines.push('=== Реплики диалога ===')
+  1087→      dialogues.forEach((e) => lines.push(`— ${e.text}`))
+  1088→      lines.push('')
+  1089→    }
+  1090→    if (notes.length) {
+  1091→      lines.push('=== Заметки ===')
+  1092→      notes.forEach((e) => lines.push(`• ${e.text}`))
+  1093→      lines.push('')
+  1094→    }
+  1095→    if (texts.length) {
+  1096→      lines.push('=== Текстовые блоки ===')
+  1097→      texts.forEach((e) => lines.push(e.text))
+  1098→      lines.push('')
+  1099→    }
+  1100→
+  1101→    if (!snap.elements.length) lines.push('(проект пуст)')
+  1102→    return lines.join('\n')
+  1103→  }
+  1104→
+  1105→  async importJson(text: string): Promise<boolean> {
+  1106→    try {
+  1107→      const json = JSON.parse(text)
+  1108→      validateProjectJson(json)
+  1109→
+  1110→      if (!this.ydoc) {
+  1111→        await this.newProject({ silent: true })
+  1112→      }
+  1113→      if (!this.ydoc) return false
+  1114→
+  1115→      importProjectFromJson(json, this.ydoc, { clear: true })
+  1116→      this.scheduleSave()
+  1117→      this.toast('Проект импортирован')
+  1118→      this.notify(true)
+  1119→      return true
+  1120→    } catch (error) {
+  1121→      console.warn('importJson failed', error)
+  1122→      const message = error instanceof Error ? error.message : 'Неизвестная ошибка импорта'
+  1123→      this.toast(message, 'error')
+  1124→      return false
+  1125→    }
+  1126→  }
+  1127→
+  1128→  downloadFile(filename: string, content: string, mime: string) {
+  1129→    try {
+  1130→      const blob = new Blob([content], { type: mime })
+  1131→      const url = URL.createObjectURL(blob)
+  1132→      const a = document.createElement('a')
+  1133→      a.href = url
+  1134→      a.download = filename
+  1135→      document.body.appendChild(a)
+  1136→      a.click()
+  1137→      a.remove()
+  1138→      setTimeout(() => URL.revokeObjectURL(url), 1000)
+  1139→    } catch (error) {
+  1140→      console.error('downloadFile failed', error)
+  1141→      this.toast('Не удалось скачать файл', 'error')
+  1142→    }
+  1143→  }
+  1144→}
+  1145→

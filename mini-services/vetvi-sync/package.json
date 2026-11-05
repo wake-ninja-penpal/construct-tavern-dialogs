@@ -1,0 +1,14 @@
+{
+  "name": "vetvi-sync-server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot index.ts"
+  },
+  "dependencies": {
+    "lib0": "^0.2.114",
+    "socket.io": "^4.8.4",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.18"
+  }
+}
