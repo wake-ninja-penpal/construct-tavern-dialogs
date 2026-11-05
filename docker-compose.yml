@@ -1,15 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # «Ветви» — весь проект в Docker (Next.js + realtime-sync + шлюз).
 #
-# Запуск:      docker compose up --build
-# Приложение:  http://localhost:8080            (порт меняется: APP_PORT=81 docker compose up -d)
-# Стоп:        docker compose down              (данные sync сохранятся в volume sync-data)
+# Запуск:      sudo docker-compose up --build   (старый docker-compose v1)
+#              docker compose up --build        (новый docker compose v2)
+# Приложение:  http://localhost:8080
+#              (порт меняется: APP_PORT=81 sudo docker-compose up -d)
+# Стоп:        sudo docker-compose down         (данные sync сохранятся в volume sync-data)
+#
+# Формат: version 2.4 — работает и в docker-compose v1 (1.29+), и в
+# docker compose v2 (v2 лишь предупредит, что version устарел — это нормально).
 #
 # Схема повторяет Caddy-шлюз песочницы:
 #   браузер → gateway(:80) ─┬─ /  (всё остальное)        → web:3000   (Next.js, отдаёт /vetvi/index.html)
 #                           └─ /?XTransformPort=3003     → sync:3003  (socket.io realtime-сервер)
 # ─────────────────────────────────────────────────────────────────────────────
-name: vetvi
+version: "2.4"
 
 services:
   # Next.js — отдаёт приложение «Ветви» (/vetvi/index.html) и статику
@@ -59,10 +64,8 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
-      web:
-        condition: service_healthy
-      sync:
-        condition: service_started
+      - web
+      - sync
     ports:
       - "${APP_PORT:-8080}:80"
     volumes:
