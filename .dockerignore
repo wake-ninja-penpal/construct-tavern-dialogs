@@ -1,0 +1,36 @@
+# зависимости и сборки
+node_modules
+.next
+out
+build
+
+# git и docker-артефакты (контекст сборки web-контейнера)
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+docker
+
+# мини-сервисы собираются из своего контекста (mini-services/vetvi-sync)
+mini-services
+
+# локальные данные и логи
+db
+*.log
+dev.log
+server.log
+
+# окружение и прочее локальное
+.env
+.env.*
+.claude
+.z-ai-config
+agent-ctx
+tool-results
+skills
+tests
+download
+upload
+prompt
+.DS_Store

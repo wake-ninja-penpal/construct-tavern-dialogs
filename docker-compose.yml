@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# «Ветви» — весь проект в Docker (Next.js + realtime-sync + шлюз).
+#
+# Запуск:      docker compose up --build
+# Приложение:  http://localhost:8080            (порт меняется: APP_PORT=81 docker compose up -d)
+# Стоп:        docker compose down              (данные sync сохранятся в volume sync-data)
+#
+# Схема повторяет Caddy-шлюз песочницы:
+#   браузер → gateway(:80) ─┬─ /  (всё остальное)        → web:3000   (Next.js, отдаёт /vetvi/index.html)
+#                           └─ /?XTransformPort=3003     → sync:3003  (socket.io realtime-сервер)
+# ─────────────────────────────────────────────────────────────────────────────
+name: vetvi
+
+services:
+  # Next.js — отдаёт приложение «Ветви» (/vetvi/index.html) и статику
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vetvi-web:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      NEXT_TELEMETRY_DISABLED: 1
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Realtime-сервер совместного редактирования (socket.io, path '/')
+  # Состояние комнат хранится в /app/data/store.json — он в volume, поэтому
+  # проекты переживают перезапуск контейнера.
+  sync:
+    build:
+      context: ./mini-services/vetvi-sync
+      dockerfile: Dockerfile
+    image: vetvi-sync:latest
+    restart: unless-stopped
+    volumes:
+      - sync-data:/app/data
+    expose:
+      - "3003"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3003/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Шлюз (Caddy) — единственная точка входа, как в песочнице.
+  # При добавлении новых мини-сервисов допишите матчер в docker/caddy/Caddyfile.
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      sync:
+        condition: service_started
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  sync-data:
