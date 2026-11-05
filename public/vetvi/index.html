@@ -140,6 +140,10 @@ body.panning #canvas,body.panning .groupbox,body.panning .gcard,body.panning .no
 #lockTip.show{opacity:1}
 #lockTip .lt-dot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 8px currentColor}
 .gbadge.lbadge{border-style:solid;font-weight:700}
+/* обводка объектов, которые прямо сейчас редактирует другой участник (цветом участника) */
+.node.lkb{border-color:var(--lkc,#8b929c)!important;box-shadow:0 0 0 1.5px var(--lkc,#8b929c),0 0 18px -4px var(--lkc,#8b929c),0 6px 18px rgba(0,0,0,.38)!important}
+.groupbox.lkb,.gcard.lkb{border-color:var(--lkc,#8b929c)!important;border-style:solid!important;box-shadow:0 0 0 2px var(--lkc,#8b929c),0 0 24px -6px var(--lkc,#8b929c)!important}
+#edges .edge.lkb .line{stroke:var(--lkc,#8b929c)!important;filter:drop-shadow(0 0 5px var(--lkc,#8b929c))}
 body.knife #canvas{cursor:crosshair}
 body.carry #canvas{cursor:copy}
 #canvas::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(900px 560px at 55% 38%,rgba(226,165,78,.045),transparent 65%),radial-gradient(140% 120% at 50% 120%,rgba(0,0,0,.5),transparent 55%)}
@@ -1427,6 +1431,7 @@ function updateGroupBadges(){
       layer.appendChild(chip2);
     });
   }
+  try{lockApplyOutlines();}catch(e){}
 }
 function renderWorld(spawn,spawnEdge){
   nodeEls.forEach(function(el){el.remove();}); nodeEls.clear();
@@ -5891,6 +5896,40 @@ function lockApplyServerList(list){
   syncState.rlocks=map;
   try{updateGroupBadges();}catch(e){}
   try{applyInspectorLockState();}catch(e){}
+}
+/* обводка объектов, которые прямо сейчас редактирует другой участник,
+   цветом, который система выдала ему при подключении */
+var lockOutlineEls=[];
+function lockApplyOutlines(){
+  if(!lockOutlineEls)lockOutlineEls=[];
+  for(var i=0;i<lockOutlineEls.length;i++){
+    var oel=lockOutlineEls[i];
+    oel.classList.remove('lkb');
+    oel.style.removeProperty('--lkc');
+  }
+  lockOutlineEls=[];
+  if(typeof syncState==='undefined'||!syncState||!syncState.enabled||!syncState.rlocks)return;
+  var meId=syncMe().id;
+  Object.keys(syncState.rlocks).forEach(function(oid){
+    var l=syncState.rlocks[oid];
+    if(!l||l.userId===meId)return;
+    var c=l.color||'#8b929c';
+    var n=nodeById(oid);
+    if(n){
+      if(collapsedAncestorOf(n))return;
+      var nel=nodeEls.get(n.id);
+      if(nel){nel.classList.add('lkb');nel.style.setProperty('--lkc',c);lockOutlineEls.push(nel);}
+      return;
+    }
+    var g=groupById(oid);
+    if(g){
+      var gel=groupEls.get(g.id);
+      if(gel){gel.classList.add('lkb');gel.style.setProperty('--lkc',c);lockOutlineEls.push(gel);}
+      return;
+    }
+    var er=edgeEls.get(oid);
+    if(er&&er.g){er.g.classList.add('lkb');er.g.style.setProperty('--lkc',c);lockOutlineEls.push(er.g);}
+  });
 }
 function lockBlockedBy(ids){
   if(!syncState.enabled||!syncState.rlocks)return null;
