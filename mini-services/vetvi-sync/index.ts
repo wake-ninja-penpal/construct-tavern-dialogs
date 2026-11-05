@@ -163,6 +163,20 @@ function userList(room: RoomState) {
   return out
 }
 
+/* Чистка «призраков»: сокет мог отвалиться без события disconnect
+   (обрыв соединения, рестарт транспорта) — если сокета больше нет
+   в списке подключённых, участник не считается онлайн-пользователем. */
+function sweepStaleMembers(io: Server, room: RoomState): boolean {
+  let changed = false
+  for (const [sid] of room.members) {
+    if (!io.of('/').sockets.has(sid)) {
+      room.members.delete(sid)
+      changed = true
+    }
+  }
+  return changed
+}
+
 function broadcastUsers(io: Server, room: RoomState) {
   io.to(room.name).emit('vetvi:users', { roomId: room.name, users: userList(room) })
 }
@@ -259,6 +273,9 @@ io.on('connection', (socket: Socket) => {
         const room = getRoom(roomName)
         socket.join(roomName)
         room.members.set(socket.id, { socketId: socket.id, user })
+
+        // удаляем призраков перед расчётом списка — счётчик онлайн всегда актуальный
+        if (sweepStaleMembers(io, room)) broadcastUsers(io, room)
 
         const stored = store.rooms[roomName] || null
         ack?.({
@@ -558,6 +575,18 @@ io.on('connection', (socket: Socket) => {
 })
 
 loadPersist()
+
+/* периодическая чистка призраков во всех комнатах — онлайн-счётчик остаётся точным,
+   даже если новый join давно не приходил */
+setInterval(() => {
+  try {
+    for (const room of rooms.values()) {
+      if (sweepStaleMembers(io, room)) broadcastUsers(io, room)
+    }
+  } catch (e) {
+    console.error('[vetvi-sync] sweep error', e)
+  }
+}, 60_000)
 
 httpServer.listen(PORT, () => {
   console.log(`[vetvi-sync] server running on port ${PORT}`)

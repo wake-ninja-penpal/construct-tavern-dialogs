@@ -39,7 +39,7 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
 .btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--tx2);font:500 13px var(--body);cursor:pointer;transition:all .18s;position:relative;white-space:nowrap}
 .btn:hover{background:#262b33;color:var(--tx);transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.35);border-color:#3d434f}
 .btn:active{transform:translateY(0) scale(.97)}
-.btn svg{width:15px;height:15px}
+.btn svg{width:15px;height:15px;flex:none}
 .btn.primary{background:linear-gradient(180deg,#eab264,#d69637);border-color:#a97a2e;color:#221604;font-weight:600;overflow:hidden}
 .btn.primary::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.35) 50%,transparent 60%);transform:translateX(-120%);transition:transform .55s}
 .btn.primary:hover{filter:brightness(1.07);color:#221604}
@@ -517,13 +517,24 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .share-link{display:flex;gap:6px;margin:6px 0 4px}
 .share-link input{flex:1;min-width:0;background:#14161a;border:1px solid #2b2f37;border-radius:9px;color:var(--tx);font:12px var(--mono);padding:8px 10px;outline:none}
 .share-link input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
-@media(max-width:1500px){#bCopies .t,#bShare .t{display:none}}
-@media(max-width:960px){
+/* ── адаптив топбара ──
+   ≤1500: у «Копии»/«Поделиться»/«Merge» остаётся только иконка (кнопка никогда не пустая),
+   прячем второстепенное и уплотняем отступы — все кнопки полноразмерные. */
+@media(max-width:1500px){
+  #bCopies .t,#bShare .t,#bMerge .t{display:none}
+  #bCopies,#bShare,#bMerge{padding:0 10px;justify-content:center}
+  #topbar .btn{padding-left:10px;padding-right:10px}
+  #zPct{display:none}
+  .brand .sub{display:none}
+  #topbar{gap:8px}
+  #topbar .vsep{display:none}
+}
+/* ≤1430: одна строка уже не вмещает — переносим на две, кнопки никогда не сжимаются */
+@media(max-width:1430px){
   #topbar{height:auto;min-height:56px;flex-wrap:wrap;padding:7px 10px;row-gap:7px}
   #projName{flex:1 1 120px}
-  .brand .sub{display:none}
 }
-@media(max-width:640px){
+@media(max-width:960px){
   #left{width:210px}
   #right{width:250px}
   #miniMap{width:170px;height:120px}
@@ -564,9 +575,9 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 <button class="btn ibtn" id="bBend90" title="Изгиб всех стрелок: прямые углы (90°)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h9a3 3 0 0 0 3-3V6h4"/></svg></button>
 <button class="btn ibtn" id="bBend45" title="Изгиб всех стрелок: углы 45°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h6l8-8h2"/></svg></button><div class="vsep" style="margin:0 8px"></div><button class="btn ibtn on" id="bMap" title="Мини-карта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="7" y="8" width="7" height="6" rx="1" fill="currentColor" fill-opacity=".3"/></svg></button><div class="vsep"></div>
   <button class="btn collab-chip" id="bCollab" title="Совместный доступ: статус и участники"><span class="cc-dot" id="ccDot"></span><span id="ccTxt">офлайн</span></button>
-  <button class="btn" id="bMerge" title="Merge-запросы копий" style="display:none">Merge<span class="m-badge" id="mergeBadge" style="display:none">0</span></button>
-  <button class="btn" id="bCopies" title="Локальные копии проекта"><span class="t">Копии</span></button>
-  <button class="btn primary" id="bShare" title="Поделиться ссылкой на проект"><span class="t">Поделиться</span></button>
+  <button class="btn" id="bMerge" title="Merge-запросы копий" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="2.6"/><circle cx="6" cy="6" r="2.6"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg><span class="t">Merge</span><span class="m-badge" id="mergeBadge" style="display:none">0</span></button>
+  <button class="btn" id="bCopies" title="Локальные копии проекта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span class="t">Копии</span></button>
+  <button class="btn primary" id="bShare" title="Поделиться ссылкой на проект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6"/></svg><span class="t">Поделиться</span></button>
 <div class="spacer"></div>
   <button class="btn ibtn" id="bHelp" title="Горячие клавиши">?</button>
 </header>
@@ -5809,7 +5820,7 @@ function projMigrateLegacy(){
   }
   return [];
 }
-/* запуск: миграция, загрузка текущего (или последнего) проекта, подключение к его комнате */
+/* запуск: миграция, загрузка текущего (или указанного в хэше) проекта, подключение к его комнате */
 function projInitStartup(){
   var list=projMigrateLegacy();
   if(!list.length){
@@ -5817,8 +5828,11 @@ function projInitStartup(){
     list=[{id:uid()+uid(),name:'Без названия',created:now,modified:now,nodes:0,roomId:null,at:now}];
     projSaveRegistry(list);
   }
+  /* если в хэше указан наш проект — открываем именно его, а не последний активный */
+  var hp=syncHashParams(),fromHash=false;
   var cur=projCurId(),entry=null;
-  for(var i=0;i<list.length;i++)if(list[i].id===cur)entry=list[i];
+  if(hp.project){for(var i=0;i<list.length;i++)if(list[i].id===hp.project){entry=list[i];fromHash=true;break;}}
+  if(!entry){for(var j=0;j<list.length;j++)if(list[j].id===cur)entry=list[j];}
   if(!entry)entry=list[0];
   var data=null;
   try{data=JSON.parse(localStorage.getItem(projSlotKey(entry.id))||'null');}catch(e){}
@@ -5832,9 +5846,12 @@ function projInitStartup(){
   p.bend=(data&&data.bend)?data.bend:null;
   loadProject(p,null);
   projSetCur(entry.id);
-  if(entry.roomId&&!syncHashParams().room){
-    syncConnect(entry.roomId,entry.id,{});
-    syncSetHash(entry.roomId,entry.id);
+  /* подключаемся только к комнате этого проекта; чужая комната из хэша обрабатывается в initSync */
+  var room=(fromHash&&hp.room)?hp.room:(hp.room?null:entry.roomId);
+  if(room){
+    syncState.mode='room';
+    syncConnect(room,entry.id,{own:true,silent:true});
+    syncSetHash(room,entry.id);
   }
   return entry;
 }
@@ -5862,8 +5879,11 @@ function projOpen(id,silent){
   projSetCur(entry.id);
   if(entry.roomId){
     syncState.mode='room';
-    syncConnect(entry.roomId,entry.id,{});
+    syncConnect(entry.roomId,entry.id,{own:true,silent:true});
     syncSetHash(entry.roomId,entry.id);
+  }else{
+    /* проект вне комнаты — обязательно сбрасываем хэш, чтобы не цепляться к комнате предыдущего проекта */
+    syncSetHash(null);
   }
   if(!silent)toast('Открыт проект: '+(entry.name||'Без названия'));
 }
@@ -5877,6 +5897,7 @@ function projCreate(){
   $('#projName').value=project.meta.name;
   projSetCur(pid);
   projSaveCurrent();
+  syncSetHash(null); /* новый проект пока вне комнаты — не наследуем хэш предыдущей */
   fitView(false);
   addNode('scene',0,0,true);
   history=[];future=[];updateHistUI();markSaved();
@@ -6065,12 +6086,18 @@ function syncRenderMergeBadge(){
   badge.textContent=String(n);
   badge.style.display=n?'':'none';
 }
-/* ── применение удалённого состояния ── */
-function syncApplyRemote(doc,fit){
+/* ── применение удалённого состояния ──
+   keepPid: документ комнаты без meta.projectId (старый снимок этого же проекта) —
+   сохраняем привязку к текущему проекту, чтобы не плодить дубли в списке. */
+function syncApplyRemote(doc,fit,keepPid){
   if(!doc||!Array.isArray(doc.nodes))return;
   syncState.applyingRemote=true;
   try{
-    if(doc.meta)project.meta=doc.meta;
+    if(doc.meta){
+      var myPid=(project.meta&&project.meta.projectId)?project.meta.projectId:null;
+      project.meta=doc.meta;
+      if(keepPid&&!project.meta.projectId&&myPid)project.meta.projectId=myPid;
+    }
     if(doc.bend==='ortho90'||doc.bend==='ortho45'||doc.bend==='smooth'){
       if(doc.bend!==bendMode){bendMode=doc.bend;syncBendButtons();}
     }
@@ -6340,21 +6367,24 @@ function syncConnect(roomId,pid,opts){
       var serverJson='';try{serverJson=serverDoc?JSON.stringify(serverDoc):'';}catch(e){}
       if(!serverDoc){
         syncFlushState(true);
-        if(!opts.silent)toast('Комната открыта — отправьте ссылку соавторам');
+        if(!opts.silent&&!opts.own)toast('Комната открыта — отправьте ссылку соавторам');
       }else if(localJson===serverJson){
         /* уже совпадаем */
       }else if(opts.pushLocal){
         syncFlushState(true);
       }else{
         var localEmpty=project.nodes.length===0;
-        var sameProject=!!(serverDoc.meta&&serverDoc.meta.projectId&&project.meta.projectId&&serverDoc.meta.projectId===project.meta.projectId);
+        var roomPid=(serverDoc.meta&&serverDoc.meta.projectId)?serverDoc.meta.projectId:null;
+        /* своя комната (открыли свой проект из списка) без projectId в документе —
+           это устаревший снимок этого же проекта, модалка не нужна */
+        var sameProject=!!(roomPid&&project.meta.projectId&&roomPid===project.meta.projectId)||(!roomPid&&opts.own===true);
         var serverNewer=!!(serverDoc.meta&&serverDoc.meta.modified&&project.meta.modified&&serverDoc.meta.modified>=project.meta.modified);
         if(localEmpty||(sameProject&&serverNewer)){
-          syncApplyRemote(serverDoc,true);
+          syncApplyRemote(serverDoc,true,opts.own===true);
           toast('Загружено состояние из комнаты');
         }else if(sameProject){
           syncFlushState(true);
-          toast('Локальная версия новее — опубликована в комнату','warn');
+          if(!opts.silent)toast('Локальная версия новее — опубликована в комнату','warn');
         }else{
           showModal({title:'Комната уже содержит проект',
             text:'<p>В комнате уже есть общее состояние, а у вас открыт другой проект. Загрузить общий (текущая работа будет заменена) или опубликовать вашу локальную версию?</p>',
@@ -6851,7 +6881,9 @@ function initSync(){
   bindSyncUI();
   renderSyncUI();
   var p=syncHashParams();
-  if(p.room){
+  /* если projInitStartup уже подключился к комнате своего проекта — не переподключаемся;
+     чужая комната из хэша (ссылка соавтора) — подключаемся как гость */
+  if(p.room&&!syncState.enabled){
     syncState.mode='room';
     syncConnect(p.room,p.project||null,{});
   }
