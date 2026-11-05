@@ -134,8 +134,8 @@ aside{background:var(--panel);flex:none;display:flex;flex-direction:column;min-h
 #stage{flex:1;position:relative;min-width:0}
 #canvas{position:absolute;inset:0;overflow:hidden;background-color:var(--bg);touch-action:none;background-image:radial-gradient(circle,#22252b 1px,transparent 1.3px)}
 #canvas.dropready{outline:2px dashed rgba(226,165,78,.35);outline-offset:-10px}
-body.space #canvas{cursor:grab}
-body.panning #canvas,body.panning .groupbox,body.panning .gcard{cursor:grabbing!important}
+body.space #canvas,body.ctrlpan #canvas{cursor:grab}
+body.panning #canvas,body.panning .groupbox,body.panning .gcard,body.panning .node{cursor:grabbing!important}
 body.knife #canvas{cursor:crosshair}
 body.carry #canvas{cursor:copy}
 #canvas::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(900px 560px at 55% 38%,rgba(226,165,78,.045),transparent 65%),radial-gradient(140% 120% at 50% 120%,rgba(0,0,0,.5),transparent 55%)}
@@ -2617,7 +2617,7 @@ function renderInspEmpty(){
     '<div class="i-empty">'+
       '<div class="ghost">'+ic('branch',26)+'</div>'+
       '<h3>Ничего не выбрано</h3>'+
-      '<p>Кликните по узлу, связи или рамке группы.<br><b>Ctrl+ЛКМ</b> по холсту — нарисовать новую группу.</p>'+
+      '<p>Кликните по узлу, связи или рамке группы.<br><b>Ctrl+ЛКМ</b> (зажать и тянуть) — перемещение по холсту.<br><b>Ctrl+Shift+ЛКМ</b> по холсту — нарисовать новую группу.</p>'+
       '<div class="ovgrid">'+cells+'</div>'+
       '<div class="ovmeta">создан: '+fmtD(project.meta.created)+'<br>изменён: '+fmtD(project.meta.modified)+'<br>своих типов: '+project.customTypes.length+' · групп: '+project.groups.length+'</div>'+
     '</div>';
@@ -3634,15 +3634,23 @@ canvas.addEventListener('pointerdown',function(e){
   var target=e.target;
   if(target.closest&&target.closest('.n-title-inp'))return;
   var modK=e.ctrlKey||e.metaKey;
-  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.dlg-reply-pin')))){
-gcreateS={sx:e.clientX,sy:e.clientY};
-    var cr0=canvas.getBoundingClientRect();
-    marquee.classList.add('mg');
-    marquee.style.display='block';
-    marquee.style.left=(e.clientX-cr0.left)+'px';
-    marquee.style.top=(e.clientY-cr0.top)+'px';
-    marquee.style.width='0px';
-    marquee.style.height='0px';
+  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.n-fold')))){
+    if(e.shiftKey){
+      /* Ctrl+Shift+ЛКМ — нарисовать новую группу */
+      gcreateS={sx:e.clientX,sy:e.clientY};
+      var cr0=canvas.getBoundingClientRect();
+      marquee.classList.add('mg');
+      marquee.style.display='block';
+      marquee.style.left=(e.clientX-cr0.left)+'px';
+      marquee.style.top=(e.clientY-cr0.top)+'px';
+      marquee.style.width='0px';
+      marquee.style.height='0px';
+      e.preventDefault();
+      return;
+    }
+    /* Ctrl/⌘+ЛКМ — перемещение по холсту (Windows: Ctrl, macOS: Control или ⌘) */
+    panS={sx:e.clientX,sy:e.clientY,vx:vp.x,vy:vp.y};
+    document.body.classList.add('panning');
     e.preventDefault();
     return;
   }
@@ -4417,6 +4425,7 @@ canvas.addEventListener('wheel',function(e){
   zoomAt(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.11:1/1.11);
 },{passive:false});
 canvas.addEventListener('dblclick',function(e){
+  if(e.ctrlKey||e.metaKey)return;
   var t=e.target;
   if(t.closest&&(t.closest('.n-fold')||t.closest('.port')||t.closest('.dlg-reply-pin')||t.closest('.n-title-inp')))return;
   var nodeEl=t.closest?t.closest('.node'):null;
@@ -4883,6 +4892,7 @@ function isTyping(){
 }
 window.addEventListener('keydown',function(e){
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
+  if((e.key==='Control'||e.key==='Meta')&&!isTyping())document.body.classList.add('ctrlpan');
   if(isTyping()){
     if(e.key==='Escape')document.activeElement.blur();
     return;
@@ -4903,7 +4913,7 @@ window.addEventListener('keydown',function(e){
   if(mod&&e.altKey&&code==='KeyN'){e.preventDefault();newProject();return;}
   if(mod&&code==='KeyD'){e.preventDefault();var r=duplicateSel();if(r)startCarry(r.ids,r.pre);return;}
   if(mod&&e.shiftKey&&code==='KeyA'){e.preventDefault();alignSelH();return;}
-  if(mod&&!e.shiftKey&&code==='KeyG'){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+ЛКМ)','warn');return;}
+  if(mod&&!e.shiftKey&&code==='KeyG'){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+Shift+ЛКМ)','warn');return;}
   if(mod&&e.shiftKey&&code==='KeyG'){
     e.preventDefault();
     var gidU=selGroup;
@@ -4936,8 +4946,9 @@ window.addEventListener('keydown',function(e){
 window.addEventListener('keyup',function(e){
   if(e.code==='Space'){spaceDown=false;document.body.classList.remove('space');}
   if(e.key==='Alt')document.body.classList.remove('knife');
+  if(e.key==='Control'||e.key==='Meta')document.body.classList.remove('ctrlpan');
 });
-window.addEventListener('blur',function(){document.body.classList.remove('knife');});
+window.addEventListener('blur',function(){document.body.classList.remove('knife');document.body.classList.remove('ctrlpan');});
 function groupModal(){
   var val='Группа';
   showModal({title:'Новая группа',
