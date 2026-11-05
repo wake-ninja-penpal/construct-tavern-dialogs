@@ -1,0 +1,1126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ветви — Yjs / WebRTC prototype</title>
+
+  <style>
+    :root {
+      --bg: #111214;
+      --panel: #1b1d21;
+      --panel-2: #23262b;
+      --line: #30343b;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #7c5cff;
+      --accent-2: #4cc9f0;
+      --danger: #ff5a5f;
+      --ok: #2ecc71;
+      --warn: #f5a623;
+      --shadow: 0 10px 30px rgba(0, 0, 0, .25);
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      flex: 0 0 auto;
+      min-height: 58px;
+      height: auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: linear-gradient(180deg, #1d2025, #15171a);
+      border-bottom: 1px solid var(--line);
+      position: relative;
+      z-index: 10;
+    }
+
+    .brand {
+      font-weight: 800;
+      letter-spacing: .08em;
+      white-space: nowrap;
+    }
+
+    .brand span {
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: normal;
+      margin-left: 6px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+
+    button:hover {
+      border-color: #4b515a;
+      background: #2a2e34;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    button.primary:hover {
+      filter: brightness(1.08);
+    }
+
+    button.danger {
+      background: #3a1f23;
+      border-color: #67313a;
+      color: #ffb3b7;
+    }
+
+    button.small {
+      padding: 6px 8px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+
+    .status {
+      margin-left: auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 0;
+    }
+
+    .pill {
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #20242a;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    main {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 320px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      padding: 12px;
+      overflow: auto;
+      min-height: 0;
+      min-width: 0;
+    }
+
+    .panel:last-child {
+      border-right: 0;
+      border-left: 1px solid var(--line);
+    }
+
+    .panel h3 {
+      margin: 14px 0 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+    }
+
+    .panel h3:first-child {
+      margin-top: 0;
+    }
+
+    .row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      margin-top: 4px;
+      background: #111316;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      outline: none;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(124, 92, 255, .15);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    #signaling {
+      width: min(220px, 45vw);
+      margin: 0;
+    }
+
+    #canvas-wrap {
+      position: relative;
+      overflow: auto;
+      min-width: 0;
+      min-height: 0;
+      background:
+        radial-gradient(circle at 1px 1px, rgba(255, 255, 255, .08) 1px, transparent 0) 0 0 / 24px 24px,
+        #0f1114;
+    }
+
+    #canvas {
+      position: relative;
+      width: 4000px;
+      height: 3000px;
+      transform-origin: 0 0;
+    }
+
+    .empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      pointer-events: none;
+      font-size: 15px;
+    }
+
+    .node {
+      position: absolute;
+      min-width: 120px;
+      min-height: 70px;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, #20242a, #191c20);
+      border: 1px solid #3a4048;
+      box-shadow: var(--shadow);
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+      overflow: hidden;
+    }
+
+    .node.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(124, 92, 255, .25), var(--shadow);
+    }
+
+    .node.dialogue {
+      background: linear-gradient(180deg, #1d2a33, #172028);
+      border-color: #2f596b;
+    }
+
+    .node.text {
+      background: linear-gradient(180deg, #2a241d, #201c17);
+      border-color: #6b5a2f;
+    }
+
+    .node-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .node-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .card {
+      background: #14161a;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .card .title {
+      font-weight: 650;
+      margin-bottom: 4px;
+    }
+
+    .card .meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .card .actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+
+    #toasts {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 999;
+      max-width: min(360px, calc(100vw - 28px));
+    }
+
+    .toast {
+      background: #1f2430;
+      border: 1px solid #394152;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      animation: in .18s ease-out;
+    }
+
+    .toast.ok {
+      border-color: rgba(46, 204, 113, .45);
+    }
+
+    .toast.warn {
+      border-color: rgba(245, 166, 35, .45);
+    }
+
+    .toast.error {
+      border-color: rgba(255, 90, 95, .45);
+    }
+
+    @keyframes in {
+      from {
+        transform: translateY(8px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    @media (max-width: 1100px) {
+      main {
+        grid-template-columns: 240px minmax(0, 1fr) 280px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(150px, 220px) minmax(0, 1fr) minmax(180px, 320px);
+      }
+
+      .panel {
+        max-height: none;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .panel:last-child {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="brand">ВЕТВИ <span>Yjs / WebRTC</span></div>
+
+    <div class="toolbar">
+      <button id="btn-new">Новый</button>
+      <button id="btn-open">Открыть JSON</button>
+      <button id="btn-save">Сохранить JSON</button>
+      <button id="btn-share" class="primary">Поделиться</button>
+      <button id="btn-copy-link">Ссылка</button>
+      <button id="btn-make-copy">Сделать копию</button>
+      <button id="btn-send-merge">Отправить merge</button>
+      <button id="btn-refresh-merges">Merge-запросы</button>
+
+      <label style="margin: 0; display: flex; align-items: center; gap: 6px;">
+        Signaling
+        <input id="signaling" value="wss://signaling.yjs.dev" />
+      </label>
+    </div>
+
+    <div class="status">
+      <span class="pill" id="mode-label">проект</span>
+      <span class="pill" id="connection-status">офлайн</span>
+      <span class="pill" id="peers-count">0 участников</span>
+    </div>
+  </header>
+
+  <main>
+    <aside class="panel">
+      <h3>Элементы</h3>
+      <div class="row">
+        <button data-add="note">Заметка</button>
+        <button data-add="dialogue">Реплика</button>
+        <button data-add="text">Текст</button>
+      </div>
+
+      <h3>Копии</h3>
+      <div id="copies-list" class="list"></div>
+
+      <h3>Merge-запросы</h3>
+      <div id="merges-list" class="list"></div>
+    </aside>
+
+    <section id="canvas-wrap">
+      <div id="canvas"></div>
+      <div id="empty" class="empty">Холст пуст — добавьте элемент слева</div>
+    </section>
+
+    <aside class="panel inspector">
+      <h3>Инспектор</h3>
+
+      <label>
+        Название проекта
+        <input id="project-name" placeholder="Название проекта" />
+      </label>
+
+      <label>
+        Тип элемента
+        <input id="insp-type" readonly placeholder="—" />
+      </label>
+
+      <div class="grid2">
+        <label>X <input id="insp-x" type="number" /></label>
+        <label>Y <input id="insp-y" type="number" /></label>
+        <label>W <input id="insp-width" type="number" /></label>
+        <label>H <input id="insp-height" type="number" /></label>
+      </div>
+
+      <label>
+        Текст
+        <textarea id="insp-text" placeholder="Текст элемента"></textarea>
+      </label>
+
+      <div class="row">
+        <button id="btn-delete-element" class="danger">Удалить элемент</button>
+      </div>
+
+      <div class="hint">
+        Prototype: данные хранятся локально в IndexedDB. Realtime работает через WebRTC и signaling-сервер Yjs.
+        Для продакшена лучше поднять свой мини-signaling и при необходимости TURN.
+      </div>
+    </aside>
+  </main>
+
+  <input type="file" id="file-input" accept="application/json,.json" hidden />
+  <div id="toasts"></div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "yjs": "https://esm.sh/yjs@13.6.18",
+        "y-webrtc": "https://esm.sh/y-webrtc@10.2.5?external=yjs"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as Y from 'yjs';
+    import { WebrtcProvider } from 'y-webrtc';
+
+    const SCHEMA_VERSION = 1;
+
+    const ROOTS = [
+      'meta',
+      'elements',
+      'connections',
+      'dialogues',
+      'notes',
+      'viewport'
+    ];
+
+    const TEXT_KEYS = new Set([
+      'text',
+      'content',
+      'title',
+      'body',
+      'note',
+      'label',
+      'caption'
+    ]);
+
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    let suppressHashChange = false;
+
+    const state = {
+      ydoc: null,
+      autoSave: null,
+      provider: null,
+
+      mailboxDoc: null,
+      mailboxProvider: null,
+      mailboxRoom: null,
+
+      projectId: null,
+      roomId: null,
+
+      mode: 'project', // project | copy
+      copyMeta: null,
+
+      selectedId: null,
+      copies: [],
+
+      currentTextObserver: null,
+      renderScheduled: false
+    };
+
+    // ---------------------------
+    // Utils
+    // ---------------------------
+
+    function uid() {
+      if (crypto.randomUUID) return crypto.randomUUID();
+      return Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+
+    function getUserId() {
+      let id = localStorage.getItem('vetvi:userId');
+      if (!id) {
+        id = uid();
+        localStorage.setItem('vetvi:userId', id);
+      }
+      return id;
+    }
+
+    function uint8ToBase64(u8) {
+      let binary = '';
+      const chunkSize = 0x8000;
+
+      for (let i = 0; i < u8.length; i += chunkSize) {
+        const chunk = u8.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk);
+      }
+
+      return btoa(binary);
+    }
+
+    function base64ToUint8(b64) {
+      const binary = atob(b64);
+      const u8 = new Uint8Array(binary.length);
+
+      for (let i = 0; i < binary.length; i++) {
+        u8[i] = binary.charCodeAt(i);
+      }
+
+      return u8;
+    }
+
+    function isPlainObject(value) {
+      return (
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        !(value instanceof Uint8Array)
+      );
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function toast(message, type = 'ok') {
+      const el = document.createElement('div');
+      el.className = `toast ${type}`;
+      el.textContent = message;
+      $('#toasts').appendChild(el);
+
+      setTimeout(() => el.remove(), 4000);
+    }
+
+    function setStatus(text) {
+      const el = $('#connection-status');
+      if (el) el.textContent = text;
+    }
+
+    function setPeers(count) {
+      const el = $('#peers-count');
+      if (el) el.textContent = `${count} участников`;
+    }
+
+    function setModeLabel() {
+      const el = $('#mode-label');
+      if (el) el.textContent = state.mode === 'copy' ? 'копия' : 'проект';
+    }
+
+    function getSignalingServers() {
+      const raw = $('#signaling')?.value || '';
+      const list = raw
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      return list.length ? list : ['wss://signaling.yjs.dev'];
+    }
+
+    function readHashParams() {
+      return new URLSearchParams(location.hash.slice(1));
+    }
+
+    function writeHashParams(paramsObject) {
+      const params = readHashParams();
+
+      for (const [key, value] of Object.entries(paramsObject)) {
+        if (value === null || value === undefined || value === '') {
+          params.delete(key);
+        } else {
+          params.set(key, value);
+        }
+      }
+
+      const hash = params.toString();
+      const newUrl = `${location.pathname}${location.search}${hash ? `#${hash}` : ''}`;
+
+      try {
+        history.replaceState(null, '', newUrl);
+      } catch {
+        suppressHashChange = true;
+        location.hash = hash;
+        setTimeout(() => {
+          suppressHashChange = false;
+        }, 0);
+      }
+    }
+
+    function getShareUrl() {
+      const params = new URLSearchParams();
+
+      if (state.roomId) params.set('room', state.roomId);
+      if (state.projectId) params.set('project', state.projectId);
+
+      const base = location.protocol === 'file:'
+        ? location.href.split('#')[0]
+        : `${location.origin}${location.pathname}`;
+
+      return `${base}#${params.toString()}`;
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          toast('Скопировано в буфер обмена');
+          return;
+        }
+
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.pointerEvents = 'none';
+
+        document.body.appendChild(textarea);
+        textarea.select();
+
+        const ok = document.execCommand('copy');
+        textarea.remove();
+
+        if (ok) {
+          toast('Скопировано в буфер обмена');
+        } else {
+          prompt('Скопируйте вручную:', text);
+        }
+      } catch (error) {
+        console.warn('Clipboard error', error);
+        prompt('Скопируйте вручную:', text);
+      }
+    }
+
+    // ---------------------------
+    // Custom IndexedDB persistence
+    // ---------------------------
+
+    const IDB_NAME = 'vetvi';
+    const IDB_STORE = 'documents';
+
+    let _idbPromise = null;
+
+    function openIdb() {
+      if (_idbPromise) return _idbPromise;
+
+      _idbPromise = new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) {
+          reject(new Error('IndexedDB недоступен'));
+          return;
+        }
+
+        const request = indexedDB.open(IDB_NAME, 1);
+
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE);
+          }
+        };
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+
+      _idbPromise.catch(() => {
+        _idbPromise = null;
+      });
+
+      return _idbPromise;
+    }
+
+    async function idbGet(key) {
+      try {
+        const db = await openIdb();
+
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readonly');
+          const req = tx.objectStore(IDB_STORE).get(key);
+
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      } catch (error) {
+        console.warn('IndexedDB get error', error);
+        return undefined;
+      }
+    }
+
+    async function idbSet(key, value) {
+      try {
+        const db = await openIdb();
+
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put(value, key);
+
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error);
+        });
+
+        return true;
+      } catch (error) {
+        console.warn('IndexedDB set error', error);
+        return false;
+      }
+    }
+
+    async function idbDelete(key) {
+      try {
+        const db = await openIdb();
+
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).delete(key);
+
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error);
+        });
+
+        return true;
+      } catch (error) {
+        console.warn('IndexedDB delete error', error);
+        return false;
+      }
+    }
+
+    async function loadDocFromIdb(ydoc, key) {
+      const saved = await idbGet(key);
+
+      if (!saved) return;
+
+      try {
+        let u8;
+
+        if (saved instanceof Uint8Array) {
+          u8 = saved;
+        } else if (saved instanceof ArrayBuffer) {
+          u8 = new Uint8Array(saved);
+        } else if (Array.isArray(saved)) {
+          u8 = Uint8Array.from(saved);
+        } else {
+          return;
+        }
+
+        Y.applyUpdate(ydoc, u8, 'idb-load');
+      } catch (error) {
+        console.warn('Не удалось загрузить документ из IndexedDB', error);
+      }
+    }
+
+    function attachAutoSave(ydoc, key) {
+      let timer = 0;
+      let destroyed = false;
+
+      const save = async () => {
+        if (destroyed) return;
+
+        try {
+          const update = Y.encodeStateAsUpdate(ydoc);
+          await idbSet(key, update);
+        } catch (error) {
+          console.warn('AutoSave error', error);
+        }
+      };
+
+      const onUpdate = () => {
+        clearTimeout(timer);
+        timer = setTimeout(save, 400);
+      };
+
+      ydoc.on('update', onUpdate);
+
+      // Первая запись, чтобы создать пустой проект локально.
+      timer = setTimeout(save, 400);
+
+      return {
+        flush: save,
+        destroy() {
+          destroyed = true;
+          clearTimeout(timer);
+
+          try {
+            ydoc.off('update', onUpdate);
+          } catch {}
+        }
+      };
+    }
+
+    // ---------------------------
+    // Yjs <-> JSON
+    // ---------------------------
+
+    function createYText(value = '') {
+      const yText = new Y.Text();
+      if (value) yText.insert(0, value);
+      return yText;
+    }
+
+    function yValueToPlain(value) {
+      if (value instanceof Y.Text) {
+        return value.toString();
+      }
+
+      if (value instanceof Y.Map) {
+        const result = {};
+        value.forEach((childValue, key) => {
+          result[key] = yValueToPlain(childValue);
+        });
+        return result;
+      }
+
+      if (value instanceof Y.Array) {
+        return value.toArray().map(item => yValueToPlain(item));
+      }
+
+      return value;
+    }
+
+    function plainToYValue(plain, key = undefined) {
+      if (plain === undefined) return undefined;
+      if (plain === null) return null;
+
+      if (typeof plain === 'string' && key && TEXT_KEYS.has(key)) {
+        return createYText(plain);
+      }
+
+      if (Array.isArray(plain)) {
+        const yArray = new Y.Array();
+        yArray.push(plain.map(item => plainToYValue(item)));
+        return yArray;
+      }
+
+      if (isPlainObject(plain)) {
+        if (plain.__yjs === 'Text') {
+          return createYText(plain.value || '');
+        }
+
+        const yMap = new Y.Map();
+        fillYMap(yMap, plain);
+        return yMap;
+      }
+
+      return plain;
+    }
+
+    function fillYMap(yMap, sourceObject) {
+      for (const [key, value] of Object.entries(sourceObject)) {
+        const yValue = plainToYValue(value, key);
+
+        if (yValue !== undefined) {
+          yMap.set(key, yValue);
+        }
+      }
+    }
+
+    function clearYMap(yMap) {
+      const keys = Array.from(yMap.keys());
+      keys.forEach(key => yMap.delete(key));
+    }
+
+    function ensureProjectSkeleton(ydoc, projectId, name = 'Новый проект') {
+      ydoc.transact(() => {
+        const meta = ydoc.getMap('meta');
+
+        if (!meta.get('projectId')) meta.set('projectId', projectId);
+        if (!meta.get('name')) meta.set('name', name);
+
+        meta.set('schemaVersion', SCHEMA_VERSION);
+
+        if (!meta.get('createdAt')) meta.set('createdAt', Date.now());
+        meta.set('updatedAt', Date.now());
+
+        ROOTS.forEach(root => ydoc.getMap(root));
+      }, 'ensure-project-skeleton');
+    }
+
+    function exportProjectToJson(ydoc) {
+      const data = {};
+
+      for (const rootName of ROOTS) {
+        data[rootName] = yValueToPlain(ydoc.getMap(rootName));
+      }
+
+      return {
+        format: 'vetvi-project',
+        schemaVersion: SCHEMA_VERSION,
+        exportedAt: new Date().toISOString(),
+        data
+      };
+    }
+
+    function importProjectFromJson(json, ydoc, options = {}) {
+      const { clear = true } = options;
+
+      if (!json || json.format !== 'vetvi-project') {
+        throw new Error('Неверный формат проекта. Ожидался vetvi-project.');
+      }
+
+      if (json.schemaVersion > SCHEMA_VERSION) {
+        console.warn(`Версия схемы файла (${json.schemaVersion}) новее поддерживаемой (${SCHEMA_VERSION}).`);
+      }
+
+      ydoc.transact(() => {
+        if (clear) {
+          ROOTS.forEach(rootName => clearYMap(ydoc.getMap(rootName)));
+        }
+
+        for (const rootName of ROOTS) {
+          const source = json.data?.[rootName];
+
+          if (!source || !isPlainObject(source)) {
+            continue;
+          }
+
+          const targetMap = ydoc.getMap(rootName);
+          fillYMap(targetMap, source);
+        }
+      }, 'import-project-json');
+    }
+
+    function patchYMap(targetMap, patchObject) {
+      for (const [key, value] of Object.entries(patchObject)) {
+        const existing = targetMap.get(key);
+
+        if (
+          isPlainObject(value) &&
+          existing instanceof Y.Map &&
+          !TEXT_KEYS.has(key)
+        ) {
+          patchYMap(existing, value);
+        } else {
+          const yValue = plainToYValue(value, key);
+
+          if (yValue === undefined) {
+            targetMap.delete(key);
+          } else {
+            targetMap.set(key, yValue);
+          }
+        }
+      }
+    }
+
+    function upsertRecord(ydoc, rootName, record) {
+      if (!record?.id) {
+        throw new Error(`Запись в ${rootName} должна иметь id.`);
+      }
+
+      const rootMap = ydoc.getMap(rootName);
+
+      ydoc.transact(() => {
+        const existing = rootMap.get(record.id);
+
+        if (existing instanceof Y.Map) {
+          patchYMap(existing, record);
+        } else {
+          rootMap.set(record.id, plainToYValue(record));
+        }
+
+        const meta = ydoc.getMap('meta');
+        meta.set('updatedAt', Date.now());
+      }, `upsert-${rootName}`);
+    }
+
+    function deleteRecord(ydoc, rootName, id) {
+      const rootMap = ydoc.getMap(rootName);
+
+      ydoc.transact(() => {
+        rootMap.delete(id);
+
+        const meta = ydoc.getMap('meta');
+        meta.set('updatedAt', Date.now());
+      }, `delete-${rootName}`);
+    }
+
+    function getYText(parentMap, key) {
+      let value = parentMap.get(key);
+
+      if (!(value instanceof Y.Text)) {
+        const stringValue = typeof value === 'string' ? value : '';
+        value = createYText(stringValue);
+        parentMap.set(key, value);
+      }
+
+      return value;
+    }
+
+    // ---------------------------
+    // Lifecycle
+    // ---------------------------
+
+    function cleanupRealtime() {
+      if (state.provider) {
+        state.provider.destroy();
+        state.provider = null;
+      }
+
+      if (state.mailboxProvider) {
+        state.mailboxProvider.destroy();
+        state.mailboxProvider = null;
+      }
+
+      if (state.mailboxDoc) {
+        state.mailboxDoc.destroy();
+        state.mailboxDoc = null;
+      }
+
+      state.mailboxRoom = null;
+
+      if (state.currentTextObserver) {
+        try {
+          state.currentTextObserver.yText.unobserve(state.currentTextObserver.fn);
+        } catch {}
+
+        state.currentTextObserver = null;
+      }
+
+      if (state.autoSave) {
+        state.autoSave.destroy();
+        state.autoSave = null;
+      }
+
+      if (state.ydoc) {
+        state.ydoc.destroy();
+        state.ydoc = null;
+      }
+
+      state.selectedId = null;
+      state.roomId = null;
+      state.copyMeta = null;
+
+      setStatus('офлайн');
+      setPeers(0);
+    }
+
+    function attachYdocEvents() {
+      state.ydoc.on('update', (_update, origin)
