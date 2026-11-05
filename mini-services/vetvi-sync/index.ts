@@ -107,15 +107,32 @@ function loadPersist() {
 interface RoomState {
   name: string
   members: Map<string, RoomMember>
+  locks: Map<string, ObjLock>
   gcTimer: ReturnType<typeof setTimeout> | null
 }
+
+/* ─── блокировки объектов (soft-lock) ───
+   Эфемерны: не персистятся, снимаются при disconnect или по TTL.
+   Клиент, начавший редактирование объекта, захватывает lock; остальные
+   получают vetvi:locks и показывают «объект используется другим пользователем». */
+
+interface ObjLock {
+  sid: string
+  userId: string
+  name: string
+  color: string
+  ts: number
+}
+
+const LOCK_TTL_MS = 3 * 60 * 1000 // страховка: если клиент «завис» и не шлёт heartbeat
+const MAX_LOCKS_PER_SOCKET = 400
 
 const rooms = new Map<string, RoomState>()
 
 function getRoom(name: string): RoomState {
   let room = rooms.get(name)
   if (!room) {
-    room = { name, members: new Map(), gcTimer: null }
+    room = { name, members: new Map(), locks: new Map(), gcTimer: null }
     rooms.set(name, room)
   }
   if (room.gcTimer) {
@@ -148,6 +165,36 @@ function userList(room: RoomState) {
 
 function broadcastUsers(io: Server, room: RoomState) {
   io.to(room.name).emit('vetvi:users', { roomId: room.name, users: userList(room) })
+}
+
+/* ─── блокировки объектов ─── */
+
+function lockList(room: RoomState) {
+  const now = Date.now()
+  const out: { id: string; userId: string; name: string; color: string }[] = []
+  for (const [id, l] of room.locks) {
+    if (now - l.ts > LOCK_TTL_MS) {
+      room.locks.delete(id)
+      continue
+    }
+    out.push({ id, userId: l.userId, name: l.name, color: l.color })
+  }
+  return out
+}
+
+function broadcastLocks(io: Server, room: RoomState) {
+  io.to(room.name).emit('vetvi:locks', { roomId: room.name, locks: lockList(room) })
+}
+
+function releaseSocketLocks(io: Server, room: RoomState, sid: string) {
+  let changed = false
+  for (const [id, l] of room.locks) {
+    if (l.sid === sid) {
+      room.locks.delete(id)
+      changed = true
+    }
+  }
+  if (changed) broadcastLocks(io, room)
 }
 
 /* ─── merge mailbox ─── */
@@ -221,6 +268,7 @@ io.on('connection', (socket: Socket) => {
           updatedAt: stored ? stored.updatedAt : null,
           users: userList(room),
           pendingMerges: pendingCount(roomName),
+          locks: lockList(room),
         })
 
         broadcastUsers(io, room)
@@ -413,12 +461,89 @@ io.on('connection', (socket: Socket) => {
     },
   )
 
+  /* ── блокировки объектов ── */
+
+  // Захват/продление (heartbeat) блокировок: свободные id — выдаём, занятые другими — в denied
+  socket.on(
+    'vetvi:lock',
+    (payload: { roomId?: string; ids?: string[] }, ack?: (r: unknown) => void) => {
+      try {
+        if (!isSafeRoom(payload?.roomId) || payload.roomId !== joinedRoom) {
+          ack?.({ ok: false, denied: [] })
+          return
+        }
+        const room = rooms.get(payload.roomId)
+        const me = room?.members.get(socket.id)
+        if (!room || !me) {
+          ack?.({ ok: false, denied: [] })
+          return
+        }
+        const ids = (Array.isArray(payload.ids) ? payload.ids : [])
+          .map(String)
+          .filter(Boolean)
+          .slice(0, MAX_LOCKS_PER_SOCKET)
+        const now = Date.now()
+        const denied: { id: string; by: { name: string; color: string } }[] = []
+        for (const id of ids) {
+          const cur = room.locks.get(id)
+          if (cur && cur.sid !== socket.id && now - cur.ts < LOCK_TTL_MS) {
+            denied.push({ id, by: { name: cur.name, color: cur.color } })
+          } else {
+            room.locks.set(id, {
+              sid: socket.id,
+              userId: me.user.id,
+              name: me.user.name,
+              color: me.user.color,
+              ts: now,
+            })
+          }
+        }
+        broadcastLocks(io, room)
+        ack?.({ ok: true, denied })
+      } catch (error) {
+        console.error('[vetvi-sync] lock error', error)
+        ack?.({ ok: false, denied: [] })
+      }
+    },
+  )
+
+  // Освобождение блокировок (жест завершён / модалка закрыта)
+  socket.on(
+    'vetvi:unlock',
+    (payload: { roomId?: string; ids?: string[] }, ack?: (r: unknown) => void) => {
+      try {
+        if (!isSafeRoom(payload?.roomId) || payload.roomId !== joinedRoom) {
+          ack?.({ ok: false })
+          return
+        }
+        const room = rooms.get(payload.roomId)
+        if (room) {
+          const ids = (Array.isArray(payload.ids) ? payload.ids : []).map(String).filter(Boolean)
+          let changed = false
+          for (const id of ids) {
+            const cur = room.locks.get(id)
+            if (cur && cur.sid === socket.id) {
+              room.locks.delete(id)
+              changed = true
+            }
+          }
+          if (changed) broadcastLocks(io, room)
+        }
+        ack?.({ ok: true })
+      } catch (error) {
+        console.error('[vetvi-sync] unlock error', error)
+        ack?.({ ok: false })
+      }
+    },
+  )
+
   socket.on('disconnect', () => {
     try {
       if (!joinedRoom) return
       const room = rooms.get(joinedRoom)
       if (!room) return
       room.members.delete(socket.id)
+      releaseSocketLocks(io, room, socket.id)
       broadcastUsers(io, room)
       console.log(`[vetvi-sync] leave "${room.name}", peers: ${userList(room).length}`)
       if (room.members.size === 0) scheduleRoomGc(room)
