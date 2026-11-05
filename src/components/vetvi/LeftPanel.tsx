@@ -1,201 +1,340 @@
 'use client'
 
 /**
- * LeftPanel — добавление элементов, список копий и merge-запросы.
+ * Левая панель: вкладки «Элементы» (палитра) и «Обзор» (дерево с поиском)
+ * + кнопка создания своего типа. Порт #left из прототипа.
  */
 
+import { useMemo, useRef, useState } from 'react'
+import type { VetviSnapshot, VetviNode, VetviGroup } from '@/lib/vetvi/types'
 import type { VetviStore } from '@/lib/vetvi/store'
-import type { VetviSnapshot } from '@/lib/vetvi/types'
-import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
-import {
-  GitPullRequestArrow,
-  MessageSquareText,
-  StickyNote,
-  Trash2,
-  Type,
-} from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { MergeRequestCard, formatDateTime } from './shared'
+import { STATUS_RU } from '@/lib/vetvi/types'
+import { Icon } from './Icons'
 
-const ACCENT_BTN = 'bg-[#7c5cff] text-white shadow-none hover:bg-[#6d4ef2]'
-
-export interface LeftPanelProps {
+export function LeftPanel({
+  store,
+  snap,
+  className,
+}: {
   store: VetviStore
-  snapshot: VetviSnapshot
+  snap: VetviSnapshot
   className?: string
-  onSendMerge: () => void
-}
-
-export function LeftPanel({ store, snapshot, className, onSendMerge }: LeftPanelProps) {
-  const isCopy = snapshot.mode === 'copy'
-  const requests = isCopy ? snapshot.outgoing : snapshot.incoming
+}) {
+  const [tab, setTab] = useState<'pal' | 'list'>('pal')
+  const [q, setQ] = useState('')
 
   return (
-    <aside
-      aria-label="Панель элементов и копий"
-      className={cn(
-        'vetvi-scroll flex min-h-0 flex-col gap-4 overflow-y-auto border-b border-[#30343b] bg-[#1b1d21] p-3 md:border-b-0 md:border-r',
-        className,
-      )}
-    >
-      {/* Элементы */}
-      <section aria-label="Добавить элемент" className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9aa0a6]">Элементы</h3>
-        <div className="grid grid-cols-3 gap-2">
-          <Button
-            variant="secondary"
-            className="h-auto flex-col gap-1.5 border border-[#30343b] bg-[#23262b] px-1 py-2.5 text-[11px] font-medium text-[#e8eaed] shadow-none hover:bg-[#2b2f36] hover:text-white"
-            onClick={() => store.addElement('note')}
-            aria-label="Добавить заметку"
-          >
-            <StickyNote className="size-4 text-[#7c5cff]" aria-hidden />
-            Заметка
-          </Button>
-          <Button
-            variant="secondary"
-            className="h-auto flex-col gap-1.5 border border-[#30343b] bg-[#23262b] px-1 py-2.5 text-[11px] font-medium text-[#e8eaed] shadow-none hover:bg-[#2b2f36] hover:text-white"
-            onClick={() => store.addElement('dialogue')}
-            aria-label="Добавить реплику"
-          >
-            <MessageSquareText className="size-4 text-[#4cc9f0]" aria-hidden />
-            Реплика
-          </Button>
-          <Button
-            variant="secondary"
-            className="h-auto flex-col gap-1.5 border border-[#30343b] bg-[#23262b] px-1 py-2.5 text-[11px] font-medium text-[#e8eaed] shadow-none hover:bg-[#2b2f36] hover:text-white"
-            onClick={() => store.addElement('text')}
-            aria-label="Добавить текстовый блок"
-          >
-            <Type className="size-4 text-[#f5a623]" aria-hidden />
-            Текст
-          </Button>
+    <aside id="left" className={className}>
+      <nav className="ltabs">
+        <button className={'ltab' + (tab === 'pal' ? ' active' : '')} data-t="pal" onClick={() => setTab('pal')}>
+          Элементы
+        </button>
+        <button
+          className={'ltab' + (tab === 'list' ? ' active' : '')}
+          data-t="list"
+          onClick={() => setTab('list')}
+        >
+          Обзор
+        </button>
+        <button className="add-type" id="bAddType" title="Создать свой тип элемента" onClick={() => store.openTypeEditor(null)}>
+          +
+        </button>
+      </nav>
+
+      <div className={'tabpane' + (tab === 'pal' ? ' active' : '')} id="panePal">
+        <Palette store={store} snap={snap} />
+      </div>
+
+      <div className={'tabpane' + (tab === 'list' ? ' active' : '')} id="paneList">
+        <div className="search">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden>
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            id="sQ"
+            placeholder="Поиск по узлам и группам…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
         </div>
-      </section>
-
-      {/* Копии */}
-      <section aria-label="Копии проекта" className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9aa0a6]">Копии</h3>
-        {snapshot.copies.length === 0 ? (
-          <p className="text-xs text-[#9aa0a6]">Копий пока нет</p>
-        ) : (
-          <ul className="vetvi-scroll flex max-h-56 flex-col gap-2 overflow-y-auto pr-1">
-            {snapshot.copies.map((copy) => (
-              <li
-                key={copy.copyId}
-                className="rounded-lg border border-[#30343b] bg-[#14161a] p-2.5"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-[#e8eaed]" title={copy.name}>
-                      {copy.name}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-[#9aa0a6]">
-                      {formatDateTime(copy.createdAt)}
-                    </p>
-                  </div>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 shrink-0 text-[#ff5a5f] hover:bg-[#ff5a5f]/10 hover:text-[#ff5a5f]"
-                        aria-label={`Удалить копию «${copy.name}»`}
-                      >
-                        <Trash2 className="size-3.5" aria-hidden />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent className="border-[#30343b] bg-[#1b1d21] text-[#e8eaed]">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Удалить копию?</AlertDialogTitle>
-                        <AlertDialogDescription className="text-[#9aa0a6]">
-                          Копия «{copy.name}» будет удалена безвозвратно.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel className="border-[#30343b] bg-[#23262b] text-[#e8eaed] hover:bg-[#2b2f36] hover:text-white">
-                          Отмена
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-[#ff5a5f] text-white shadow-none hover:bg-[#e64c51]"
-                          onClick={() => void store.deleteCopy(copy.copyId)}
-                        >
-                          Удалить
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="mt-2 h-7 w-full border border-[#30343b] bg-[#23262b] text-xs text-[#e8eaed] shadow-none hover:bg-[#2b2f36] hover:text-white"
-                  onClick={() => void store.openCopy(copy.copyId)}
-                >
-                  Открыть
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* Merge-запросы */}
-      <section aria-label="Merge-запросы" className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9aa0a6]">
-          Merge-запросы
-        </h3>
-
-        {isCopy && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-8 border border-[#30343b] bg-[#23262b] text-xs text-[#e8eaed] shadow-none hover:bg-[#2b2f36] hover:text-white"
-            onClick={onSendMerge}
-          >
-            <GitPullRequestArrow className="size-3.5" aria-hidden />
-            Отправить merge
-          </Button>
-        )}
-
-        {!isCopy && !snapshot.mailboxActive && (
-          <p className="text-xs text-[#9aa0a6]">
-            Поделитесь проектом, чтобы получать merge-запросы
-          </p>
-        )}
-
-        {requests.length === 0 ? (
-          <p className="text-xs text-[#9aa0a6]">
-            {isCopy ? 'Вы ещё не отправляли merge-запросов' : 'Входящих merge-запросов нет'}
-          </p>
-        ) : (
-          <div className="vetvi-scroll flex max-h-56 flex-col gap-2 overflow-y-auto pr-1">
-            {requests.map((request) => (
-              <MergeRequestCard
-                key={request.id}
-                request={request}
-                compact
-                onAccept={
-                  !isCopy && snapshot.mailboxActive
-                    ? (id) => void store.acceptMerge(id)
-                    : undefined
-                }
-                onReject={!isCopy ? (id) => void store.rejectMerge(id) : undefined}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+        <OverviewList store={store} snap={snap} q={q.toLowerCase().trim()} />
+      </div>
     </aside>
+  )
+}
+
+/* ═══════════ Палитра ═══════════ */
+
+function Palette({ store, snap }: { store: VetviStore; snap: VetviSnapshot }) {
+  const hiddenSet = useMemo(() => new Set(snap.listHidden), [snap.listHidden])
+  const nodesByType = useMemo(() => {
+    const m = new Map<string, VetviNode[]>()
+    snap.nodes.forEach((n) => {
+      const arr = m.get(n.type) ?? []
+      arr.push(n)
+      m.set(n.type, arr)
+    })
+    return m
+  }, [snap.nodes])
+
+  const addToCenter = (typeKey: string) => {
+    const c = store.geom?.getCenterWorld() ?? { x: 0, y: 0 }
+    store.addNode(typeKey, c.x - 108, c.y - 46, true)
+  }
+
+  const anyShown = store.allTypeKeys().some((key) => !hiddenSet.has(key) && (nodesByType.get(key)?.length ?? 0) > 0)
+
+  return (
+    <div id="palList">
+      {store.allTypeKeys().map((key) => {
+        const info = store.typeInfo(key)
+        const isCustom = !(['scene', 'char', 'quest', 'dialog', 'skill', 'branch', 'event', 'note'] as string[]).includes(key)
+        const off = hiddenSet.has(key)
+        const cnt = (nodesByType.get(key) ?? []).length
+        return (
+          <div
+            key={key}
+            className={'pal-item' + (isCustom ? ' custom' : '') + (off ? ' dim' : '')}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/vetvi-type', key)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            style={{ ['--c' as string]: info.color }}
+            title={(isCustom ? 'Свой тип · ' : '') + info.name}
+            onClick={() => addToCenter(key)}
+          >
+            <span className="pal-ico">
+              <Icon name={info.icon} size={16} />
+            </span>
+            <span className="pal-name">{info.name}</span>
+            <span className="pal-cnt">{cnt}</span>
+            <button
+              className={'mini-btn eye' + (off ? ' off' : '')}
+              title={off ? 'Вернуть тип в раздел «На холсте»' : 'Убрать тип из раздела «На холсте»'}
+              onClick={(e) => {
+                e.stopPropagation()
+                store.toggleListVis(key)
+              }}
+            >
+              <Icon name={off ? 'eyeOff' : 'eye'} size={13} />
+            </button>
+            {isCustom && (
+              <span className="item-acts">
+                <button
+                  className="mini-btn"
+                  title="Редактировать"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    store.openTypeEditor(key)
+                  }}
+                >
+                  <Icon name="pencil" size={12} />
+                </button>
+                <button
+                  className="mini-btn del"
+                  title="Удалить тип"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    store.deleteCustomType(key)
+                  }}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      <div className="pal-sep">на холсте</div>
+
+      {!snap.nodes.length ? (
+        <div className="pal-hint" style={{ textAlign: 'center' }}>
+          Холст пуст — перетащите что-нибудь сверху.
+        </div>
+      ) : !anyShown ? (
+        <div className="pal-hint" style={{ textAlign: 'center' }}>
+          Все типы убраны глазиками выше.
+        </div>
+      ) : (
+        store.allTypeKeys().map((key) => {
+          if (hiddenSet.has(key)) return null
+          const list = nodesByType.get(key) ?? []
+          if (!list.length) return null
+          const info = store.typeInfo(key)
+          const fk = 'cv:' + key
+          const folded = !!snap.palFold[fk]
+          const isCustom = !(['scene', 'char', 'quest', 'dialog', 'skill', 'branch', 'event', 'note'] as string[]).includes(key)
+          return (
+            <div key={key}>
+              <div
+                className={'pal-group foldable' + (folded ? ' folded' : '')}
+                title={folded ? 'Развернуть' : 'Свернуть'}
+                onClick={() => store.togglePalFold(fk)}
+              >
+                <span className="pg-chev">
+                  <Icon name="chev" size={10} />
+                </span>
+                <span className="dot" style={{ background: info.color }} />
+                {info.name}
+                {isCustom ? ' ·' : ''}
+                <span className="pg-cnt">{list.length}</span>
+              </div>
+              {!folded &&
+                list.map((n) => {
+                  const vis = store.typeInfo(n.type)
+                  const desc =
+                    n.type === 'dialog'
+                      ? n.dialog?.description
+                        ? n.dialog.description
+                        : 'диалог'
+                      : n.text || 'без описания'
+                  return (
+                    <div
+                      key={n.id}
+                      className={'pal-item cv-card' + (snap.sel.includes(n.id) ? ' sel' : '')}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/vetvi-clone', n.id)
+                        e.dataTransfer.effectAllowed = 'copy'
+                      }}
+                      style={{ ['--c' as string]: vis.color }}
+                      title="Клик — перейти · перетащите, чтобы создать копию"
+                      onClick={() => {
+                        store.geom?.centerOn(n.id)
+                        store.selectOnly(n.id)
+                      }}
+                    >
+                      <span className="pal-ico">
+                        <Icon name={vis.icon} size={16} />
+                      </span>
+                      <span className="cv-info">
+                        <span className="pal-name">{n.title}</span>
+                        <span className="cv-desc">{desc}</span>
+                      </span>
+                      <span className={'n-st st-' + n.status} title={STATUS_RU[n.status]} />
+                    </div>
+                  )
+                })}
+            </div>
+          )
+        })
+      )}
+    </div>
+  )
+}
+
+/* ═══════════ Обзор ═══════════ */
+
+function nodeMatches(n: VetviNode, q: string): boolean {
+  if (!q) return true
+  if (n.title.toLowerCase().includes(q)) return true
+  const txt = n.type === 'dialog' ? n.dialog?.description || '' : n.text || ''
+  return txt.toLowerCase().includes(q)
+}
+
+function OverviewList({ store, snap, q }: { store: VetviStore; snap: VetviSnapshot; q: string }) {
+  const groupRows: React.ReactNode[] = []
+
+  const renderGroup = (g: VetviGroup, depth: number, keyPrefix: string) => {
+    const desc = store.allDescNodes(g.id)
+    const matchSelf = !q || g.name.toLowerCase().includes(q)
+    const matched = desc.filter((n) => nodeMatches(n, q))
+    if (q && !matchSelf && !matched.length) return
+    const indent = 9 + depth * 14
+    const isF = !!snap.ovFold[g.id] && !q
+    const gcolor = g.color || '#9aa1ac'
+    groupRows.push(
+      <div
+        key={keyPrefix + g.id}
+        className={'nli grp' + (snap.selGroups.includes(g.id) ? ' sel' : '')}
+        style={{ paddingLeft: indent }}
+        onClick={(ev) => {
+          if ((ev.target as HTMLElement).closest?.('.ov-f')) return
+          store.geom?.centerOn(g.id)
+          store.selectGroup(g.id)
+        }}
+      >
+        <button
+          className={'ov-f' + (isF ? ' folded' : '')}
+          title="Свернуть/развернуть"
+          onClick={(ev) => {
+            ev.stopPropagation()
+            store.toggleOvFold(g.id)
+          }}
+        >
+          <Icon name="chev" size={10} />
+        </button>
+        <span className="garr">
+          <Icon name="folder" size={11} />
+        </span>
+        <span className="dot" style={{ background: gcolor }} />
+        <span className="t">{g.name}</span>
+        <span className="k">{desc.length}</span>
+      </div>,
+    )
+    if (isF) return
+    snap.groups.forEach((cg) => {
+      if (cg.parent === g.id) renderGroup(cg, depth + 1, keyPrefix + g.id + '/')
+    })
+    const direct = store.membersOf(g.id).filter((n) => matchSelf || nodeMatches(n, q))
+    direct.forEach((n) => {
+      const vis = store.typeInfo(n.type)
+      groupRows.push(
+        <div
+          key={keyPrefix + g.id + '/' + n.id}
+          className={'nli' + (snap.sel.includes(n.id) ? ' sel' : '')}
+          style={{ paddingLeft: indent + 22 }}
+          onClick={() => {
+            store.geom?.centerOn(n.id)
+            store.selectOnly(n.id)
+          }}
+        >
+          <span className="dot" style={{ background: vis.color }} />
+          <span className="t">{n.title}</span>
+          <span className="k">{vis.name}</span>
+        </div>,
+      )
+    })
+  }
+
+  snap.groups.forEach((g, i) => {
+    if (!g.parent) renderGroup(g, 0, 'g' + i)
+  })
+
+  const loose = snap.nodes.filter((n) => !n.gid && nodeMatches(n, q))
+  const looseRows = loose.map((n) => {
+    const vis = store.typeInfo(n.type)
+    return (
+      <div
+        key={'l' + n.id}
+        className={'nli' + (snap.sel.includes(n.id) ? ' sel' : '')}
+        onClick={() => {
+          store.geom?.centerOn(n.id)
+          store.selectOnly(n.id)
+        }}
+      >
+        <span className="dot" style={{ background: vis.color }} />
+        <span className="t">{n.title}</span>
+        <span className="k">{vis.name}</span>
+      </div>
+    )
+  })
+
+  return (
+    <div id="nodeList">
+      {groupRows}
+      {snap.groups.length > 0 && loose.length > 0 && (
+        <div className="pal-sep" style={{ margin: '16px 4px 2px' }}>
+          без группы
+        </div>
+      )}
+      {looseRows}
+      {!groupRows.length && !looseRows.length && (
+        <div className="list-empty">{q ? 'Ничего не найдено' : 'Пока нет узлов'}</div>
+      )}
+    </div>
   )
 }

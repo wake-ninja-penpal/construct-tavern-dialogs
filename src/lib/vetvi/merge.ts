@@ -78,10 +78,10 @@ export function computeDelta(
 
 // Совместимое описание плоского среза (избегаем жёсткой связки с типами export).
 export interface PlainProjectLike {
-  elements?: Record<string, unknown>
-  connections?: Record<string, unknown>
-  dialogues?: Record<string, unknown>
-  notes?: Record<string, unknown>
+  nodes?: Record<string, unknown>
+  edges?: Record<string, unknown>
+  groups?: Record<string, unknown>
+  customTypes?: Record<string, unknown>
 }
 
 export function deltaStats(delta: MergeDelta): MergeStats {

@@ -51,4 +51,14 @@ prompt
 
 server.log
 # Skills directory
-/skills/
+/skills/tool-results/
+download/
+
+# sandbox-only artifacts (not part of the app)
+/skills
+/tests
+/download
+/upload
+/agent-ctx
+/tool-results
+dev.log
