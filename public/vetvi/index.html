@@ -893,10 +893,62 @@ function undo(){if(!history.length)return;future.push(serialize());applySnap(his
 function redo(){if(!future.length)return;history.push(serialize());applySnap(future.pop());updateHistUI();toast('Повторено','ok');}
 function mutate(fn,spawn){pushHistory(serialize());fn();renderAll(spawn);markDirty();}
 function discrete(fn){pushHistory(serialize());fn();markDirty();}
-function editStart(){if(!preSnap)preSnap=serialize();}
+var editLockIds=[];
+/* объект, блокировка которого взята на время набора текста в инспекторе/модалке */
+function editStartIds(){
+  if(typeof syncState==='undefined'||!syncState||!syncState.enabled)return [];
+  var ids=[];
+  if(selEdge)ids=[selEdge];
+  else if(selEdges&&selEdges.size===1&&!sel.size&&!selGroups.size)ids=[selEdges.values().next().value];
+  else if(sel&&sel.size===1&&!selGroups.size)ids=[sel.values().next().value];
+  else if(selGroups&&selGroups.size===1&&!sel.size)ids=[selGroups.values().next().value];
+  return ids;
+}
+/* этот id сейчас удерживает активный жест/модалка (не «текстовая» блокировка)? */
+function lockHeldByGesture(id){
+  function inLK(lk){return !!lk&&(lk.indexOf?lk.indexOf(id)>=0:lk===id);}
+  if(dragS&&inLK(dragS.lk))return true;
+  if(gdrag&&inLK(gdrag.lk))return true;
+  if(dlgResizeS&&inLK(dlgResizeS.lk))return true;
+  if(grestore&&inLK(grestore.lk))return true;
+  if(connS&&inLK(connS.lk))return true;
+  if(brDrag&&brDrag.eid===id)return true;
+  if(wpDrag&&wpDrag.eid===id)return true;
+  if(lblDrag&&lblDrag.eid===id)return true;
+  if(rpDrag&&rpDrag.eid===id)return true;
+  if(inDrag&&inDrag.nid===id)return true;
+  if(outDrag&&outDrag.nid===id)return true;
+  if(repOutDrag&&repOutDrag.nid===id)return true;
+  if(dlgModalNode&&dlgModalNode.id===id)return true;
+  if(noteEditorState&&noteEditorState.n&&noteEditorState.n.id===id)return true;
+  return false;
+}
+function editStart(){
+  if(!preSnap)preSnap=serialize();
+  /* soft-lock редактируемого объекта на время набора текста */
+  var ids=editStartIds();
+  for(var i=0;i<ids.length;i++){
+    var id=ids[i];
+    if(syncState.myLocks[id])continue; /* уже залочено жестом/модалкой — не трогаем */
+    editLockIds.push(id);
+    lockTake([id]);
+  }
+}
 function editEnd(){
   if(preSnap && preSnap!==serialize()){pushHistory(preSnap);markDirty();}
   preSnap=null; renderList(); renderPalette();
+  if(editLockIds.length){
+    var rel=editLockIds.slice();editLockIds=[];
+    setTimeout(function(){
+      var rem=[];
+      for(var i=0;i<rel.length;i++){
+        if(editLockIds.indexOf(rel[i])>=0)continue;      /* снова печатаем */
+        if(lockHeldByGesture(rel[i]))continue;            /* жест перехватил лок */
+        rem.push(rel[i]);
+      }
+      if(rem.length)lockGive(rem);
+    },220);
+  }
 }
 function markDirty(){dirty=true;project.meta.modified=new Date().toISOString();updateStatus();scheduleAutosave();syncQueueState();}
 function markSaved(){dirty=false;updateStatus();}
@@ -5993,6 +6045,19 @@ function lockHandleDenied(denied){
   if(rpDrag&&rpDrag.eid&&ids[rpDrag.eid]){drop([rpDrag.eid]);if(rpDrag.prev&&rpDrag.prev.parentNode)rpDrag.prev.remove();rpDrag=null;hit=true;}
   if(dlgModalNode&&ids[dlgModalNode.id]){drop([dlgModalNode.id]);closeDlgEditor();hit=true;}
   if(noteEditorState&&noteEditorState.n&&ids[noteEditorState.n.id]){drop([noteEditorState.n.id]);closeNoteEditor();hit=true;}
+  /* проигранная гонка при наборе текста: снимаем фокус с поля */
+  if(editLockIds&&editLockIds.length){
+    var keepE=[],droppedE=false;
+    for(var ei=0;ei<editLockIds.length;ei++){
+      if(ids[editLockIds[ei]]){drop([editLockIds[ei]]);droppedE=true;}
+      else keepE.push(editLockIds[ei]);
+    }
+    if(droppedE){
+      editLockIds=keepE;
+      try{if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();}catch(e){}
+      hit=true;
+    }
+  }
   if(!hit)return;
   if(pre)applySnap(pre);
   showLockTip(lastPtr.x,lastPtr.y,firstBy);
