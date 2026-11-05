@@ -162,15 +162,40 @@ export function Header({
         </Button>
 
         {!isCopy && (
-          <Button variant="secondary" size="sm" className={TOOLBAR_BTN} onClick={onMakeCopy}>
-            <Copy className="size-3.5" aria-hidden />
-            Сделать копию
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              className={TOOLBAR_BTN}
+              onClick={onMakeCopy}
+              title="Сохранить локальную копию проекта"
+            >
+              <Copy className="size-3.5" aria-hidden />
+              Сделать копию
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className={TOOLBAR_BTN}
+              onClick={onSendMerge}
+              disabled
+              title="Отправить merge можно только из копии проекта — сделайте копию и откройте её"
+            >
+              <GitPullRequestArrow className="size-3.5" aria-hidden />
+              Отправить merge
+            </Button>
+          </>
         )}
 
         {isCopy && (
           <>
-            <Button variant="secondary" size="sm" className={TOOLBAR_BTN} onClick={onSendMerge}>
+            <Button
+              variant="secondary"
+              size="sm"
+              className={TOOLBAR_BTN}
+              onClick={onSendMerge}
+              title="Отправить изменения из копии владельцу оригинала"
+            >
               <GitPullRequestArrow className="size-3.5" aria-hidden />
               Отправить merge
             </Button>

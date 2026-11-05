@@ -27,7 +27,7 @@ export interface ShareDialogProps {
 
 export function ShareDialog({ open, onOpenChange, snapshot, store }: ShareDialogProps) {
   const handleDisconnect = () => {
-    store.disconnectRoom()
+    store.leaveRoom()
     onOpenChange(false)
   }
 

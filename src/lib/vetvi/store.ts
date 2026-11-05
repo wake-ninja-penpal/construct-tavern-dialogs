@@ -16,6 +16,7 @@ import {
   ensureProjectSkeleton,
   exportProjectToJson,
   importProjectFromJson,
+  toPlainProject,
   uid,
   uint8ToBase64,
   upsertRecord,
@@ -352,7 +353,8 @@ export class VetviStore {
 
     if (room) {
       const projectId = project || uid()
-      await this.openProject(projectId, { name: project ? 'Проект' : 'Проект из комнаты' })
+      // restoreRoom: false — комнату подключаем ниже, из hash (приоритет ссылки).
+      await this.openProject(projectId, { name: project ? 'Проект' : 'Проект из комнаты', restoreRoom: false })
       this.connectRoom(room)
       writeHashParams({ room, project: projectId, copy: null })
       return
@@ -375,18 +377,24 @@ export class VetviStore {
 
   async newProject(options: { silent?: boolean } = {}) {
     this.cleanupDoc()
+    // Режим сбрасываем ДО createDoc: maybeRestoreRoom смотрит на mode.
+    this.mode = 'project'
+    this.copyMeta = null
+    this.currentCopyRecord = null
     const projectId = uid()
     await this.createDoc(projectId, 'Новый проект')
     writeHashParams({ room: null, project: null, copy: null })
     safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
-    this.mode = 'project'
-    this.copyMeta = null
     this.ready = true
     if (!options.silent) this.toast('Создан новый проект')
     this.notify(true)
   }
 
-  private async createDoc(projectId: string, name: string) {
+  private async createDoc(
+    projectId: string,
+    name: string,
+    options: { restoreRoom?: boolean } = {},
+  ) {
     const doc = new Y.Doc()
     this.ydoc = doc
     this.projectId = projectId
@@ -403,17 +411,43 @@ export class VetviStore {
     ensureProjectSkeleton(doc, projectId, name)
     await addProjectId(projectId)
 
-    doc.on('update', () => this.notify())
-    this.scheduleSave()
+    // Автосохранение на ЛЮБОЕ изменение документа — как в прототипе (attachAutoSave):
+    // локальные правки, правки соавторов из комнаты, meta-изменения (roomId, имя).
+    doc.on('update', () => {
+      this.notify()
+      this.scheduleSave()
+    })
+
+    // Проект ранее был в realtime-комнате — восстанавливаем подключение
+    // (комната + merge-mailbox), чтобы соавторы могли снова подключиться,
+    // а владелец — получать merge-запросы (ТЗ 13.2, NF-3, 18.5).
+    if (options.restoreRoom !== false) {
+      this.maybeRestoreRoom()
+    }
   }
 
-  async openProject(projectId: string, options: { name?: string } = {}) {
+  private async openProject(projectId: string, options: { name?: string; restoreRoom?: boolean } = {}) {
     this.cleanupDoc()
-    await this.createDoc(projectId, options.name ?? 'Новый проект')
-    safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
+    // Режим сбрасываем ДО createDoc: maybeRestoreRoom смотрит на mode.
     this.mode = 'project'
     this.copyMeta = null
+    this.currentCopyRecord = null
+    await this.createDoc(projectId, options.name ?? 'Новый проект', {
+      restoreRoom: options.restoreRoom,
+    })
+    safeLocalStorage()?.setItem(LS_LAST_PROJECT, projectId)
     this.notify(true)
+  }
+
+  /** Подключается к комнате, сохранённой в meta проекта (если есть и мы не в копии). */
+  private maybeRestoreRoom() {
+    if (this.mode === 'copy') return
+    const doc = this.ydoc
+    if (!doc || this.provider) return
+    const savedRoom = doc.getMap('meta').get('roomId')
+    if (typeof savedRoom === 'string' && savedRoom) {
+      this.connectRoom(savedRoom)
+    }
   }
 
   private cleanupDoc() {
@@ -574,15 +608,42 @@ export class VetviStore {
     return this.shareUrl
   }
 
+  /** Явное отключение комнаты пользователем: комната забывается и не восстановится при перезагрузке. */
+  leaveRoom() {
+    if (!this.provider && !this.roomId) {
+      return
+    }
+    this.disconnectRoom()
+    if (this.mode !== 'copy' && this.ydoc) {
+      this.ydoc.getMap('meta').delete('roomId')
+      this.scheduleSave()
+    }
+    this.toast('Комната отключена — проект снова только локальный')
+    this.notify(true)
+  }
+
   private connectRoom(room: string) {
     this.disconnectRoom()
     if (!this.ydoc) return
 
     this.roomId = room
 
+    // Запоминаем комнату в meta проекта (sync'ится соавторам через CRDT):
+    // после перезагрузки или открытия проекта ссылка/комната восстанавливаются.
+    if (this.mode !== 'copy') {
+      this.ydoc.transact(() => {
+        this.ydoc!.getMap('meta').set('roomId', room)
+        this.ydoc!.getMap('meta').set('updatedAt', Date.now())
+      }, 'set-room-id')
+    }
+
     this.provider = new VetviProvider(room, this.ydoc, {
       onStatus: (status) => {
+        const previous = this.connection
         this.connection = status
+        if (status === 'error' && previous !== 'error') {
+          this.toast('Сервер синхронизации недоступен — работаем локально, переподключаемся…', 'error')
+        }
         this.notify(true)
       },
       onPeerJoined: () => {
@@ -780,8 +841,10 @@ export class VetviStore {
     }
 
     ensureProjectSkeleton(doc, this.projectId, record.meta.name)
-    doc.on('update', () => this.notify())
-    this.scheduleSave()
+    doc.on('update', () => {
+      this.notify()
+      this.scheduleSave()
+    })
 
     writeHashParams({ room: null, project: null, copy: copyId })
 
@@ -1026,33 +1089,37 @@ export class VetviStore {
 
   async restoreBackup(backupId: string) {
     const bytes = await getBackupUpdate(backupId)
+    const doc = this.ydoc
     if (!bytes) {
       this.toast('Backup не найден', 'error')
       return
     }
+    if (!doc) return
 
     try {
-      const roomId = this.roomId
-      const backupMeta = this.backups.find((b) => b.id === backupId)
+      // Снапшот backup'а как плоский срез.
+      const backupDoc = new Y.Doc()
+      try {
+        Y.applyUpdate(backupDoc, bytes, 'backup-snapshot')
+        const backupPlain = toPlainProject(backupDoc)
 
-      this.cleanupDoc()
-
-      const doc = new Y.Doc()
-      this.ydoc = doc
-      this.projectId = backupMeta?.projectId ?? this.projectId
-      this.mode = 'project'
-      this.copyMeta = null
-      this.currentCopyRecord = null
-
-      Y.applyUpdate(doc, bytes, 'backup-restore')
-      doc.on('update', () => this.notify())
-      this.scheduleSave()
-
-      if (roomId) {
-        this.connectRoom(roomId)
+        // Структурная дельта «текущее состояние → состояние backup'а».
+        // Применяем её к ЖИВОМУ документу: удаления уходят в комнату как
+        // настоящие delete-операции и не «воскресают» при CRDT-слиянии,
+        // а комната и подключение сохраняются без пересоздания документа.
+        const currentPlain = toPlainProject(doc)
+        const delta = computeDelta(this.projectId ?? 'unknown', currentPlain, backupPlain)
+        applyDelta(doc, delta)
+      } finally {
+        try {
+          backupDoc.destroy()
+        } catch {
+          // ignore
+        }
       }
 
       this.selectedId = null
+      this.scheduleSave()
       this.toast('Состояние восстановлено из backup')
       this.notify(true)
     } catch (error) {
@@ -1113,6 +1180,9 @@ export class VetviStore {
       if (!this.ydoc) return false
 
       importProjectFromJson(json, this.ydoc, { clear: true })
+      // Импортированный снапшот мог содержать meta.roomId источника —
+      // не подключаемся к чужой комнате автоматически (доступ — только по ссылке).
+      this.ydoc.getMap('meta').delete('roomId')
       this.scheduleSave()
       this.toast('Проект импортирован')
       this.notify(true)
