@@ -1,44 +1,111 @@
 /**
- * «Ветви» — синхронизационный сервер (signaling + relay) на socket.io.
+ * «Ветви» — сервер совместного доступа (realtime-синхронизация + merge-mailbox).
  *
- * Реализует протокол синхронизации Yjs (y-protocols/sync) поверх socket.io:
- *  - комнаты по roomId (проект) и `${roomId}::mailbox` (merge-запросы);
- *  - держит in-memory Y.Doc комнаты, чтобы поздние участники получали
- *    полное состояние, даже если создатель временно переподключается;
- *  - ретранслирует awareness (имена/цвета участников) и события входа/выхода.
+ * Модель (по ТЗ TD.md, разделы 2, 8, 9, 16 — с сервером вместо P2P):
+ *  - комнаты по roomId; состояние документа комнаты хранится на сервере,
+ *    поэтому проект «живёт» даже когда владелец офлайн (снимает ограничение 8.3);
+ *  - снапшот-синхронизация: клиент публикует полное состояние (debounce),
+ *    сервер сохраняет и раздаёт остальным участникам;
+ *  - живые события перетаскивания (vetvi:live) ретранслируются без сохранения;
+ *  - участники (имя/цвет) — список онлайн-пользователей комнаты;
+ *  - merge-mailbox: копии отправляют дельты, владелец принимает/отклоняет,
+ *    статусы доступны отправителю (всё через socket.io ack-события — порт
+ *    полностью занят транспортом socket.io, path '/').
  *
- * Транспорт: клиент всегда подключается через шлюз: io('/?XTransformPort=3003'),
+ * Транспорт: клиент подключается через шлюз io('/?XTransformPort=3003'),
  * путь socket.io — '/' (требование Caddy-шлюза).
+ *
+ * Персистентность: data/store.json (debounced), переживает перезапуск.
  */
 
 import { createServer } from 'http'
 import { Server, type Socket } from 'socket.io'
-import * as Y from 'yjs'
-import * as syncProtocol from 'y-protocols/sync'
-import * as awarenessProtocol from 'y-protocols/awareness'
-import * as encoding from 'lib0/encoding'
-import * as decoding from 'lib0/decoding'
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs'
 
 const PORT = 3003
-const ROOM_TTL_MS = 30 * 60 * 1000 // держим состояние комнаты 30 минут после ухода всех
+const ROOM_TTL_MS = 60 * 60 * 1000 // освобождаем память через час простоя (состояние уже на диске)
+const MAX_DOC_BYTES = 4 * 1024 * 1024
+const MAX_MERGE_BYTES = 12 * 1024 * 1024
+const MAX_MERGES_PER_ROOM = 60
+const MAX_ROOMS = 500
+const FLUSH_MS = 600
 
-const MESSAGE_SYNC = 0
-const MESSAGE_AWARENESS = 1
-
-const SYNC_STEP1 = 0
-const SYNC_STEP2 = 1
-const SYNC_UPDATE = 2
+interface UserMeta {
+  id: string
+  name: string
+  color: string
+}
 
 interface RoomMember {
   socketId: string
-  yjsClientId: number
-  lastAwareness: Uint8Array | null
+  user: UserMeta
 }
+
+interface MergeRequest {
+  id: string
+  roomId: string
+  copyId: string
+  sender: { name: string; color: string }
+  createdAt: string
+  status: 'pending' | 'applied' | 'rejected'
+  stats: Record<string, number>
+  doc: { current: unknown; base: unknown }
+}
+
+interface StoredRoom {
+  doc: unknown
+  updatedAt: string
+}
+
+interface StoreShape {
+  rooms: Record<string, StoredRoom>
+  merges: Record<string, MergeRequest[]>
+}
+
+const DATA_DIR = new URL('./data/', import.meta.url).pathname
+const DATA_FILE = DATA_DIR + 'store.json'
+
+const store: StoreShape = { rooms: {}, merges: {} }
+
+/* ─── персистентность ─── */
+
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+function schedulePersist() {
+  if (flushTimer) return
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    try {
+      mkdirSync(DATA_DIR, { recursive: true })
+      const tmp = DATA_FILE + '.tmp'
+      writeFileSync(tmp, JSON.stringify(store))
+      renameSync(tmp, DATA_FILE)
+    } catch (e) {
+      console.error('[vetvi-sync] persist error', e)
+    }
+  }, FLUSH_MS)
+}
+
+function loadPersist() {
+  try {
+    const raw = readFileSync(DATA_FILE, 'utf8')
+    const parsed = JSON.parse(raw) as StoreShape
+    if (parsed && typeof parsed === 'object') {
+      store.rooms = parsed.rooms || {}
+      store.merges = parsed.merges || {}
+      console.log(
+        `[vetvi-sync] загружено комнат: ${Object.keys(store.rooms).length}, merge-комнат: ${Object.keys(store.merges).length}`,
+      )
+    }
+  } catch {
+    // первый запуск или пустой файл
+  }
+}
+
+/* ─── комнаты ─── */
 
 interface RoomState {
   name: string
-  doc: Y.Doc
-  awareness: awarenessProtocol.Awareness
   members: Map<string, RoomMember>
   gcTimer: ReturnType<typeof setTimeout> | null
 }
@@ -48,9 +115,7 @@ const rooms = new Map<string, RoomState>()
 function getRoom(name: string): RoomState {
   let room = rooms.get(name)
   if (!room) {
-    const doc = new Y.Doc()
-    const awareness = new awarenessProtocol.Awareness(doc)
-    room = { name, doc, awareness, members: new Map(), gcTimer: null }
+    room = { name, members: new Map(), gcTimer: null }
     rooms.set(name, room)
   }
   if (room.gcTimer) {
@@ -64,43 +129,48 @@ function scheduleRoomGc(room: RoomState) {
   if (room.gcTimer) clearTimeout(room.gcTimer)
   room.gcTimer = setTimeout(() => {
     if (room.members.size === 0) {
-      try {
-        room.awareness.destroy()
-        room.doc.destroy()
-      } catch {
-        // ignore
-      }
       rooms.delete(room.name)
       console.log(`[vetvi-sync] room "${room.name}" reclaimed (idle)`)
     }
   }, ROOM_TTL_MS)
 }
 
-/** Полное сообщение (с префиксом messageSync) с update-диффом. */
-function encodeSyncUpdateMessage(update: Uint8Array): Uint8Array {
-  const encoder = encoding.createEncoder()
-  encoding.writeVarUint(encoder, MESSAGE_SYNC)
-  syncProtocol.writeUpdate(encoder, update)
-  return encoding.toUint8Array(encoder)
+function userList(room: RoomState) {
+  const out: UserMeta[] = []
+  const seen = new Set<string>()
+  for (const m of room.members.values()) {
+    if (seen.has(m.user.id)) continue
+    seen.add(m.user.id)
+    out.push(m.user)
+  }
+  return out
 }
 
-function encodeSyncStep1Message(doc: Y.Doc): Uint8Array {
-  const encoder = encoding.createEncoder()
-  encoding.writeVarUint(encoder, MESSAGE_SYNC)
-  syncProtocol.writeSyncStep1(encoder, doc)
-  return encoding.toUint8Array(encoder)
+function broadcastUsers(io: Server, room: RoomState) {
+  io.to(room.name).emit('vetvi:users', { roomId: room.name, users: userList(room) })
 }
 
-function encodeAwarenessMessage(rawUpdate: Uint8Array): Uint8Array {
-  const encoder = encoding.createEncoder()
-  encoding.writeVarUint(encoder, MESSAGE_AWARENESS)
-  encoding.writeVarUint8Array(encoder, rawUpdate)
-  return encoding.toUint8Array(encoder)
+/* ─── merge mailbox ─── */
+
+function mergesOf(roomId: string): MergeRequest[] {
+  if (!store.merges[roomId]) store.merges[roomId] = []
+  return store.merges[roomId]
 }
 
-function emitPeersCount(io: Server, room: RoomState) {
-  io.to(room.name).emit('vetvi:peers', { room: room.name, count: room.members.size })
+function pendingCount(roomId: string): number {
+  return mergesOf(roomId).filter((r) => r.status === 'pending').length
 }
+
+function trimRooms() {
+  const ids = Object.keys(store.rooms)
+  if (ids.length <= MAX_ROOMS) return
+  ids
+    .sort((a, b) => (store.rooms[a].updatedAt < store.rooms[b].updatedAt ? -1 : 1))
+    .slice(0, ids.length - MAX_ROOMS)
+    .forEach((id) => delete store.rooms[id])
+}
+
+/* ─── socket.io ─── */
 
 const httpServer = createServer()
 
@@ -113,53 +183,50 @@ const io = new Server(httpServer, {
   },
   pingTimeout: 60000,
   pingInterval: 25000,
-  maxHttpBufferSize: 8e6, // merge-запросы и снапшоты могут быть крупными
+  maxHttpBufferSize: MAX_MERGE_BYTES,
 })
+
+const isSafeRoom = (room: unknown): room is string =>
+  typeof room === 'string' && room.length > 0 && room.length <= 256
 
 io.on('connection', (socket: Socket) => {
   let joinedRoom: string | null = null
 
-  const isSafeRoom = (room: unknown): room is string =>
-    typeof room === 'string' && room.length > 0 && room.length <= 256
-
+  /* ── вход в комнату ── */
   socket.on(
     'vetvi:join',
-    (payload: { room?: string; yjsClientId?: number }, ack?: (r: unknown) => void) => {
+    (payload: { roomId?: string; user?: UserMeta }, ack?: (r: unknown) => void) => {
       try {
-        const roomName = payload?.room
+        const roomName = payload?.roomId
         if (!isSafeRoom(roomName)) {
           ack?.({ ok: false, error: 'bad room' })
           return
+        }
+        const user: UserMeta = {
+          id: String(payload?.user?.id || socket.id),
+          name: String(payload?.user?.name || 'Гость').slice(0, 40),
+          color: String(payload?.user?.color || '#8b929c').slice(0, 20),
         }
 
         joinedRoom = roomName
         const room = getRoom(roomName)
         socket.join(roomName)
+        room.members.set(socket.id, { socketId: socket.id, user })
 
-        room.members.set(socket.id, {
-          socketId: socket.id,
-          yjsClientId: Number(payload?.yjsClientId ?? 0),
-          lastAwareness: null,
+        const stored = store.rooms[roomName] || null
+        ack?.({
+          ok: true,
+          count: userList(room).length,
+          doc: stored ? stored.doc : null,
+          updatedAt: stored ? stored.updatedAt : null,
+          users: userList(room),
+          pendingMerges: pendingCount(roomName),
         })
 
-        // 1) Полное состояние комнаты новому участнику.
-        socket.emit('vetvi:msg', roomName, encodeSyncUpdateMessage(Y.encodeStateAsUpdate(room.doc)))
-        // 2) Просим у нового участника недостающее (если сервер отстал от него).
-        socket.emit('vetvi:msg', roomName, encodeSyncStep1Message(room.doc))
-
-        // Просим остальных участников перевыслать awareness и диффы.
-        socket.to(roomName).emit('vetvi:peer-joined', { room: roomName, socketId: socket.id })
-
-        // Отправляем новичку известные awareness-состояния остальных.
-        for (const member of room.members.values()) {
-          if (member.socketId !== socket.id && member.lastAwareness) {
-            socket.emit('vetvi:msg', roomName, member.lastAwareness)
-          }
-        }
-
-        emitPeersCount(io, room)
-        console.log(`[vetvi-sync] join "${roomName}" (${socket.id}), peers: ${room.members.size}`)
-        ack?.({ ok: true, count: room.members.size })
+        broadcastUsers(io, room)
+        console.log(
+          `[vetvi-sync] join "${roomName}" (${user.name}), peers: ${userList(room).length}`,
+        )
       } catch (error) {
         console.error('[vetvi-sync] join error', error)
         ack?.({ ok: false, error: 'join failed' })
@@ -167,84 +234,193 @@ io.on('connection', (socket: Socket) => {
     },
   )
 
-  socket.on('vetvi:msg', (roomName: unknown, data: unknown) => {
+  /* ── снапшот состояния ── */
+  socket.on('vetvi:state', (msg: { roomId?: string; doc?: unknown }) => {
     try {
-      if (!isSafeRoom(roomName) || roomName !== joinedRoom) return
-      if (!(data instanceof Uint8Array)) {
-        console.warn(`[vetvi-sync] некорректный payload от ${socket.id}`)
+      if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      const doc = msg.doc as { nodes?: unknown[] } | undefined
+      if (!doc || !Array.isArray(doc.nodes)) return
+      const json = JSON.stringify(doc)
+      if (json.length > MAX_DOC_BYTES) {
+        socket.emit('vetvi:error', { message: 'Документ слишком большой для синхронизации' })
         return
       }
-
-      const room = rooms.get(roomName)
-      if (!room) return
-
-      const decoder = decoding.createDecoder(data)
-      const messageType = decoding.readVarUint(decoder)
-
-      if (messageType === MESSAGE_SYNC) {
-        const syncType = decoding.readVarUint(decoder)
-
-        if (syncType === SYNC_STEP1) {
-          // Участник просит недостающее: отвечаем своим диффом и просим его —
-          // взаимная сверка делает цикл синхронизации полным (защита от потерь).
-          const stateVector = decoding.readVarUint8Array(decoder)
-          const diff = Y.encodeStateAsUpdate(room.doc, stateVector)
-          socket.emit('vetvi:msg', roomName, encodeSyncUpdateMessage(diff))
-          socket.emit('vetvi:msg', roomName, encodeSyncStep1Message(room.doc))
-          return
-        }
-
-        if (syncType === SYNC_STEP2 || syncType === SYNC_UPDATE) {
-          const update = decoding.readVarUint8Array(decoder)
-          // Применяем к документу комнаты и ретранслируем остальным как update.
-          Y.applyUpdate(room.doc, update, 'relay')
-          socket.to(roomName).emit('vetvi:msg', roomName, encodeSyncUpdateMessage(update))
-        }
-      } else if (messageType === MESSAGE_AWARENESS) {
-        const rawUpdate = decoding.readVarUint8Array(decoder)
-        // Сервер отслеживает awareness, чтобы уметь чистить состояния при выходе.
-        try {
-          awarenessProtocol.applyAwarenessUpdate(room.awareness, rawUpdate, 'remote')
-        } catch {
-          // ignore malformed awareness
-        }
-
-        const member = room.members.get(socket.id)
-        if (member) {
-          member.lastAwareness = encodeAwarenessMessage(rawUpdate)
-        }
-
-        socket.to(roomName).emit('vetvi:msg', roomName, encodeAwarenessMessage(rawUpdate))
-      }
+      store.rooms[msg.roomId] = { doc, updatedAt: new Date().toISOString() }
+      trimRooms()
+      schedulePersist()
+      socket.to(msg.roomId).emit('vetvi:state', { roomId: msg.roomId, doc })
     } catch (error) {
-      console.error('[vetvi-sync] msg error', error)
+      console.error('[vetvi-sync] state error', error)
     }
   })
+
+  /* ── живые перетаскивания ── */
+  socket.on(
+    'vetvi:live',
+    (msg: {
+      roomId?: string
+      nodes?: { id: string; x: number; y: number }[]
+      groups?: { id: string; x: number; y: number }[]
+      pts?: { eid: string; pts: { x: number; y: number }[] }[]
+      dlgW?: { id: string; w: number }[]
+    }) => {
+      try {
+        if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+        socket.to(msg.roomId).emit('vetvi:live', {
+          roomId: msg.roomId,
+          nodes: msg.nodes,
+          groups: msg.groups,
+          pts: msg.pts,
+          dlgW: msg.dlgW,
+        })
+      } catch {
+        // ignore
+      }
+    },
+  )
+
+  /* ── merge-почта ── */
+
+  // Отправить merge-запрос из копии (отправитель может не состоять в комнате)
+  socket.on(
+    'vetvi:merge-send',
+    (
+      payload: {
+        roomId?: string
+        copyId?: string
+        sender?: { name?: string; color?: string }
+        stats?: Record<string, number>
+        doc?: { current?: unknown; base?: unknown }
+      },
+      ack?: (r: unknown) => void,
+    ) => {
+      try {
+        const roomId = payload?.roomId
+        if (!isSafeRoom(roomId) || !payload?.copyId || !payload?.doc?.current) {
+          ack?.({ ok: false, error: 'bad merge payload' })
+          return
+        }
+        const entry: MergeRequest = {
+          id: 'mr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+          roomId,
+          copyId: String(payload.copyId),
+          sender: {
+            name: String(payload.sender?.name || 'Гость').slice(0, 40),
+            color: String(payload.sender?.color || '#8b929c').slice(0, 20),
+          },
+          createdAt: new Date().toISOString(),
+          status: 'pending',
+          stats: payload.stats || {},
+          doc: { current: payload.doc.current, base: payload.doc.base || null },
+        }
+        const list = mergesOf(roomId)
+        // повторная отправка из той же копии обновляет существующую заявку
+        const prevIdx = list.findIndex(
+          (r) => r.copyId === entry.copyId && r.status === 'pending',
+        )
+        if (prevIdx >= 0) list.splice(prevIdx, 1)
+        list.unshift(entry)
+        while (list.length > MAX_MERGES_PER_ROOM) list.pop()
+        schedulePersist()
+        io.to(roomId).emit('vetvi:merge-new', {
+          roomId,
+          id: entry.id,
+          sender: entry.sender,
+          stats: entry.stats,
+          createdAt: entry.createdAt,
+        })
+        console.log(`[vetvi-sync] merge "${entry.id}" → room "${roomId}"`)
+        ack?.({ ok: true, id: entry.id })
+      } catch (error) {
+        console.error('[vetvi-sync] merge-send error', error)
+        ack?.({ ok: false, error: 'merge failed' })
+      }
+    },
+  )
+
+  // Список заявок комнаты (для владельца)
+  socket.on(
+    'vetvi:merge-list',
+    (payload: { roomId?: string }, ack?: (r: unknown) => void) => {
+      try {
+        const roomId = payload?.roomId
+        if (!isSafeRoom(roomId)) {
+          ack?.({ ok: false, error: 'bad room' })
+          return
+        }
+        ack?.({ ok: true, requests: mergesOf(roomId), pending: pendingCount(roomId) })
+      } catch (error) {
+        console.error('[vetvi-sync] merge-list error', error)
+        ack?.({ ok: false, error: 'list failed' })
+      }
+    },
+  )
+
+  // Решение владельца: принять/отклонить
+  socket.on(
+    'vetvi:merge-decide',
+    (
+      payload: { roomId?: string; requestId?: string; decision?: string },
+      ack?: (r: unknown) => void,
+    ) => {
+      try {
+        const roomId = payload?.roomId
+        const requestId = String(payload?.requestId || '')
+        const decision = payload?.decision === 'applied' ? 'applied' : 'rejected'
+        if (!isSafeRoom(roomId)) {
+          ack?.({ ok: false, error: 'bad room' })
+          return
+        }
+        const entry = mergesOf(roomId).find((r) => r.id === requestId)
+        if (!entry) {
+          ack?.({ ok: false, error: 'merge not found' })
+          return
+        }
+        entry.status = decision
+        schedulePersist()
+        io.to(roomId).emit('vetvi:merge-decision', {
+          roomId,
+          requestId,
+          status: decision,
+          copyId: entry.copyId,
+        })
+        console.log(`[vetvi-sync] merge "${requestId}" → ${decision}`)
+        ack?.({ ok: true, status: entry.status })
+      } catch (error) {
+        console.error('[vetvi-sync] merge-decide error', error)
+        ack?.({ ok: false, error: 'decide failed' })
+      }
+    },
+  )
+
+  // Статусы merge-заявок для отправителя
+  socket.on(
+    'vetvi:merge-status',
+    (payload: { ids?: string[] }, ack?: (r: unknown) => void) => {
+      try {
+        const ids = (payload?.ids || []).map(String).filter(Boolean)
+        const statuses: Record<string, string> = {}
+        for (const list of Object.values(store.merges)) {
+          for (const r of list) {
+            if (ids.includes(r.id)) statuses[r.id] = r.status
+          }
+        }
+        ack?.({ ok: true, statuses })
+      } catch (error) {
+        console.error('[vetvi-sync] merge-status error', error)
+        ack?.({ ok: false, error: 'status failed' })
+      }
+    },
+  )
 
   socket.on('disconnect', () => {
     try {
       if (!joinedRoom) return
       const room = rooms.get(joinedRoom)
       if (!room) return
-
-      const member = room.members.get(socket.id)
       room.members.delete(socket.id)
-
-      if (member && member.yjsClientId) {
-        try {
-          // Помечаем состояние участника как удалённое и раздаём это остальным.
-          awarenessProtocol.removeAwarenessStates(room.awareness, [member.yjsClientId], 'disconnect')
-          const removal = awarenessProtocol.encodeAwarenessUpdate(room.awareness, [member.yjsClientId])
-          socket.to(room.name).emit('vetvi:msg', room.name, encodeAwarenessMessage(removal))
-        } catch {
-          // ignore
-        }
-      }
-
-      socket.to(room.name).emit('vetvi:peer-left', { room: room.name, socketId: socket.id })
-      emitPeersCount(io, room)
-      console.log(`[vetvi-sync] leave "${room.name}" (${socket.id}), peers: ${room.members.size}`)
-
+      broadcastUsers(io, room)
+      console.log(`[vetvi-sync] leave "${room.name}", peers: ${userList(room).length}`)
       if (room.members.size === 0) scheduleRoomGc(room)
     } catch (error) {
       console.error('[vetvi-sync] disconnect error', error)
@@ -255,6 +431,8 @@ io.on('connection', (socket: Socket) => {
     console.error(`[vetvi-sync] socket error (${socket.id})`, error)
   })
 })
+
+loadPersist()
 
 httpServer.listen(PORT, () => {
   console.log(`[vetvi-sync] server running on port ${PORT}`)

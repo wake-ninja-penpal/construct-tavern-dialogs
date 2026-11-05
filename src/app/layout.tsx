@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "./vetvi.css";
 
 export const metadata: Metadata = {
   title: "Ветви — совместный конструктор нарратива",
