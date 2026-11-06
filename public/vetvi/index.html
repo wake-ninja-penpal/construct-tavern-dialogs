@@ -1655,10 +1655,32 @@ function edgeAnchors(e){
   var na=nodeById(e.from),nb=nodeById(e.to);
   if(!na||!nb)return null;
   if(isBridge(e)){
-        var elA0=nodeEls.get(na.id),elB0=nodeEls.get(nb.id);
+    var gaB=collapsedAncestorOf(na),gbB=collapsedAncestorOf(nb);
+    if(gaB&&gbB&&gaB.id===gbB.id)return null;
+    var elA0=nodeEls.get(na.id),elB0=nodeEls.get(nb.id);
     var wA0=elA0?elA0.offsetWidth:NODE_W,hA0=elA0?elA0.offsetHeight:90;
     var hB0=elB0?elB0.offsetHeight:90;
-    return{x1:na.x+wA0,y1:na.y+hA0/2,x2:nb.x,y2:nb.y+hB0/2};
+    var x1b,y1b,x2b,y2b,gyB=null;
+    if(gaB){
+      var rpB=cardRowPoint(gaB,na,'out');
+      if(rpB){x1b=rpB.x;y1b=rpB.y;}
+      else{
+        var elGA=groupEls.get(gaB.id),hGA=elGA?elGA.offsetHeight:44;
+        var faB=memberFrac(gaB,na);if(faB===null)faB=spreadFrac(gaB.id,e.id,'out');
+        x1b=gaB.x+GCARD_W;y1b=gaB.y+hGA*faB;
+      }
+    }else{x1b=na.x+wA0;y1b=na.y+hA0/2;}
+    if(gbB){
+      var rpB2=cardRowPoint(gbB,nb,'in');
+      if(rpB2){x2b=rpB2.x;y2b=rpB2.y;}
+      else{
+        var elGB=groupEls.get(gbB.id),hGB=elGB?elGB.offsetHeight:44;
+        var fbB=memberFrac(gbB,nb);if(fbB===null)fbB=spreadFrac(gbB.id,e.id,'in');
+        x2b=gbB.x;y2b=gbB.y+hGB*fbB;
+      }
+    }else{x2b=nb.x;y2b=nb.y+hB0/2;}
+    if(gaB||gbB)gyB=(y1b+y2b)/2;
+    return{x1:x1b,y1:y1b,x2:x2b,y2:y2b,_gy0:gyB};
   }
   var ga=collapsedAncestorOf(na),gb=collapsedAncestorOf(nb);
   var ca=!!ga,cb=!!gb;
@@ -1711,25 +1733,26 @@ var a=edgeAnchors(e);
 if(!a)return null;
 if(isBridge(e)){
 a.pts=null;
-a.corners=bridgeCorners(e);
+a.corners=bridgeCorners(e,a);
 }else{
 a.pts=(e.pts&&e.pts.length)?e.pts:null;
 a.bend=bendMode;
 }
 return a;
 }
-function bridgeGeom(e){
+function bridgeGeom(e,anch){
   var na=nodeById(e.from),nb=nodeById(e.to);
   var elA=nodeEls.get(na.id),elB=nodeEls.get(nb.id);
   var wA=elA?elA.offsetWidth:NODE_W,hA=elA?elA.offsetHeight:90,hB=elB?elB.offsetHeight:90;
   var bd=e.bd||{dl:0,dy:0,dr:0};
-  var x1=na.x+wA,y1=na.y+hA/2;
-  var x2=nb.x,y2=nb.y+hB/2;
-  var gy0=(na.y+hA+nb.y)/2;
+  var x1,y1,x2,y2;
+  if(anch){x1=anch.x1;y1=anch.y1;x2=anch.x2;y2=anch.y2;}
+  else{x1=na.x+wA;y1=na.y+hA/2;x2=nb.x;y2=nb.y+hB/2;}
+  var gy0=(anch&&anch._gy0!=null)?anch._gy0:(na.y+hA+nb.y)/2;
   return{x1:x1,y1:y1,x2:x2,y2:y2,bx1:x2-56+bd.dl,bx2:x1+30+bd.dr,gy:gy0+bd.dy};
 }
-function bridgeCorners(e){
-  var bg=bridgeGeom(e);
+function bridgeCorners(e,anch){
+  var bg=bridgeGeom(e,anch);
   return[{x:bg.bx2,y:bg.y1},{x:bg.bx2,y:bg.gy},{x:bg.bx1,y:bg.gy},{x:bg.bx1,y:bg.y2}];
 }
 function orthoPath(a){
@@ -4805,7 +4828,7 @@ edgesSvg.addEventListener('pointerdown',function(e){
     var eb=edgeById(gB.dataset.id);
     if(eb&&isBridge(eb)){
       var wb=toWorld(e.clientX,e.clientY);
-      var bgm=bridgeGeom(eb);
+      var bgm=bridgeGeom(eb,edgeAnchors(eb)||undefined);
       var mode=null;
       if(Math.abs(wb.x-bgm.bx1)<=10&&wb.y>=bgm.gy-12&&wb.y<=bgm.y2+12)mode='l';
       else if(Math.abs(wb.x-bgm.bx2)<=10&&wb.y>=bgm.y1-12&&wb.y<=bgm.gy+12)mode='r';
