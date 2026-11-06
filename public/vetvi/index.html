@@ -271,6 +271,10 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .n-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
 .node.ex-0 .n-tags{margin-top:1px;margin-bottom:1px}
 .n-tags span{font:600 9.5px var(--mono);letter-spacing:.4px;color:var(--tx3);background:#232730;border:1px solid #303540;border-radius:6px;padding:2px 7px}
+.n-cast{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:7px}
+.n-cast:empty{display:none}
+.node.ex-0 .n-cast{margin-bottom:2px}
+.n-cast span{display:inline-flex;align-items:center;min-width:0;max-width:100%;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .port{position:absolute;top:50%;width:26px;height:26px;margin-top:-13px;border-radius:50%;background:transparent;border:none;z-index:4;opacity:0;transition:opacity .18s}
 .port::after{content:'';position:absolute;inset:7px;border-radius:50%;background:#0f1114;border:2px solid #565c66;transition:all .18s}
 .pin{left:-13px;cursor:crosshair}
@@ -1023,7 +1027,19 @@ function typeInfo(key){
 }
 function nodeVisual(n){
   var info=typeInfo(n.type);
-  return{color:n.color?nodePaint(n):(info.color||'#8b929c'),icon:info.icon||'note',name:info.name,baseColor:info.color||'#8b929c'};
+  return{color:resolvedNodeColor(n,0),icon:info.icon||'note',name:info.name,baseColor:info.color||'#8b929c'};
+}
+/* итоговый цвет узла: приоритет — цвет персонажа-участника (кроме диалогов),
+   затем собственная краска узла, затем цвет типа. depth — защита от циклов в данных */
+function resolvedNodeColor(n,depth){
+  if(n.type!=='dialog'&&depth<5&&Array.isArray(n.participants)&&n.participants.length){
+    var first=nodeById(n.participants[0]);
+    if(first){
+      var sub=resolvedNodeColor(first,depth+1);
+      if(sub)return sub;
+    }
+  }
+  return n.color?nodePaint(n):(typeInfo(n.type).color||'#8b929c');
 }
 function allTypeKeys(){return Object.keys(TYPES).concat(project.customTypes.map(function(c){return c.id;}));}
 function listHidden(key){return project.listHidden.indexOf(key)>=0;}
@@ -1522,6 +1538,16 @@ function updateGroupBadges(){
   }
   try{lockApplyOutlines();}catch(e){}
 }
+/* плашка с именами персонажей, прикреплённых к блоку (у диалогов — своя отображение) */
+function nodeCastHtml(n){
+  if(n.type==='dialog')return '';
+  var ps=Array.isArray(n.participants)?n.participants:[];
+  if(!ps.length)return '';
+  return '<div class="n-cast">'+ps.map(function(pid){
+    var c=charColor(pid);
+    return '<span data-cid="'+esc(pid)+'" title="Прикреплённый персонаж" style="background:'+c+';color:#16181d">'+esc(charName(pid))+'</span>';
+  }).join('')+'</div>';
+}
 function renderWorld(spawn,spawnEdge){
   nodeEls.forEach(function(el){el.remove();}); nodeEls.clear();
   project.nodes.forEach(function(n){
@@ -1533,11 +1559,20 @@ function renderWorld(spawn,spawnEdge){
     el.dataset.id=n.id;
     el.style.left=n.x+'px'; el.style.top=n.y+'px';
     var baseC=typeInfo(n.type).color;
-    el.style.setProperty('--c',baseC);
-    if(n.color){
-      var ap=nodePaint(n);
-      el.style.background='linear-gradient('+shadeHex(ap,10)+','+shadeHex(ap,-8)+')';
-      el.style.borderColor=shadeHex(ap,-30);
+    var castPs=(n.type!=='dialog'&&Array.isArray(n.participants))?n.participants:[];
+    if(castPs.length){
+      var cc=charColor(castPs[0]);
+      baseC=cc;
+      el.style.setProperty('--c',cc);
+      el.style.background='linear-gradient('+shadeHex(cc,10)+','+shadeHex(cc,-8)+')';
+      el.style.borderColor=shadeHex(cc,-30);
+    }else{
+      el.style.setProperty('--c',baseC);
+      if(n.color){
+        var ap=nodePaint(n);
+        el.style.background='linear-gradient('+shadeHex(ap,10)+','+shadeHex(ap,-8)+')';
+        el.style.borderColor=shadeHex(ap,-30);
+      }
     }
     if(n.type==='dialog'){
       ensureDialog(n);
@@ -1553,7 +1588,7 @@ function renderWorld(spawn,spawnEdge){
         '<span class="n-st st-'+n.status+'" title="'+STATUS[n.status]+'"></span>'+
         '<button class="n-fold" title="'+FOLD_TITLES[ex]+'">'+ic(FOLD_ICONS[ex],12)+'</button>'+
       '</div>'+
-      '<div class="n-body"><div class="n-text"></div><div class="n-tags"></div></div>'+
+      '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-tags"></div></div>'+
       '<i class="port pin" title="вход — потяните, чтобы перенести входящие стрелки"></i>'+
       '<i class="port pin" title="вход — потяните (можно с Ctrl), чтобы отсоединить и перенести входящие стрелки"></i>'+
 '<i class="port pout" title="'+(n.type==='dialog'?'выход диалога (правая грань, внизу) · Ctrl+тянуть — перенести исходящие':'выход — тяните к другому узлу · Ctrl+тянуть — отсоединить и перенести исходящие стрелки')+'"></i>';
@@ -2815,6 +2850,7 @@ function renderInspNode(){
     if(el)el.querySelector('.n-title').textContent=n.title;
     var card=document.querySelector('#palList .cv-card[data-node="'+n.id+'"] .pal-name');
     if(card)card.textContent=n.title;
+    if(n.type==='char')$all('.n-cast span[data-cid="'+n.id+'"]').forEach(function(ch){ch.textContent=n.title;});
     markDirty();
   });
   title.addEventListener('change',editEnd);
@@ -2857,7 +2893,7 @@ function renderInspNode(){
     }
     markDirty();
   });
-  tr.addEventListener('change',editEnd);
+  tr.addEventListener('change',function(){editEnd();if(n.type==='char')renderAll();});
   tr.addEventListener('blur',editEnd);
   $('#iType').onchange=function(ev){
     var v=ev.target.value;
