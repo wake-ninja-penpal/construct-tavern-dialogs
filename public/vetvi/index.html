@@ -329,6 +329,11 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .dlg-reply-acts{display:flex;gap:4px;justify-content:flex-end;margin-top:3px}
 .dlg-reply-acts .mini-btn{width:20px;height:20px}
 .dlg-children-ed{margin-left:12px;padding-left:6px;border-left:1px dashed var(--line)}
+.dlg-drag{cursor:grab;margin-right:auto}
+.dlg-drag:active{cursor:grabbing}
+.dlg-reply-ed.dragging{opacity:.45;border-color:var(--acc)!important}
+.dlg-reply-ed.drop-above{box-shadow:inset 0 2px 0 var(--acc)}
+.dlg-reply-ed.drop-below{box-shadow:inset 0 -2px 0 var(--acc)}
 .dlg-add-root-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;font-size:11.5px;font-weight:600;background:#262b33;color:var(--tx2);border:1px solid var(--line2);cursor:pointer;transition:.15s}
 .dlg-add-root-btn:hover{background:#333a45;color:var(--tx)}
 .dlg-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;margin:3px 6px 3px 0;border-radius:7px;font-size:11px;font-weight:700;letter-spacing:.2px;border:1px solid transparent}
@@ -727,6 +732,8 @@ var ICONS={
   eye:'<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
   eyeOff:'<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>',
   alignH:'<path d="M2 12h20"/><rect x="4" y="8" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="8" rx="1"/><rect x="16" y="8" width="4" height="8" rx="1"/>',
+  grip:'<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>',
+  corner:'<path d="M5 5v4.6a3.9 3.9 0 0 0 3.9 3.9H19"/><path d="m15.5 9.5 3.5 3.5-3.5 3.5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>'
 };
 var EXTRA_ICONS={
@@ -821,6 +828,7 @@ var palFold={}, ovFold={};
 var canvas=$('#canvas'), worldEl=$('#world'), framesLayer=$('#framesLayer'), edgesSvg=$('#edges'),
     marquee=$('#marquee'), ctxEl=$('#ctx'), insp=$('#insp');
 var dlgModalNode=null;
+var dlgDragRid=null;
 function toast(msg,kind){
   var t=document.createElement('div');
   t.className='toast '+(kind||'ok');
@@ -2419,7 +2427,9 @@ function dlgModalRenderReplies(replies,depth,chars){
         '<textarea data-f="text" placeholder="Текст реплики…">'+esc(r.text||'')+'</textarea>'+
       '</div>'+
       '<div class="dlg-reply-acts">'+
-        '<button class="mini-btn" data-act="add-child" title="Добавить ответ">'+ic('plus',11)+'</button>'+
+        '<button class="mini-btn dlg-drag" data-act="drag" title="Перетащить — изменить порядок">'+ic('grip',11)+'</button>'+
+        '<button class="mini-btn" data-act="add-below" title="Новая реплика ниже">'+ic('plus',11)+'</button>'+
+        '<button class="mini-btn" data-act="add-child" title="Ответ-ветка (вложенная)">'+ic('corner',11)+'</button>'+
         '<button class="mini-btn del" data-act="del" title="Удалить реплику">'+ic('x',11)+'</button>'+
       '</div>';
     if(r.children&&r.children.length){
@@ -2485,6 +2495,14 @@ function dlgModalBind(chars){
             });
             dlgModalRender();
             renderAll();
+          }else if(act==='add-below'){
+            /* новая реплика сразу под этой (соседняя, тот же уровень) */
+            discrete(function(){
+              var loc=findReplyParent(d.replies,rid,null);
+              if(loc)loc.arr.splice(loc.idx+1,0,{id:uid(),speaker:(r.speaker!=null?r.speaker:(chars[0]?chars[0].id:null)),text:'',children:[]});
+            });
+            dlgModalRender();
+            renderAll();
           }else if(act==='add-child'){
             discrete(function(){
               if(!r.children)r.children=[];
@@ -2496,6 +2514,66 @@ function dlgModalBind(chars){
         };
       })(acts[i]);
     }
+    /* ── перетаскивание реплик (порядок среди соседних) ── */
+    var handle=ed.querySelector('.dlg-drag');
+    if(handle){
+      handle.addEventListener('mousedown',function(){ed.setAttribute('draggable','true');});
+      handle.addEventListener('dblclick',function(ev){ev.preventDefault();});
+    }
+    ed.addEventListener('dragstart',function(ev){
+      if(ed.getAttribute('draggable')!=='true'){ev.preventDefault();return;}
+      ev.dataTransfer.effectAllowed='move';
+      try{ev.dataTransfer.setData('text/plain',rid);}catch(e){}
+      dlgDragRid=rid;
+      setTimeout(function(){ed.classList.add('dragging');},0);
+    });
+    ed.addEventListener('dragend',function(){
+      ed.removeAttribute('draggable');
+      ed.classList.remove('dragging');
+      $all('#dlgModalBody .dlg-reply-ed').forEach(function(x){x.classList.remove('drop-above','drop-below');});
+      dlgDragRid=null;
+    });
+    ed.addEventListener('dragover',function(ev){
+      if(!dlgDragRid||dlgDragRid===rid)return;
+      var inner=ev.target&&ev.target.closest?ev.target.closest('.dlg-reply-ed'):null;
+      if(inner&&inner!==ed)return; /* вложенная реплика обработает сама */
+      var srcLoc=findReplyParent(d.replies,dlgDragRid,null);
+      var tgtLoc=findReplyParent(d.replies,rid,null);
+      if(!srcLoc||!tgtLoc||srcLoc.parent!==tgtLoc.parent)return; /* только соседние */
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect='move';
+      var rect=ed.getBoundingClientRect();
+      var below=(ev.clientY-rect.top)>(rect.height/2);
+      ed.classList.toggle('drop-below',below);
+      ed.classList.toggle('drop-above',!below);
+    });
+    ed.addEventListener('dragleave',function(){
+      ed.classList.remove('drop-above','drop-below');
+    });
+    ed.addEventListener('drop',function(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      var srcRid=dlgDragRid;
+      var rect=ed.getBoundingClientRect();
+      var below=(ev.clientY-rect.top)>(rect.height/2);
+      ed.classList.remove('drop-above','drop-below');
+      if(!srcRid||srcRid===rid)return;
+      var srcLoc=findReplyParent(d.replies,srcRid,null);
+      var tgtLoc=findReplyParent(d.replies,rid,null);
+      if(!srcLoc||!tgtLoc||srcLoc.parent!==tgtLoc.parent){toast('Перемещать можно только реплики одного уровня','warn');return;}
+      discrete(function(){
+        var s=findReplyParent(d.replies,srcRid,null);
+        var t=findReplyParent(d.replies,rid,null);
+        if(!s||!t||s.parent!==t.parent)return;
+        var moved=s.arr.splice(s.idx,1)[0];
+        var insAt=(s.idx<t.idx)?(t.idx-1):t.idx;
+        if(below)insAt+=1;
+        t.arr.splice(insAt,0,moved);
+      });
+      dlgDragRid=null;
+      dlgModalRender();
+      renderAll();
+    });
   });
 }
 $('#dlgModalClose').onclick=closeDlgEditor;
@@ -2503,6 +2581,43 @@ $('#dlgModalDone').onclick=closeDlgEditor;
 $('#dlgModal').addEventListener('pointerdown',function(e){
   if(e.target.id==='dlgModal')closeDlgEditor();
 });
+/* ═══ участники узла (для не-диалоговых типов: «Мысли», «Повествование» и т.д.) ═══ */
+function nodeParts(n){
+  if(!Array.isArray(n.participants))n.participants=[];
+  return n.participants;
+}
+function inspPartsHtml(n){
+  var ids=nodeParts(n);
+  var chips=ids.map(function(pid){
+    var color=charColor(pid);
+    return '<span class="dlg-chip" style="background:'+hexToRgba(color,0.15)+';color:'+color+';border-color:'+hexToRgba(color,0.55)+'">'+
+      '<span>'+esc(charName(pid))+'</span><span class="x" data-rm-p="'+esc(pid)+'" title="Убрать">'+ic('x',10)+'</span></span>';
+  }).join('');
+  var avail=allCharNodes().filter(function(c){return ids.indexOf(c.id)<0;});
+  var addOpts='<option value="">+ добавить участника…</option>';
+  avail.forEach(function(c){addOpts+='<option value="'+esc(c.id)+'">'+esc(c.title)+'</option>';});
+  return '<label class="i-lab">Участники</label>'+
+    '<div id="nParts">'+(chips||'<span style="font-size:11px;color:var(--tx3)">пока никого — добавьте персонажей</span>')+'</div>'+
+    '<select class="inp" id="nAddPart" style="margin-top:6px;height:28px;font-size:11.5px"'+(avail.length?'':' disabled')+'>'+addOpts+'</select>';
+}
+function bindInspParts(n){
+  $all('#nParts .x').forEach(function(x){
+    x.onclick=function(){
+      var pid=x.getAttribute('data-rm-p');
+      discrete(function(){n.participants=nodeParts(n).filter(function(p){return p!==pid;});});
+      renderAll();
+    };
+  });
+  var addSel=$('#nAddPart');
+  if(addSel){
+    addSel.onchange=function(){
+      var v=addSel.value;
+      if(!v)return;
+      discrete(function(){var ps=nodeParts(n);if(ps.indexOf(v)<0)ps.push(v);});
+      renderAll();
+    };
+  }
+}
 function renderInspNode(){
   var n=nodeById(sel.values().next().value);
   if(!n){sel.clear();return renderInspEmpty();}
@@ -2657,6 +2772,7 @@ function renderInspNode(){
     '<label class="i-lab">Название (или F2 на холсте)</label>'+
     '<input class="inp" id="iTitle" value="'+esc(n.title)+'" maxlength="80">'+
     '<label class="i-lab">Статус</label><div class="seg" id="iSt">'+stBtns+'</div>'+
+    (n.type==='char'?'':inspPartsHtml(n))+
     '<label class="i-lab">Цвет фона элемента</label><div class="swatches" id="inSw">'+colSw+'</div>'+
     '<label class="i-lab">Яркость цвета: <span id="inTintVal">'+(tintV>0?'+':'')+tintV+'%</span></label>'+
     '<input type="range" class="inp" id="inTint" min="-60" max="60" value="'+tintV+'">'+
@@ -2697,6 +2813,7 @@ function renderInspNode(){
     editEnd();
   });
   tags.addEventListener('blur',editEnd);
+  if(n.type!=='char')bindInspParts(n);
   $all('#inSw .swatch').forEach(function(s){
     s.onclick=function(){
       var v=s.dataset.nc||null;
@@ -5503,7 +5620,9 @@ function normalize(p){
       tags:Array.isArray(n.tags)?n.tags:[],expand:ex,
       color:(typeof n.color==='string'&&/^#([0-9a-f]{6})$/i.test(n.color))?n.color:null,
       tint:(typeof n.tint==='number')?clamp(n.tint,-60,60):0,
-dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes:Array.isArray(n.notes)?n.notes.map(function(m){return{title:String(m.title||'').slice(0,80),html:String(m.html||''),hidden:!!m.hidden};}):[]};    if(t==='dialog'){
+dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes:Array.isArray(n.notes)?n.notes.map(function(m){return{title:String(m.title||'').slice(0,80),html:String(m.html||''),hidden:!!m.hidden};}):[]};
+    if(Array.isArray(n.participants))node.participants=n.participants.filter(function(p){return typeof p==='string';});
+    if(t==='dialog'){
       node.dialog={
         participants:Array.isArray(n.dialog&&n.dialog.participants)?n.dialog.participants:[],
         description:(n.dialog&&typeof n.dialog.description==='string')?n.dialog.description:(typeof n.text==='string'?n.text:''),
