@@ -331,6 +331,38 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .dlg-reply-pin.out{right:-5px;cursor:grab}
 .dlg-reply-pin.out.live{opacity:1;border-color:var(--acc);background:#2a2113;box-shadow:0 0 6px rgba(226,165,78,.5)}
 .dlg-reply-pin.out:hover{border-color:var(--acc2);background:#2a2113;transform:scale(1.3);box-shadow:0 0 10px rgba(226,165,78,.6)}
+/* ── исходы развилки (пины на узле) ── */
+.n-outs{display:flex;flex-direction:column;gap:3px;margin-top:7px}
+.node.ex-0 .n-outs{display:none}
+.br-out{position:relative;display:flex;align-items:center;gap:6px;background:rgba(22,25,30,.55);border:1px solid rgba(214,201,106,.28);border-radius:7px;padding:3px 9px 3px 8px;margin-right:2px}
+.br-out .lbl{flex:1;min-width:0;font:700 10.5px var(--body);color:#e6dfae;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.br-out .cnd{font:600 9px var(--mono);color:#9aa1ac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.br-out .cnd.on{color:#e8dfa8}
+.br-x{flex:none;width:16px;height:16px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:4px;color:var(--tx3);cursor:pointer;opacity:0;transition:.15s;padding:0}
+.br-out:hover .br-x{opacity:1}
+.br-x:hover{color:#cf6d4f;background:#33272a}
+.opin{position:absolute;right:-6px;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;flex:none;opacity:0;transition:opacity .15s,border-color .15s,transform .15s;cursor:grab;z-index:5}
+.node:hover .opin,.node.sel .opin,body.connecting .opin{opacity:1}
+.opin.live{opacity:1;border-color:var(--acc);background:#2a2113;box-shadow:0 0 6px rgba(226,165,78,.5)}
+.opin:hover{border-color:var(--acc2);background:#2a2113;transform:scale(1.3)}
+.br-add{margin-top:4px;width:calc(100% - 4px);background:transparent;border:1px dashed rgba(214,201,106,.4);border-radius:7px;color:#b9b06d;font:600 10px var(--body);padding:3px 0;cursor:pointer;transition:.15s}
+.br-add:hover{background:rgba(214,201,106,.1);border-color:rgba(214,201,106,.7);color:#e8dfa8}
+.out-ed{border:1px solid var(--line);border-radius:9px;padding:7px 8px;margin-bottom:7px;background:rgba(255,255,255,.02)}
+.out-ed-row{display:flex;align-items:center;gap:6px}
+.out-ed-row .out-lbl{flex:1;min-width:0}
+.out-ed-cond{margin-top:6px}
+.out-ed-cond .seg{margin-bottom:6px}
+.out-ed-cond .v-row{margin-bottom:0}
+/* ── ноды переменных ── */
+.node.t-varnode .n-text{display:none}
+.node.t-varnode .n-vars{display:flex}
+#paneVars .v-row{cursor:grab}
+#paneVars .v-row.dragging{opacity:.45}
+.v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
+.v-row .v-type{flex:0 0 64px;padding:0 2px;font-size:10.5px}
+#paneVars .v-row .v-val{flex:0 0 46px;min-width:46px}
+.v-add-btn{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.v-add-btn:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
 .dlg-children{margin-left:9px;padding-left:14px;position:relative;margin-top:3px}
 .dlg-item{position:relative}
 .dlg-reply-row::before{content:'';position:absolute;left:-14px;top:50%;width:12px;height:2px;margin-top:-1px;background:#4a5160;border-radius:1px}
@@ -900,7 +932,8 @@ var EXTRA_ICONS={
   wand:'<path d="M3.5 20.5 14 10"/><path d="m15.5 3.5.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z"/><path d="m19.5 12 .5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>',
   bag:'<path d="M6 8h12l1.2 12H4.8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>',
   door:'<path d="M6.5 21V9.5a5.5 5.5 0 0 1 11 0V21"/><path d="M4 21h16"/><path d="M14.5 13h.01" stroke-width="2.4"/>',
-  candle:'<path d="M9 11.5h6V20H9z"/><path d="M12 11.5V9"/><path d="M12 2.5c1 1.2 1.6 2.1 1.6 3.1A1.6 1.6 0 0 1 12 7.2a1.6 1.6 0 0 1-1.6-1.6c0-1 .6-1.9 1.6-3.1z"/><path d="M6.5 20h11"/>'
+  candle:'<path d="M9 11.5h6V20H9z"/><path d="M12 11.5V9"/><path d="M12 2.5c1 1.2 1.6 2.1 1.6 3.1A1.6 1.6 0 0 1 12 7.2a1.6 1.6 0 0 1-1.6-1.6c0-1 .6-1.9 1.6-3.1z"/><path d="M6.5 20h11"/>',
+  variable:'<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>'
 };
 var ALLICONS={};
 Object.keys(ICONS).forEach(function(k){ALLICONS[k]=ICONS[k];});
@@ -917,6 +950,7 @@ var TYPES={
   dialog:{name:'Диалог',color:'#cbbd92',icon:'dialog'},
   skill:{name:'Навык',color:'#7fb5a2',icon:'skill'},
   branch:{name:'Развилка',color:'#d6c96a',icon:'branch'},
+  varnode:{name:'Переменная',color:'#b7b26a',icon:'variable'},
   event:{name:'Событие',color:'#aab1bb',icon:'event'},
   note:{name:'Заметка',color:'#8b929c',icon:'note'}
 };
@@ -1019,34 +1053,71 @@ function charColor(id){
 /* ═══ переменные ═══ */
 var VARS_OPS={'=':'=','+':'+','-':'−'};
 var COND_OPS={'==':'=','!=':'≠','>':'>','<':'<','>=':'≥','<=':'≤'};
+var COND_OPS_EQ={'==':'=','!=':'≠'};
+var VAR_TYPES={num:'Число',str:'Текст',bool:'Флаг'};
 function varsList(){if(!Array.isArray(project.vars))project.vars=[];return project.vars;}
 function varById(id){var l=varsList();for(var i=0;i<l.length;i++)if(l[i].id===id)return l[i];return null;}
 function varName(id){var v=varById(id);return v?v.name:'?';}
+function varType(v){
+  if(v&&VAR_TYPES[v.type])return v.type;
+  if(v&&typeof v.val==='string')return 'str';
+  return 'num';
+}
+/* приведение значения к типу переменной */
+function varCastVal(type,raw){
+  var t=String(raw==null?'':raw).trim();
+  if(type==='num'){
+    if(t==='')return 0;
+    var n=parseFloat(t);
+    return(isFinite(n)&&/^[-+]?[0-9]*\.?[0-9]+$/.test(t))?n:0;
+  }
+  if(type==='bool')return (t==='1'||t==='true'||t==='да'||t==='yes'||t==='Да')?true:false;
+  return t.slice(0,200);
+}
+function varCast(v,raw){return varCastVal(varType(v),raw);}
+function isTrueVal(x){return x===true||x==='true'||x==='да'||x==='Да'||x===1;}
+function varValText(val,v){
+  var t=v?varType(v):'num';
+  if(t==='bool')return isTrueVal(val)?'да':'нет';
+  if(t==='str')return '«'+String(val==null?'':val)+'»';
+  return String(val==null?'':val);
+}
 function varNum(x){var n=(typeof x==='number')?x:parseFloat(x);return isFinite(n)?n:0;}
-function vldVal(s){var t=String(s==null?'':s).trim();if(t==='')return 0;var n=parseFloat(t);return(isFinite(n)&&/^[-+]?[0-9]*\.?[0-9]+$/.test(t))?n:t.slice(0,40);}
-function varApplyOp(op,cur,val){
+function opsForType(t){return (t==='num')?VARS_OPS:{'=':'='};}
+function condOpsFor(t){return (t==='num')?COND_OPS:COND_OPS_EQ;}
+function varApplyOp(op,cur,val,type){
   if(op==='=')return val;
+  if(type&&type!=='num')return cur;
   var a=varNum(cur),b=varNum(val);
   if(op==='+')return a+b;
   if(op==='-')return a-b;
   return cur;
 }
+function opSym(op){return (op==='+')?'+':((op==='-')?'−':'=');}
 function opText(o){
   if(!o)return '';
-  var sop=(o.op==='+')?'+':((o.op==='-')?'−':'=');
-  return varName(o.vid)+' '+sop+' '+o.val;
+  return varName(o.vid)+' '+opSym(o.op)+' '+varValText(o.val,varById(o.vid));
 }
 function condText(c){
   if(!c)return '';
-  return varName(c.vid)+' '+(COND_OPS[c.op]||c.op)+' '+c.val;
+  return varName(c.vid)+' '+(COND_OPS[c.op]||c.op)+' '+varValText(c.val,varById(c.vid));
 }
 function condMet(c,vals){
   if(!c)return true;
   var v=varById(c.vid);if(!v)return true;
   var cur=(vals&&vals[c.vid]!==undefined&&vals[c.vid]!==null)?vals[c.vid]:v.val;
-  if(c.op==='==')return String(cur)===String(c.val);
-  if(c.op==='!=')return String(cur)!==String(c.val);
+  var t=varType(v);
+  if(t==='bool'){
+    var cb=isTrueVal(cur),tb=isTrueVal(c.val);
+    return c.op==='!='?(cb!==tb):(cb===tb);
+  }
+  if(t==='str'){
+    var cs=String(cur==null?'':cur),ts=String(c.val==null?'':c.val);
+    return c.op==='!='?cs!==ts:cs===ts;
+  }
   var a=varNum(cur),b=varNum(c.val);
+  if(c.op==='==')return a===b;
+  if(c.op==='!=')return a!==b;
   if(c.op==='>')return a>b;
   if(c.op==='<')return a<b;
   if(c.op==='>=')return a>=b;
@@ -1446,6 +1517,17 @@ function layoutDlgConnectors(el){
 }
 function updateDlgRowStates(){
   project.nodes.forEach(function(n){
+    if(n.type==='branch'){
+      var bel=nodeEls.get(n.id);
+      if(bel){
+        var bouts={};
+        project.edges.forEach(function(e){if(e.from===n.id&&e.fromOut)bouts[e.fromOut]=true;});
+        Array.prototype.forEach.call(bel.querySelectorAll('.opin'),function(pin){
+          pin.classList.toggle('live',!!bouts[pin.getAttribute('data-out')]);
+        });
+      }
+      return;
+    }
     if(n.type!=='dialog')return;
     var el=nodeEls.get(n.id);
     if(!el)return;
@@ -1762,6 +1844,19 @@ function renderWorld(spawn,spawnEdge){
       tree.innerHTML=dlgTreeInner(n,ex);
       el.querySelector('.n-body').appendChild(tree);
     }
+    if(n.type==='branch'){
+      ensureBranch(n);
+      var ob=document.createElement('div');
+      ob.className='n-outs';
+      ob.innerHTML=branchOutsHtml(n);
+      el.querySelector('.n-body').appendChild(ob);
+      bindBranchOuts(el,n);
+    }
+    if(n.type==='varnode'){
+      ensureVarnode(n);
+      var vwc=el.querySelector('.n-vars');
+      if(vwc){vwc.innerHTML='<span>'+esc(nodeVarChipText(n))+'</span>';vwc.style.display='';}
+    }
     if(collapsedAncestorOf(n))el.style.display='none';renderNodeNotes(n,el);worldEl.appendChild(el);nodeEls.set(n.id,el);
     if(spawn.has(n.id))el.addEventListener('animationend',function(){el.classList.remove('spawn');},{once:true});
   });
@@ -1885,6 +1980,11 @@ function edgeAnchors(e){
     }
     if(rp){x1=rp.x;y1=rp.y;}
     else{var ma=dlgMainAnchor(na,nodeElA);x1=ma.x;y1=ma.y;}
+  }else if(e.fromOut&&na.type==='branch'){
+    var outElA=nodeEls.get(na.id);
+    var rpO=outElA?branchOutPortPos(outElA,e.fromOut):null;
+    if(rpO){x1=rpO.x;y1=rpO.y;}
+    else{x1=na.x+(outElA?outElA.offsetWidth:NODE_W);y1=na.y+((outElA?outElA.offsetHeight:90)/2);}
   }else if(ca){
     var rp1=cardRowPoint(ga,na,'out');
     if(rp1){x1=rp1.x;y1=rp1.y;}
@@ -2462,6 +2562,13 @@ function renderInspEdge(){
     var r=findReply(A.dialog.replies,e.fromReply);
     if(r)fromReplyInfo='<br>из реплики: «'+esc((r.text||'').slice(0,40))+'»';
   }
+  var fromOutInfo='';
+  if(A&&A.type==='branch'&&e.fromOut){
+    ensureBranch(A);
+    var oo=null;
+    A.outcomes.forEach(function(o){if(o.id===e.fromOut)oo=o;});
+    if(oo)fromOutInfo='<br>из исхода: «'+esc(oo.label||'Исход')+'»';
+  }
   var extra=(selEdges.size>1?'<div class="i-meta">выбрано связей: '+selEdges.size+'</div>':'')+
     ((e.pts&&e.pts.length)?'<div class="i-meta">точек излома: '+e.pts.length+'</div>':'');
   insp.innerHTML=
@@ -2470,7 +2577,7 @@ function renderInspEdge(){
     '<input class="inp" id="iLbl" value="'+esc(e.label)+'" placeholder="например: условие выполнено">'+
     '<label class="i-lab">Тип связи</label><div class="seg" id="iKind">'+segHtml+'</div>'+
     (A&&A.type==='branch'?inspCondHtml(e):'')+
-    '<div class="i-meta">из: «'+esc(A?A.title:'?')+'»'+fromReplyInfo+'<br>в: «'+esc(B?B.title:'?')+'»<br>ID: '+e.id+'</div>'+extra+
+    '<div class="i-meta">из: «'+esc(A?A.title:'?')+'»'+fromReplyInfo+fromOutInfo+'<br>в: «'+esc(B?B.title:'?')+'»<br>ID: '+e.id+'</div>'+extra+
     '<div class="i-actions">'+
       '<button class="btn" id="iSwap">'+ic('swap')+'Развернуть</button>'+
       '<button class="btn danger" id="iDelE">'+ic('trash')+'Удалить</button>'+
@@ -2497,7 +2604,7 @@ $all('#iKind button').forEach(function(x){x.classList.toggle('on',x===b);});
 };
 });
   $('#iSwap').onclick=function(){
-    discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;e.cond=null;});
+    discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;e.fromOut=null;e.cond=null;});
     updateEdgeGeom(e); renderInspector();
   };
   $('#iDelE').onclick=removeSelected;
@@ -3002,7 +3109,7 @@ function renderInspNode(){
     '<label class="i-lab">Описание</label>'+
     '<textarea class="inp" id="iText" placeholder="Что здесь происходит?">'+esc(n.text)+'</textarea>'+
     '<label class="i-lab">Теги, через запятую</label>'+
-    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?inspOpsHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?(inspOutsHtml(n)+inspOpsHtml(n)):'')+(n.type==='varnode'?inspVarHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
     '<div class="i-actions">'+
       '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
       '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -3038,7 +3145,8 @@ function renderInspNode(){
   });
   tags.addEventListener('blur',editEnd);
   if(n.type!=='char')bindInspParts(n);
-  if(n.type==='branch')bindInspOps(n);
+  if(n.type==='branch'){bindInspOuts(n);bindInspOps(n);}
+  if(n.type==='varnode')bindInspVar(n);
   $all('#inSw .swatch').forEach(function(s){
     s.onclick=function(){
       var v=s.dataset.nc||null;
@@ -3063,7 +3171,11 @@ function renderInspNode(){
   tr.addEventListener('blur',editEnd);
   $('#iType').onchange=function(ev){
     var v=ev.target.value;
-    mutate(function(){n.type=v;});
+    mutate(function(){
+      n.type=v;
+      if(v!=='varnode'){delete n.vid;delete n.varMode;delete n.varOp;delete n.varVal;}
+      if(v!=='branch'&&Array.isArray(n.outcomes))delete n.outcomes;
+    });
   };
   $all('#iSt button').forEach(function(b){
     b.onclick=function(){
@@ -3118,39 +3230,64 @@ function renderInspEmpty(){
     '</div>';
 }
 /* ═══ переменные: вкладка слева ═══ */
+function nodeVarChipText(n){
+  var v=n.vid?varById(n.vid):null;
+  if(!v)return n.varMode==='get'?'чтение: переменная не выбрана':'изменение: переменная не выбрана';
+  if(n.varMode==='get')return 'чтение: '+v.name;
+  return v.name+' '+opSym(n.varOp)+' '+varValText(n.varVal,v);
+}
 function refreshNodeVarsChip(n){
   var el=nodeEls.get(n.id);if(!el)return;
   var w=el.querySelector('.n-vars');if(!w)return;
+  if(n.type==='varnode'){
+    w.innerHTML='<span>'+esc(nodeVarChipText(n))+'</span>';
+    w.style.display='';
+    return;
+  }
   var ops=(n.type==='branch'&&n.setVars)||[];
   w.innerHTML=ops.map(function(o){return '<span>'+esc(opText(o))+'</span>';}).join('');
   w.style.display=ops.length?'':'none';
 }
 function refreshAllBranchChips(){
-  project.nodes.forEach(function(n){if(n.type==='branch')refreshNodeVarsChip(n);});
+  project.nodes.forEach(function(n){if(n.type==='branch'||n.type==='varnode')refreshNodeVarsChip(n);});
   project.edges.forEach(function(e){if(e.cond)updateEdgeGeom(e);});
+}
+function varValControlHtml(v,cls){
+  var t=varType(v);
+  if(t==='bool'){
+    return '<select class="inp v-val '+(cls||'')+'" title="Начальное значение">'+
+      '<option value="1"'+(isTrueVal(v.val)?' selected':'')+'>да</option>'+
+      '<option value="0"'+(isTrueVal(v.val)?'':' selected')+'>нет</option></select>';
+  }
+  return '<input class="inp v-val '+(cls||'')+'" value="'+esc(String(v.val))+'" title="Начальное значение" placeholder="'+(t==='num'?'0':'текст')+'">';
 }
 function renderVarsPane(){
   var pane=$('#paneVars');if(!pane)return;
   var l=varsList();
   var html='<div class="v-head"><span>Переменные сюжета</span><button class="btn primary" id="vAdd" title="Создать переменную">+ Переменная</button></div>';
   if(!l.length){
-    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число или слово, которое меняется по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. Выберите на холсте блок <b>«Развилка»</b> — справа в инспекторе привяжите к ней изменение переменной.<br>3. У стрелок, выходящих из развилки, можно задать <b>условие</b> — тогда в режиме новеллы игрок увидит, куда можно идти.</div>';
+    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число, текст или флаг (да/нет), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br>3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.</div>';
   }
   html+='<div id="vRows">';
   l.forEach(function(v){
+    var typeOpts=Object.keys(VAR_TYPES).map(function(t){
+      return '<option value="'+t+'"'+(varType(v)===t?' selected':'')+'>'+VAR_TYPES[t]+'</option>';
+    }).join('');
     html+='<div class="v-row" data-vid="'+esc(v.id)+'">'+
+      '<span class="v-grip" title="Перетащите на холст — создать ноду переменной">'+ic('grip',12)+'</span>'+
       '<input class="inp v-name" value="'+esc(v.name)+'" maxlength="40" title="Название переменной" placeholder="название">'+
-      '<input class="inp v-val" value="'+esc(String(v.val))+'" title="Начальное значение" placeholder="0">'+
+      '<select class="inp v-type" title="Тип переменной">'+typeOpts+'</select>'+
+      varValControlHtml(v)+
       '<button class="v-del" title="Удалить переменную">'+ic('x',12)+'</button>'+
     '</div>';
   });
   html+='</div>';
-  if(l.length)html+='<div class="v-hint">Начальное значение — с ним игрок стартует режим новеллы. Привязывайте изменение переменной к <b>развилке</b> (инспектор справа), а <b>условия</b> — к стрелкам от неё.</div>';
+  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы нода изменения меняет значение, нода чтения показывает его. У <b>развилки</b> добавляйте <b>исходы</b> и привязывайте к ним переменную и значение.</div>';
   pane.innerHTML=html;
   var add=$('#vAdd');
   if(add)add.onclick=function(){
     var id='v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
-    discrete(function(){varsList().push({id:id,name:'переменная',val:0});});
+    discrete(function(){varsList().push({id:id,name:'переменная',type:'num',val:0});});
     renderVarsPane();renderInspector();refreshAllBranchChips();
     var rows=$all('#paneVars .v-row');var last=rows[rows.length-1];
     if(last){var nm=last.querySelector('.v-name');nm.focus();nm.select();}
@@ -3160,29 +3297,72 @@ function renderVarsPane(){
 function bindVarsRows(){
   $all('#paneVars .v-row').forEach(function(row){
     var vid=row.dataset.vid,v=varById(vid);if(!v)return;
-    var nm=row.querySelector('.v-name'),vl=row.querySelector('.v-val');
+    var nm=row.querySelector('.v-name'),vl=row.querySelector('.v-val'),vt=row.querySelector('.v-type');
     nm.addEventListener('focus',editStart);
     nm.addEventListener('input',function(){v.name=nm.value;markDirty();refreshAllBranchChips();});
     nm.addEventListener('change',editEnd);nm.addEventListener('blur',editEnd);
-    vl.addEventListener('focus',editStart);
-    vl.addEventListener('input',function(){v.val=vldVal(vl.value);markDirty();});
-    vl.addEventListener('change',editEnd);vl.addEventListener('blur',editEnd);
+    vt.addEventListener('change',function(){
+      discrete(function(){
+        v.type=vt.value;
+        v.val=varCastVal(v.type,v.val);
+        if(v.type==='bool'&&typeof v.val!=='boolean')v.val=isTrueVal(v.val);
+      });
+      renderVarsPane();refreshAllBranchChips();renderInspector();
+    });
+    if(vt.value==='bool'){
+      vl.addEventListener('change',function(){
+        discrete(function(){v.val=vl.value==='1';});
+        refreshAllBranchChips();
+      });
+    }else{
+      vl.addEventListener('focus',editStart);
+      vl.addEventListener('input',function(){v.val=varCastVal(varType(v),vl.value);markDirty();refreshAllBranchChips();});
+      vl.addEventListener('change',editEnd);vl.addEventListener('blur',editEnd);
+    }
     row.querySelector('.v-del').onclick=function(){
       discrete(function(){
         var l=varsList(),i=-1;
         for(var k=0;k<l.length;k++)if(l[k].id===vid){i=k;break;}
         if(i>=0)l.splice(i,1);
-        project.nodes.forEach(function(n){if(n.setVars)n.setVars=n.setVars.filter(function(o){return o.vid!==vid;});});
+        project.nodes.forEach(function(n){
+          if(n.setVars)n.setVars=n.setVars.filter(function(o){return o.vid!==vid;});
+          if(n.type==='varnode'&&n.vid===vid)n.vid=null;
+          if(Array.isArray(n.outcomes))n.outcomes.forEach(function(o){if(o.cond&&o.cond.vid===vid)o.cond=null;});
+        });
         project.edges.forEach(function(e){if(e.cond&&e.cond.vid===vid)e.cond=null;});
       });
       renderVarsPane();renderInspector();renderAll();
       toast('Переменная удалена (привязки очищены)','warn');
     };
+    /* перетаскивание переменной на холст → нода переменной (только за grip) */
+    var grip=row.querySelector('.v-grip');
+    if(grip){
+      grip.addEventListener('mousedown',function(){row.setAttribute('draggable','true');});
+      grip.addEventListener('dblclick',function(ev){ev.preventDefault();});
+    }
+    row.addEventListener('dragstart',function(e){
+      e.dataTransfer.setData('text/vetvi-var',vid);
+      e.dataTransfer.effectAllowed='copy';
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend',function(){
+      row.removeAttribute('draggable');
+      row.classList.remove('dragging');
+    });
   });
 }
 /* ═══ переменные: инспектор развилки ═══ */
+function opValControlHtml(o,v){
+  var t=v?varType(v):'num';
+  if(t==='bool'){
+    return '<select class="inp v-val" title="Значение">'+
+      '<option value="1"'+(isTrueVal(o.val)?' selected':'')+'>да</option>'+
+      '<option value="0"'+(isTrueVal(o.val)?'':' selected')+'>нет</option></select>';
+  }
+  return '<input class="inp v-val" value="'+esc(String(o.val))+'" title="'+(t==='num'?'На сколько изменить':'Новое значение')+'">';
+}
 function inspOpsHtml(n){
-  var h='<label class="i-lab">Переменные (изменяются при прохождении развилки)</label>';
+  var h='<label class="i-lab">Переменные (изменяются при входе в развилку)</label>';
   h+='<div id="iOps">'+opsRowHtml(n)+'</div>';
   h+='<div style="margin:6px 0 10px"><button class="btn" id="iOpAdd" style="width:100%">'+ic('plus',14)+'Привязать переменную</button></div>';
   return h;
@@ -3192,26 +3372,41 @@ function opsRowHtml(n){
   if(!l.length)return '<div class="v-empty">Сначала создайте переменные — вкладка «Переменные» слева.</div>';
   var ops=n.setVars||[];
   return ops.map(function(o,i){
+    var v0=varById(o.vid);
     var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===o.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
-    var oops=Object.keys(VARS_OPS).map(function(k){return '<option value="'+k+'"'+(k===o.op?' selected':'')+'>'+VARS_OPS[k]+'</option>';}).join('');
+    var vt=v0?varType(v0):'num';
+    var opd=opsForType(vt);
+    var oops=Object.keys(opd).map(function(k){return '<option value="'+k+'"'+(k===o.op?' selected':'')+'>'+opd[k]+'</option>';}).join('');
     return '<div class="v-row op" data-i="'+i+'">'+
       '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
       '<select class="inp v-op" title="Операция">'+oops+'</select>'+
-      '<input class="inp v-val" value="'+esc(String(o.val))+'" title="На сколько изменить">'+
+      opValControlHtml(o,v0)+
       '<button class="v-del" title="Убрать привязку">'+ic('x',12)+'</button>'+
     '</div>';
   }).join('');
 }
 function bindInspOps(n){
-  var box=$('#iOps');
   $all('#iOps .v-row').forEach(function(row){
     var i=+row.dataset.i,o=(n.setVars||[])[i];if(!o)return;
-    row.querySelector('.v-var').onchange=function(ev){discrete(function(){o.vid=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
+    row.querySelector('.v-var').onchange=function(ev){
+      discrete(function(){
+        o.vid=ev.target.value;
+        var v0=varById(o.vid);
+        if(v0&&!opsForType(varType(v0))[o.op])o.op='=';
+        o.val=varCastVal(v0?varType(v0):'num',o.val);
+      });
+      renderInspector();refreshNodeVarsChip(n);
+    };
     row.querySelector('.v-op').onchange=function(ev){discrete(function(){o.op=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
     var vi=row.querySelector('.v-val');
-    vi.addEventListener('focus',editStart);
-    vi.addEventListener('input',function(){o.val=vldVal(vi.value);markDirty();refreshNodeVarsChip(n);});
-    vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+    var v0=varById(o.vid),vt0=v0?varType(v0):'num';
+    if(vt0==='bool'){
+      vi.addEventListener('change',function(){discrete(function(){o.val=vi.value==='1';});refreshNodeVarsChip(n);});
+    }else{
+      vi.addEventListener('focus',editStart);
+      vi.addEventListener('input',function(){o.val=varCastVal(v0,vi.value);markDirty();refreshNodeVarsChip(n);});
+      vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+    }
     row.querySelector('.v-del').onclick=function(){
       discrete(function(){n.setVars.splice(i,1);if(!n.setVars.length)delete n.setVars;});
       renderInspector();refreshNodeVarsChip(n);
@@ -3220,9 +3415,50 @@ function bindInspOps(n){
   var add=$('#iOpAdd');
   if(add)add.onclick=function(){
     var l=varsList();if(!l.length){toast('Сначала создайте переменные — вкладка «Переменные» слева','warn');return;}
-    discrete(function(){if(!n.setVars)n.setVars=[];n.setVars.push({vid:l[0].id,op:'=',val:0});});
+    discrete(function(){if(!n.setVars)n.setVars=[];n.setVars.push({vid:l[0].id,op:'=',val:(varType(l[0])==='bool')?true:0});});
     renderInspector();refreshNodeVarsChip(n);
   };
+}
+/* ═══ условия: общая строка «переменная · сравнение · значение» ═══ */
+function condRowHtml(c,vt,cls){
+  var l=varsList();
+  var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===c.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
+  var cops=condOpsFor(vt);
+  var copsopts=Object.keys(cops).map(function(k){return '<option value="'+k+'"'+(k===c.op?' selected':'')+'>'+cops[k]+'</option>';}).join('');
+  var valCtl;
+  if(vt==='bool'){
+    valCtl='<select class="inp v-val" title="Значение">'+
+      '<option value="1"'+(isTrueVal(c.val)?' selected':'')+'>да</option>'+
+      '<option value="0"'+(isTrueVal(c.val)?'':' selected')+'>нет</option></select>';
+  }else{
+    valCtl='<input class="inp v-val" value="'+esc(String(c.val))+'" title="Значение">';
+  }
+  return '<div class="v-row op '+(cls||'')+'">'+
+    '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
+    '<select class="inp v-op" title="Сравнение">'+copsopts+'</select>'+
+    valCtl+'</div>';
+}
+function bindCondRow(row,c,after){
+  if(!row)return;
+  row.querySelector('.v-var').onchange=function(ev){
+    discrete(function(){
+      c.vid=ev.target.value;
+      var v0=varById(c.vid);
+      if(v0&&!condOpsFor(varType(v0))[c.op])c.op='==';
+      c.val=varCastVal(v0,c.val);
+    });
+    after();
+  };
+  row.querySelector('.v-op').onchange=function(ev){discrete(function(){c.op=ev.target.value;});after();};
+  var vi=row.querySelector('.v-val');
+  var v0=varById(c.vid),vt0=v0?varType(v0):'num';
+  if(vt0==='bool'){
+    vi.addEventListener('change',function(){discrete(function(){c.val=vi.value==='1';});after();});
+  }else{
+    vi.addEventListener('focus',editStart);
+    vi.addEventListener('input',function(){c.val=varCastVal(v0,vi.value);markDirty();after(true);});
+    vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+  }
 }
 /* ═══ переменные: условие на стрелке от развилки ═══ */
 function inspCondHtml(e){
@@ -3230,13 +3466,8 @@ function inspCondHtml(e){
   var h='<label class="i-lab">Условие перехода (развилка)</label>';
   h+='<div class="seg" id="iCondTog"><button data-s="off" class="'+(on?'':'on')+'">Без условия</button><button data-s="on" class="'+(on?'on':'')+'">По переменной</button></div>';
   if(on&&l.length){
-    var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===e.cond.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
-    var cops=Object.keys(COND_OPS).map(function(k){return '<option value="'+k+'"'+(k===e.cond.op?' selected':'')+'>'+COND_OPS[k]+'</option>';}).join('');
-    h+='<div class="v-row op" id="iCondRow" style="margin-top:6px">'+
-      '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
-      '<select class="inp v-op" title="Сравнение">'+cops+'</select>'+
-      '<input class="inp v-val" value="'+esc(String(e.cond.val))+'" title="Значение">'+
-    '</div>';
+    var v0=varById(e.cond.vid);
+    h+=condRowHtml(e.cond,v0?varType(v0):'num','iCondRow');
   }else if(on&&!l.length){
     h+='<div class="v-empty">Нет переменных — создайте на вкладке «Переменные» слева.</div>';
   }
@@ -3247,19 +3478,231 @@ function bindInspCond(e){
   $all('#iCondTog button').forEach(function(b){
     b.onclick=function(){
       var on=b.dataset.s==='on';
-      discrete(function(){e.cond=on?{vid:(varsList()[0]||{}).id||'',op:'==',val:0}:null;});
+      discrete(function(){
+        if(on){var v0=varsList()[0]||null;e.cond={vid:v0?v0.id:'',op:'==',val:(v0&&varType(v0)==='bool')?true:0};}
+        else e.cond=null;
+      });
       updateEdgeGeom(e);renderInspector();
     };
   });
-  var row=$('#iCondRow');
-  if(row){
-    row.querySelector('.v-var').onchange=function(ev){discrete(function(){e.cond.vid=ev.target.value;});updateEdgeGeom(e);renderInspector();};
-    row.querySelector('.v-op').onchange=function(ev){discrete(function(){e.cond.op=ev.target.value;});updateEdgeGeom(e);renderInspector();};
-    var vi=row.querySelector('.v-val');
-    vi.addEventListener('focus',editStart);
-    vi.addEventListener('input',function(){e.cond.val=vldVal(vi.value);markDirty();updateEdgeGeom(e);});
-    vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+  bindCondRow($('#iCondRow'),e.cond,function(live){
+    updateEdgeGeom(e);
+    if(!live)renderInspector();
+  });
+}
+/* ═══ развилка: исходы с индивидуальными условиями ═══ */
+function ensureBranch(n){if(n.type==='branch'&&!Array.isArray(n.outcomes))n.outcomes=[];}
+function branchCondDefault(){
+  var v0=varsList()[0]||null;
+  return {vid:v0?v0.id:'',op:'==',val:(v0&&varType(v0)==='bool')?true:0};
+}
+function inspOutsHtml(n){
+  ensureBranch(n);
+  var h='<label class="i-lab">Исходы развилки ('+n.outcomes.length+')</label>';
+  h+='<div id="iOuts">';
+  if(!n.outcomes.length)h+='<div class="v-empty">Добавьте исходы — у каждого появится свой пин на узле (тяните стрелку от строки исхода). Исходу можно привязать переменную: путь откроется только при совпадении значения.</div>';
+  n.outcomes.forEach(function(o,i){
+    var condHtml='';
+    if(o.cond){
+      var l=varsList();
+      if(l.length){
+        var v0=varById(o.cond.vid);
+        condHtml=condRowHtml(o.cond,v0?varType(v0):'num','out-cond-row');
+      }else condHtml='<div class="v-empty">Нет переменных — создайте на вкладке «Переменные».</div>';
+    }
+    h+='<div class="out-ed" data-i="'+i+'">'+
+      '<div class="out-ed-row">'+
+        '<input class="inp out-lbl" value="'+esc(o.label||'')+'" placeholder="Название исхода…" maxlength="60">'+
+        '<button class="v-del out-del" title="Удалить исход">'+ic('x',12)+'</button>'+
+      '</div>'+
+      '<div class="out-ed-cond">'+
+        '<div class="seg out-cond-tog"><button data-s="off" class="'+(o.cond?'':'on')+'">Без условия</button><button data-s="on" class="'+(o.cond?'on':'')+'">По переменной</button></div>'+
+        condHtml+
+      '</div>'+
+    '</div>';
+  });
+  h+='</div>';
+  h+='<div style="margin:6px 0 10px"><button class="btn" id="iOutAdd" style="width:100%">'+ic('plus',14)+'Добавить исход</button></div>';
+  return h;
+}
+function bindInspOuts(n){
+  $all('#iOuts .out-ed').forEach(function(box){
+    var i=+box.dataset.i,o=(n.outcomes||[])[i];if(!o)return;
+    var lbl=box.querySelector('.out-lbl');
+    lbl.addEventListener('focus',editStart);
+    lbl.addEventListener('input',function(){
+      o.label=lbl.value;
+      var el=nodeEls.get(n.id);
+      if(el)refreshBranchOutsBox(el,n);
+      updateEdgesFor(n.id);
+      markDirty();
+    });
+    lbl.addEventListener('change',editEnd);lbl.addEventListener('blur',editEnd);
+    box.querySelector('.out-del').onclick=function(){
+      discrete(function(){
+        n.outcomes.splice(i,1);
+        if(!n.outcomes.length)delete n.outcomes;
+        project.edges=project.edges.filter(function(e){return !(e.from===n.id&&e.fromOut===o.id);});
+      });
+      renderAll();
+    };
+    Array.prototype.forEach.call(box.querySelectorAll('.out-cond-tog button'),function(b){
+      b.onclick=function(){
+        var on=b.dataset.s==='on';
+        discrete(function(){o.cond=on?branchCondDefault():null;});
+        renderInspector();renderAll();
+      };
+    });
+    bindCondRow(box.querySelector('.out-cond-row'),o.cond,function(live){
+      var el=nodeEls.get(n.id);
+      if(el)refreshBranchOutsBox(el,n);
+      updateEdgesFor(n.id);
+      if(!live)renderInspector();
+    });
+  });
+  var add=$('#iOutAdd');
+  if(add)add.onclick=function(){
+    discrete(function(){ensureBranch(n);n.outcomes.push({id:uid(),label:'',cond:null});});
+    renderAll();renderInspector();
+  };
+}
+/* ═══ нода переменной: инспектор ═══ */
+function ensureVarnode(n){
+  if(n.type!=='varnode')return;
+  if(n.varMode!=='get'&&n.varMode!=='set')n.varMode='set';
+  if(!VARS_OPS[n.varOp])n.varOp='=';
+}
+function inspVarHtml(n){
+  ensureVarnode(n);
+  var l=varsList();
+  var h='<label class="i-lab">Переменная</label>';
+  var opts='<option value="">— не выбрана —</option>'+l.map(function(v){
+    return '<option value="'+esc(v.id)+'"'+(v.id===n.vid?' selected':'')+'>'+esc(v.name)+'</option>';
+  }).join('');
+  h+='<select class="inp" id="iVarSel">'+opts+'</select>';
+  if(!l.length)h+='<div class="v-empty">Нет переменных — создайте их на вкладке «Переменные» слева, либо перетащите переменную на холст.</div>';
+  h+='<label class="i-lab">Режим ноды</label>';
+  h+='<div class="seg" id="iVarMode"><button data-m="get" class="'+(n.varMode==='get'?'on':'')+'" title="Показывает значение переменной">Чтение</button><button data-m="set" class="'+(n.varMode==='set'?'on':'')+'" title="Меняет значение переменной">Изменение</button></div>';
+  if(n.varMode==='set'&&l.length){
+    var v0=varById(n.vid);
+    var vt=v0?varType(v0):'num';
+    var opd=opsForType(vt);
+    var oops=Object.keys(opd).map(function(k){return '<option value="'+k+'"'+(k===n.varOp?' selected':'')+'>'+opd[k]+'</option>';}).join('');
+    h+='<div class="v-row op" id="iVarOpRow" style="margin-top:6px">'+
+      '<select class="inp v-op" title="Операция">'+oops+'</select>'+
+      opValControlHtml({val:n.varVal},v0)+
+    '</div>';
   }
+  if(n.varMode==='get')h+='<div class="v-empty" style="margin-top:6px">В режиме новеллы эта нода покажет текущее значение переменной.</div>';
+  return h;
+}
+function bindInspVar(n){
+  var sel=$('#iVarSel');
+  sel.onchange=function(ev){
+    discrete(function(){n.vid=ev.target.value||null;});
+    renderInspector();refreshNodeVarsChip(n);
+  };
+  $all('#iVarMode button').forEach(function(b){
+    b.onclick=function(){
+      discrete(function(){n.varMode=b.dataset.m;});
+      renderInspector();refreshNodeVarsChip(n);
+    };
+  });
+  var row=$('#iVarOpRow');
+  if(row){
+    row.querySelector('.v-op').onchange=function(ev){discrete(function(){n.varOp=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
+    var vi=row.querySelector('.v-val');
+    var v0=varById(n.vid),vt0=v0?varType(v0):'num';
+    if(vt0==='bool'){
+      vi.addEventListener('change',function(){discrete(function(){n.varVal=vi.value==='1';});refreshNodeVarsChip(n);});
+    }else{
+      vi.addEventListener('focus',editStart);
+      vi.addEventListener('input',function(){n.varVal=varCastVal(v0,vi.value);markDirty();refreshNodeVarsChip(n);});
+      vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+    }
+  }
+}
+/* ═══ развилка: исходы на холсте (пины на узле) ═══ */
+function branchOutsHtml(n){
+  ensureBranch(n);
+  var h='';
+  n.outcomes.forEach(function(o,i){
+    var nm=o.label||('Исход '+(i+1));
+    h+='<div class="br-out" data-oid="'+esc(o.id)+'">'+
+      '<span class="lbl">'+esc(nm)+'</span>'+
+      '<span class="cnd'+(o.cond?' on':'')+'" title="'+(o.cond?esc('Условие: '+condText(o.cond)):'Без условия — путь всегда открыт')+'">'+esc(o.cond?('⟦ '+condText(o.cond)+' ⟧'):'без условия')+'</span>'+
+      '<button class="br-x" data-oid="'+esc(o.id)+'" title="Убрать исход">'+ic('x',10)+'</button>'+
+      '<i class="opin" data-out="'+esc(o.id)+'" title="Исход «'+esc(nm)+'» — тяните к другому узлу"></i>'+
+    '</div>';
+  });
+  h+='<button class="br-add" title="Добавить исход (пин на узле)">+ исход</button>';
+  return h;
+}
+function refreshBranchOutsBox(el,n){
+  var box=el.querySelector('.n-outs');
+  if(!box)return;
+  box.innerHTML=branchOutsHtml(n);
+  bindBranchOuts(el,n);
+}
+function bindBranchOuts(el,n){
+  ensureBranch(n);
+  var add=el.querySelector('.br-add');
+  if(add){
+    add.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+    add.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      discrete(function(){ensureBranch(n);n.outcomes.push({id:uid(),label:'',cond:null});});
+      renderAll();
+    });
+  }
+  Array.prototype.forEach.call(el.querySelectorAll('.br-x'),function(x){
+    x.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+    x.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var oid=x.getAttribute('data-oid');
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      discrete(function(){
+        n.outcomes=n.outcomes.filter(function(o){return o.id!==oid;});
+        if(!n.outcomes.length)delete n.outcomes;
+        project.edges=project.edges.filter(function(e){return !(e.from===n.id&&e.fromOut===oid);});
+      });
+      renderAll();
+    });
+  });
+  Array.prototype.forEach.call(el.querySelectorAll('.opin'),function(pin){
+    pin.addEventListener('pointerdown',function(ev){startConnectOut(ev,pin);});
+  });
+}
+function branchOutPortPos(nodeEl,oid){
+  if(!nodeEl)return null;
+  var portEl=nodeEl.querySelector('.opin[data-out="'+oid+'"]');
+  if(!portEl)return null;
+  var nr=nodeEl.getBoundingClientRect();
+  var pr=portEl.getBoundingClientRect();
+  return{
+    x:(pr.left+pr.width/2-nr.left)/vp.z+parseFloat(nodeEl.style.left||0),
+    y:(pr.top+pr.height/2-nr.top)/vp.z+parseFloat(nodeEl.style.top||0)
+  };
+}
+function startConnectOut(e,portEl){
+  e.stopPropagation();e.preventDefault();
+  var oid=portEl.getAttribute('data-out');
+  var nodeEl=portEl.closest('.node');
+  if(!nodeEl||!oid)return;
+  var nodeId=nodeEl.dataset.id;
+  var n=nodeById(nodeId);if(!n)return;
+  var lk=lockBlockedBy([nodeId]);
+  if(lk){showLockTip(e.clientX,e.clientY,lk);return;}
+  lockTake([nodeId]);
+  var pos=branchOutPortPos(nodeEl,oid);
+  if(!pos)return;
+  var prev=svgEl('path');prev.setAttribute('class','preview');
+  edgesSvg.appendChild(prev);
+  connS={from:nodeId,fromReply:null,fromOut:oid,fromPin:'out',x1:pos.x,y1:pos.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nodeId]};
+  document.body.classList.add('connecting');
 }
 /* ═══ заметки элементов ═══ */
 var NOTE_MAX=3;
@@ -3456,6 +3899,7 @@ function addNode(typeKey,x,y,select){
   var info=typeInfo(typeKey);
   var n={id:uid(),type:typeKey,gid:null,x:Math.round(x),y:Math.round(y),title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
   if(typeKey==='dialog'){ensureDialog(n);}
+  if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   mutate(function(){project.nodes.push(n);},{nodes:[n.id]});
   if(select)selectOnly(n.id);
   return n;
@@ -3466,6 +3910,12 @@ function cloneNode(src,x,y){
     color:src.color||null,tint:src.tint||0,dlgWidth:src.dlgWidth||null,notes:src.notes?JSON.parse(JSON.stringify(src.notes)):[]};
   if(src.type==='dialog'&&src.dialog){
     c.dialog=JSON.parse(JSON.stringify(src.dialog));
+  }
+  if(src.type==='varnode'){
+    c.vid=src.vid||null;c.varMode=(src.varMode==='get')?'get':'set';c.varOp=VARS_OPS[src.varOp]?src.varOp:'=';c.varVal=src.varVal;
+  }
+  if(src.type==='branch'&&Array.isArray(src.outcomes)){
+    c.outcomes=src.outcomes.map(function(o){return{id:o.id,label:o.label||'',cond:o.cond?{vid:o.cond.vid,op:o.cond.op,val:o.cond.val}:null};});
   }
   return c;
 }
@@ -3524,7 +3974,7 @@ function duplicateSel(){
   });
   var add=[];
   project.edges.forEach(function(e){
-    if(map.has(e.from)&&map.has(e.to))add.push({id:uid(),from:map.get(e.from),to:map.get(e.to),label:e.label,kind:e.kind,pts:(e.pts||[]).map(function(p){return{x:p.x,y:p.y};}),lt:e.lt,lp:e.lp,fromReply:e.fromReply||null,bd:e.bd?{dl:e.bd.dl,dy:e.bd.dy,dr:e.bd.dr}:{dl:0,dy:0,dr:0}});
+    if(map.has(e.from)&&map.has(e.to))add.push({id:uid(),from:map.get(e.from),to:map.get(e.to),label:e.label,kind:e.kind,pts:(e.pts||[]).map(function(p){return{x:p.x,y:p.y};}),lt:e.lt,lp:e.lp,fromReply:e.fromReply||null,fromOut:e.fromOut||null,bd:e.bd?{dl:e.bd.dl,dy:e.bd.dy,dr:e.bd.dr}:{dl:0,dy:0,dr:0}});
   });
   add.forEach(function(e){project.edges.push(e);});
   sel=new Set(spawn);
@@ -4109,7 +4559,7 @@ function startReplyConnect(e,portEl){
   if(!pos)return;
   var prev=svgEl('path');prev.setAttribute('class','preview');
   edgesSvg.appendChild(prev);
-  connS={from:nodeId,fromReply:replyId,fromPin:'out',x1:pos.x,y1:pos.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nodeId]};
+  connS={from:nodeId,fromReply:replyId,fromOut:null,fromPin:'out',x1:pos.x,y1:pos.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nodeId]};
   document.body.classList.add('connecting');
 }
 function startReplyOutDrag(e,portEl){
@@ -4154,7 +4604,7 @@ inDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
 function startOutDrag(e,nodeEl){
 e.stopPropagation();e.preventDefault();
 var nid=nodeEl.dataset.id;
-var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply;});
+var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply&&!ed.fromOut;});
 if(!outs.length){toast('У узла нет исходящих стрелок','warn');return;}
 var lkOu=lockBlockedBy([nid]);
 if(lkOu){showLockTip(e.clientX,e.clientY,lkOu);return;}
@@ -4191,10 +4641,10 @@ function startConnect(e,nodeEl){
     x1=n.x+nodeEl.offsetWidth;
     y1=n.y+nodeEl.offsetHeight/2;
   }
-  connS={from:id,fromReply:null,fromPin:'main',x1:x1,y1:y1,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[id]};
+  connS={from:id,fromReply:null,fromOut:null,fromPin:'main',x1:x1,y1:y1,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[id]};
   document.body.classList.add('connecting');
 }
-function createConnected(fromId,typeKey,cloneId,pt,fromReply){
+function createConnected(fromId,typeKey,cloneId,pt,fromReply,fromOut){
   var src=nodeById(fromId);if(!src)return;
   var n;
   if(cloneId){
@@ -4204,6 +4654,7 @@ function createConnected(fromId,typeKey,cloneId,pt,fromReply){
     var info=typeInfo(typeKey);
     n={id:uid(),type:typeKey,gid:null,x:0,y:0,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
     if(typeKey==='dialog')ensureDialog(n);
+    if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   }
   n.x=Math.round(pt.x-NODE_W/2);n.y=Math.round(pt.y-46);
   var tgtGroup=collapsedAncestorOf(src)?null:deepestGroupAt(pt.x,pt.y);
@@ -4211,16 +4662,16 @@ function createConnected(fromId,typeKey,cloneId,pt,fromReply){
   var eid=uid();
   mutate(function(){
     project.nodes.push(n);
-    project.edges.push({id:eid,from:fromId,to:n.id,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply||null});
+    project.edges.push({id:eid,from:fromId,to:n.id,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply||null,fromOut:fromOut||null});
   },{nodes:[n.id],edge:eid});
   resolveOverlaps(new Set([n.id]));
   selectOnly(n.id);
 }
-function connectMenuItems(fromId,pt,fromReply){
+function connectMenuItems(fromId,pt,fromReply,fromOut){
   var arr=[{head:'Создать и подключить'}];
   allTypeKeys().forEach(function(key){
     var info=typeInfo(key);
-    arr.push({dot:info.color,label:info.name+(TYPES[key]?'':' ·'),fn:function(){createConnected(fromId,key,null,pt,fromReply);}});
+    arr.push({dot:info.color,label:info.name+(TYPES[key]?'':' ·'),fn:function(){createConnected(fromId,key,null,pt,fromReply,fromOut);}});
   });
   var cands=[];
   allTypeKeys().forEach(function(key){
@@ -4234,7 +4685,7 @@ function connectMenuItems(fromId,pt,fromReply){
     arr.push({head:'Копия из раздела «На холсте»'});
     cands.forEach(function(n){
       var v=nodeVisual(n);
-      arr.push({dot:v.color,label:'«'+n.title+'»',fn:function(){createConnected(fromId,null,n.id,pt,fromReply);}});
+      arr.push({dot:v.color,label:'«'+n.title+'»',fn:function(){createConnected(fromId,null,n.id,pt,fromReply,fromOut);}});
     });
   }
   return arr;
@@ -4245,22 +4696,22 @@ function finishConnect(){
   if(connS.lk)lockGive(connS.lk);
   if(connS.prev&&connS.prev.parentNode)connS.prev.remove();
   if(connS.hl)connS.hl.classList.remove('drop-hover');
-  var from=connS.from,fromReply=connS.fromReply||null,to=connS.hl?connS.hl.dataset.id:null;
+  var from=connS.from,fromReply=connS.fromReply||null,fromOut=connS.fromOut||null,to=connS.hl?connS.hl.dataset.id:null;
   var pt=(connS.wx!=null)?{x:connS.wx,y:connS.wy}:null;
   var cx=connS.cx,cy=connS.cy;
   connS=null;
   if(to&&to!==from){
-    var dup=project.edges.some(function(x){return x.from===from&&x.to===to&&x.fromReply===fromReply;});
+    var dup=project.edges.some(function(x){return x.from===from&&x.to===to&&x.fromReply===fromReply&&(x.fromOut||null)===fromOut;});
     if(dup)toast('Такая связь уже есть','warn');
     else{
       var eid=uid();
-      mutate(function(){project.edges.push({id:eid,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply});},{edge:eid});
+      mutate(function(){project.edges.push({id:eid,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply,fromOut:fromOut});},{edge:eid});
       selectEdgeOnly(eid);
     }
     return;
   }
   if(from&&pt){
-    openCtxMenu(cx,cy,connectMenuItems(from,pt,fromReply));
+    openCtxMenu(cx,cy,connectMenuItems(from,pt,fromReply,fromOut));
   }
 }
 function finishConnectCancel(){
@@ -4332,6 +4783,8 @@ canvas.addEventListener('pointerdown',function(e){
     return;
   }
   if(e.button===0){
+    var outPin=target.closest?target.closest('.opin'):null;
+    if(outPin){startConnectOut(e,outPin);return;}
     var replyPort=target.closest?target.closest('.dlg-reply-pin.out'):null;
     if(replyPort){
       if(modK){startReplyOutDrag(e,replyPort);}else{startReplyConnect(e,replyPort);}
@@ -5278,7 +5731,7 @@ function clearDropVisuals(){
 }
 canvas.addEventListener('dragover',function(e){
   var ty=e.dataTransfer.types;
-  if(ty.indexOf('text/vetvi-type')<0&&ty.indexOf('text/vetvi-clone')<0)return;
+  if(ty.indexOf('text/vetvi-type')<0&&ty.indexOf('text/vetvi-clone')<0&&ty.indexOf('text/vetvi-var')<0)return;
   e.preventDefault();e.dataTransfer.dropEffect='copy';
   canvas.classList.add('dropready');
   document.body.classList.add('dropping');
@@ -5309,6 +5762,7 @@ function attachNewTo(target,typeKey,cloneId){
     var info=typeInfo(typeKey);
     n={id:uid(),type:typeKey,gid:null,x:nx,y:ny,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
     if(typeKey==='dialog')ensureDialog(n);
+    if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   }
   var tgtGroup=collapsedAncestorOf(target)?null:deepestGroupAt(target.x+NODE_W/2,target.y+40);
   n.gid=tgtGroup?tgtGroup.id:null;
@@ -5323,12 +5777,27 @@ function attachNewTo(target,typeKey,cloneId){
 canvas.addEventListener('drop',function(e){
   var t=e.dataTransfer.getData('text/vetvi-type');
   var cl=e.dataTransfer.getData('text/vetvi-clone');
-  if(!t&&!cl){clearDropVisuals();return;}
+  var vr=e.dataTransfer.getData('text/vetvi-var');
+  if(!t&&!cl&&!vr){clearDropVisuals();return;}
   e.preventDefault();
   var eid=dropEdgeId;
   var hoverNode=palHover;
   clearDropVisuals();
   var w=toWorld(e.clientX,e.clientY);
+  /* переменная, перетащенная из вкладки «Переменные» → нода переменной */
+  if(vr&&!t&&!cl){
+    var vv=varById(vr);
+    if(vv){
+      var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null,varMode:'set',varOp:'=',varVal:(varType(vv)==='bool')?true:0,vid:vv.id};
+      var tgV=deepestGroupAt(w.x,w.y);
+      vn.gid=tgV?tgV.id:null;
+      mutate(function(){project.nodes.push(vn);},{nodes:[vn.id]});
+      resolveOverlaps(new Set([vn.id]));
+      selectOnly(vn.id);
+      toast('Нода переменной «'+vv.name+'» создана. Режим «изменение» можно переключить на «чтение» в инспекторе.');
+    }
+    return;
+  }
   var edge=eid?edgeById(eid):null;
   if(edge){
 if(isBridge(edge)){toast('В мост нельзя вставить элемент','warn');return;}
@@ -5995,9 +6464,22 @@ function normalize(p){
 dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes:Array.isArray(n.notes)?n.notes.map(function(m){return{title:String(m.title||'').slice(0,80),html:String(m.html||''),hidden:!!m.hidden};}):[]};
     if(t==='branch'&&Array.isArray(n.setVars)){
       var sv=n.setVars.filter(function(o){return o&&typeof o.vid==='string';}).map(function(o){
-        return{vid:o.vid.slice(0,40),op:VARS_OPS[o.op]?o.op:'=',val:(typeof o.val==='number')?o.val:(typeof o.val==='string'?o.val.slice(0,40):0)};
+        return{vid:o.vid.slice(0,40),op:VARS_OPS[o.op]?o.op:'=',val:(o.val===true)?true:((typeof o.val==='number')?o.val:(typeof o.val==='string'?o.val.slice(0,200):0))};
       });
       if(sv.length)node.setVars=sv;
+    }
+    if(t==='branch'&&Array.isArray(n.outcomes)){
+      var oc=n.outcomes.filter(function(o){return o&&typeof o.id==='string';}).slice(0,24).map(function(o){
+        var c=(o.cond&&typeof o.cond.vid==='string'&&COND_OPS[o.cond.op])?{vid:o.cond.vid.slice(0,40),op:o.cond.op,val:(o.cond.val===true)?true:((typeof o.cond.val==='number')?o.cond.val:(typeof o.cond.val==='string'?o.cond.val.slice(0,200):0))}:null;
+        return{id:o.id.slice(0,40),label:String(o.label||'').slice(0,60),cond:c};
+      });
+      if(oc.length)node.outcomes=oc;
+    }
+    if(t==='varnode'){
+      node.varMode=(n.varMode==='get')?'get':'set';
+      node.varOp=VARS_OPS[n.varOp]?n.varOp:'=';
+      node.varVal=(n.varVal===true)?true:((typeof n.varVal==='number')?n.varVal:(typeof n.varVal==='string'?n.varVal.slice(0,200):0));
+      if(typeof n.vid==='string'&&n.vid)node.vid=n.vid.slice(0,40);
     }
     if(Array.isArray(n.participants))node.participants=n.participants.filter(function(p){return typeof p==='string';});
     if(t==='dialog'){
@@ -6015,21 +6497,33 @@ dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes
   }).map(function(e){
 var kk=KINDS[e.kind]?e.kind:'flow';
 if(e.bridge)kk='bridge';
-var econd=(e.cond&&typeof e.cond.vid==='string'&&COND_OPS[e.cond.op])?{vid:e.cond.vid.slice(0,40),op:e.cond.op,val:(typeof e.cond.val==='number')?e.cond.val:(typeof e.cond.val==='string'?e.cond.val.slice(0,40):0)}:null;
+var econd=(e.cond&&typeof e.cond.vid==='string'&&COND_OPS[e.cond.op])?{vid:e.cond.vid.slice(0,40),op:e.cond.op,val:(e.cond.val===true)?true:((typeof e.cond.val==='number')?e.cond.val:(typeof e.cond.val==='string'?e.cond.val.slice(0,200):0))}:null;
 return{id:e.id||uid(),from:e.from,to:e.to,label:e.label||'',kind:kk,
 pts:Array.isArray(e.pts)?e.pts.filter(function(pt){return pt&&isFinite(pt.x)&&isFinite(pt.y);}).map(function(pt){return{x:+pt.x,y:+pt.y};}):[],
 lt:(typeof e.lt==='number')?clamp(e.lt,0.04,0.96):0.5,
 lp:(typeof e.lp==='number')?clamp(e.lp,-44,44):0,
 fromReply:(typeof e.fromReply==='string'&&e.fromReply)?e.fromReply:null,
+fromOut:(typeof e.fromOut==='string'&&e.fromOut)?e.fromOut:null,
 bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0},cond:econd};
 });
+  /* исход, к которому привязана стрелка, должен существовать на развилке */
+  var outIds={};
+  p.nodes.forEach(function(nn){
+    if(nn.type==='branch'&&Array.isArray(nn.outcomes)){
+      var s={};nn.outcomes.forEach(function(o){s[o.id]=true;});outIds[nn.id]=s;
+    }
+  });
+  p.edges.forEach(function(e){
+    if(e.fromOut&&(!outIds[e.from]||!outIds[e.from][e.fromOut]))e.fromOut=null;
+  });
   p.groups=p.groups.filter(function(g){
     return p.nodes.some(function(n){return n.gid===g.id;});
   });
   p.listHidden=Array.isArray(p.listHidden)?p.listHidden:(Array.isArray(p.hiddenTypes)?p.hiddenTypes:[]);
   p.listHidden=p.listHidden.filter(function(k){return TYPES[k]||cmap[k];});
   p.vars=Array.isArray(p.vars)?p.vars.filter(function(v){return v&&typeof v.id==='string'&&typeof v.name==='string';}).map(function(v){
-    return{id:v.id.slice(0,40),name:String(v.name).slice(0,40),val:(typeof v.val==='number')?v.val:(typeof v.val==='string'?v.val.slice(0,40):0)};
+    var type=VAR_TYPES[v.type]?v.type:((typeof v.val==='number')?'num':'str');
+    return{id:v.id.slice(0,40),name:String(v.name).slice(0,40),type:type,val:varCastVal(type,v.val)};
   }):[];
   return p;
 }
@@ -6241,8 +6735,8 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; развилки меняют переменные и открывают/закрывают пути</div>'+
-      '<div>вкладка «Переменные»</div><div>создавайте переменные, привязывайте их изменение к развилкам, задавайте условия на стрелках от развилки</div>'+
+      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
+      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (число / текст / флаг); перетащите строку на холст — получится нода чтения или изменения переменной; у развилки добавляйте исходы и привязывайте к ним переменную — исход откроется при совпадении значения</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -7606,18 +8100,39 @@ function plRenderVars(){
   el.style.display='';
   el.innerHTML=l.map(function(v){
     var cur=(PL.vars&&(PL.vars[v.id]!==undefined&&PL.vars[v.id]!==null))?PL.vars[v.id]:v.val;
-    return '<span class="pl-var"><i>'+esc(v.name)+'</i><b>'+esc(String(cur))+'</b></span>';
+    return '<span class="pl-var"><i>'+esc(v.name)+'</i><b>'+esc(varValText(cur,v))+'</b></span>';
   }).join('');
 }
-/* варианты перехода от развилки: условия на стрелках учитываются */
+/* варианты перехода от развилки: исходы с условиями (пины на узле) и условия на стрелках (старое поведение) */
 function plBranchChoices(n){
+  ensureBranch(n);
+  var outs=n.outcomes||[];
   var nx=plNodeEdgeList(n);
-  var hasCond=nx.some(function(e){return e.cond;});
-  if(!hasCond)return null; /* условий нет — обычное поведение */
-  return nx.map(function(e){
-    var ok=condMet(e.cond,PL.vars);
-    return{label:plEdgeLabel(e),ok:ok,why:(e.cond&&!ok)?('нужно: '+condText(e.cond)):null,fn:function(){plFollowEdge(e);}};
+  var gen=nx.filter(function(e){return !e.fromOut;});
+  var hasCond=nx.some(function(e){return e.cond;})||outs.some(function(o){return o.cond;});
+  if(!outs.length){
+    if(!hasCond)return null;
+    return nx.map(function(e){
+      var ok=condMet(e.cond,PL.vars);
+      return{label:plEdgeLabel(e),ok:ok,why:(e.cond&&!ok)?('нужно: '+condText(e.cond)):null,fn:function(){plFollowEdge(e);}};
+    });
+  }
+  if(outs.length===1&&!outs[0].cond&&!hasCond)return null; /* один выход без условия — авто-переход */
+  var items=[];
+  outs.forEach(function(o,i){
+    var ed=null;
+    for(var k=0;k<nx.length;k++){if(nx[k].fromOut===o.id){ed=nx[k];break;}}
+    var ok=(!o.cond||condMet(o.cond,PL.vars))&&!!ed;
+    var why=null;
+    if(o.cond&&!condMet(o.cond,PL.vars))why='нужно: '+condText(o.cond);
+    else if(!ed)why='исход не подключён стрелкой';
+    items.push({label:o.label||('Исход '+(i+1)),ok:ok,why:why,fn:function(){if(ed)plFollowEdge(ed);}});
   });
+  gen.forEach(function(e){
+    var ok=!e.cond||condMet(e.cond,PL.vars);
+    items.push({label:plEdgeLabel(e),ok:ok,why:(e.cond&&!ok)?('нужно: '+condText(e.cond)):null,fn:function(){plFollowEdge(e);}});
+  });
+  return items;
 }
 function plRenderBranchChoices(items){
   var c=$('#plChoices');
@@ -7687,15 +8202,36 @@ function plShowSlide(opts){
 function plGoNode(n,keepPath){
   PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
   if(!keepPath)plTrackPath(n.id);
-  /* развилка меняет переменные при входе игрока (при «Назад» значения восстанавливаются из истории) */
-  if(n.type==='branch'&&n.setVars&&n.setVars.length&&PL.vars&&!keepPath){
-    var msgs=[];
-    n.setVars.forEach(function(o){
-      if(!varById(o.vid))return;
-      PL.vars[o.vid]=varApplyOp(o.op,PL.vars[o.vid],o.val);
-      msgs.push(opText(o));
-    });
-    if(msgs.length){plRenderVars();plVarFlash(msgs.join(' · '));}
+  if(PL.vars&&!keepPath){
+    /* развилка меняет переменные при входе игрока (при «Назад» значения восстанавливаются из истории) */
+    if(n.type==='branch'&&n.setVars&&n.setVars.length){
+      var msgs=[];
+      n.setVars.forEach(function(o){
+        var v0=varById(o.vid);if(!v0)return;
+        PL.vars[o.vid]=varApplyOp(o.op,PL.vars[o.vid],o.val,varType(v0));
+        msgs.push(opText(o));
+      });
+      if(msgs.length){plRenderVars();plVarFlash(msgs.join(' · '));}
+    }
+    /* нода переменной в режиме «изменение» */
+    if(n.type==='varnode'){
+      var vnS=n.vid?varById(n.vid):null;
+      if(vnS&&n.varMode==='set'){
+        var after=varApplyOp(n.varOp,PL.vars[vnS.id],n.varVal,varType(vnS));
+        PL.vars[vnS.id]=after;
+        plRenderVars();
+        plVarFlash(varName(vnS.id)+' '+opSym(n.varOp)+' '+varValText(n.varVal,vnS)+'  →  '+varValText(after,vnS));
+      }
+    }
+  }
+  if(n.type==='varnode'){
+    var vn=n.vid?varById(n.vid):null;
+    var txt;
+    if(!vn)txt='Переменная не привязана — выберите её в инспекторе.';
+    else if(n.varMode==='get')txt=vn.name+' = '+varValText((PL.vars&&PL.vars[vn.id]!=null)?PL.vars[vn.id]:vn.val,vn);
+    else txt=opText({vid:vn.id,op:n.varOp,val:n.varVal});
+    plShowSlide({name:null,color:nodeVisual(n).color,text:txt,chapter:n});
+    return;
   }
   if(n.type==='dialog'){
     ensureDialog(n);
@@ -7706,7 +8242,9 @@ function plGoNode(n,keepPath){
       plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});
       return;
     }
-    if(rs.length){plShowReply(rs[0]);return;}
+    /* без описания — сразу список выбора реплик */
+    if(rs.length>1){plShowDialogChoices(n,rs);return;}
+    if(rs.length===1){plShowReply(rs[0]);return;}
     plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
     return;
   }
@@ -7741,6 +8279,14 @@ function plShowEnd(){
   var sub=document.querySelector('#plEnd .pl-sub');
   if(sub)sub.textContent=(PL.mode==='list')?'выделенный фрагмент проигран':'эта ветка истории завершена';
   $('#plEnd').classList.add('show');
+}
+/* диалог: список корневых реплик — игрок выбирает одну из них */
+function plShowDialogChoices(n,rs){
+  var items=rs.map(function(r){
+    var nm=r.speaker?charName(r.speaker):null;
+    return{label:(nm?nm+': ':'')+(r.text||'…'),fn:function(){plShowReply(r);}};
+  });
+  plRenderChoices(items);
 }
 function plHideEnd(){
   $('#plEnd').classList.remove('show');
@@ -7806,10 +8352,11 @@ function plAdvance(){
   var n=nodeById(PL.nodeId);
   if(!n){plShowEnd();return;}
   if(PL.intro){
-    plPushHist();
     PL.intro=false;
     var rs=(n.dialog&&n.dialog.replies)||[];
-    if(rs.length){plShowReply(rs[0]);return;}
+    if(rs.length===1){plPushHist();plShowReply(rs[0]);return;}
+    if(rs.length>1){plShowDialogChoices(n,rs);return;} /* выбор реплики — ветка выбора */
+    plPushHist();
     plAfterNodeFinal(n);
     return;
   }
