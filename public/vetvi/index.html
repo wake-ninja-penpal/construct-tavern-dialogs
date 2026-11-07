@@ -271,6 +271,34 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .n-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
 .node.ex-0 .n-tags{margin-top:1px;margin-bottom:1px}
 .n-tags span{font:600 9.5px var(--mono);letter-spacing:.4px;color:var(--tx3);background:#232730;border:1px solid #303540;border-radius:6px;padding:2px 7px}
+/* ── переменные ── */
+#paneVars{padding:12px}
+.v-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.v-head span{font:600 12.5px var(--body);color:var(--tx2);letter-spacing:.3px}
+.v-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.v-row .v-name{flex:1.2;min-width:0}
+.v-row .v-var{flex:1.2;min-width:0}
+.v-row .v-op{flex:0 0 46px;padding:0 4px}
+.v-row .v-val{flex:.7;min-width:46px}
+.v-del{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.v-del:hover{color:#cf6d4f;border-color:#5a3a33;background:#33272a}
+.v-hint{margin-top:12px;font-size:11.5px;line-height:1.65;color:var(--tx3);background:rgba(255,255,255,.025);border:1px dashed #2e333c;border-radius:10px;padding:10px 12px}
+.v-hint b{color:var(--tx2)}
+.v-empty{font-size:11.5px;color:var(--tx3);padding:4px 0}
+.n-vars{display:none;flex-wrap:wrap;gap:4px;margin-top:7px}
+.node.ex-0 .n-vars{margin-top:2px}
+.n-vars span{font:600 9.5px var(--mono);letter-spacing:.4px;color:#e8dfa8;background:rgba(214,201,106,.13);border:1px solid rgba(214,201,106,.42);border-radius:6px;padding:2px 7px;white-space:nowrap}
+#edges .ecnd{font:600 9.5px var(--mono);fill:#d6c96a;paint-order:stroke;stroke:#14171b;stroke-width:3px;pointer-events:none}
+/* ── переменные в режиме новеллы ── */
+.pl-vars{display:none;flex-direction:column;gap:6px;position:absolute;top:56px;left:16px;z-index:5}
+.pl-var{display:flex;align-items:center;gap:9px;background:rgba(18,21,26,.85);border:1px solid #343b47;border-radius:9px;padding:5px 11px;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
+.pl-var i{font:500 11px var(--body);color:var(--tx3);font-style:normal;white-space:nowrap}
+.pl-var b{font:600 12.5px var(--mono);color:#e2a54e}
+.pl-varflash{position:absolute;left:50%;top:15%;transform:translateX(-50%) translateY(-8px);background:rgba(20,23,29,.94);border:1px solid #d6c96a;color:#e8dfa8;font:600 13px var(--body);border-radius:10px;padding:9px 16px;opacity:0;pointer-events:none;transition:all .32s;z-index:9;max-width:80vw;text-align:center}
+.pl-varflash.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.pl-choice.lock{opacity:.42;cursor:not-allowed}
+.pl-choice.lock:hover{transform:none;box-shadow:none;background:rgba(20,23,29,.92)}
+.pl-choice .why{display:block;font:500 11px var(--body);color:#d0714e;margin-top:3px;font-style:normal}
 .n-cast{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:7px}
 .n-cast:empty{display:none}
 .node.ex-0 .n-cast{margin-bottom:2px}
@@ -643,6 +671,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     <nav class="ltabs">
       <button class="ltab active" data-t="pal">Элементы</button>
       <button class="ltab" data-t="list">Обзор</button>
+      <button class="ltab" data-t="vars">Переменные</button>
       <button class="add-type" id="bAddType" title="Создать свой тип элемента">+</button>
     </nav>
     <div class="tabpane active" id="panePal"><div id="palList"></div></div>
@@ -650,6 +679,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sQ" placeholder="Поиск по узлам и группам…"></div>
       <div id="nodeList"></div>
     </div>
+    <div class="tabpane" id="paneVars"></div>
   </aside>
   <section id="stage">
     <div id="canvas">
@@ -690,6 +720,8 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
   </div>
   <div class="pl-chapter" id="plChapter"></div>
+  <div class="pl-vars" id="plVars"></div>
+  <div class="pl-varflash" id="plVarFlash"></div>
   <div class="pl-body">
     <div class="pl-wrap">
       <div class="pl-choices" id="plChoices"></div>
@@ -895,7 +927,7 @@ var KINDS_RU={flow:'обычная',choice:'выбор',cond:'условие',br
 var FOLD_NAMES=['Компакт','Список','Развёрнута'];
 var PALETTE_COLORS=['#e2a54e','#e0b46b','#d0714e','#cf6b5a','#c9857a','#d6c96a','#b7b26a','#9cb878','#7fb5a2','#cbbd92','#aab1bb','#8b929c'];
 /* ═══ состояние ═══ */
-var project={meta:{name:'Без названия',created:'',modified:''},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
+var project={meta:{name:'Без названия',created:'',modified:''},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[]};
 var vp={x:80,y:80,z:1};
 var sel=new Set(), selGroups=new Set(), selEdges=new Set(), selEdge=null, selGroup=null;
 var history=[], future=[], preSnap=null;
@@ -984,8 +1016,45 @@ function charColor(id){
   if(!c)return '#8b929c';
   return c.color?nodePaint(c):nodeVisual(c).color;
 }
+/* ═══ переменные ═══ */
+var VARS_OPS={'=':'=','+':'+','-':'−'};
+var COND_OPS={'==':'=','!=':'≠','>':'>','<':'<','>=':'≥','<=':'≤'};
+function varsList(){if(!Array.isArray(project.vars))project.vars=[];return project.vars;}
+function varById(id){var l=varsList();for(var i=0;i<l.length;i++)if(l[i].id===id)return l[i];return null;}
+function varName(id){var v=varById(id);return v?v.name:'?';}
+function varNum(x){var n=(typeof x==='number')?x:parseFloat(x);return isFinite(n)?n:0;}
+function vldVal(s){var t=String(s==null?'':s).trim();if(t==='')return 0;var n=parseFloat(t);return(isFinite(n)&&/^[-+]?[0-9]*\.?[0-9]+$/.test(t))?n:t.slice(0,40);}
+function varApplyOp(op,cur,val){
+  if(op==='=')return val;
+  var a=varNum(cur),b=varNum(val);
+  if(op==='+')return a+b;
+  if(op==='-')return a-b;
+  return cur;
+}
+function opText(o){
+  if(!o)return '';
+  var sop=(o.op==='+')?'+':((o.op==='-')?'−':'=');
+  return varName(o.vid)+' '+sop+' '+o.val;
+}
+function condText(c){
+  if(!c)return '';
+  return varName(c.vid)+' '+(COND_OPS[c.op]||c.op)+' '+c.val;
+}
+function condMet(c,vals){
+  if(!c)return true;
+  var v=varById(c.vid);if(!v)return true;
+  var cur=(vals&&vals[c.vid]!==undefined&&vals[c.vid]!==null)?vals[c.vid]:v.val;
+  if(c.op==='==')return String(cur)===String(c.val);
+  if(c.op==='!=')return String(cur)!==String(c.val);
+  var a=varNum(cur),b=varNum(c.val);
+  if(c.op==='>')return a>b;
+  if(c.op==='<')return a<b;
+  if(c.op==='>=')return a>=b;
+  if(c.op==='<=')return a<=b;
+  return true;
+}
 /* ═══ история ═══ */
-function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups});}
+function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,vars:varsList()});}
 function pushHistory(s){history.push(s);if(history.length>150)history.shift();future.length=0;updateHistUI();}
 function updateHistUI(){
   $('#bUndo').classList.toggle('disabled',history.length===0);
@@ -996,6 +1065,7 @@ function applySnap(s){
   project.nodes=d.nodes; project.edges=d.edges;
   project.customTypes=Array.isArray(d.customTypes)?d.customTypes:[];
   project.groups=Array.isArray(d.groups)?d.groups:[];
+  project.vars=Array.isArray(d.vars)?d.vars:[];
   var ids=new Set(project.nodes.map(function(n){return n.id;}));
   var ns=new Set(); sel.forEach(function(id){if(ids.has(id))ns.add(id);}); sel=ns;
   var eids=new Set(project.edges.map(function(e){return e.id;}));
@@ -1422,6 +1492,7 @@ function renderAll(opts){
   renderEdges(spawnEdge);
   refreshGroupFrames();
   renderPalette(); renderList(); renderInspector(); updateStatus();
+  if($('#paneVars')&&$('#paneVars').classList.contains('active'))renderVarsPane();
   $('#emptyHint').classList.toggle('show',project.nodes.length===0);
   syncSel();
   updateGroupBadges();
@@ -1667,11 +1738,15 @@ function renderWorld(spawn,spawnEdge){
         '<span class="n-st st-'+n.status+'" title="'+STATUS[n.status]+'"></span>'+
         '<button class="n-fold" title="'+FOLD_TITLES[ex]+'">'+ic(FOLD_ICONS[ex],12)+'</button>'+
       '</div>'+
-      '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-tags"></div></div>'+
+      '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-vars"></div><div class="n-tags"></div></div>'+
       '<i class="port pin" title="вход — потяните, чтобы перенести входящие стрелки"></i>'+
       '<i class="port pin" title="вход — потяните (можно с Ctrl), чтобы отсоединить и перенести входящие стрелки"></i>'+
 '<i class="port pout" title="'+(n.type==='dialog'?'выход диалога (правая грань, внизу) · Ctrl+тянуть — перенести исходящие':'выход — тяните к другому узлу · Ctrl+тянуть — отсоединить и перенести исходящие стрелки')+'"></i>';
     el.querySelector('.n-title').textContent=n.title;
+    if(n.type==='branch'&&n.setVars&&n.setVars.length){
+      var vw=el.querySelector('.n-vars');
+      if(vw){vw.innerHTML=n.setVars.map(function(o){return '<span>'+esc(opText(o))+'</span>';}).join('');vw.style.display='';}
+    }
     if(n.type==='dialog'){
       var cntEl=el.querySelector('.n-reply-cnt');
       if(cntEl)cntEl.textContent=countReplies(n.dialog.replies)+' репл.';
@@ -1719,11 +1794,12 @@ g.setAttribute('class','edge kind-'+(e.kind||'flow')+(isBridge(e)?' bridge':'')+
     if(e.id===spawnEdge)line.setAttribute('pathLength','1');
     var labelHit=svgEl('text');labelHit.setAttribute('class','elabel-hit');
     var label=svgEl('text');label.setAttribute('class','elabel');
+    var cnd=svgEl('text');cnd.setAttribute('class','ecnd');
     var epFrom=svgEl('circle');epFrom.setAttribute('class','ep-h');epFrom.setAttribute('r','6');epFrom.dataset.ep='from';
     var epTo=svgEl('circle');epTo.setAttribute('class','ep-h');epTo.setAttribute('r','6');epTo.dataset.ep='to';
-    g.appendChild(hit);g.appendChild(line);g.appendChild(epFrom);g.appendChild(epTo);g.appendChild(labelHit);g.appendChild(label);
+    g.appendChild(hit);g.appendChild(line);g.appendChild(epFrom);g.appendChild(epTo);g.appendChild(labelHit);g.appendChild(label);g.appendChild(cnd);
     edgesSvg.appendChild(g);
-    edgeEls.set(e.id,{g:g,line:line,hit:hit,label:label,labelHit:labelHit,wps:[],epFrom:epFrom,epTo:epTo});
+    edgeEls.set(e.id,{g:g,line:line,hit:hit,label:label,labelHit:labelHit,wps:[],epFrom:epFrom,epTo:epTo,cnd:cnd});
     g.addEventListener('mouseenter',function(){setRowSrcHl(e,true);});
     g.addEventListener('mouseleave',function(){setRowSrcHl(e,false);});
     updateEdgeGeom(e);
@@ -2127,6 +2203,14 @@ var pts=isBridge(e)?[]:(g.pts||[]);
   r.labelHit.setAttribute('y',lp.y-6);
   r.labelHit.textContent=e.label||'';
   r.labelHit.style.display=e.label?'':'none';
+  var fnA=nodeById(e.from);
+  var ct=(e.cond&&fnA&&fnA.type==='branch')?('⟦ '+condText(e.cond)+' ⟧'):'';
+  if(r.cnd){
+    r.cnd.setAttribute('x',lp.x);
+    r.cnd.setAttribute('y',e.label?(lp.y+13):(lp.y-6));
+    r.cnd.textContent=ct;
+    r.cnd.style.display=ct?'':'none';
+  }
   setRowSrcSel(e);
 }
 function updateEdgesFor(id){
@@ -2385,6 +2469,7 @@ function renderInspEdge(){
     '<label class="i-lab">Подпись</label>'+
     '<input class="inp" id="iLbl" value="'+esc(e.label)+'" placeholder="например: условие выполнено">'+
     '<label class="i-lab">Тип связи</label><div class="seg" id="iKind">'+segHtml+'</div>'+
+    (A&&A.type==='branch'?inspCondHtml(e):'')+
     '<div class="i-meta">из: «'+esc(A?A.title:'?')+'»'+fromReplyInfo+'<br>в: «'+esc(B?B.title:'?')+'»<br>ID: '+e.id+'</div>'+extra+
     '<div class="i-actions">'+
       '<button class="btn" id="iSwap">'+ic('swap')+'Развернуть</button>'+
@@ -2412,10 +2497,11 @@ $all('#iKind button').forEach(function(x){x.classList.toggle('on',x===b);});
 };
 });
   $('#iSwap').onclick=function(){
-    discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;});
+    discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;e.cond=null;});
     updateEdgeGeom(e); renderInspector();
   };
   $('#iDelE').onclick=removeSelected;
+  if(A&&A.type==='branch')bindInspCond(e);
 }
 function toggleAuto(g){
   discrete(function(){
@@ -2916,7 +3002,7 @@ function renderInspNode(){
     '<label class="i-lab">Описание</label>'+
     '<textarea class="inp" id="iText" placeholder="Что здесь происходит?">'+esc(n.text)+'</textarea>'+
     '<label class="i-lab">Теги, через запятую</label>'+
-    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?inspOpsHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
     '<div class="i-actions">'+
       '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
       '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -2952,6 +3038,7 @@ function renderInspNode(){
   });
   tags.addEventListener('blur',editEnd);
   if(n.type!=='char')bindInspParts(n);
+  if(n.type==='branch')bindInspOps(n);
   $all('#inSw .swatch').forEach(function(s){
     s.onclick=function(){
       var v=s.dataset.nc||null;
@@ -3029,6 +3116,150 @@ function renderInspEmpty(){
       '<div class="ovgrid">'+cells+'</div>'+
       '<div class="ovmeta">создан: '+fmtD(project.meta.created)+'<br>изменён: '+fmtD(project.meta.modified)+'<br>своих типов: '+project.customTypes.length+' · групп: '+project.groups.length+'</div>'+
     '</div>';
+}
+/* ═══ переменные: вкладка слева ═══ */
+function refreshNodeVarsChip(n){
+  var el=nodeEls.get(n.id);if(!el)return;
+  var w=el.querySelector('.n-vars');if(!w)return;
+  var ops=(n.type==='branch'&&n.setVars)||[];
+  w.innerHTML=ops.map(function(o){return '<span>'+esc(opText(o))+'</span>';}).join('');
+  w.style.display=ops.length?'':'none';
+}
+function refreshAllBranchChips(){
+  project.nodes.forEach(function(n){if(n.type==='branch')refreshNodeVarsChip(n);});
+  project.edges.forEach(function(e){if(e.cond)updateEdgeGeom(e);});
+}
+function renderVarsPane(){
+  var pane=$('#paneVars');if(!pane)return;
+  var l=varsList();
+  var html='<div class="v-head"><span>Переменные сюжета</span><button class="btn primary" id="vAdd" title="Создать переменную">+ Переменная</button></div>';
+  if(!l.length){
+    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число или слово, которое меняется по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. Выберите на холсте блок <b>«Развилка»</b> — справа в инспекторе привяжите к ней изменение переменной.<br>3. У стрелок, выходящих из развилки, можно задать <b>условие</b> — тогда в режиме новеллы игрок увидит, куда можно идти.</div>';
+  }
+  html+='<div id="vRows">';
+  l.forEach(function(v){
+    html+='<div class="v-row" data-vid="'+esc(v.id)+'">'+
+      '<input class="inp v-name" value="'+esc(v.name)+'" maxlength="40" title="Название переменной" placeholder="название">'+
+      '<input class="inp v-val" value="'+esc(String(v.val))+'" title="Начальное значение" placeholder="0">'+
+      '<button class="v-del" title="Удалить переменную">'+ic('x',12)+'</button>'+
+    '</div>';
+  });
+  html+='</div>';
+  if(l.length)html+='<div class="v-hint">Начальное значение — с ним игрок стартует режим новеллы. Привязывайте изменение переменной к <b>развилке</b> (инспектор справа), а <b>условия</b> — к стрелкам от неё.</div>';
+  pane.innerHTML=html;
+  var add=$('#vAdd');
+  if(add)add.onclick=function(){
+    var id='v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+    discrete(function(){varsList().push({id:id,name:'переменная',val:0});});
+    renderVarsPane();renderInspector();refreshAllBranchChips();
+    var rows=$all('#paneVars .v-row');var last=rows[rows.length-1];
+    if(last){var nm=last.querySelector('.v-name');nm.focus();nm.select();}
+  };
+  bindVarsRows();
+}
+function bindVarsRows(){
+  $all('#paneVars .v-row').forEach(function(row){
+    var vid=row.dataset.vid,v=varById(vid);if(!v)return;
+    var nm=row.querySelector('.v-name'),vl=row.querySelector('.v-val');
+    nm.addEventListener('focus',editStart);
+    nm.addEventListener('input',function(){v.name=nm.value;markDirty();refreshAllBranchChips();});
+    nm.addEventListener('change',editEnd);nm.addEventListener('blur',editEnd);
+    vl.addEventListener('focus',editStart);
+    vl.addEventListener('input',function(){v.val=vldVal(vl.value);markDirty();});
+    vl.addEventListener('change',editEnd);vl.addEventListener('blur',editEnd);
+    row.querySelector('.v-del').onclick=function(){
+      discrete(function(){
+        var l=varsList(),i=-1;
+        for(var k=0;k<l.length;k++)if(l[k].id===vid){i=k;break;}
+        if(i>=0)l.splice(i,1);
+        project.nodes.forEach(function(n){if(n.setVars)n.setVars=n.setVars.filter(function(o){return o.vid!==vid;});});
+        project.edges.forEach(function(e){if(e.cond&&e.cond.vid===vid)e.cond=null;});
+      });
+      renderVarsPane();renderInspector();renderAll();
+      toast('Переменная удалена (привязки очищены)','warn');
+    };
+  });
+}
+/* ═══ переменные: инспектор развилки ═══ */
+function inspOpsHtml(n){
+  var h='<label class="i-lab">Переменные (изменяются при прохождении развилки)</label>';
+  h+='<div id="iOps">'+opsRowHtml(n)+'</div>';
+  h+='<div style="margin:6px 0 10px"><button class="btn" id="iOpAdd" style="width:100%">'+ic('plus',14)+'Привязать переменную</button></div>';
+  return h;
+}
+function opsRowHtml(n){
+  var l=varsList();
+  if(!l.length)return '<div class="v-empty">Сначала создайте переменные — вкладка «Переменные» слева.</div>';
+  var ops=n.setVars||[];
+  return ops.map(function(o,i){
+    var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===o.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
+    var oops=Object.keys(VARS_OPS).map(function(k){return '<option value="'+k+'"'+(k===o.op?' selected':'')+'>'+VARS_OPS[k]+'</option>';}).join('');
+    return '<div class="v-row op" data-i="'+i+'">'+
+      '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
+      '<select class="inp v-op" title="Операция">'+oops+'</select>'+
+      '<input class="inp v-val" value="'+esc(String(o.val))+'" title="На сколько изменить">'+
+      '<button class="v-del" title="Убрать привязку">'+ic('x',12)+'</button>'+
+    '</div>';
+  }).join('');
+}
+function bindInspOps(n){
+  var box=$('#iOps');
+  $all('#iOps .v-row').forEach(function(row){
+    var i=+row.dataset.i,o=(n.setVars||[])[i];if(!o)return;
+    row.querySelector('.v-var').onchange=function(ev){discrete(function(){o.vid=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
+    row.querySelector('.v-op').onchange=function(ev){discrete(function(){o.op=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
+    var vi=row.querySelector('.v-val');
+    vi.addEventListener('focus',editStart);
+    vi.addEventListener('input',function(){o.val=vldVal(vi.value);markDirty();refreshNodeVarsChip(n);});
+    vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+    row.querySelector('.v-del').onclick=function(){
+      discrete(function(){n.setVars.splice(i,1);if(!n.setVars.length)delete n.setVars;});
+      renderInspector();refreshNodeVarsChip(n);
+    };
+  });
+  var add=$('#iOpAdd');
+  if(add)add.onclick=function(){
+    var l=varsList();if(!l.length){toast('Сначала создайте переменные — вкладка «Переменные» слева','warn');return;}
+    discrete(function(){if(!n.setVars)n.setVars=[];n.setVars.push({vid:l[0].id,op:'=',val:0});});
+    renderInspector();refreshNodeVarsChip(n);
+  };
+}
+/* ═══ переменные: условие на стрелке от развилки ═══ */
+function inspCondHtml(e){
+  var l=varsList(),on=!!e.cond;
+  var h='<label class="i-lab">Условие перехода (развилка)</label>';
+  h+='<div class="seg" id="iCondTog"><button data-s="off" class="'+(on?'':'on')+'">Без условия</button><button data-s="on" class="'+(on?'on':'')+'">По переменной</button></div>';
+  if(on&&l.length){
+    var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===e.cond.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
+    var cops=Object.keys(COND_OPS).map(function(k){return '<option value="'+k+'"'+(k===e.cond.op?' selected':'')+'>'+COND_OPS[k]+'</option>';}).join('');
+    h+='<div class="v-row op" id="iCondRow" style="margin-top:6px">'+
+      '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
+      '<select class="inp v-op" title="Сравнение">'+cops+'</select>'+
+      '<input class="inp v-val" value="'+esc(String(e.cond.val))+'" title="Значение">'+
+    '</div>';
+  }else if(on&&!l.length){
+    h+='<div class="v-empty">Нет переменных — создайте на вкладке «Переменные» слева.</div>';
+  }
+  return h;
+}
+function bindInspCond(e){
+  var tog=$('#iCondTog');if(!tog)return;
+  $all('#iCondTog button').forEach(function(b){
+    b.onclick=function(){
+      var on=b.dataset.s==='on';
+      discrete(function(){e.cond=on?{vid:(varsList()[0]||{}).id||'',op:'==',val:0}:null;});
+      updateEdgeGeom(e);renderInspector();
+    };
+  });
+  var row=$('#iCondRow');
+  if(row){
+    row.querySelector('.v-var').onchange=function(ev){discrete(function(){e.cond.vid=ev.target.value;});updateEdgeGeom(e);renderInspector();};
+    row.querySelector('.v-op').onchange=function(ev){discrete(function(){e.cond.op=ev.target.value;});updateEdgeGeom(e);renderInspector();};
+    var vi=row.querySelector('.v-val');
+    vi.addEventListener('focus',editStart);
+    vi.addEventListener('input',function(){e.cond.val=vldVal(vi.value);markDirty();updateEdgeGeom(e);});
+    vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+  }
 }
 /* ═══ заметки элементов ═══ */
 var NOTE_MAX=3;
@@ -5546,7 +5777,7 @@ function deleteCustomType(id){
 /* ═══ файлы ═══ */
 function exportJSON(){
   project.meta.modified=new Date().toISOString();
-return JSON.stringify({app:'vetvi',version:18,bend:bendMode,meta:project.meta,viewport:vp,nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,listHidden:project.listHidden},null,2);}
+return JSON.stringify({app:'vetvi',version:18,bend:bendMode,meta:project.meta,viewport:vp,nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,listHidden:project.listHidden,vars:varsList()},null,2);}
 function slug(s){
   var r=(s||'proekt').toLowerCase().replace(/[^a-zа-яё0-9]+/gi,'-').replace(/^-+|-+$/g,'');
   return r.slice(0,60)||'proekt';
@@ -5762,6 +5993,12 @@ function normalize(p){
       color:(typeof n.color==='string'&&/^#([0-9a-f]{6})$/i.test(n.color))?n.color:null,
       tint:(typeof n.tint==='number')?clamp(n.tint,-60,60):0,
 dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes:Array.isArray(n.notes)?n.notes.map(function(m){return{title:String(m.title||'').slice(0,80),html:String(m.html||''),hidden:!!m.hidden};}):[]};
+    if(t==='branch'&&Array.isArray(n.setVars)){
+      var sv=n.setVars.filter(function(o){return o&&typeof o.vid==='string';}).map(function(o){
+        return{vid:o.vid.slice(0,40),op:VARS_OPS[o.op]?o.op:'=',val:(typeof o.val==='number')?o.val:(typeof o.val==='string'?o.val.slice(0,40):0)};
+      });
+      if(sv.length)node.setVars=sv;
+    }
     if(Array.isArray(n.participants))node.participants=n.participants.filter(function(p){return typeof p==='string';});
     if(t==='dialog'){
       node.dialog={
@@ -5778,24 +6015,28 @@ dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes
   }).map(function(e){
 var kk=KINDS[e.kind]?e.kind:'flow';
 if(e.bridge)kk='bridge';
+var econd=(e.cond&&typeof e.cond.vid==='string'&&COND_OPS[e.cond.op])?{vid:e.cond.vid.slice(0,40),op:e.cond.op,val:(typeof e.cond.val==='number')?e.cond.val:(typeof e.cond.val==='string'?e.cond.val.slice(0,40):0)}:null;
 return{id:e.id||uid(),from:e.from,to:e.to,label:e.label||'',kind:kk,
 pts:Array.isArray(e.pts)?e.pts.filter(function(pt){return pt&&isFinite(pt.x)&&isFinite(pt.y);}).map(function(pt){return{x:+pt.x,y:+pt.y};}):[],
 lt:(typeof e.lt==='number')?clamp(e.lt,0.04,0.96):0.5,
 lp:(typeof e.lp==='number')?clamp(e.lp,-44,44):0,
 fromReply:(typeof e.fromReply==='string'&&e.fromReply)?e.fromReply:null,
-bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0}};
+bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0},cond:econd};
 });
   p.groups=p.groups.filter(function(g){
     return p.nodes.some(function(n){return n.gid===g.id;});
   });
   p.listHidden=Array.isArray(p.listHidden)?p.listHidden:(Array.isArray(p.hiddenTypes)?p.hiddenTypes:[]);
   p.listHidden=p.listHidden.filter(function(k){return TYPES[k]||cmap[k];});
+  p.vars=Array.isArray(p.vars)?p.vars.filter(function(v){return v&&typeof v.id==='string'&&typeof v.name==='string';}).map(function(v){
+    return{id:v.id.slice(0,40),name:String(v.name).slice(0,40),val:(typeof v.val==='number')?v.val:(typeof v.val==='string'?v.val.slice(0,40):0)};
+  }):[];
   return p;
 }
 function loadProject(p,name){
   syncLeaveIfRoom();
   p=normalize(p);
-  project={meta:p.meta||{name:'Без названия',created:'',modified:''},nodes:p.nodes,edges:p.edges,customTypes:p.customTypes,groups:p.groups,listHidden:p.listHidden};
+  project={meta:p.meta||{name:'Без названия',created:'',modified:''},nodes:p.nodes,edges:p.edges,customTypes:p.customTypes,groups:p.groups,listHidden:p.listHidden,vars:p.vars||[]};
   project.groups.forEach(function(g){
     if(g.fold<2&&!g.bbox){
       var ms=allDescNodes(g.id),y0=1e9,y1=-1e9,hh={};
@@ -5872,7 +6113,7 @@ function guardOpen(){guardDirtyThen(openProject);}
 function newProject(){
   guardDirtyThen(function(){
     var now=new Date().toISOString();
-    project={meta:{name:'Новый проект',created:now,modified:now},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
+    project={meta:{name:'Новый проект',created:now,modified:now},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[]};
     sel.clear();selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;history=[];future=[];fileName=null;fileHandle=null;
     $('#projName').value=project.meta.name;
     markSaved();renderAll();fitView(false);
@@ -6000,7 +6241,8 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
+      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; развилки меняют переменные и открывают/закрывают пути</div>'+
+      '<div>вкладка «Переменные»</div><div>создавайте переменные, привязывайте их изменение к развилкам, задавайте условия на стрелках от развилки</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -6013,6 +6255,8 @@ $all('.ltab').forEach(function(b){
     $all('.ltab').forEach(function(x){x.classList.toggle('active',x===b);});
     $('#panePal').classList.toggle('active',b.dataset.t==='pal');
     $('#paneList').classList.toggle('active',b.dataset.t==='list');
+    $('#paneVars').classList.toggle('active',b.dataset.t==='vars');
+    if(b.dataset.t==='vars')renderVarsPane();
   };
 });
 $('#sQ').addEventListener('input',renderList);
@@ -6311,7 +6555,7 @@ function syncMe(){
 function syncDocObj(){
   return{app:'vetvi-room',version:1,meta:project.meta,bend:bendMode,
     nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,
-    groups:project.groups,listHidden:project.listHidden};
+    groups:project.groups,listHidden:project.listHidden,vars:varsList()};
 }
 function syncBusy(){
   return !!(dragS||gdrag||carryS||dlgResizeS||wpDrag||brDrag||lblDrag||inDrag||outDrag||repOutDrag||grestore||gcreateS||marS||knifeS||connS||isTyping()||
@@ -6367,6 +6611,7 @@ function syncApplyRemote(doc,fit,keepPid){
     project.customTypes=Array.isArray(doc.customTypes)?doc.customTypes:[];
     project.groups=Array.isArray(doc.groups)?doc.groups:[];
     project.listHidden=Array.isArray(doc.listHidden)?doc.listHidden:[];
+    project.vars=Array.isArray(doc.vars)?doc.vars:[];
     var ids=new Set(project.nodes.map(function(n){return n.id;}));
     var ns=new Set();sel.forEach(function(id){if(ids.has(id))ns.add(id);});sel=ns;
     var eids=new Set(project.edges.map(function(e){return e.id;}));
@@ -7170,7 +7415,7 @@ function initSync(){
    в порядке цепочек стрелок внутри выделения (блоки вне цепочек — по положению на
    холсте: сверху вниз, слева направо). Диалоги: описание, затем реплики по дереву
    (несколько детей реплики = выбор игрока; реплики кончились → следующий блок списка). */
-var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1};
+var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null};
 function plIsOpen(){return PL.open;}
 function plPickStartNode(){
   if(sel&&sel.size===1){
@@ -7238,6 +7483,8 @@ function plStart(nodeId){
   closeCtx();closeModal();
   PL.open=true;PL.nodeId=null;PL.replyId=null;PL.intro=false;
   PL.typing=false;PL.full='';PL.hist=[];PL.path=[];
+  PL.vars={};
+  varsList().forEach(function(v){PL.vars[v.id]=v.val;});
   if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
   var start=null;
   if(list){
@@ -7253,6 +7500,7 @@ function plStart(nodeId){
   }
   $('#player').classList.add('show');
   $('#plEnd').classList.remove('show');
+  plRenderVars();
   plRenderPath();
   plGoNode(start);
 }
@@ -7266,12 +7514,15 @@ function plRestart(){
   var st=(PL.mode==='list')?nodeById(PL.list[0]):(PL.startId?nodeById(PL.startId):null);
   if(!st){plExit();return;}
   PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;
+  PL.vars={};
+  varsList().forEach(function(v){PL.vars[v.id]=v.val;});
+  plRenderVars();
   $('#plEnd').classList.remove('show');
   plRenderPath();
   plGoNode(st);
 }
 function plPushHist(){
-  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro});
+  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null});
   if(PL.hist.length>120)PL.hist.shift();
   plUpdateBackUI();
 }
@@ -7286,6 +7537,8 @@ function plBack(){
   PL.typing=false;
   $('#plEnd').classList.remove('show');
   PL.nodeId=s.nodeId;PL.replyId=s.replyId;PL.intro=s.intro;
+  if(s.vars)PL.vars=Object.assign({},s.vars);
+  plRenderVars();
   if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
   plShowCurrent();
 }
@@ -7338,6 +7591,51 @@ function plClearChoices(){
   var c=$('#plChoices');
   c.innerHTML='';c.style.display='none';
 }
+/* HUD переменных + всплывашка изменения */
+var plFlashT=null;
+function plVarFlash(txt){
+  var el=$('#plVarFlash');if(!el)return;
+  el.textContent=txt;el.classList.add('show');
+  clearTimeout(plFlashT);
+  plFlashT=setTimeout(function(){el.classList.remove('show');},2600);
+}
+function plRenderVars(){
+  var el=$('#plVars');if(!el)return;
+  var l=varsList();
+  if(!l.length){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='';
+  el.innerHTML=l.map(function(v){
+    var cur=(PL.vars&&(PL.vars[v.id]!==undefined&&PL.vars[v.id]!==null))?PL.vars[v.id]:v.val;
+    return '<span class="pl-var"><i>'+esc(v.name)+'</i><b>'+esc(String(cur))+'</b></span>';
+  }).join('');
+}
+/* варианты перехода от развилки: условия на стрелках учитываются */
+function plBranchChoices(n){
+  var nx=plNodeEdgeList(n);
+  var hasCond=nx.some(function(e){return e.cond;});
+  if(!hasCond)return null; /* условий нет — обычное поведение */
+  return nx.map(function(e){
+    var ok=condMet(e.cond,PL.vars);
+    return{label:plEdgeLabel(e),ok:ok,why:(e.cond&&!ok)?('нужно: '+condText(e.cond)):null,fn:function(){plFollowEdge(e);}};
+  });
+}
+function plRenderBranchChoices(items){
+  var c=$('#plChoices');
+  c.innerHTML='';
+  items.forEach(function(it,i){
+    var b=document.createElement('button');
+    b.className='pl-choice'+(it.ok?'':' lock');
+    b.innerHTML='<span class="num">'+(i+1)+'</span><span class="lbl">'+esc(it.label)+(it.why?'<i class="why">путь закрыт — '+esc(it.why)+'</i>':'')+'</span>';
+    b.onclick=function(ev){
+      ev.stopPropagation();
+      if(!it.ok){plVarFlash('Путь закрыт: '+it.why);return;}
+      plPushHist();plClearChoices();it.fn();
+    };
+    c.appendChild(b);
+  });
+  c.style.display='flex';
+  $('#plHint').style.display='none';
+}
 function plRenderChoices(list){
   var c=$('#plChoices');
   c.innerHTML='';
@@ -7389,6 +7687,16 @@ function plShowSlide(opts){
 function plGoNode(n,keepPath){
   PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
   if(!keepPath)plTrackPath(n.id);
+  /* развилка меняет переменные при входе игрока (при «Назад» значения восстанавливаются из истории) */
+  if(n.type==='branch'&&n.setVars&&n.setVars.length&&PL.vars&&!keepPath){
+    var msgs=[];
+    n.setVars.forEach(function(o){
+      if(!varById(o.vid))return;
+      PL.vars[o.vid]=varApplyOp(o.op,PL.vars[o.vid],o.val);
+      msgs.push(opText(o));
+    });
+    if(msgs.length){plRenderVars();plVarFlash(msgs.join(' · '));}
+  }
   if(n.type==='dialog'){
     ensureDialog(n);
     var desc=n.dialog.description||'';
@@ -7483,8 +7791,11 @@ function plAfterType(){
   }
   if(PL.mode==='list'){plListHint();return;} /* в списке стрелки не ветвят */
   var nx2=plNodeEdgeList(n);
-  if(nx2.length>1){mkChoices(nx2);return;}
-  if(nx2.length===1){$('#plHint').textContent='далее: '+plEdgeLabel(nx2[0])+' ▸';return;}
+  if(nx2.length>1){var bc=plBranchChoices(n);if(bc){plRenderBranchChoices(bc);return;}mkChoices(nx2);return;}
+  if(nx2.length===1){
+    if(nx2[0].cond&&!condMet(nx2[0].cond,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(nx2[0].cond)+' · ← назад';return;}
+    $('#plHint').textContent='далее: '+plEdgeLabel(nx2[0])+' ▸';return;
+  }
   $('#plHint').textContent='клик — конец ▸';
 }
 /* клик/пробел: завершить печать → шаг вперёд */
@@ -7524,8 +7835,13 @@ function plAdvance(){
 function plAfterNodeFinal(n){
   if(PL.mode==='list'){plListNext();return;}
   var nx=plNodeEdgeList(n);
-  if(nx.length===1){plFollowEdge(nx[0]);return;}
+  if(nx.length===1){
+    if(nx[0].cond&&!condMet(nx[0].cond,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(nx[0].cond)+' · ← назад';return;}
+    plFollowEdge(nx[0]);return;
+  }
   if(nx.length>1){
+    var bc=plBranchChoices(n);
+    if(bc){plRenderBranchChoices(bc);return;}
     plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
     return;
   }
