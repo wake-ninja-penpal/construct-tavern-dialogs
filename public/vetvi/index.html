@@ -549,6 +549,53 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   #miniMap{width:170px;height:120px}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ═══════════ режим новеллы (проигрывание) ═══════════ */
+#player{position:fixed;inset:0;z-index:300;display:none;flex-direction:column;background:radial-gradient(120% 85% at 50% 28%,#1c212b 0%,#12151b 46%,#0a0b0e 100%);user-select:none;overflow:hidden}
+#player.show{display:flex;animation:plIn .4s ease}
+@keyframes plIn{from{opacity:0}}
+#player .pl-vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(85% 70% at 50% 42%,transparent 40%,rgba(0,0,0,.42) 100%)}
+.pl-top{position:absolute;top:14px;left:0;right:0;display:flex;align-items:center;gap:10px;padding:0 18px;z-index:6}
+.pl-path{display:flex;align-items:center;gap:7px;font:500 11px var(--mono);color:var(--tx3);white-space:nowrap;overflow:hidden;max-width:52vw}
+.pl-path b{color:var(--tx2);font-weight:600}
+.pl-path .sep{color:#3d434f}
+.pl-path .pl-cnt{flex:none;padding:3px 9px;border-radius:999px;background:rgba(226,165,78,.14);border:1px solid rgba(226,165,78,.4);color:#e2a54e;font-weight:600;letter-spacing:1px;white-space:nowrap}
+.pl-top .spacer{flex:1}
+.pl-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--line2);background:rgba(21,23,27,.82);color:var(--tx2);font:500 12px var(--body);cursor:pointer;transition:all .16s;backdrop-filter:blur(4px)}
+.pl-btn:hover{background:#262b33;color:var(--tx);border-color:#3d434f}
+.pl-btn svg{width:13px;height:13px}
+.pl-btn.accent{border-color:rgba(226,165,78,.45);color:var(--acc)}
+.pl-btn.accent:hover{background:rgba(226,165,78,.12)}
+.pl-chapter{position:absolute;top:58px;left:0;right:0;display:flex;justify-content:center;z-index:4;pointer-events:none}
+.pl-chip{display:inline-flex;align-items:center;gap:8px;max-width:80vw;padding:6px 15px;border-radius:999px;background:rgba(13,15,19,.78);border:1px solid #2c313b;font:600 10.5px var(--mono);letter-spacing:1.6px;text-transform:uppercase;color:var(--tx2);backdrop-filter:blur(4px)}
+.pl-chip .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.pl-chip .ttl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:1px}
+.pl-body{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;z-index:3}
+.pl-wrap{width:min(940px,94vw);display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 0 44px}
+.pl-choices{display:none;flex-direction:column;gap:9px;width:min(620px,92vw);margin-bottom:4px}
+.pl-choice{display:flex;align-items:center;gap:12px;padding:12px 18px;border-radius:12px;border:1px solid #343b47;background:rgba(20,23,29,.92);color:var(--tx);font:500 14.5px var(--body);text-align:left;cursor:pointer;transition:all .16s;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
+.pl-choice:nth-child(2){animation-delay:.05s}.pl-choice:nth-child(3){animation-delay:.1s}.pl-choice:nth-child(4){animation-delay:.15s}.pl-choice:nth-child(5){animation-delay:.2s}
+.pl-choice::before{content:'';width:3px;align-self:stretch;border-radius:3px;background:var(--plc,#e2a54e);opacity:.8;flex:none;transition:opacity .16s}
+.pl-choice:hover{background:rgba(32,36,44,.96);border-color:var(--plc,#e2a54e);transform:translateX(4px);box-shadow:0 8px 22px rgba(0,0,0,.4)}
+.pl-choice .num{font:600 10px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-radius:5px;padding:2px 6px;flex:none}
+.pl-choice:hover .num{color:var(--plc,#e2a54e);border-color:var(--plc,#e2a54e)}
+.pl-choice .lbl{flex:1}
+.pl-box{position:relative;width:100%;background:rgba(15,17,22,.94);border:1px solid #2c313b;border-radius:16px;padding:24px 28px 30px;min-height:118px;box-shadow:0 26px 70px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+.pl-box::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:16px 16px 0 0;background:var(--plc,#e2a54e);opacity:.85}
+.pl-name{position:absolute;top:-16px;left:24px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-name.hidden{display:none}
+.pl-text{font:400 16.5px/1.65 var(--body);color:var(--tx);min-height:56px;white-space:pre-wrap;word-break:break-word}
+.pl-text .caret{display:inline-block;width:9px;height:1.05em;margin-left:2px;vertical-align:text-bottom;background:var(--plc,#e2a54e);animation:plCaret .8s steps(1) infinite}
+@keyframes plCaret{50%{opacity:0}}
+.pl-hint{position:absolute;right:20px;bottom:10px;font:500 10.5px var(--mono);color:var(--tx3);letter-spacing:.6px}
+.pl-end{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(7,8,11,.62);z-index:8}
+.pl-end.show{display:flex;animation:plIn .55s ease}
+.pl-end h2{font:700 36px var(--disp);letter-spacing:8px;color:var(--acc);text-shadow:0 6px 40px rgba(226,165,78,.35)}
+.pl-end .pl-sub{font:500 12px var(--mono);color:var(--tx3);margin-bottom:14px}
+.pl-end .pl-btns{display:flex;gap:10px}
+.pl-end .pl-btn{height:36px;padding:0 16px;font-size:13px}
+@keyframes plSlide{from{opacity:0;transform:translateY(14px)}}
+.pl-anim{animation:plSlide .3s cubic-bezier(.2,.8,.3,1)}
+body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 </style>
 </head>
 <body>
@@ -583,6 +630,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   <button class="btn ibtn on" id="bSnap" title="Привязка к сетке"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v5a7 7 0 0 0 14 0V3"/><path d="M5 3h3v5H5zM16 3h3v5h-3z"/></svg></button><div class="vsep" style="margin:0 8px"></div><button class="btn ibtn on" id="bBendS" title="Изгиб всех стрелок: плавный"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 18c7 0 3-12 10-12h6"/></svg></button>
 <button class="btn ibtn" id="bBend90" title="Изгиб всех стрелок: прямые углы (90°)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h9a3 3 0 0 0 3-3V6h4"/></svg></button>
 <button class="btn ibtn" id="bBend45" title="Изгиб всех стрелок: углы 45°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h6l8-8h2"/></svg></button><div class="vsep" style="margin:0 8px"></div><button class="btn ibtn on" id="bMap" title="Мини-карта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="7" y="8" width="7" height="6" rx="1" fill="currentColor" fill-opacity=".3"/></svg></button><div class="vsep"></div>
+  <button class="btn" id="bPlay" title="Режим новеллы: проиграть выделенные блоки или группу по порядку; без выделения — весь сюжет (P)"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.5v13l10.5-6.5z"/></svg><span class="t">Играть</span></button>
   <button class="btn collab-chip" id="bCollab" title="Совместный доступ: статус и участники"><span class="cc-dot" id="ccDot"></span><span id="ccTxt">офлайн</span></button>
   <button class="btn" id="bMerge" title="Merge-запросы копий" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="2.6"/><circle cx="6" cy="6" r="2.6"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg><span class="t">Merge</span><span class="m-badge" id="mergeBadge" style="display:none">0</span></button>
   <button class="btn" id="bCopies" title="Локальные копии проекта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span class="t">Копии</span></button>
@@ -632,6 +680,36 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   <div class="st-right"><span id="stCounts"></span><span id="stAuto">✓ автосохранение</span></div>
 </footer>
 <div id="ctx"></div>
+<div id="player">
+  <div class="pl-vig"></div>
+  <div class="pl-top">
+    <div class="pl-path" id="plPath"></div>
+    <div class="spacer"></div>
+    <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
+    <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+    <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
+  </div>
+  <div class="pl-chapter" id="plChapter"></div>
+  <div class="pl-body">
+    <div class="pl-wrap">
+      <div class="pl-choices" id="plChoices"></div>
+      <div class="pl-box" id="plBox">
+        <div class="pl-name hidden" id="plName"></div>
+        <div class="pl-text" id="plText"></div>
+        <div class="pl-hint" id="plHint">клик — далее ▸</div>
+      </div>
+    </div>
+  </div>
+  <div class="pl-end" id="plEnd">
+    <h2>~ КОНЕЦ ~</h2>
+    <div class="pl-sub">эта ветка истории завершена</div>
+    <div class="pl-btns">
+      <button class="pl-btn" id="plEndBack" title="Вернуться на шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
+      <button class="pl-btn" id="plEndRestart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+      <button class="pl-btn accent" id="plEndExit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>В редактор</button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 <div id="modalWrap"><div class="m-card" id="mCard"></div></div>
 <div id="dlgModal" class="dlg-modal">
@@ -741,6 +819,7 @@ var ICONS={
   plus:'<path d="M12 5v14M5 12h14"/>'
 };
 var EXTRA_ICONS={
+  play:'<path d="M7.5 5.5v13l11-6.5z"/><path d="M4.5 5.5v13"/>',
   sword:'<path d="M19.5 4.5 9 15"/><path d="M19.5 4.5l-4 .7M19.5 4.5l-.7 4"/><path d="M6.5 13.5l4 4"/><path d="M4.5 19.5l3-3"/>',
   shield:'<path d="M12 3l7 3v5.5c0 4.8-3.4 7.7-7 9.5-3.6-1.8-7-4.7-7-9.5V6z"/>',
   bow:'<path d="M5 19C5 11 11 5 19 5"/><path d="M5 19 19 5"/><path d="M12 12l7-7m0 0h-3.5M19 5v3.5"/>',
@@ -5219,6 +5298,7 @@ canvas.addEventListener('contextmenu',function(e){
     if(!sel.has(id))selectOnly(id);
     var n=nodeById(id);
     var items=[
+      {ico:'play',label:'Играть отсюда',fn:function(){plStart(id);}},
       {ico:'copy',label:'Дублировать',fn:function(){var r=duplicateSel();if(r)startCarry(r.ids,r.pre);}},
       {ico:'target',label:'Центрировать',fn:function(){centerOn(n);}}
     ];
@@ -5300,6 +5380,7 @@ function isTyping(){
   return a&&((a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT')||a.isContentEditable);
 }
 window.addEventListener('keydown',function(e){
+  if(plIsOpen()){plKey(e);return;}
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
   if((e.key==='Control'||e.key==='Meta')&&!isTyping())document.body.classList.add('ctrlpan');
   if(isTyping()){
@@ -5348,6 +5429,7 @@ window.addEventListener('keydown',function(e){
     clearSel();return;
   }
   if(code==='KeyF'){if(sel.size===1)centerOn(nodeById(sel.values().next().value));return;}
+  if(code==='KeyP'&&!mod){e.preventDefault();plStart();return;}
   if(e.key==='0'){fitView(true);return;}
   if(e.key==='='||e.key==='+'){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1.15);return;}
   if(e.key==='-'){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1/1.15);return;}
@@ -5918,6 +6000,7 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
+      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -7080,6 +7163,397 @@ function initSync(){
     }
   },600);
 }
+/* ═══════════ режим новеллы: проигрывание сюжета ═══════════
+   Только чтение: ничего не меняет в project, JSON-структура данных не затрагивается.
+   Два режима: «граф» — обход по стрелкам от стартового блока (кнопка без выделения,
+   ПКМ «Играть отсюда»); «список» — выделенные блоки или группа проигрываются подряд
+   в порядке цепочек стрелок внутри выделения (блоки вне цепочек — по положению на
+   холсте: сверху вниз, слева направо). Диалоги: описание, затем реплики по дереву
+   (несколько детей реплики = выбор игрока; реплики кончились → следующий блок списка). */
+var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1};
+function plIsOpen(){return PL.open;}
+function plPickStartNode(){
+  if(sel&&sel.size===1){
+    var c0=nodeById(sel.values().next().value);
+    if(c0)return c0;
+  }
+  var roots=project.nodes.filter(function(n){
+    return !project.edges.some(function(e){return e.to===n.id;});
+  });
+  var sc=roots.filter(function(n){return n.type==='scene';});
+  return sc[0]||roots[0]||project.nodes[0]||null;
+}
+/* блоки текущего выделения: узлы + содержимое выделенных групп (включая вложенные) */
+function plSelectionIds(){
+  if(!sel.size&&!selGroups.size)return null;
+  var seen=new Set(),out=[];
+  var add=function(n){if(n&&!seen.has(n.id)){seen.add(n.id);out.push(n);}};
+  sel.forEach(function(id){add(nodeById(id));});
+  selGroups.forEach(function(gid){allDescNodes(gid).forEach(function(n){add(n);});});
+  return out;
+}
+/* порядок проигрывания выделения: цепочки по стрелкам внутри выделения,
+   остальное — по положению на холсте (сверху вниз, слева направо) */
+function plBuildPlaylist(nodes){
+  var S=new Set(),arr=[];
+  nodes.forEach(function(n){if(n&&!S.has(n.id)){S.add(n.id);arr.push(n);}});
+  var byPos=function(a,b){return ((a.y||0)-(b.y||0))||((a.x||0)-(b.x||0))||0;};
+  var indeg={},outs={};
+  arr.forEach(function(n){indeg[n.id]=0;});
+  project.edges.forEach(function(e){
+    if(!S.has(e.from)||!S.has(e.to)||e.from===e.to)return;
+    var lst=outs[e.from]||(outs[e.from]=[]),dup=false;
+    for(var i=0;i<lst.length;i++)if(lst[i]&&lst[i].id===e.to){dup=true;break;}
+    if(dup)return; /* кратные стрелки между той же парой считаются один раз */
+    lst.push(nodeById(e.to));
+    indeg[e.to]=(indeg[e.to]||0)+1;
+  });
+  var ready=arr.filter(function(n){return !indeg[n.id];}).sort(byPos);
+  var out=[],done=new Set();
+  while(ready.length){
+    var n=ready.shift();
+    if(!n||done.has(n.id))continue;
+    done.add(n.id);out.push(n);
+    ((outs[n.id])||[]).forEach(function(t){
+      if(!t)return;
+      indeg[t.id]--;
+      if(indeg[t.id]<=0&&!done.has(t.id))ready.push(t);
+    });
+    ready.sort(byPos);
+  }
+  arr.filter(function(n){return !done.has(n.id);}).sort(byPos).forEach(function(n){out.push(n);}); /* циклы — в конец */
+  return out;
+}
+function plStart(nodeId){
+  if(PL.open)return;
+  /* есть выделение (блоки/группа) — проигрываем только его списком по порядку */
+  var list=null;
+  if(!nodeId){
+    var s=plSelectionIds();
+    if(s&&s.length){
+      list=plBuildPlaylist(s);
+      if(!list.length){toast('В выделении нет блоков для проигрывания','warn');return;}
+    }
+  }
+  closeCtx();closeModal();
+  PL.open=true;PL.nodeId=null;PL.replyId=null;PL.intro=false;
+  PL.typing=false;PL.full='';PL.hist=[];PL.path=[];
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  var start=null;
+  if(list){
+    PL.mode='list';PL.list=list.map(function(n){return n.id;});PL.idx=0;
+    PL.startId=PL.list[0];
+    start=list[0];
+  }else{
+    PL.mode='graph';PL.list=[];PL.idx=-1;
+    start=nodeId?nodeById(nodeId):null;
+    if(!start)start=plPickStartNode();
+    if(!start){toast('Проект пуст — нечего проигрывать','warn');PL.open=false;return;}
+    PL.startId=start.id;
+  }
+  $('#player').classList.add('show');
+  $('#plEnd').classList.remove('show');
+  plRenderPath();
+  plGoNode(start);
+}
+function plExit(){
+  PL.open=false;PL.typing=false;
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  $('#player').classList.remove('show');
+  $('#plEnd').classList.remove('show');
+}
+function plRestart(){
+  var st=(PL.mode==='list')?nodeById(PL.list[0]):(PL.startId?nodeById(PL.startId):null);
+  if(!st){plExit();return;}
+  PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;
+  $('#plEnd').classList.remove('show');
+  plRenderPath();
+  plGoNode(st);
+}
+function plPushHist(){
+  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro});
+  if(PL.hist.length>120)PL.hist.shift();
+  plUpdateBackUI();
+}
+function plUpdateBackUI(){
+  var b=$('#plBackBtn');
+  if(b)b.style.opacity=PL.hist.length?'1':'.4';
+}
+function plBack(){
+  if(!PL.hist.length)return;
+  var s=PL.hist.pop();
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  PL.typing=false;
+  $('#plEnd').classList.remove('show');
+  PL.nodeId=s.nodeId;PL.replyId=s.replyId;PL.intro=s.intro;
+  if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
+  plShowCurrent();
+}
+/* показать текущее состояние (после «Назад») без записи в историю */
+function plShowCurrent(){
+  var n=nodeById(PL.nodeId);
+  if(!n){plShowEnd();return;}
+  if(PL.path.length&&PL.path[PL.path.length-1]!==n.id)PL.path.pop();
+  plRenderPath();
+  if(PL.intro&&n.type==='dialog'){
+    ensureDialog(n);
+    plShowSlide({name:null,color:nodeVisual(n).color,text:n.dialog.description||'…',chapter:n});
+    return;
+  }
+  if(PL.replyId&&n.type==='dialog'){
+    var r=findReply(n.dialog.replies,PL.replyId);
+    if(r){plShowReply(r,true);return;}
+  }
+  PL.replyId=null;PL.intro=false;
+  plGoNode(n,true);
+}
+function plTrackPath(id){
+  if(PL.path[PL.path.length-1]!==id)PL.path.push(id);
+  plRenderPath();
+}
+function plRenderPath(){
+  var el=$('#plPath');if(!el)return;
+  var html='';
+  if(PL.mode==='list'&&PL.list.length)html+='<span class="pl-cnt">'+(Math.max(0,PL.idx)+1)+' / '+PL.list.length+'</span>';
+  var tail=PL.path.slice(-4);
+  tail.forEach(function(id,i){
+    var n=nodeById(id);if(!n)return;
+    if(i||html)html+='<span class="sep">→</span>';
+    html+=(i===tail.length-1)?('<b>'+esc(n.title||'…')+'</b>'):('<span>'+esc(n.title||'…')+'</span>');
+  });
+  el.innerHTML=html;
+}
+function plCastName(n){
+  var ps=(n.type==='dialog')?(n.dialog&&n.dialog.participants||[]):(Array.isArray(n.participants)?n.participants:[]);
+  if(!ps.length)return null;
+  var nm=charName(ps[0]);
+  if(ps.length>1)nm+=' +'+(ps.length-1);
+  return nm;
+}
+function plChapterHtml(n){
+  var vis=nodeVisual(n);
+  return '<span class="pl-chip"><i class="dot" style="background:'+esc(vis.color)+'"></i>'+esc(vis.name||'')+'<span class="ttl">· '+esc(n.title||'')+'</span></span>';
+}
+function plClearChoices(){
+  var c=$('#plChoices');
+  c.innerHTML='';c.style.display='none';
+}
+function plRenderChoices(list){
+  var c=$('#plChoices');
+  c.innerHTML='';
+  list.forEach(function(it,i){
+    var b=document.createElement('button');
+    b.className='pl-choice';
+    b.innerHTML='<span class="num">'+(i+1)+'</span><span class="lbl">'+esc(it.label)+'</span>';
+    b.onclick=function(ev){ev.stopPropagation();plPushHist();plClearChoices();it.fn();};
+    c.appendChild(b);
+  });
+  c.style.display='flex';
+  $('#plHint').style.display='none';
+}
+function plType(text){
+  var tEl=$('#plText');
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  PL.full=text||'';PL.typing=true;
+  tEl.innerHTML='<span class="caret"></span>';
+  var dur=Math.min(2200,Math.max(260,PL.full.length*22));
+  var t0=performance.now();
+  PL.timer=setInterval(function(){
+    var k=clamp((performance.now()-t0)/dur,0,1);
+    tEl.innerHTML=esc(PL.full.slice(0,Math.floor(k*PL.full.length)))+'<span class="caret"></span>';
+    if(k>=1)plFinishType();
+  },33);
+}
+function plFinishType(){
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  PL.typing=false;
+  $('#plText').innerHTML=esc(PL.full);
+  plAfterType();
+}
+function plShowSlide(opts){
+  plHideEnd();
+  var box=$('#plBox');
+  $('#plChapter').innerHTML=opts.chapter?plChapterHtml(opts.chapter):'';
+  var nameEl=$('#plName');
+  if(opts.name){nameEl.textContent=opts.name;nameEl.classList.remove('hidden');}
+  else nameEl.classList.add('hidden');
+  box.style.setProperty('--plc',opts.color||'#e2a54e');
+  plClearChoices();
+  $('#plHint').style.display='';
+  $('#plHint').textContent='клик — далее ▸';
+  plType(opts.text||'');
+  box.classList.remove('pl-anim');
+  void box.offsetWidth;
+  box.classList.add('pl-anim');
+}
+function plGoNode(n,keepPath){
+  PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
+  if(!keepPath)plTrackPath(n.id);
+  if(n.type==='dialog'){
+    ensureDialog(n);
+    var desc=n.dialog.description||'';
+    var rs=n.dialog.replies||[];
+    if(desc){
+      PL.intro=true;
+      plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});
+      return;
+    }
+    if(rs.length){plShowReply(rs[0]);return;}
+    plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
+    return;
+  }
+  plShowSlide({name:plCastName(n),color:resolvedNodeColor(n,0),text:n.text||'…',chapter:n});
+}
+function plShowReply(r,noHist){
+  PL.replyId=r.id;PL.intro=false;
+  var name=r.speaker?charName(r.speaker):null;
+  var color=r.speaker?charColor(r.speaker):'#8b929c';
+  var n=nodeById(PL.nodeId);
+  plShowSlide({name:name,color:color,text:r.text||'…',chapter:n});
+}
+/* список исходящих связей узла (без привязанных к репликам) */
+function plNodeEdgeList(n){
+  return project.edges.filter(function(e){return e.from===n.id&&!e.fromReply;});
+}
+function plEdgeLabel(e){
+  if(e.label)return e.label;
+  var t=nodeById(e.to);
+  return (t&&t.title)?t.title:'далее';
+}
+function plFollowEdge(e){
+  var t=nodeById(e.to);
+  if(!t){plShowEnd();return;}
+  plGoNode(t);
+}
+function plShowEnd(){
+  PL.typing=false;
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  plClearChoices();
+  $('#plHint').style.display='none';
+  var sub=document.querySelector('#plEnd .pl-sub');
+  if(sub)sub.textContent=(PL.mode==='list')?'выделенный фрагмент проигран':'эта ветка истории завершена';
+  $('#plEnd').classList.add('show');
+}
+function plHideEnd(){
+  $('#plEnd').classList.remove('show');
+  $('#plHint').style.display='';
+}
+/* режим «список» (проигрывание выделения): подсказка и переход к следующему блоку */
+function plListHint(){
+  $('#plHint').textContent=(PL.idx>=PL.list.length-1)?'клик — конец ▸':'клик — далее ▸';
+}
+function plShowAt(i){
+  PL.idx=i;
+  var n=(i>=0&&i<PL.list.length)?nodeById(PL.list[i]):null;
+  if(!n){plShowEnd();return;}
+  plGoNode(n);
+}
+function plListNext(){
+  if(PL.mode!=='list')return;
+  plShowAt(PL.idx+1);
+}
+/* что показывать после завершения печатания: подсказка или выбор */
+function plAfterType(){
+  $('#plHint').style.display='';
+  var n=nodeById(PL.nodeId);
+  if(!n){plShowEnd();return;}
+  var mkChoices=function(arr){
+    plRenderChoices(arr.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
+  };
+  if(PL.intro){$('#plHint').textContent='клик — далее ▸';return;}
+  if(PL.replyId&&n.type==='dialog'){
+    var r=findReply(n.dialog.replies,PL.replyId);
+    if(r){
+      var kids=r.children||[];
+      if(kids.length>1){
+        plRenderChoices(kids.map(function(ch){return{label:ch.text||'Продолжить…',fn:function(){plShowReply(ch);}};}));
+        return;
+      }
+      if(kids.length===1){$('#plHint').textContent='клик — далее ▸';return;}
+      if(PL.mode==='list'){plListHint();return;} /* в списке — просто следующий блок */
+      var ex=project.edges.filter(function(e){return e.from===n.id&&e.fromReply===r.id;});
+      if(ex.length>1){mkChoices(ex);return;}
+      if(ex.length===1){$('#plHint').textContent='далее: '+plEdgeLabel(ex[0])+' ▸';return;}
+      var nx=plNodeEdgeList(n);
+      if(nx.length>1){mkChoices(nx);return;}
+      if(nx.length===1){$('#plHint').textContent='далее: '+plEdgeLabel(nx[0])+' ▸';return;}
+      $('#plHint').textContent='клик — конец ▸';
+      return;
+    }
+  }
+  if(PL.mode==='list'){plListHint();return;} /* в списке стрелки не ветвят */
+  var nx2=plNodeEdgeList(n);
+  if(nx2.length>1){mkChoices(nx2);return;}
+  if(nx2.length===1){$('#plHint').textContent='далее: '+plEdgeLabel(nx2[0])+' ▸';return;}
+  $('#plHint').textContent='клик — конец ▸';
+}
+/* клик/пробел: завершить печать → шаг вперёд */
+function plAdvance(){
+  if(PL.typing){plFinishType();return;}
+  if($('#plChoices').style.display==='flex')return; /* ждём выбор игрока */
+  if($('#plEnd').classList.contains('show'))return;
+  var n=nodeById(PL.nodeId);
+  if(!n){plShowEnd();return;}
+  if(PL.intro){
+    plPushHist();
+    PL.intro=false;
+    var rs=(n.dialog&&n.dialog.replies)||[];
+    if(rs.length){plShowReply(rs[0]);return;}
+    plAfterNodeFinal(n);
+    return;
+  }
+  if(PL.replyId&&n.type==='dialog'){
+    var r=findReply(n.dialog.replies,PL.replyId);
+    if(r){
+      var kids=r.children||[];
+      if(kids.length===1){plPushHist();plShowReply(kids[0]);return;}
+      if(kids.length>1){plAfterType();return;} /* выбор не сделан — страховка */
+      if(PL.mode!=='list'){
+        var ex=project.edges.filter(function(e){return e.from===n.id&&e.fromReply===r.id;});
+        if(ex.length){plPushHist();plFollowEdge(ex[0]);return;}
+      }
+    }
+    plPushHist();
+    plAfterNodeFinal(n);
+    return;
+  }
+  plPushHist();
+  plAfterNodeFinal(n);
+}
+/* реплика/текст узла закончились → куда дальше (следующий блок списка, исходы узла или конец) */
+function plAfterNodeFinal(n){
+  if(PL.mode==='list'){plListNext();return;}
+  var nx=plNodeEdgeList(n);
+  if(nx.length===1){plFollowEdge(nx[0]);return;}
+  if(nx.length>1){
+    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
+    return;
+  }
+  plShowEnd();
+}
+function plKey(e){
+  if(e.key==='Escape'){e.preventDefault();plExit();return;}
+  if(e.key===' '||e.key==='Enter'||e.key==='ArrowRight'){e.preventDefault();plAdvance();return;}
+  if(e.key==='ArrowLeft'||e.key==='Backspace'){e.preventDefault();plBack();return;}
+  if(e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К'){e.preventDefault();plRestart();return;}
+  var m=/^Digit([1-9])$/.exec(e.code);
+  if(m){
+    var c=$('#plChoices');
+    var btn=c.querySelectorAll('.pl-choice')[parseInt(m[1],10)-1];
+    if(btn&&c.style.display==='flex'){e.preventDefault();btn.click();}
+  }
+}
+$('#player').addEventListener('click',function(e){
+  if(e.target.closest&&e.target.closest('button'))return;
+  plAdvance();
+});
+$('#plExitBtn').onclick=function(e){e.stopPropagation();plExit();};
+$('#plRestartBtn').onclick=function(e){e.stopPropagation();plRestart();};
+$('#plBackBtn').onclick=function(e){e.stopPropagation();plBack();};
+$('#plEndExit').onclick=function(e){e.stopPropagation();plExit();};
+$('#plEndRestart').onclick=function(e){e.stopPropagation();plRestart();};
+$('#plEndBack').onclick=function(e){e.stopPropagation();plBack();};
+$('#bPlay').onclick=function(){plStart();};
 /* ═══ запуск ═══ */
 try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key!=='Escape')return;if($('#noteModal').classList.contains('show')){closeNoteEditor();}if($('#noteViewModal').classList.contains('show')){closeNoteView();}},true);renderPalette();
   try{
