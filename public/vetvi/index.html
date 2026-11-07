@@ -179,6 +179,9 @@ body.carry #canvas{cursor:copy}
 #edges .edge.drop-target .line{stroke:var(--acc2);stroke-width:3.2;marker-end:url(#arwSel);filter:drop-shadow(0 0 8px rgba(226,165,78,.75))}
 #edges .edge.kind-choice .line{stroke-dasharray:7 5}
 #edges .edge.kind-cond .line{stroke-dasharray:2 5;stroke-linecap:round}
+#edges .edge.tvar .line{stroke-dasharray:5 4;stroke:#b7b26a}
+#edges .edge.tvar:hover .line{stroke:#d6cf92}
+#edges .edge.tvar .ecnd{fill:#b7b26a}
 #edges .edge.bridge .line{stroke-width:6;stroke:#79808d;marker-end:url(#arwBridge)}
 #edges .edge.bridge:hover .line{stroke:#a6adb8;marker-end:url(#arwBridgeHi)}
 #edges .edge.bridge.sel .line{stroke:var(--acc);marker-end:url(#arwBridgeSel);filter:drop-shadow(0 0 6px rgba(226,165,78,.45))}
@@ -353,6 +356,18 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .out-ed-cond{margin-top:6px}
 .out-ed-cond .seg{margin-bottom:6px}
 .out-ed-cond .v-row{margin-bottom:0}
+/* ── вход переменной у развилки ── */
+.br-vin{position:relative;display:flex;align-items:center;gap:6px;background:rgba(183,178,106,.07);border:1px dashed rgba(183,178,106,.38);border-radius:7px;padding:3px 9px 3px 8px;margin-right:2px}
+.br-vin .t{display:flex;align-items:center;gap:4px;font:700 10px var(--body);color:#b9b06d;white-space:nowrap}
+.br-vin .vv{flex:1;min-width:0;font:600 9.5px var(--mono);color:#e8dfa8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.br-vin.none .vv{color:#7d838e}
+.br-vin.hl{border-style:solid;border-color:var(--acc);background:rgba(226,165,78,.16)}
+.vpinn{position:absolute;left:-6px;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#0f1114;border:2px solid #8a855a;opacity:0;transition:opacity .15s,border-color .15s;z-index:5}
+.node:hover .vpinn,.node.sel .vpinn,body.connecting .vpinn{opacity:1}
+.vpinn.has{opacity:1;border-color:#b7b26a;background:#262613;box-shadow:0 0 6px rgba(183,178,106,.45)}
+body.connecting .vpinn{cursor:copy}
+.vin-hint{display:flex;align-items:center;gap:8px;font:500 11px var(--body);color:#cfc98a;background:rgba(183,178,106,.08);border:1px dashed rgba(183,178,106,.4);border-radius:8px;padding:6px 8px;margin-bottom:8px}
+.vin-hint>span{flex:1;min-width:0}
 /* ── ноды переменных ── */
 .node.t-varnode .n-text{display:none}
 .node.t-varnode .n-vars{display:flex}
@@ -1124,6 +1139,25 @@ function condMet(c,vals){
   if(c.op==='<=')return a<=b;
   return true;
 }
+/* ═══ вход переменной у развилки: подключённая нода перебивает переменную из условий ═══ */
+function branchVarOverride(n){
+  if(!n||n.type!=='branch')return null;
+  var es=project.edges;
+  for(var i=0;i<es.length;i++){
+    var e=es[i];
+    if(e.to!==n.id||e.tin!=='var')continue;
+    var src=nodeById(e.from);
+    if(src&&src.type==='varnode'&&src.vid)return src.vid;
+  }
+  return null;
+}
+/* условие с учётом перебивания: у развилки с подключённой переменной vid заменяется */
+function condWithOverride(c,fn){
+  if(!c||!fn||fn.type!=='branch')return c;
+  var ov=branchVarOverride(fn);
+  if(!ov||ov===c.vid)return c;
+  return{vid:ov,op:c.op,val:c.val};
+}
 /* ═══ история ═══ */
 function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,vars:varsList()});}
 function pushHistory(s){history.push(s);if(history.length>150)history.shift();future.length=0;updateHistUI();}
@@ -1882,7 +1916,7 @@ function renderEdges(spawnEdge){
   edgeEls.clear();
   project.edges.forEach(function(e){
     var g=svgEl('g');
-g.setAttribute('class','edge kind-'+(e.kind||'flow')+(isBridge(e)?' bridge':'')+(selEdges.has(e.id)?' sel':'')+(e.id===spawnEdge?' spawn':''));
+g.setAttribute('class','edge kind-'+(e.kind||'flow')+(isBridge(e)?' bridge':'')+(e.tin==='var'?' tvar':'')+(selEdges.has(e.id)?' sel':'')+(e.id===spawnEdge?' spawn':''));
     g.dataset.id=e.id;
     var hit=svgEl('path');hit.setAttribute('class','hit');
     var line=svgEl('path');line.setAttribute('class','line');
@@ -2012,6 +2046,11 @@ function edgeAnchors(e){
       if(fb===null)fb=spreadFrac(gb.id,e.id,'in');
       x2=gb.x;y2=gb.y+hB*fb;
     }
+  }else if(e.tin==='var'){
+    var bV=nodeEls.get(nb.id);if(!bV)return null;
+    var rpV=branchVarInPos(bV);
+    if(rpV){x2=rpV.x;y2=rpV.y;}
+    else{x2=nb.x;y2=nb.y+bV.offsetHeight/2;}
   }else{
     var b=nodeEls.get(nb.id);if(!b)return null;
     x2=nb.x;y2=nb.y+b.offsetHeight/2;
@@ -2304,7 +2343,7 @@ var pts=isBridge(e)?[]:(g.pts||[]);
   r.labelHit.textContent=e.label||'';
   r.labelHit.style.display=e.label?'':'none';
   var fnA=nodeById(e.from);
-  var ct=(e.cond&&fnA&&fnA.type==='branch')?('⟦ '+condText(e.cond)+' ⟧'):'';
+  var ct=(e.cond&&fnA&&fnA.type==='branch')?('⟦ '+condText(condWithOverride(e.cond,fnA))+' ⟧'):'';
   if(r.cnd){
     r.cnd.setAttribute('x',lp.x);
     r.cnd.setAttribute('y',e.label?(lp.y+13):(lp.y-6));
@@ -3250,7 +3289,20 @@ function refreshNodeVarsChip(n){
 }
 function refreshAllBranchChips(){
   project.nodes.forEach(function(n){if(n.type==='branch'||n.type==='varnode')refreshNodeVarsChip(n);});
+  refreshBranchVinRows();
   project.edges.forEach(function(e){if(e.cond)updateEdgeGeom(e);});
+}
+/* строки «переменная ⟵ …» на всех развилках (после переименования/смены привязки ноды) */
+function refreshBranchVinRows(){
+  project.nodes.forEach(function(n){
+    if(n.type!=='branch')return;
+    var el=nodeEls.get(n.id);if(!el)return;
+    var vin=el.querySelector('.br-vin');if(!vin)return;
+    var ov=branchVarOverride(n);
+    vin.classList.toggle('none',!ov);
+    var vp=vin.querySelector('.vpinn');if(vp)vp.classList.toggle('has',!!ov);
+    var vv=vin.querySelector('.vv');if(vv)vv.textContent=ov?('⟵ '+varName(ov)):'не подключена';
+  });
 }
 function varValControlHtml(v,cls){
   var t=varType(v);
@@ -3282,7 +3334,7 @@ function renderVarsPane(){
     '</div>';
   });
   html+='</div>';
-  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы нода изменения меняет значение, нода чтения показывает его. У <b>развилки</b> добавляйте <b>исходы</b> и привязывайте к ним переменную и значение.</div>';
+  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов.</div>';
   pane.innerHTML=html;
   var add=$('#vAdd');
   if(add)add.onclick=function(){
@@ -3499,6 +3551,8 @@ function branchCondDefault(){
 function inspOutsHtml(n){
   ensureBranch(n);
   var h='<label class="i-lab">Исходы развилки ('+n.outcomes.length+')</label>';
+  var ovIn=branchVarOverride(n);
+  if(ovIn)h+='<div class="vin-hint"><span>вход: переменная «'+esc(varName(ovIn))+'» — перебивает переменные во всех условиях исходов</span><button class="mini-btn" id="iVinDel" title="Отключить переменную от входа развилки">'+ic('x',12)+'</button></div>';
   h+='<div id="iOuts">';
   if(!n.outcomes.length)h+='<div class="v-empty">Добавьте исходы — у каждого появится свой пин на узле (тяните стрелку от строки исхода). Исходу можно привязать переменную: путь откроется только при совпадении значения.</div>';
   n.outcomes.forEach(function(o,i){
@@ -3526,6 +3580,11 @@ function inspOutsHtml(n){
   return h;
 }
 function bindInspOuts(n){
+  var vinDel=$('#iVinDel');
+  if(vinDel)vinDel.onclick=function(){
+    discrete(function(){project.edges=project.edges.filter(function(e){return !(e.to===n.id&&e.tin==='var');});});
+    renderAll();
+  };
   $all('#iOuts .out-ed').forEach(function(box){
     var i=+box.dataset.i,o=(n.outcomes||[])[i];if(!o)return;
     var lbl=box.querySelector('.out-lbl');
@@ -3593,14 +3652,14 @@ function inspVarHtml(n){
       opValControlHtml({val:n.varVal},v0)+
     '</div>';
   }
-  if(n.varMode==='get')h+='<div class="v-empty" style="margin-top:6px">В режиме новеллы эта нода покажет текущее значение переменной.</div>';
+  if(n.varMode==='get')h+='<div class="v-empty" style="margin-top:6px">В режиме новеллы эта нода считает значение (всплывашка у HUD) и ведёт дальше; её можно соединить со входом «переменная» у развилки.</div>';
   return h;
 }
 function bindInspVar(n){
   var sel=$('#iVarSel');
   sel.onchange=function(ev){
     discrete(function(){n.vid=ev.target.value||null;});
-    renderInspector();refreshNodeVarsChip(n);
+    renderInspector();refreshNodeVarsChip(n);refreshBranchVinRows();
   };
   $all('#iVarMode button').forEach(function(b){
     b.onclick=function(){
@@ -3625,7 +3684,12 @@ function bindInspVar(n){
 /* ═══ развилка: исходы на холсте (пины на узле) ═══ */
 function branchOutsHtml(n){
   ensureBranch(n);
-  var h='';
+  var ovIn=branchVarOverride(n);
+  var h='<div class="br-vin'+(ovIn?'':' none')+'" title="Вход переменной: потяните сюда связь от ноды переменной — она перебьёт переменные в условиях исходов">'+
+    '<i class="vpinn'+(ovIn?' has':'')+'" title="Вход переменной"></i>'+
+    '<span class="t">'+ic('variable',11)+'<span>переменная</span></span>'+
+    '<span class="vv">'+(ovIn?('⟵ '+esc(varName(ovIn))):'не подключена')+'</span>'+
+  '</div>';
   n.outcomes.forEach(function(o,i){
     var nm=o.label||('Исход '+(i+1));
     h+='<div class="br-out" data-oid="'+esc(o.id)+'">'+
@@ -3679,6 +3743,17 @@ function bindBranchOuts(el,n){
 function branchOutPortPos(nodeEl,oid){
   if(!nodeEl)return null;
   var portEl=nodeEl.querySelector('.opin[data-out="'+oid+'"]');
+  if(!portEl)return null;
+  var nr=nodeEl.getBoundingClientRect();
+  var pr=portEl.getBoundingClientRect();
+  return{
+    x:(pr.left+pr.width/2-nr.left)/vp.z+parseFloat(nodeEl.style.left||0),
+    y:(pr.top+pr.height/2-nr.top)/vp.z+parseFloat(nodeEl.style.top||0)
+  };
+}
+function branchVarInPos(nodeEl){
+  if(!nodeEl)return null;
+  var portEl=nodeEl.querySelector('.vpinn');
   if(!portEl)return null;
   var nr=nodeEl.getBoundingClientRect();
   var pr=portEl.getBoundingClientRect();
@@ -4697,11 +4772,23 @@ function finishConnect(){
   if(connS.prev&&connS.prev.parentNode)connS.prev.remove();
   if(connS.hl)connS.hl.classList.remove('drop-hover');
   var from=connS.from,fromReply=connS.fromReply||null,fromOut=connS.fromOut||null,to=connS.hl?connS.hl.dataset.id:null;
+  var toVin=!!connS.hlVin&&!!to;
   var pt=(connS.wx!=null)?{x:connS.wx,y:connS.wy}:null;
   var cx=connS.cx,cy=connS.cy;
   connS=null;
   if(to&&to!==from){
-    var dup=project.edges.some(function(x){return x.from===from&&x.to===to&&x.fromReply===fromReply&&(x.fromOut||null)===fromOut;});
+    var tnV=nodeById(to),fnV=nodeById(from);
+    if(toVin){
+      if(!tnV||tnV.type!=='branch'){toast('Вход «переменная» есть только у развилки','warn');return;}
+      if(!fnV||fnV.type!=='varnode'){toast('Ко входу «переменная» подключаются ноды переменных — перетащите переменную из вкладки «Переменные» на холст','warn');return;}
+      var dupV=project.edges.some(function(x){return x.from===from&&x.to===to&&x.tin==='var';});
+      if(dupV){toast('Эта переменная уже подключена к развилке','warn');return;}
+      var eidV=uid();
+      mutate(function(){project.edges.push({id:eidV,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:'var'});},{edge:eidV});
+      toast('Переменная подключена ко входу развилки — перебьёт переменные в условиях исходов');
+      return;
+    }
+    var dup=project.edges.some(function(x){return x.from===from&&x.to===to&&x.fromReply===fromReply&&(x.fromOut||null)===fromOut&&!x.tin;});
     if(dup)toast('Такая связь уже есть','warn');
     else{
       var eid=uid();
@@ -5001,8 +5088,15 @@ window.addEventListener('pointermove',function(e){lastPtr.x=e.clientX;lastPtr.y=
     var elp=document.elementFromPoint(e.clientX,e.clientY);
     var under=elpp(elp);
     if(connS.hl)connS.hl.classList.remove('drop-hover');
-    connS.hl=null;
-    if(under&&under.dataset.id!==connS.from){under.classList.add('drop-hover');connS.hl=under;}
+    if(connS.hlVin){connS.hlVin.classList.remove('hl');connS.hlVin=null;}
+    connS.hl=null;connS.hlVin=null;
+    var vinEl=(elp&&elp.closest)?elp.closest('.br-vin'):null;
+    var vinNode=vinEl?vinEl.closest('.node'):null;
+    if(vinEl&&vinNode&&vinNode.dataset.id!==connS.from){
+      vinNode.classList.add('drop-hover');connS.hl=vinNode;
+      connS.hlVin=vinEl;vinEl.classList.add('hl');
+    }
+    else if(under&&under.dataset.id!==connS.from){under.classList.add('drop-hover');connS.hl=under;}
     return;
   }
   if(panS){vp.x=panS.vx+e.clientX-panS.sx;vp.y=panS.vy+e.clientY-panS.sy;applyView();return;}
@@ -6504,6 +6598,7 @@ lt:(typeof e.lt==='number')?clamp(e.lt,0.04,0.96):0.5,
 lp:(typeof e.lp==='number')?clamp(e.lp,-44,44):0,
 fromReply:(typeof e.fromReply==='string'&&e.fromReply)?e.fromReply:null,
 fromOut:(typeof e.fromOut==='string'&&e.fromOut)?e.fromOut:null,
+tin:(e.tin==='var')?'var':null,
 bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0},cond:econd};
 });
   /* исход, к которому привязана стрелка, должен существовать на развилке */
@@ -6515,6 +6610,12 @@ bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:
   });
   p.edges.forEach(function(e){
     if(e.fromOut&&(!outIds[e.from]||!outIds[e.from][e.fromOut]))e.fromOut=null;
+  });
+  /* связь «переменная → вход развилки» должна идти от ноды переменной к развилке */
+  var typesById={};
+  p.nodes.forEach(function(nn){typesById[nn.id]=nn.type;});
+  p.edges.forEach(function(e){
+    if(e.tin==='var'&&(typesById[e.from]!=='varnode'||typesById[e.to]!=='branch'))e.tin=null;
   });
   p.groups=p.groups.filter(function(g){
     return p.nodes.some(function(n){return n.gid===g.id;});
@@ -6736,7 +6837,7 @@ $('#bHelp').onclick=function(){
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
       '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
-      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (число / текст / флаг); перетащите строку на холст — получится нода чтения или изменения переменной; у развилки добавляйте исходы и привязывайте к ним переменную — исход откроется при совпадении значения</div>'+
+      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (число / текст / флаг); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -7940,6 +8041,7 @@ function plBuildPlaylist(nodes){
   var indeg={},outs={};
   arr.forEach(function(n){indeg[n.id]=0;});
   project.edges.forEach(function(e){
+    if(e.tin==='var')return; /* связь «переменная → вход развилки» — не поток проигрывания */
     if(!S.has(e.from)||!S.has(e.to)||e.from===e.to)return;
     var lst=outs[e.from]||(outs[e.from]=[]),dup=false;
     for(var i=0;i<lst.length;i++)if(lst[i]&&lst[i].id===e.to){dup=true;break;}
@@ -8027,6 +8129,20 @@ function plUpdateBackUI(){
 function plBack(){
   if(!PL.hist.length)return;
   var s=PL.hist.pop();
+  /* ноды переменных невидимы в проигрывании: «Назад» перескакивает их (значения откатываются вместе с историей) */
+  while(true){
+    var nn=nodeById(s.nodeId);
+    if(!nn||nn.type!=='varnode')break;
+    if(!PL.hist.length){
+      PL.nodeId=s.nodeId;PL.replyId=null;PL.intro=false;PL.typing=false;
+      if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+      if(s.vars)PL.vars=Object.assign({},s.vars);
+      plRenderVars();
+      if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
+      plShowEnd();return;
+    }
+    s=PL.hist.pop();
+  }
   if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
   PL.typing=false;
   $('#plEnd').classList.remove('show');
@@ -8113,8 +8229,9 @@ function plBranchChoices(n){
   if(!outs.length){
     if(!hasCond)return null;
     return nx.map(function(e){
-      var ok=condMet(e.cond,PL.vars);
-      return{label:plEdgeLabel(e),ok:ok,why:(e.cond&&!ok)?('нужно: '+condText(e.cond)):null,fn:function(){plFollowEdge(e);}};
+      var c0=condWithOverride(e.cond,n);
+      var ok=!c0||condMet(c0,PL.vars);
+      return{label:plEdgeLabel(e),ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}};
     });
   }
   if(outs.length===1&&!outs[0].cond&&!hasCond)return null; /* один выход без условия — авто-переход */
@@ -8122,15 +8239,17 @@ function plBranchChoices(n){
   outs.forEach(function(o,i){
     var ed=null;
     for(var k=0;k<nx.length;k++){if(nx[k].fromOut===o.id){ed=nx[k];break;}}
-    var ok=(!o.cond||condMet(o.cond,PL.vars))&&!!ed;
+    var c0=condWithOverride(o.cond,n);
+    var ok=(!c0||condMet(c0,PL.vars))&&!!ed;
     var why=null;
-    if(o.cond&&!condMet(o.cond,PL.vars))why='нужно: '+condText(o.cond);
+    if(c0&&!condMet(c0,PL.vars))why='нужно: '+condText(c0);
     else if(!ed)why='исход не подключён стрелкой';
     items.push({label:o.label||('Исход '+(i+1)),ok:ok,why:why,fn:function(){if(ed)plFollowEdge(ed);}});
   });
   gen.forEach(function(e){
-    var ok=!e.cond||condMet(e.cond,PL.vars);
-    items.push({label:plEdgeLabel(e),ok:ok,why:(e.cond&&!ok)?('нужно: '+condText(e.cond)):null,fn:function(){plFollowEdge(e);}});
+    var c0=condWithOverride(e.cond,n);
+    var ok=!c0||condMet(c0,PL.vars);
+    items.push({label:plEdgeLabel(e),ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}});
   });
   return items;
 }
@@ -8201,7 +8320,7 @@ function plShowSlide(opts){
 }
 function plGoNode(n,keepPath){
   PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
-  if(!keepPath)plTrackPath(n.id);
+  if(!keepPath&&n.type!=='varnode')plTrackPath(n.id); /* нода переменной не попадает в путь проигрывания */
   if(PL.vars&&!keepPath){
     /* развилка меняет переменные при входе игрока (при «Назад» значения восстанавливаются из истории) */
     if(n.type==='branch'&&n.setVars&&n.setVars.length){
@@ -8213,7 +8332,7 @@ function plGoNode(n,keepPath){
       });
       if(msgs.length){plRenderVars();plVarFlash(msgs.join(' · '));}
     }
-    /* нода переменной в режиме «изменение» */
+    /* нода переменной: «изменение» — применяем операцию, «чтение» — считываем значение (всплывашка у HUD) */
     if(n.type==='varnode'){
       var vnS=n.vid?varById(n.vid):null;
       if(vnS&&n.varMode==='set'){
@@ -8221,18 +8340,14 @@ function plGoNode(n,keepPath){
         PL.vars[vnS.id]=after;
         plRenderVars();
         plVarFlash(varName(vnS.id)+' '+opSym(n.varOp)+' '+varValText(n.varVal,vnS)+'  →  '+varValText(after,vnS));
+      }else if(vnS){
+        var gv=(PL.vars[vnS.id]!==undefined&&PL.vars[vnS.id]!==null)?PL.vars[vnS.id]:vnS.val;
+        plVarFlash('чтение: '+vnS.name+' = '+varValText(gv,vnS));
       }
     }
   }
-  if(n.type==='varnode'){
-    var vn=n.vid?varById(n.vid):null;
-    var txt;
-    if(!vn)txt='Переменная не привязана — выберите её в инспекторе.';
-    else if(n.varMode==='get')txt=vn.name+' = '+varValText((PL.vars&&PL.vars[vn.id]!=null)?PL.vars[vn.id]:vn.val,vn);
-    else txt=opText({vid:vn.id,op:n.varOp,val:n.varVal});
-    plShowSlide({name:null,color:nodeVisual(n).color,text:txt,chapter:n});
-    return;
-  }
+  /* нода переменной не выводится как слайд: срабатывает (меняет/читает значение) и сразу ведёт дальше */
+  if(n.type==='varnode'){plAfterVarnode(n,keepPath);return;}
   if(n.type==='dialog'){
     ensureDialog(n);
     var desc=n.dialog.description||'';
@@ -8250,6 +8365,25 @@ function plGoNode(n,keepPath){
   }
   plShowSlide({name:plCastName(n),color:resolvedNodeColor(n,0),text:n.text||'…',chapter:n});
 }
+/* нода переменной: без слайда — сработала и ведёт дальше (список — следующий блок, граф — по стрелке) */
+function plAfterVarnode(n,keepPath){
+  var vn=n.vid?varById(n.vid):null;
+  if(!vn)plVarFlash('Переменная не привязана — выберите её в инспекторе.');
+  if(PL.mode==='list'){plListNext();return;}
+  var nx=plNodeEdgeList(n);
+  if(nx.length===1){
+    var c0=condWithOverride(nx[0].cond,n);
+    if(c0&&!condMet(c0,PL.vars)){plVarFlash('путь закрыт: '+condText(c0));plShowEnd();return;}
+    plFollowEdge(nx[0]);return;
+  }
+  if(nx.length>1){
+    var bc=plBranchChoices(n);
+    if(bc){plRenderBranchChoices(bc);return;}
+    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
+    return;
+  }
+  plShowEnd();
+}
 function plShowReply(r,noHist){
   PL.replyId=r.id;PL.intro=false;
   var name=r.speaker?charName(r.speaker):null;
@@ -8259,7 +8393,7 @@ function plShowReply(r,noHist){
 }
 /* список исходящих связей узла (без привязанных к репликам) */
 function plNodeEdgeList(n){
-  return project.edges.filter(function(e){return e.from===n.id&&!e.fromReply;});
+  return project.edges.filter(function(e){return e.from===n.id&&!e.fromReply&&e.tin!=='var';});
 }
 function plEdgeLabel(e){
   if(e.label)return e.label;
@@ -8339,7 +8473,8 @@ function plAfterType(){
   var nx2=plNodeEdgeList(n);
   if(nx2.length>1){var bc=plBranchChoices(n);if(bc){plRenderBranchChoices(bc);return;}mkChoices(nx2);return;}
   if(nx2.length===1){
-    if(nx2[0].cond&&!condMet(nx2[0].cond,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(nx2[0].cond)+' · ← назад';return;}
+    var c2=condWithOverride(nx2[0].cond,n);
+    if(c2&&!condMet(c2,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(c2)+' · ← назад';return;}
     $('#plHint').textContent='далее: '+plEdgeLabel(nx2[0])+' ▸';return;
   }
   $('#plHint').textContent='клик — конец ▸';
@@ -8383,7 +8518,8 @@ function plAfterNodeFinal(n){
   if(PL.mode==='list'){plListNext();return;}
   var nx=plNodeEdgeList(n);
   if(nx.length===1){
-    if(nx[0].cond&&!condMet(nx[0].cond,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(nx[0].cond)+' · ← назад';return;}
+    var c0=condWithOverride(nx[0].cond,n);
+    if(c0&&!condMet(c0,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(c0)+' · ← назад';return;}
     plFollowEdge(nx[0]);return;
   }
   if(nx.length>1){
