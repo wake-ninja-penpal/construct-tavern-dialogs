@@ -1104,7 +1104,7 @@ function defValOf(v){
 function isTrueVal(x){return x===true||x==='true'||x==='да'||x==='Да'||x===1;}
 function varValText(val,v){
   var t=v?varType(v):'num';
-  if(t==='bool')return isTrueVal(val)?'да':'нет';
+  if(t==='bool')return isTrueVal(val)?'true':'false';
   if(t==='str')return '«'+String(val==null?'':val)+'»';
   return String(val==null?'':val);
 }
@@ -1120,10 +1120,6 @@ function varApplyOp(op,cur,val,type){
   return cur;
 }
 function opSym(op){return (op==='+')?'+':((op==='-')?'−':'=');}
-function opText(o){
-  if(!o)return '';
-  return varName(o.vid)+' '+opSym(o.op)+' '+varValText(o.val,varById(o.vid));
-}
 function condText(c){
   if(!c)return '';
   return varName(c.vid)+' '+(COND_OPS[c.op]||c.op)+' '+varValText(c.val,varById(c.vid));
@@ -1870,10 +1866,6 @@ function renderWorld(spawn,spawnEdge){
       '<i class="port pin" title="вход — потяните (можно с Ctrl), чтобы отсоединить и перенести входящие стрелки"></i>'+
 '<i class="port pout" title="'+(n.type==='dialog'?'выход диалога (правая грань, внизу) · Ctrl+тянуть — перенести исходящие':'выход — тяните к другому узлу · Ctrl+тянуть — отсоединить и перенести исходящие стрелки')+'"></i>';
     el.querySelector('.n-title').textContent=n.title;
-    if(n.type==='branch'&&n.setVars&&n.setVars.length){
-      var vw=el.querySelector('.n-vars');
-      if(vw){vw.innerHTML=n.setVars.map(function(o){return '<span>'+esc(opText(o))+'</span>';}).join('');vw.style.display='';}
-    }
     if(n.type==='dialog'){
       var cntEl=el.querySelector('.n-reply-cnt');
       if(cntEl)cntEl.textContent=countReplies(n.dialog.replies)+' репл.';
@@ -3159,7 +3151,7 @@ function renderInspNode(){
     '<label class="i-lab">Описание</label>'+
     '<textarea class="inp" id="iText" placeholder="Что здесь происходит?">'+esc(n.text)+'</textarea>'+
     '<label class="i-lab">Теги, через запятую</label>'+
-    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?(inspOutsHtml(n)+inspOpsHtml(n)):'')+(n.type==='varnode'?inspVarHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?inspOutsHtml(n):'')+(n.type==='varnode'?inspVarHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
     '<div class="i-actions">'+
       '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
       '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -3195,7 +3187,7 @@ function renderInspNode(){
   });
   tags.addEventListener('blur',editEnd);
   if(n.type!=='char')bindInspParts(n);
-  if(n.type==='branch'){bindInspOuts(n);bindInspOps(n);}
+  if(n.type==='branch'){bindInspOuts(n);}
   if(n.type==='varnode')bindInspVar(n);
   $all('#inSw .swatch').forEach(function(s){
     s.onclick=function(){
@@ -3289,17 +3281,12 @@ function nodeVarChipText(n){
 function refreshNodeVarsChip(n){
   var el=nodeEls.get(n.id);if(!el)return;
   var w=el.querySelector('.n-vars');if(!w)return;
-  if(n.type==='varnode'){
-    w.innerHTML='<span>'+esc(nodeVarChipText(n))+'</span>';
-    w.style.display='';
-    return;
-  }
-  var ops=(n.type==='branch'&&n.setVars)||[];
-  w.innerHTML=ops.map(function(o){return '<span>'+esc(opText(o))+'</span>';}).join('');
-  w.style.display=ops.length?'':'none';
+  if(n.type!=='varnode')return;
+  w.innerHTML='<span>'+esc(nodeVarChipText(n))+'</span>';
+  w.style.display='';
 }
 function refreshAllBranchChips(){
-  project.nodes.forEach(function(n){if(n.type==='branch'||n.type==='varnode')refreshNodeVarsChip(n);});
+  project.nodes.forEach(function(n){if(n.type==='varnode')refreshNodeVarsChip(n);});
   refreshBranchVinRows();
   project.edges.forEach(function(e){if(e.cond)updateEdgeGeom(e);});
 }
@@ -3319,8 +3306,8 @@ function varValControlHtml(v,cls){
   var t=varType(v);
   if(t==='bool'){
     return '<select class="inp v-val '+(cls||'')+'" title="Начальное значение">'+
-      '<option value="1"'+(isTrueVal(v.val)?' selected':'')+'>да</option>'+
-      '<option value="0"'+(isTrueVal(v.val)?'':' selected')+'>нет</option></select>';
+      '<option value="1"'+(isTrueVal(v.val)?' selected':'')+'>true</option>'+
+      '<option value="0"'+(isTrueVal(v.val)?'':' selected')+'>false</option></select>';
   }
   return '<input class="inp v-val '+(cls||'')+'" value="'+esc(String(v.val))+'" title="Начальное значение" placeholder="'+(t==='num'?'0':'текст')+'">';
 }
@@ -3329,7 +3316,7 @@ function renderVarsPane(){
   var l=varsList();
   var html='<div class="v-head"><span>Переменные сюжета</span><button class="btn primary" id="vAdd" title="Создать переменную">+ Переменная</button></div>';
   if(!l.length){
-    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число (number), текст (string) или флаг да/нет (boolean), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br>3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.</div>';
+    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число (number), текст (string) или флаг true/false (boolean), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br>3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.</div>';
   }
   html+='<div id="vRows">';
   l.forEach(function(v){
@@ -3388,7 +3375,6 @@ function bindVarsRows(){
         for(var k=0;k<l.length;k++)if(l[k].id===vid){i=k;break;}
         if(i>=0)l.splice(i,1);
         project.nodes.forEach(function(n){
-          if(n.setVars)n.setVars=n.setVars.filter(function(o){return o.vid!==vid;});
           if(n.type==='varnode'&&n.vid===vid)n.vid=null;
           if(Array.isArray(n.outcomes))n.outcomes.forEach(function(o){if(o.cond&&o.cond.vid===vid)o.cond=null;});
         });
@@ -3414,73 +3400,15 @@ function bindVarsRows(){
     });
   });
 }
-/* ═══ переменные: инспектор развилки ═══ */
+/* ═══ переменные: контрол значения (нода переменной) ═══ */
 function opValControlHtml(o,v){
   var t=v?varType(v):'num';
   if(t==='bool'){
     return '<select class="inp v-val" title="Значение">'+
-      '<option value="1"'+(isTrueVal(o.val)?' selected':'')+'>да</option>'+
-      '<option value="0"'+(isTrueVal(o.val)?'':' selected')+'>нет</option></select>';
+      '<option value="1"'+(isTrueVal(o.val)?' selected':'')+'>true</option>'+
+      '<option value="0"'+(isTrueVal(o.val)?'':' selected')+'>false</option></select>';
   }
   return '<input class="inp v-val" value="'+esc(String(o.val))+'" title="'+(t==='num'?'На сколько изменить':'Новое значение')+'">';
-}
-function inspOpsHtml(n){
-  var h='<label class="i-lab">Переменные (изменяются при входе в развилку)</label>';
-  h+='<div id="iOps">'+opsRowHtml(n)+'</div>';
-  h+='<div style="margin:6px 0 10px"><button class="btn" id="iOpAdd" style="width:100%">'+ic('plus',14)+'Изменить переменную при входе</button></div>';
-  return h;
-}
-function opsRowHtml(n){
-  var l=varsList();
-  if(!l.length)return '<div class="v-empty">Сначала создайте переменные — вкладка «Переменные» слева.</div>';
-  var ops=n.setVars||[];
-  return ops.map(function(o,i){
-    var v0=varById(o.vid);
-    var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===o.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
-    var vt=v0?varType(v0):'num';
-    var opd=opsForType(vt);
-    var oops=Object.keys(opd).map(function(k){return '<option value="'+k+'"'+(k===o.op?' selected':'')+'>'+opd[k]+'</option>';}).join('');
-    return '<div class="v-row op" data-i="'+i+'">'+
-      '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
-      '<select class="inp v-op" title="Операция">'+oops+'</select>'+
-      opValControlHtml(o,v0)+
-      '<button class="v-del" title="Убрать привязку">'+ic('x',12)+'</button>'+
-    '</div>';
-  }).join('');
-}
-function bindInspOps(n){
-  $all('#iOps .v-row').forEach(function(row){
-    var i=+row.dataset.i,o=(n.setVars||[])[i];if(!o)return;
-    row.querySelector('.v-var').onchange=function(ev){
-      discrete(function(){
-        o.vid=ev.target.value;
-        var v0=varById(o.vid);
-        if(v0&&!opsForType(varType(v0))[o.op])o.op='=';
-        o.val=varCastVal(v0?varType(v0):'num',o.val);
-      });
-      renderInspector();refreshNodeVarsChip(n);
-    };
-    row.querySelector('.v-op').onchange=function(ev){discrete(function(){o.op=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
-    var vi=row.querySelector('.v-val');
-    var v0=varById(o.vid),vt0=v0?varType(v0):'num';
-    if(vt0==='bool'){
-      vi.addEventListener('change',function(){discrete(function(){o.val=vi.value==='1';});refreshNodeVarsChip(n);});
-    }else{
-      vi.addEventListener('focus',editStart);
-      vi.addEventListener('input',function(){o.val=varCastVal(v0,vi.value);markDirty();refreshNodeVarsChip(n);});
-      vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
-    }
-    row.querySelector('.v-del').onclick=function(){
-      discrete(function(){n.setVars.splice(i,1);if(!n.setVars.length)delete n.setVars;});
-      renderInspector();refreshNodeVarsChip(n);
-    };
-  });
-  var add=$('#iOpAdd');
-  if(add)add.onclick=function(){
-    var l=varsList();if(!l.length){toast('Сначала создайте переменные — вкладка «Переменные» слева','warn');return;}
-    discrete(function(){if(!n.setVars)n.setVars=[];n.setVars.push({vid:l[0].id,op:'=',val:defValOf(l[0])});});
-    renderInspector();refreshNodeVarsChip(n);
-  };
 }
 /* ═══ условия: общая строка «переменная · сравнение · значение» ═══ */
 function condRowHtml(c,vt,cls){
@@ -3491,8 +3419,8 @@ function condRowHtml(c,vt,cls){
   var valCtl;
   if(vt==='bool'){
     valCtl='<select class="inp v-val" title="Значение">'+
-      '<option value="1"'+(isTrueVal(c.val)?' selected':'')+'>да</option>'+
-      '<option value="0"'+(isTrueVal(c.val)?'':' selected')+'>нет</option></select>';
+      '<option value="1"'+(isTrueVal(c.val)?' selected':'')+'>true</option>'+
+      '<option value="0"'+(isTrueVal(c.val)?'':' selected')+'>false</option></select>';
   }else{
     valCtl='<input class="inp v-val" value="'+esc(String(c.val))+'" title="Значение">';
   }
@@ -6567,12 +6495,6 @@ function normalize(p){
       color:(typeof n.color==='string'&&/^#([0-9a-f]{6})$/i.test(n.color))?n.color:null,
       tint:(typeof n.tint==='number')?clamp(n.tint,-60,60):0,
 dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes:Array.isArray(n.notes)?n.notes.map(function(m){return{title:String(m.title||'').slice(0,80),html:String(m.html||''),hidden:!!m.hidden};}):[]};
-    if(t==='branch'&&Array.isArray(n.setVars)){
-      var sv=n.setVars.filter(function(o){return o&&typeof o.vid==='string';}).map(function(o){
-        return{vid:o.vid.slice(0,40),op:VARS_OPS[o.op]?o.op:'=',val:(o.val===true)?true:((typeof o.val==='number')?o.val:(typeof o.val==='string'?o.val.slice(0,200):0))};
-      });
-      if(sv.length)node.setVars=sv;
-    }
     if(t==='branch'&&Array.isArray(n.outcomes)){
       var oc=n.outcomes.filter(function(o){return o&&typeof o.id==='string';}).slice(0,24).map(function(o){
         var c=(o.cond&&typeof o.cond.vid==='string'&&COND_OPS[o.cond.op])?{vid:o.cond.vid.slice(0,40),op:o.cond.op,val:(o.cond.val===true)?true:((typeof o.cond.val==='number')?o.cond.val:(typeof o.cond.val==='string'?o.cond.val.slice(0,200):0))}:null;
@@ -8358,18 +8280,8 @@ function plGoNode(n,keepPath){
   }
   if(!keepPath&&n.type!=='varnode')plTrackPath(n.id); /* нода переменной не попадает в путь проигрывания */
   if(PL.vars&&!keepPath){
-    /* развилка меняет переменные при входе игрока (при «Назад» значения восстанавливаются из истории) */
-    if(n.type==='branch'&&n.setVars&&n.setVars.length){
-      var msgs=[];
-      n.setVars.forEach(function(o){
-        var v0=varById(o.vid);if(!v0)return;
-        var before=(PL.vars[o.vid]!==undefined&&PL.vars[o.vid]!==null)?PL.vars[o.vid]:v0.val;
-        PL.vars[o.vid]=varApplyOp(o.op,PL.vars[o.vid],o.val,varType(v0));
-        if(PL.varChanged)PL.varChanged.add(o.vid);
-        msgs.push(varName(o.vid)+' '+opSym(o.op)+' '+varValText(o.val,v0)+'  →  '+varValText(PL.vars[o.vid],v0)+' (было: '+varValText(before,v0)+')');
-      });
-      if(msgs.length){plRenderVars();plVarFlash((n.title?n.title+': ':'')+msgs.join(' · '));}
-    }
+    /* развилка не меняет переменные — только вычисляет исходы по условиям;
+       значения меняют только ноды переменных (режим «изменение») */
     /* нода переменной: «изменение» — применяем операцию, «чтение» — считываем значение (всплывашка у HUD) */
     if(n.type==='varnode'){
       var vnS=n.vid?varById(n.vid):null;
