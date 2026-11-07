@@ -179,6 +179,9 @@ body.carry #canvas{cursor:copy}
 #edges .edge.drop-target .line{stroke:var(--acc2);stroke-width:3.2;marker-end:url(#arwSel);filter:drop-shadow(0 0 8px rgba(226,165,78,.75))}
 #edges .edge.kind-choice .line{stroke-dasharray:7 5}
 #edges .edge.kind-cond .line{stroke-dasharray:2 5;stroke-linecap:round}
+#edges .edge.tvar .line{stroke-dasharray:5 4;stroke:#b7b26a}
+#edges .edge.tvar:hover .line{stroke:#d6cf92}
+#edges .edge.tvar .ecnd{fill:#b7b26a}
 #edges .edge.bridge .line{stroke-width:6;stroke:#79808d;marker-end:url(#arwBridge)}
 #edges .edge.bridge:hover .line{stroke:#a6adb8;marker-end:url(#arwBridgeHi)}
 #edges .edge.bridge.sel .line{stroke:var(--acc);marker-end:url(#arwBridgeSel);filter:drop-shadow(0 0 6px rgba(226,165,78,.45))}
@@ -271,6 +274,37 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .n-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
 .node.ex-0 .n-tags{margin-top:1px;margin-bottom:1px}
 .n-tags span{font:600 9.5px var(--mono);letter-spacing:.4px;color:var(--tx3);background:#232730;border:1px solid #303540;border-radius:6px;padding:2px 7px}
+/* ── переменные ── */
+#paneVars{padding:12px}
+.v-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.v-head span{font:600 12.5px var(--body);color:var(--tx2);letter-spacing:.3px}
+.v-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.v-row .v-name{flex:1.2;min-width:0}
+.v-row .v-var{flex:1.2;min-width:0}
+.v-row .v-op{flex:0 0 46px;padding:0 4px}
+.v-row .v-val{flex:.7;min-width:46px}
+.v-del{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.v-del:hover{color:#cf6d4f;border-color:#5a3a33;background:#33272a}
+.v-hint{margin-top:12px;font-size:11.5px;line-height:1.65;color:var(--tx3);background:rgba(255,255,255,.025);border:1px dashed #2e333c;border-radius:10px;padding:10px 12px}
+.v-hint b{color:var(--tx2)}
+.v-empty{font-size:11.5px;color:var(--tx3);padding:4px 0}
+.n-vars{display:none;flex-wrap:wrap;gap:4px;margin-top:7px}
+.node.ex-0 .n-vars{margin-top:2px}
+.n-vars span{font:600 9.5px var(--mono);letter-spacing:.4px;color:#e8dfa8;background:rgba(214,201,106,.13);border:1px solid rgba(214,201,106,.42);border-radius:6px;padding:2px 7px;white-space:nowrap}
+#edges .ecnd{font:600 9.5px var(--mono);fill:#d6c96a;paint-order:stroke;stroke:#14171b;stroke-width:3px;pointer-events:none}
+/* ── переменные в режиме новеллы ── */
+.pl-vars{display:none;flex-direction:column;gap:6px;position:absolute;top:56px;left:16px;z-index:5}
+.pl-var{display:flex;align-items:center;gap:9px;background:rgba(18,21,26,.85);border:1px solid #343b47;border-radius:9px;padding:5px 11px;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
+.pl-var i{font:500 11px var(--body);color:var(--tx3);font-style:normal;white-space:nowrap}
+.pl-var b{font:600 12.5px var(--mono);color:#e2a54e}
+.pl-var.chg{border-color:#8a6d33;background:rgba(43,32,14,.88)}
+.pl-var.chg b{color:#f0c268}
+.pl-var.chg i::after{content:' ↯';color:#c99a3f;font-style:normal}
+.pl-varflash{position:absolute;left:50%;top:15%;transform:translateX(-50%) translateY(-8px);background:rgba(20,23,29,.94);border:1px solid #d6c96a;color:#e8dfa8;font:600 13px var(--body);border-radius:10px;padding:9px 16px;opacity:0;pointer-events:none;transition:all .32s;z-index:9;max-width:80vw;text-align:center}
+.pl-varflash.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.pl-choice.lock{opacity:.42;cursor:not-allowed}
+.pl-choice.lock:hover{transform:none;box-shadow:none;background:rgba(20,23,29,.92)}
+.pl-choice .why{display:block;font:500 11px var(--body);color:#d0714e;margin-top:3px;font-style:normal}
 .n-cast{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:7px}
 .n-cast:empty{display:none}
 .node.ex-0 .n-cast{margin-bottom:2px}
@@ -303,6 +337,50 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .dlg-reply-pin.out{right:-5px;cursor:grab}
 .dlg-reply-pin.out.live{opacity:1;border-color:var(--acc);background:#2a2113;box-shadow:0 0 6px rgba(226,165,78,.5)}
 .dlg-reply-pin.out:hover{border-color:var(--acc2);background:#2a2113;transform:scale(1.3);box-shadow:0 0 10px rgba(226,165,78,.6)}
+/* ── исходы развилки (пины на узле) ── */
+.n-outs{display:flex;flex-direction:column;gap:3px;margin-top:7px}
+.node.ex-0 .n-outs{display:none}
+.br-out{position:relative;display:flex;align-items:center;gap:6px;background:rgba(22,25,30,.55);border:1px solid rgba(214,201,106,.28);border-radius:7px;padding:3px 9px 3px 8px;margin-right:2px}
+.br-out .lbl{flex:1;min-width:0;font:700 10.5px var(--body);color:#e6dfae;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.br-out .cnd{font:600 9px var(--mono);color:#9aa1ac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.br-out .cnd.on{color:#e8dfa8}
+.br-x{flex:none;width:16px;height:16px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:4px;color:var(--tx3);cursor:pointer;opacity:0;transition:.15s;padding:0}
+.br-out:hover .br-x{opacity:1}
+.br-x:hover{color:#cf6d4f;background:#33272a}
+.opin{position:absolute;right:-6px;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;flex:none;opacity:0;transition:opacity .15s,border-color .15s,transform .15s;cursor:grab;z-index:5}
+.node:hover .opin,.node.sel .opin,body.connecting .opin{opacity:1}
+.opin.live{opacity:1;border-color:var(--acc);background:#2a2113;box-shadow:0 0 6px rgba(226,165,78,.5)}
+.opin:hover{border-color:var(--acc2);background:#2a2113;transform:scale(1.3)}
+.br-add{margin-top:4px;width:calc(100% - 4px);background:transparent;border:1px dashed rgba(214,201,106,.4);border-radius:7px;color:#b9b06d;font:600 10px var(--body);padding:3px 0;cursor:pointer;transition:.15s}
+.br-add:hover{background:rgba(214,201,106,.1);border-color:rgba(214,201,106,.7);color:#e8dfa8}
+.out-ed{border:1px solid var(--line);border-radius:9px;padding:7px 8px;margin-bottom:7px;background:rgba(255,255,255,.02)}
+.out-ed-row{display:flex;align-items:center;gap:6px}
+.out-ed-row .out-lbl{flex:1;min-width:0}
+.out-ed-cond{margin-top:6px}
+.out-ed-cond .seg{margin-bottom:6px}
+.out-ed-cond .v-row{margin-bottom:0}
+/* ── вход переменной у развилки ── */
+.br-vin{position:relative;display:flex;align-items:center;gap:6px;background:rgba(183,178,106,.07);border:1px dashed rgba(183,178,106,.38);border-radius:7px;padding:3px 9px 3px 8px;margin-right:2px}
+.br-vin .t{display:flex;align-items:center;gap:4px;font:700 10px var(--body);color:#b9b06d;white-space:nowrap}
+.br-vin .vv{flex:1;min-width:0;font:600 9.5px var(--mono);color:#e8dfa8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.br-vin.none .vv{color:#7d838e}
+.br-vin.hl{border-style:solid;border-color:var(--acc);background:rgba(226,165,78,.16)}
+.vpinn{position:absolute;left:-6px;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#0f1114;border:2px solid #8a855a;opacity:0;transition:opacity .15s,border-color .15s;z-index:5}
+.node:hover .vpinn,.node.sel .vpinn,body.connecting .vpinn{opacity:1}
+.vpinn.has{opacity:1;border-color:#b7b26a;background:#262613;box-shadow:0 0 6px rgba(183,178,106,.45)}
+body.connecting .vpinn{cursor:copy}
+.vin-hint{display:flex;align-items:center;gap:8px;font:500 11px var(--body);color:#cfc98a;background:rgba(183,178,106,.08);border:1px dashed rgba(183,178,106,.4);border-radius:8px;padding:6px 8px;margin-bottom:8px}
+.vin-hint>span{flex:1;min-width:0}
+/* ── ноды переменных ── */
+.node.t-varnode .n-text{display:none}
+.node.t-varnode .n-vars{display:flex}
+#paneVars .v-row{cursor:grab}
+#paneVars .v-row.dragging{opacity:.45}
+.v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
+.v-row .v-type{flex:0 0 78px;padding:0 2px;font-size:10.5px}
+#paneVars .v-row .v-val{flex:0 0 46px;min-width:46px}
+.v-add-btn{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.v-add-btn:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
 .dlg-children{margin-left:9px;padding-left:14px;position:relative;margin-top:3px}
 .dlg-item{position:relative}
 .dlg-reply-row::before{content:'';position:absolute;left:-14px;top:50%;width:12px;height:2px;margin-top:-1px;background:#4a5160;border-radius:1px}
@@ -549,6 +627,53 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   #miniMap{width:170px;height:120px}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ═══════════ режим новеллы (проигрывание) ═══════════ */
+#player{position:fixed;inset:0;z-index:300;display:none;flex-direction:column;background:radial-gradient(120% 85% at 50% 28%,#1c212b 0%,#12151b 46%,#0a0b0e 100%);user-select:none;overflow:hidden}
+#player.show{display:flex;animation:plIn .4s ease}
+@keyframes plIn{from{opacity:0}}
+#player .pl-vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(85% 70% at 50% 42%,transparent 40%,rgba(0,0,0,.42) 100%)}
+.pl-top{position:absolute;top:14px;left:0;right:0;display:flex;align-items:center;gap:10px;padding:0 18px;z-index:6}
+.pl-path{display:flex;align-items:center;gap:7px;font:500 11px var(--mono);color:var(--tx3);white-space:nowrap;overflow:hidden;max-width:52vw}
+.pl-path b{color:var(--tx2);font-weight:600}
+.pl-path .sep{color:#3d434f}
+.pl-path .pl-cnt{flex:none;padding:3px 9px;border-radius:999px;background:rgba(226,165,78,.14);border:1px solid rgba(226,165,78,.4);color:#e2a54e;font-weight:600;letter-spacing:1px;white-space:nowrap}
+.pl-top .spacer{flex:1}
+.pl-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--line2);background:rgba(21,23,27,.82);color:var(--tx2);font:500 12px var(--body);cursor:pointer;transition:all .16s;backdrop-filter:blur(4px)}
+.pl-btn:hover{background:#262b33;color:var(--tx);border-color:#3d434f}
+.pl-btn svg{width:13px;height:13px}
+.pl-btn.accent{border-color:rgba(226,165,78,.45);color:var(--acc)}
+.pl-btn.accent:hover{background:rgba(226,165,78,.12)}
+.pl-chapter{position:absolute;top:58px;left:0;right:0;display:flex;justify-content:center;z-index:4;pointer-events:none}
+.pl-chip{display:inline-flex;align-items:center;gap:8px;max-width:80vw;padding:6px 15px;border-radius:999px;background:rgba(13,15,19,.78);border:1px solid #2c313b;font:600 10.5px var(--mono);letter-spacing:1.6px;text-transform:uppercase;color:var(--tx2);backdrop-filter:blur(4px)}
+.pl-chip .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.pl-chip .ttl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:1px}
+.pl-body{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;z-index:3}
+.pl-wrap{width:min(940px,94vw);display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 0 44px}
+.pl-choices{display:none;flex-direction:column;gap:9px;width:min(620px,92vw);margin-bottom:4px}
+.pl-choice{display:flex;align-items:center;gap:12px;padding:12px 18px;border-radius:12px;border:1px solid #343b47;background:rgba(20,23,29,.92);color:var(--tx);font:500 14.5px var(--body);text-align:left;cursor:pointer;transition:all .16s;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
+.pl-choice:nth-child(2){animation-delay:.05s}.pl-choice:nth-child(3){animation-delay:.1s}.pl-choice:nth-child(4){animation-delay:.15s}.pl-choice:nth-child(5){animation-delay:.2s}
+.pl-choice::before{content:'';width:3px;align-self:stretch;border-radius:3px;background:var(--plc,#e2a54e);opacity:.8;flex:none;transition:opacity .16s}
+.pl-choice:hover{background:rgba(32,36,44,.96);border-color:var(--plc,#e2a54e);transform:translateX(4px);box-shadow:0 8px 22px rgba(0,0,0,.4)}
+.pl-choice .num{font:600 10px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-radius:5px;padding:2px 6px;flex:none}
+.pl-choice:hover .num{color:var(--plc,#e2a54e);border-color:var(--plc,#e2a54e)}
+.pl-choice .lbl{flex:1}
+.pl-box{position:relative;width:100%;background:rgba(15,17,22,.94);border:1px solid #2c313b;border-radius:16px;padding:24px 28px 30px;min-height:118px;box-shadow:0 26px 70px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+.pl-box::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:16px 16px 0 0;background:var(--plc,#e2a54e);opacity:.85}
+.pl-name{position:absolute;top:-16px;left:24px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-name.hidden{display:none}
+.pl-text{font:400 16.5px/1.65 var(--body);color:var(--tx);min-height:56px;white-space:pre-wrap;word-break:break-word}
+.pl-text .caret{display:inline-block;width:9px;height:1.05em;margin-left:2px;vertical-align:text-bottom;background:var(--plc,#e2a54e);animation:plCaret .8s steps(1) infinite}
+@keyframes plCaret{50%{opacity:0}}
+.pl-hint{position:absolute;right:20px;bottom:10px;font:500 10.5px var(--mono);color:var(--tx3);letter-spacing:.6px}
+.pl-end{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(7,8,11,.62);z-index:8}
+.pl-end.show{display:flex;animation:plIn .55s ease}
+.pl-end h2{font:700 36px var(--disp);letter-spacing:8px;color:var(--acc);text-shadow:0 6px 40px rgba(226,165,78,.35)}
+.pl-end .pl-sub{font:500 12px var(--mono);color:var(--tx3);margin-bottom:14px}
+.pl-end .pl-btns{display:flex;gap:10px}
+.pl-end .pl-btn{height:36px;padding:0 16px;font-size:13px}
+@keyframes plSlide{from{opacity:0;transform:translateY(14px)}}
+.pl-anim{animation:plSlide .3s cubic-bezier(.2,.8,.3,1)}
+body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 </style>
 </head>
 <body>
@@ -583,6 +708,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   <button class="btn ibtn on" id="bSnap" title="Привязка к сетке"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v5a7 7 0 0 0 14 0V3"/><path d="M5 3h3v5H5zM16 3h3v5h-3z"/></svg></button><div class="vsep" style="margin:0 8px"></div><button class="btn ibtn on" id="bBendS" title="Изгиб всех стрелок: плавный"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 18c7 0 3-12 10-12h6"/></svg></button>
 <button class="btn ibtn" id="bBend90" title="Изгиб всех стрелок: прямые углы (90°)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h9a3 3 0 0 0 3-3V6h4"/></svg></button>
 <button class="btn ibtn" id="bBend45" title="Изгиб всех стрелок: углы 45°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h6l8-8h2"/></svg></button><div class="vsep" style="margin:0 8px"></div><button class="btn ibtn on" id="bMap" title="Мини-карта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="7" y="8" width="7" height="6" rx="1" fill="currentColor" fill-opacity=".3"/></svg></button><div class="vsep"></div>
+  <button class="btn" id="bPlay" title="Режим новеллы: проиграть выделенные блоки или группу по порядку; без выделения — весь сюжет (P)"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.5v13l10.5-6.5z"/></svg><span class="t">Играть</span></button>
   <button class="btn collab-chip" id="bCollab" title="Совместный доступ: статус и участники"><span class="cc-dot" id="ccDot"></span><span id="ccTxt">офлайн</span></button>
   <button class="btn" id="bMerge" title="Merge-запросы копий" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="2.6"/><circle cx="6" cy="6" r="2.6"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg><span class="t">Merge</span><span class="m-badge" id="mergeBadge" style="display:none">0</span></button>
   <button class="btn" id="bCopies" title="Локальные копии проекта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span class="t">Копии</span></button>
@@ -595,6 +721,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
     <nav class="ltabs">
       <button class="ltab active" data-t="pal">Элементы</button>
       <button class="ltab" data-t="list">Обзор</button>
+      <button class="ltab" data-t="vars">Переменные</button>
       <button class="add-type" id="bAddType" title="Создать свой тип элемента">+</button>
     </nav>
     <div class="tabpane active" id="panePal"><div id="palList"></div></div>
@@ -602,6 +729,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
       <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sQ" placeholder="Поиск по узлам и группам…"></div>
       <div id="nodeList"></div>
     </div>
+    <div class="tabpane" id="paneVars"></div>
   </aside>
   <section id="stage">
     <div id="canvas">
@@ -632,6 +760,38 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   <div class="st-right"><span id="stCounts"></span><span id="stAuto">✓ автосохранение</span></div>
 </footer>
 <div id="ctx"></div>
+<div id="player">
+  <div class="pl-vig"></div>
+  <div class="pl-top">
+    <div class="pl-path" id="plPath"></div>
+    <div class="spacer"></div>
+    <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
+    <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+    <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
+  </div>
+  <div class="pl-chapter" id="plChapter"></div>
+  <div class="pl-vars" id="plVars"></div>
+  <div class="pl-varflash" id="plVarFlash"></div>
+  <div class="pl-body">
+    <div class="pl-wrap">
+      <div class="pl-choices" id="plChoices"></div>
+      <div class="pl-box" id="plBox">
+        <div class="pl-name hidden" id="plName"></div>
+        <div class="pl-text" id="plText"></div>
+        <div class="pl-hint" id="plHint">клик — далее ▸</div>
+      </div>
+    </div>
+  </div>
+  <div class="pl-end" id="plEnd">
+    <h2>~ КОНЕЦ ~</h2>
+    <div class="pl-sub">эта ветка истории завершена</div>
+    <div class="pl-btns">
+      <button class="pl-btn" id="plEndBack" title="Вернуться на шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
+      <button class="pl-btn" id="plEndRestart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+      <button class="pl-btn accent" id="plEndExit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>В редактор</button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 <div id="modalWrap"><div class="m-card" id="mCard"></div></div>
 <div id="dlgModal" class="dlg-modal">
@@ -741,6 +901,7 @@ var ICONS={
   plus:'<path d="M12 5v14M5 12h14"/>'
 };
 var EXTRA_ICONS={
+  play:'<path d="M7.5 5.5v13l11-6.5z"/><path d="M4.5 5.5v13"/>',
   sword:'<path d="M19.5 4.5 9 15"/><path d="M19.5 4.5l-4 .7M19.5 4.5l-.7 4"/><path d="M6.5 13.5l4 4"/><path d="M4.5 19.5l3-3"/>',
   shield:'<path d="M12 3l7 3v5.5c0 4.8-3.4 7.7-7 9.5-3.6-1.8-7-4.7-7-9.5V6z"/>',
   bow:'<path d="M5 19C5 11 11 5 19 5"/><path d="M5 19 19 5"/><path d="M12 12l7-7m0 0h-3.5M19 5v3.5"/>',
@@ -789,7 +950,8 @@ var EXTRA_ICONS={
   wand:'<path d="M3.5 20.5 14 10"/><path d="m15.5 3.5.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z"/><path d="m19.5 12 .5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>',
   bag:'<path d="M6 8h12l1.2 12H4.8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>',
   door:'<path d="M6.5 21V9.5a5.5 5.5 0 0 1 11 0V21"/><path d="M4 21h16"/><path d="M14.5 13h.01" stroke-width="2.4"/>',
-  candle:'<path d="M9 11.5h6V20H9z"/><path d="M12 11.5V9"/><path d="M12 2.5c1 1.2 1.6 2.1 1.6 3.1A1.6 1.6 0 0 1 12 7.2a1.6 1.6 0 0 1-1.6-1.6c0-1 .6-1.9 1.6-3.1z"/><path d="M6.5 20h11"/>'
+  candle:'<path d="M9 11.5h6V20H9z"/><path d="M12 11.5V9"/><path d="M12 2.5c1 1.2 1.6 2.1 1.6 3.1A1.6 1.6 0 0 1 12 7.2a1.6 1.6 0 0 1-1.6-1.6c0-1 .6-1.9 1.6-3.1z"/><path d="M6.5 20h11"/>',
+  variable:'<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>'
 };
 var ALLICONS={};
 Object.keys(ICONS).forEach(function(k){ALLICONS[k]=ICONS[k];});
@@ -806,6 +968,7 @@ var TYPES={
   dialog:{name:'Диалог',color:'#cbbd92',icon:'dialog'},
   skill:{name:'Навык',color:'#7fb5a2',icon:'skill'},
   branch:{name:'Развилка',color:'#d6c96a',icon:'branch'},
+  varnode:{name:'Переменная',color:'#b7b26a',icon:'variable'},
   event:{name:'Событие',color:'#aab1bb',icon:'event'},
   note:{name:'Заметка',color:'#8b929c',icon:'note'}
 };
@@ -816,7 +979,7 @@ var KINDS_RU={flow:'обычная',choice:'выбор',cond:'условие',br
 var FOLD_NAMES=['Компакт','Список','Развёрнута'];
 var PALETTE_COLORS=['#e2a54e','#e0b46b','#d0714e','#cf6b5a','#c9857a','#d6c96a','#b7b26a','#9cb878','#7fb5a2','#cbbd92','#aab1bb','#8b929c'];
 /* ═══ состояние ═══ */
-var project={meta:{name:'Без названия',created:'',modified:''},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
+var project={meta:{name:'Без названия',created:'',modified:''},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[]};
 var vp={x:80,y:80,z:1};
 var sel=new Set(), selGroups=new Set(), selEdges=new Set(), selEdge=null, selGroup=null;
 var history=[], future=[], preSnap=null;
@@ -905,8 +1068,105 @@ function charColor(id){
   if(!c)return '#8b929c';
   return c.color?nodePaint(c):nodeVisual(c).color;
 }
+/* ═══ переменные ═══ */
+var VARS_OPS={'=':'=','+':'+','-':'−'};
+var COND_OPS={'==':'=','!=':'≠','>':'>','<':'<','>=':'≥','<=':'≤'};
+var COND_OPS_EQ={'==':'=','!=':'≠'};
+var VAR_TYPES={num:'number',str:'string',bool:'boolean'};
+function varsList(){if(!Array.isArray(project.vars))project.vars=[];return project.vars;}
+function varById(id){var l=varsList();for(var i=0;i<l.length;i++)if(l[i].id===id)return l[i];return null;}
+function varName(id){var v=varById(id);return v?v.name:'?';}
+function varType(v){
+  if(v&&VAR_TYPES[v.type])return v.type;
+  if(v&&typeof v.val==='string')return 'str';
+  return 'num';
+}
+/* приведение значения к типу переменной */
+function varCastVal(type,raw){
+  var t=String(raw==null?'':raw).trim();
+  if(type==='num'){
+    if(t==='')return 0;
+    var n=parseFloat(t);
+    return(isFinite(n)&&/^[-+]?[0-9]*\.?[0-9]+$/.test(t))?n:0;
+  }
+  if(type==='bool')return (t==='1'||t==='true'||t==='да'||t==='yes'||t==='Да')?true:false;
+  return t.slice(0,200);
+}
+function varCast(v,raw){return varCastVal(varType(v),raw);}
+/* значение по умолчанию переменной — безопасный дефолт для новых привязок (не меняет поведение) */
+function defValOf(v){
+  if(!v)return 0;
+  var t=varType(v);
+  if(t==='bool')return v.val===true;
+  if(t==='str')return String(v.val==null?'':v.val).slice(0,200);
+  var n=varNum(v.val);return isFinite(n)?n:0;
+}
+function isTrueVal(x){return x===true||x==='true'||x==='да'||x==='Да'||x===1;}
+function varValText(val,v){
+  var t=v?varType(v):'num';
+  if(t==='bool')return isTrueVal(val)?'true':'false';
+  if(t==='str')return '«'+String(val==null?'':val)+'»';
+  return String(val==null?'':val);
+}
+function varNum(x){var n=(typeof x==='number')?x:parseFloat(x);return isFinite(n)?n:0;}
+function opsForType(t){return (t==='num')?VARS_OPS:{'=':'='};}
+function condOpsFor(t){return (t==='num')?COND_OPS:COND_OPS_EQ;}
+function varApplyOp(op,cur,val,type){
+  if(op==='=')return val;
+  if(type&&type!=='num')return cur;
+  var a=varNum(cur),b=varNum(val);
+  if(op==='+')return a+b;
+  if(op==='-')return a-b;
+  return cur;
+}
+function opSym(op){return (op==='+')?'+':((op==='-')?'−':'=');}
+function condText(c){
+  if(!c)return '';
+  return varName(c.vid)+' '+(COND_OPS[c.op]||c.op)+' '+varValText(c.val,varById(c.vid));
+}
+function condMet(c,vals){
+  if(!c)return true;
+  var v=varById(c.vid);if(!v)return true;
+  var cur=(vals&&vals[c.vid]!==undefined&&vals[c.vid]!==null)?vals[c.vid]:v.val;
+  var t=varType(v);
+  if(t==='bool'){
+    var cb=isTrueVal(cur),tb=isTrueVal(c.val);
+    return c.op==='!='?(cb!==tb):(cb===tb);
+  }
+  if(t==='str'){
+    var cs=String(cur==null?'':cur),ts=String(c.val==null?'':c.val);
+    return c.op==='!='?cs!==ts:cs===ts;
+  }
+  var a=varNum(cur),b=varNum(c.val);
+  if(c.op==='==')return a===b;
+  if(c.op==='!=')return a!==b;
+  if(c.op==='>')return a>b;
+  if(c.op==='<')return a<b;
+  if(c.op==='>=')return a>=b;
+  if(c.op==='<=')return a<=b;
+  return true;
+}
+/* ═══ вход переменной у развилки: подключённая нода перебивает переменную из условий ═══ */
+function branchVarOverride(n){
+  if(!n||n.type!=='branch')return null;
+  var es=project.edges;
+  for(var i=0;i<es.length;i++){
+    var e=es[i];
+    if(e.to!==n.id||e.tin!=='var')continue;
+    var src=nodeById(e.from);
+    if(src&&src.type==='varnode'&&src.vid)return src.vid;
+  }
+  return null;
+}
+/* условие с учётом перебивания: у развилки с подключённой переменной vid заменяется */
+function condWithOverride(c,fn){
+  if(!c||!fn||fn.type!=='branch')return c;
+  var ov=branchVarOverride(fn);
+  if(!ov||ov===c.vid)return c;
+  return{vid:ov,op:c.op,val:c.val};
+}
 /* ═══ история ═══ */
-function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups});}
+function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,vars:varsList()});}
 function pushHistory(s){history.push(s);if(history.length>150)history.shift();future.length=0;updateHistUI();}
 function updateHistUI(){
   $('#bUndo').classList.toggle('disabled',history.length===0);
@@ -917,6 +1177,7 @@ function applySnap(s){
   project.nodes=d.nodes; project.edges=d.edges;
   project.customTypes=Array.isArray(d.customTypes)?d.customTypes:[];
   project.groups=Array.isArray(d.groups)?d.groups:[];
+  project.vars=Array.isArray(d.vars)?d.vars:[];
   var ids=new Set(project.nodes.map(function(n){return n.id;}));
   var ns=new Set(); sel.forEach(function(id){if(ids.has(id))ns.add(id);}); sel=ns;
   var eids=new Set(project.edges.map(function(e){return e.id;}));
@@ -1297,6 +1558,17 @@ function layoutDlgConnectors(el){
 }
 function updateDlgRowStates(){
   project.nodes.forEach(function(n){
+    if(n.type==='branch'){
+      var bel=nodeEls.get(n.id);
+      if(bel){
+        var bouts={};
+        project.edges.forEach(function(e){if(e.from===n.id&&e.fromOut)bouts[e.fromOut]=true;});
+        Array.prototype.forEach.call(bel.querySelectorAll('.opin'),function(pin){
+          pin.classList.toggle('live',!!bouts[pin.getAttribute('data-out')]);
+        });
+      }
+      return;
+    }
     if(n.type!=='dialog')return;
     var el=nodeEls.get(n.id);
     if(!el)return;
@@ -1343,6 +1615,7 @@ function renderAll(opts){
   renderEdges(spawnEdge);
   refreshGroupFrames();
   renderPalette(); renderList(); renderInspector(); updateStatus();
+  if($('#paneVars')&&$('#paneVars').classList.contains('active'))renderVarsPane();
   $('#emptyHint').classList.toggle('show',project.nodes.length===0);
   syncSel();
   updateGroupBadges();
@@ -1588,7 +1861,7 @@ function renderWorld(spawn,spawnEdge){
         '<span class="n-st st-'+n.status+'" title="'+STATUS[n.status]+'"></span>'+
         '<button class="n-fold" title="'+FOLD_TITLES[ex]+'">'+ic(FOLD_ICONS[ex],12)+'</button>'+
       '</div>'+
-      '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-tags"></div></div>'+
+      '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-vars"></div><div class="n-tags"></div></div>'+
       '<i class="port pin" title="вход — потяните, чтобы перенести входящие стрелки"></i>'+
       '<i class="port pin" title="вход — потяните (можно с Ctrl), чтобы отсоединить и перенести входящие стрелки"></i>'+
 '<i class="port pout" title="'+(n.type==='dialog'?'выход диалога (правая грань, внизу) · Ctrl+тянуть — перенести исходящие':'выход — тяните к другому узлу · Ctrl+тянуть — отсоединить и перенести исходящие стрелки')+'"></i>';
@@ -1607,6 +1880,19 @@ function renderWorld(spawn,spawnEdge){
       tree.className='dlg-tree';
       tree.innerHTML=dlgTreeInner(n,ex);
       el.querySelector('.n-body').appendChild(tree);
+    }
+    if(n.type==='branch'){
+      ensureBranch(n);
+      var ob=document.createElement('div');
+      ob.className='n-outs';
+      ob.innerHTML=branchOutsHtml(n);
+      el.querySelector('.n-body').appendChild(ob);
+      bindBranchOuts(el,n);
+    }
+    if(n.type==='varnode'){
+      ensureVarnode(n);
+      var vwc=el.querySelector('.n-vars');
+      if(vwc){vwc.innerHTML='<span>'+esc(nodeVarChipText(n))+'</span>';vwc.style.display='';}
     }
     if(collapsedAncestorOf(n))el.style.display='none';renderNodeNotes(n,el);worldEl.appendChild(el);nodeEls.set(n.id,el);
     if(spawn.has(n.id))el.addEventListener('animationend',function(){el.classList.remove('spawn');},{once:true});
@@ -1633,18 +1919,19 @@ function renderEdges(spawnEdge){
   edgeEls.clear();
   project.edges.forEach(function(e){
     var g=svgEl('g');
-g.setAttribute('class','edge kind-'+(e.kind||'flow')+(isBridge(e)?' bridge':'')+(selEdges.has(e.id)?' sel':'')+(e.id===spawnEdge?' spawn':''));
+g.setAttribute('class','edge kind-'+(e.kind||'flow')+(isBridge(e)?' bridge':'')+(e.tin==='var'?' tvar':'')+(selEdges.has(e.id)?' sel':'')+(e.id===spawnEdge?' spawn':''));
     g.dataset.id=e.id;
     var hit=svgEl('path');hit.setAttribute('class','hit');
     var line=svgEl('path');line.setAttribute('class','line');
     if(e.id===spawnEdge)line.setAttribute('pathLength','1');
     var labelHit=svgEl('text');labelHit.setAttribute('class','elabel-hit');
     var label=svgEl('text');label.setAttribute('class','elabel');
+    var cnd=svgEl('text');cnd.setAttribute('class','ecnd');
     var epFrom=svgEl('circle');epFrom.setAttribute('class','ep-h');epFrom.setAttribute('r','6');epFrom.dataset.ep='from';
     var epTo=svgEl('circle');epTo.setAttribute('class','ep-h');epTo.setAttribute('r','6');epTo.dataset.ep='to';
-    g.appendChild(hit);g.appendChild(line);g.appendChild(epFrom);g.appendChild(epTo);g.appendChild(labelHit);g.appendChild(label);
+    g.appendChild(hit);g.appendChild(line);g.appendChild(epFrom);g.appendChild(epTo);g.appendChild(labelHit);g.appendChild(label);g.appendChild(cnd);
     edgesSvg.appendChild(g);
-    edgeEls.set(e.id,{g:g,line:line,hit:hit,label:label,labelHit:labelHit,wps:[],epFrom:epFrom,epTo:epTo});
+    edgeEls.set(e.id,{g:g,line:line,hit:hit,label:label,labelHit:labelHit,wps:[],epFrom:epFrom,epTo:epTo,cnd:cnd});
     g.addEventListener('mouseenter',function(){setRowSrcHl(e,true);});
     g.addEventListener('mouseleave',function(){setRowSrcHl(e,false);});
     updateEdgeGeom(e);
@@ -1730,6 +2017,11 @@ function edgeAnchors(e){
     }
     if(rp){x1=rp.x;y1=rp.y;}
     else{var ma=dlgMainAnchor(na,nodeElA);x1=ma.x;y1=ma.y;}
+  }else if(e.fromOut&&na.type==='branch'){
+    var outElA=nodeEls.get(na.id);
+    var rpO=outElA?branchOutPortPos(outElA,e.fromOut):null;
+    if(rpO){x1=rpO.x;y1=rpO.y;}
+    else{x1=na.x+(outElA?outElA.offsetWidth:NODE_W);y1=na.y+((outElA?outElA.offsetHeight:90)/2);}
   }else if(ca){
     var rp1=cardRowPoint(ga,na,'out');
     if(rp1){x1=rp1.x;y1=rp1.y;}
@@ -1757,6 +2049,11 @@ function edgeAnchors(e){
       if(fb===null)fb=spreadFrac(gb.id,e.id,'in');
       x2=gb.x;y2=gb.y+hB*fb;
     }
+  }else if(e.tin==='var'){
+    var bV=nodeEls.get(nb.id);if(!bV)return null;
+    var rpV=branchVarInPos(bV);
+    if(rpV){x2=rpV.x;y2=rpV.y;}
+    else{x2=nb.x;y2=nb.y+bV.offsetHeight/2;}
   }else{
     var b=nodeEls.get(nb.id);if(!b)return null;
     x2=nb.x;y2=nb.y+b.offsetHeight/2;
@@ -2048,6 +2345,14 @@ var pts=isBridge(e)?[]:(g.pts||[]);
   r.labelHit.setAttribute('y',lp.y-6);
   r.labelHit.textContent=e.label||'';
   r.labelHit.style.display=e.label?'':'none';
+  var fnA=nodeById(e.from);
+  var ct=(e.cond&&fnA&&fnA.type==='branch')?('⟦ '+condText(condWithOverride(e.cond,fnA))+' ⟧'):'';
+  if(r.cnd){
+    r.cnd.setAttribute('x',lp.x);
+    r.cnd.setAttribute('y',e.label?(lp.y+13):(lp.y-6));
+    r.cnd.textContent=ct;
+    r.cnd.style.display=ct?'':'none';
+  }
   setRowSrcSel(e);
 }
 function updateEdgesFor(id){
@@ -2299,6 +2604,13 @@ function renderInspEdge(){
     var r=findReply(A.dialog.replies,e.fromReply);
     if(r)fromReplyInfo='<br>из реплики: «'+esc((r.text||'').slice(0,40))+'»';
   }
+  var fromOutInfo='';
+  if(A&&A.type==='branch'&&e.fromOut){
+    ensureBranch(A);
+    var oo=null;
+    A.outcomes.forEach(function(o){if(o.id===e.fromOut)oo=o;});
+    if(oo)fromOutInfo='<br>из исхода: «'+esc(oo.label||'Исход')+'»';
+  }
   var extra=(selEdges.size>1?'<div class="i-meta">выбрано связей: '+selEdges.size+'</div>':'')+
     ((e.pts&&e.pts.length)?'<div class="i-meta">точек излома: '+e.pts.length+'</div>':'');
   insp.innerHTML=
@@ -2306,7 +2618,8 @@ function renderInspEdge(){
     '<label class="i-lab">Подпись</label>'+
     '<input class="inp" id="iLbl" value="'+esc(e.label)+'" placeholder="например: условие выполнено">'+
     '<label class="i-lab">Тип связи</label><div class="seg" id="iKind">'+segHtml+'</div>'+
-    '<div class="i-meta">из: «'+esc(A?A.title:'?')+'»'+fromReplyInfo+'<br>в: «'+esc(B?B.title:'?')+'»<br>ID: '+e.id+'</div>'+extra+
+    (A&&A.type==='branch'?inspCondHtml(e):'')+
+    '<div class="i-meta">из: «'+esc(A?A.title:'?')+'»'+fromReplyInfo+fromOutInfo+'<br>в: «'+esc(B?B.title:'?')+'»<br>ID: '+e.id+'</div>'+extra+
     '<div class="i-actions">'+
       '<button class="btn" id="iSwap">'+ic('swap')+'Развернуть</button>'+
       '<button class="btn danger" id="iDelE">'+ic('trash')+'Удалить</button>'+
@@ -2333,10 +2646,11 @@ $all('#iKind button').forEach(function(x){x.classList.toggle('on',x===b);});
 };
 });
   $('#iSwap').onclick=function(){
-    discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;});
+    discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;e.fromOut=null;e.cond=null;});
     updateEdgeGeom(e); renderInspector();
   };
   $('#iDelE').onclick=removeSelected;
+  if(A&&A.type==='branch')bindInspCond(e);
 }
 function toggleAuto(g){
   discrete(function(){
@@ -2837,7 +3151,7 @@ function renderInspNode(){
     '<label class="i-lab">Описание</label>'+
     '<textarea class="inp" id="iText" placeholder="Что здесь происходит?">'+esc(n.text)+'</textarea>'+
     '<label class="i-lab">Теги, через запятую</label>'+
-    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?inspOutsHtml(n):'')+(n.type==='varnode'?inspVarHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
     '<div class="i-actions">'+
       '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
       '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -2873,6 +3187,8 @@ function renderInspNode(){
   });
   tags.addEventListener('blur',editEnd);
   if(n.type!=='char')bindInspParts(n);
+  if(n.type==='branch'){bindInspOuts(n);}
+  if(n.type==='varnode')bindInspVar(n);
   $all('#inSw .swatch').forEach(function(s){
     s.onclick=function(){
       var v=s.dataset.nc||null;
@@ -2897,7 +3213,11 @@ function renderInspNode(){
   tr.addEventListener('blur',editEnd);
   $('#iType').onchange=function(ev){
     var v=ev.target.value;
-    mutate(function(){n.type=v;});
+    mutate(function(){
+      n.type=v;
+      if(v!=='varnode'){delete n.vid;delete n.varMode;delete n.varOp;delete n.varVal;}
+      if(v!=='branch'&&Array.isArray(n.outcomes))delete n.outcomes;
+    });
   };
   $all('#iSt button').forEach(function(b){
     b.onclick=function(){
@@ -2950,6 +3270,453 @@ function renderInspEmpty(){
       '<div class="ovgrid">'+cells+'</div>'+
       '<div class="ovmeta">создан: '+fmtD(project.meta.created)+'<br>изменён: '+fmtD(project.meta.modified)+'<br>своих типов: '+project.customTypes.length+' · групп: '+project.groups.length+'</div>'+
     '</div>';
+}
+/* ═══ переменные: вкладка слева ═══ */
+function nodeVarChipText(n){
+  var v=n.vid?varById(n.vid):null;
+  if(!v)return n.varMode==='get'?'чтение: переменная не выбрана':'изменение: переменная не выбрана';
+  if(n.varMode==='get')return 'чтение: '+v.name;
+  return v.name+' '+opSym(n.varOp)+' '+varValText(n.varVal,v);
+}
+function refreshNodeVarsChip(n){
+  var el=nodeEls.get(n.id);if(!el)return;
+  var w=el.querySelector('.n-vars');if(!w)return;
+  if(n.type!=='varnode')return;
+  w.innerHTML='<span>'+esc(nodeVarChipText(n))+'</span>';
+  w.style.display='';
+}
+function refreshAllBranchChips(){
+  project.nodes.forEach(function(n){if(n.type==='varnode')refreshNodeVarsChip(n);});
+  refreshBranchVinRows();
+  project.edges.forEach(function(e){if(e.cond)updateEdgeGeom(e);});
+}
+/* строки «переменная ⟵ …» на всех развилках (после переименования/смены привязки ноды) */
+function refreshBranchVinRows(){
+  project.nodes.forEach(function(n){
+    if(n.type!=='branch')return;
+    var el=nodeEls.get(n.id);if(!el)return;
+    var vin=el.querySelector('.br-vin');if(!vin)return;
+    var ov=branchVarOverride(n);
+    vin.classList.toggle('none',!ov);
+    var vp=vin.querySelector('.vpinn');if(vp)vp.classList.toggle('has',!!ov);
+    var vv=vin.querySelector('.vv');if(vv)vv.textContent=ov?('⟵ '+varName(ov)):'не подключена';
+  });
+}
+function varValControlHtml(v,cls){
+  var t=varType(v);
+  if(t==='bool'){
+    return '<select class="inp v-val '+(cls||'')+'" title="Начальное значение">'+
+      '<option value="1"'+(isTrueVal(v.val)?' selected':'')+'>true</option>'+
+      '<option value="0"'+(isTrueVal(v.val)?'':' selected')+'>false</option></select>';
+  }
+  return '<input class="inp v-val '+(cls||'')+'" value="'+esc(String(v.val))+'" title="Начальное значение" placeholder="'+(t==='num'?'0':'текст')+'">';
+}
+function renderVarsPane(){
+  var pane=$('#paneVars');if(!pane)return;
+  var l=varsList();
+  var html='<div class="v-head"><span>Переменные сюжета</span><button class="btn primary" id="vAdd" title="Создать переменную">+ Переменная</button></div>';
+  if(!l.length){
+    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число (number), текст (string) или флаг true/false (boolean), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br>3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.</div>';
+  }
+  html+='<div id="vRows">';
+  l.forEach(function(v){
+    var typeOpts=Object.keys(VAR_TYPES).map(function(t){
+      return '<option value="'+t+'"'+(varType(v)===t?' selected':'')+'>'+VAR_TYPES[t]+'</option>';
+    }).join('');
+    html+='<div class="v-row" data-vid="'+esc(v.id)+'">'+
+      '<span class="v-grip" title="Перетащите на холст — создать ноду переменной">'+ic('grip',12)+'</span>'+
+      '<input class="inp v-name" value="'+esc(v.name)+'" maxlength="40" title="Название переменной" placeholder="название">'+
+      '<select class="inp v-type" title="Тип переменной">'+typeOpts+'</select>'+
+      varValControlHtml(v)+
+      '<button class="v-del" title="Удалить переменную">'+ic('x',12)+'</button>'+
+    '</div>';
+  });
+  html+='</div>';
+  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов.</div>';
+  pane.innerHTML=html;
+  var add=$('#vAdd');
+  if(add)add.onclick=function(){
+    var id='v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+    discrete(function(){varsList().push({id:id,name:'переменная',type:'num',val:0});});
+    renderVarsPane();renderInspector();refreshAllBranchChips();
+    var rows=$all('#paneVars .v-row');var last=rows[rows.length-1];
+    if(last){var nm=last.querySelector('.v-name');nm.focus();nm.select();}
+  };
+  bindVarsRows();
+}
+function bindVarsRows(){
+  $all('#paneVars .v-row').forEach(function(row){
+    var vid=row.dataset.vid,v=varById(vid);if(!v)return;
+    var nm=row.querySelector('.v-name'),vl=row.querySelector('.v-val'),vt=row.querySelector('.v-type');
+    nm.addEventListener('focus',editStart);
+    nm.addEventListener('input',function(){v.name=nm.value;markDirty();refreshAllBranchChips();});
+    nm.addEventListener('change',editEnd);nm.addEventListener('blur',editEnd);
+    vt.addEventListener('change',function(){
+      discrete(function(){
+        v.type=vt.value;
+        v.val=varCastVal(v.type,v.val);
+        if(v.type==='bool'&&typeof v.val!=='boolean')v.val=isTrueVal(v.val);
+      });
+      renderVarsPane();refreshAllBranchChips();renderInspector();
+    });
+    if(vt.value==='bool'){
+      vl.addEventListener('change',function(){
+        discrete(function(){v.val=vl.value==='1';});
+        refreshAllBranchChips();
+      });
+    }else{
+      vl.addEventListener('focus',editStart);
+      vl.addEventListener('input',function(){v.val=varCastVal(varType(v),vl.value);markDirty();refreshAllBranchChips();});
+      vl.addEventListener('change',editEnd);vl.addEventListener('blur',editEnd);
+    }
+    row.querySelector('.v-del').onclick=function(){
+      discrete(function(){
+        var l=varsList(),i=-1;
+        for(var k=0;k<l.length;k++)if(l[k].id===vid){i=k;break;}
+        if(i>=0)l.splice(i,1);
+        project.nodes.forEach(function(n){
+          if(n.type==='varnode'&&n.vid===vid)n.vid=null;
+          if(Array.isArray(n.outcomes))n.outcomes.forEach(function(o){if(o.cond&&o.cond.vid===vid)o.cond=null;});
+        });
+        project.edges.forEach(function(e){if(e.cond&&e.cond.vid===vid)e.cond=null;});
+      });
+      renderVarsPane();renderInspector();renderAll();
+      toast('Переменная удалена (привязки очищены)','warn');
+    };
+    /* перетаскивание переменной на холст → нода переменной (только за grip) */
+    var grip=row.querySelector('.v-grip');
+    if(grip){
+      grip.addEventListener('mousedown',function(){row.setAttribute('draggable','true');});
+      grip.addEventListener('dblclick',function(ev){ev.preventDefault();});
+    }
+    row.addEventListener('dragstart',function(e){
+      e.dataTransfer.setData('text/vetvi-var',vid);
+      e.dataTransfer.effectAllowed='copy';
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend',function(){
+      row.removeAttribute('draggable');
+      row.classList.remove('dragging');
+    });
+  });
+}
+/* ═══ переменные: контрол значения (нода переменной) ═══ */
+function opValControlHtml(o,v){
+  var t=v?varType(v):'num';
+  if(t==='bool'){
+    return '<select class="inp v-val" title="Значение">'+
+      '<option value="1"'+(isTrueVal(o.val)?' selected':'')+'>true</option>'+
+      '<option value="0"'+(isTrueVal(o.val)?'':' selected')+'>false</option></select>';
+  }
+  return '<input class="inp v-val" value="'+esc(String(o.val))+'" title="'+(t==='num'?'На сколько изменить':'Новое значение')+'">';
+}
+/* ═══ условия: общая строка «переменная · сравнение · значение» ═══ */
+function condRowHtml(c,vt,cls){
+  var l=varsList();
+  var opts=l.map(function(v){return '<option value="'+esc(v.id)+'"'+(v.id===c.vid?' selected':'')+'>'+esc(v.name)+'</option>';}).join('');
+  var cops=condOpsFor(vt);
+  var copsopts=Object.keys(cops).map(function(k){return '<option value="'+k+'"'+(k===c.op?' selected':'')+'>'+cops[k]+'</option>';}).join('');
+  var valCtl;
+  if(vt==='bool'){
+    valCtl='<select class="inp v-val" title="Значение">'+
+      '<option value="1"'+(isTrueVal(c.val)?' selected':'')+'>true</option>'+
+      '<option value="0"'+(isTrueVal(c.val)?'':' selected')+'>false</option></select>';
+  }else{
+    valCtl='<input class="inp v-val" value="'+esc(String(c.val))+'" title="Значение">';
+  }
+  return '<div class="v-row op '+(cls||'')+'">'+
+    '<select class="inp v-var" title="Переменная">'+opts+'</select>'+
+    '<select class="inp v-op" title="Сравнение">'+copsopts+'</select>'+
+    valCtl+'</div>';
+}
+function bindCondRow(row,c,after){
+  if(!row)return;
+  row.querySelector('.v-var').onchange=function(ev){
+    discrete(function(){
+      c.vid=ev.target.value;
+      var v0=varById(c.vid);
+      if(v0&&!condOpsFor(varType(v0))[c.op])c.op='==';
+      c.val=varCastVal(v0,c.val);
+    });
+    after();
+  };
+  row.querySelector('.v-op').onchange=function(ev){discrete(function(){c.op=ev.target.value;});after();};
+  var vi=row.querySelector('.v-val');
+  var v0=varById(c.vid),vt0=v0?varType(v0):'num';
+  if(vt0==='bool'){
+    vi.addEventListener('change',function(){discrete(function(){c.val=vi.value==='1';});after();});
+  }else{
+    vi.addEventListener('focus',editStart);
+    vi.addEventListener('input',function(){c.val=varCastVal(v0,vi.value);markDirty();after(true);});
+    vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+  }
+}
+/* ═══ переменные: условие на стрелке от развилки ═══ */
+function inspCondHtml(e){
+  var l=varsList(),on=!!e.cond;
+  var h='<label class="i-lab">Условие перехода (развилка)</label>';
+  h+='<div class="seg" id="iCondTog"><button data-s="off" class="'+(on?'':'on')+'">Без условия</button><button data-s="on" class="'+(on?'on':'')+'">По переменной</button></div>';
+  if(on&&l.length){
+    var v0=varById(e.cond.vid);
+    h+=condRowHtml(e.cond,v0?varType(v0):'num','iCondRow');
+  }else if(on&&!l.length){
+    h+='<div class="v-empty">Нет переменных — создайте на вкладке «Переменные» слева.</div>';
+  }
+  return h;
+}
+function bindInspCond(e){
+  var tog=$('#iCondTog');if(!tog)return;
+  $all('#iCondTog button').forEach(function(b){
+    b.onclick=function(){
+      var on=b.dataset.s==='on';
+      discrete(function(){
+        if(on){var v0=varsList()[0]||null;e.cond={vid:v0?v0.id:'',op:'==',val:(v0&&varType(v0)==='bool')?true:0};}
+        else e.cond=null;
+      });
+      updateEdgeGeom(e);renderInspector();
+    };
+  });
+  bindCondRow($('#iCondRow'),e.cond,function(live){
+    updateEdgeGeom(e);
+    if(!live)renderInspector();
+  });
+}
+/* ═══ развилка: исходы с индивидуальными условиями ═══ */
+function ensureBranch(n){if(n.type==='branch'&&!Array.isArray(n.outcomes))n.outcomes=[];}
+function branchCondDefault(){
+  var v0=varsList()[0]||null;
+  return {vid:v0?v0.id:'',op:'==',val:(v0&&varType(v0)==='bool')?true:0};
+}
+function inspOutsHtml(n){
+  ensureBranch(n);
+  var h='<label class="i-lab">Исходы развилки ('+n.outcomes.length+')</label>';
+  var ovIn=branchVarOverride(n);
+  if(ovIn)h+='<div class="vin-hint"><span>вход: переменная «'+esc(varName(ovIn))+'» — перебивает переменные во всех условиях исходов</span><button class="mini-btn" id="iVinDel" title="Отключить переменную от входа развилки">'+ic('x',12)+'</button></div>';
+  h+='<div id="iOuts">';
+  if(!n.outcomes.length)h+='<div class="v-empty">Добавьте исходы — у каждого появится свой пин на узле (тяните стрелку от строки исхода). Исходу можно привязать переменную: путь откроется только при совпадении значения.</div>';
+  n.outcomes.forEach(function(o,i){
+    var condHtml='';
+    if(o.cond){
+      var l=varsList();
+      if(l.length){
+        var v0=varById(o.cond.vid);
+        condHtml=condRowHtml(o.cond,v0?varType(v0):'num','out-cond-row');
+      }else condHtml='<div class="v-empty">Нет переменных — создайте на вкладке «Переменные».</div>';
+    }
+    h+='<div class="out-ed" data-i="'+i+'">'+
+      '<div class="out-ed-row">'+
+        '<input class="inp out-lbl" value="'+esc(o.label||'')+'" placeholder="Название исхода…" maxlength="60">'+
+        '<button class="v-del out-del" title="Удалить исход">'+ic('x',12)+'</button>'+
+      '</div>'+
+      '<div class="out-ed-cond">'+
+        '<div class="seg out-cond-tog"><button data-s="off" class="'+(o.cond?'':'on')+'">Без условия</button><button data-s="on" class="'+(o.cond?'on':'')+'">По переменной</button></div>'+
+        condHtml+
+      '</div>'+
+    '</div>';
+  });
+  h+='</div>';
+  h+='<div style="margin:6px 0 10px"><button class="btn" id="iOutAdd" style="width:100%">'+ic('plus',14)+'Добавить исход</button></div>';
+  return h;
+}
+function bindInspOuts(n){
+  var vinDel=$('#iVinDel');
+  if(vinDel)vinDel.onclick=function(){
+    discrete(function(){project.edges=project.edges.filter(function(e){return !(e.to===n.id&&e.tin==='var');});});
+    renderAll();
+  };
+  $all('#iOuts .out-ed').forEach(function(box){
+    var i=+box.dataset.i,o=(n.outcomes||[])[i];if(!o)return;
+    var lbl=box.querySelector('.out-lbl');
+    lbl.addEventListener('focus',editStart);
+    lbl.addEventListener('input',function(){
+      o.label=lbl.value;
+      var el=nodeEls.get(n.id);
+      if(el)refreshBranchOutsBox(el,n);
+      updateEdgesFor(n.id);
+      markDirty();
+    });
+    lbl.addEventListener('change',editEnd);lbl.addEventListener('blur',editEnd);
+    box.querySelector('.out-del').onclick=function(){
+      discrete(function(){
+        n.outcomes.splice(i,1);
+        if(!n.outcomes.length)delete n.outcomes;
+        project.edges=project.edges.filter(function(e){return !(e.from===n.id&&e.fromOut===o.id);});
+      });
+      renderAll();
+    };
+    Array.prototype.forEach.call(box.querySelectorAll('.out-cond-tog button'),function(b){
+      b.onclick=function(){
+        var on=b.dataset.s==='on';
+        discrete(function(){o.cond=on?branchCondDefault():null;});
+        renderInspector();renderAll();
+      };
+    });
+    bindCondRow(box.querySelector('.out-cond-row'),o.cond,function(live){
+      var el=nodeEls.get(n.id);
+      if(el)refreshBranchOutsBox(el,n);
+      updateEdgesFor(n.id);
+      if(!live)renderInspector();
+    });
+  });
+  var add=$('#iOutAdd');
+  if(add)add.onclick=function(){
+    discrete(function(){ensureBranch(n);n.outcomes.push({id:uid(),label:'',cond:null});});
+    renderAll();renderInspector();
+  };
+}
+/* ═══ нода переменной: инспектор ═══ */
+function ensureVarnode(n){
+  if(n.type!=='varnode')return;
+  if(n.varMode!=='get'&&n.varMode!=='set')n.varMode='set';
+  if(!VARS_OPS[n.varOp])n.varOp='=';
+}
+function inspVarHtml(n){
+  ensureVarnode(n);
+  var l=varsList();
+  var h='<label class="i-lab">Переменная</label>';
+  var opts='<option value="">— не выбрана —</option>'+l.map(function(v){
+    return '<option value="'+esc(v.id)+'"'+(v.id===n.vid?' selected':'')+'>'+esc(v.name)+'</option>';
+  }).join('');
+  h+='<select class="inp" id="iVarSel">'+opts+'</select>';
+  if(!l.length)h+='<div class="v-empty">Нет переменных — создайте их на вкладке «Переменные» слева, либо перетащите переменную на холст.</div>';
+  h+='<label class="i-lab">Режим ноды</label>';
+  h+='<div class="seg" id="iVarMode"><button data-m="get" class="'+(n.varMode==='get'?'on':'')+'" title="Показывает значение переменной">Чтение</button><button data-m="set" class="'+(n.varMode==='set'?'on':'')+'" title="Меняет значение переменной">Изменение</button></div>';
+  if(n.varMode==='set'&&l.length){
+    var v0=varById(n.vid);
+    var vt=v0?varType(v0):'num';
+    var opd=opsForType(vt);
+    var oops=Object.keys(opd).map(function(k){return '<option value="'+k+'"'+(k===n.varOp?' selected':'')+'>'+opd[k]+'</option>';}).join('');
+    h+='<div class="v-row op" id="iVarOpRow" style="margin-top:6px">'+
+      '<select class="inp v-op" title="Операция">'+oops+'</select>'+
+      opValControlHtml({val:n.varVal},v0)+
+    '</div>';
+  }
+  if(n.varMode==='get')h+='<div class="v-empty" style="margin-top:6px">В режиме новеллы эта нода считает значение (всплывашка у HUD) и ведёт дальше; её можно соединить со входом «переменная» у развилки.</div>';
+  return h;
+}
+function bindInspVar(n){
+  var sel=$('#iVarSel');
+  sel.onchange=function(ev){
+    discrete(function(){n.vid=ev.target.value||null;});
+    renderInspector();refreshNodeVarsChip(n);refreshBranchVinRows();
+  };
+  $all('#iVarMode button').forEach(function(b){
+    b.onclick=function(){
+      discrete(function(){n.varMode=b.dataset.m;});
+      renderInspector();refreshNodeVarsChip(n);
+    };
+  });
+  var row=$('#iVarOpRow');
+  if(row){
+    row.querySelector('.v-op').onchange=function(ev){discrete(function(){n.varOp=ev.target.value;});renderInspector();refreshNodeVarsChip(n);};
+    var vi=row.querySelector('.v-val');
+    var v0=varById(n.vid),vt0=v0?varType(v0):'num';
+    if(vt0==='bool'){
+      vi.addEventListener('change',function(){discrete(function(){n.varVal=vi.value==='1';});refreshNodeVarsChip(n);});
+    }else{
+      vi.addEventListener('focus',editStart);
+      vi.addEventListener('input',function(){n.varVal=varCastVal(v0,vi.value);markDirty();refreshNodeVarsChip(n);});
+      vi.addEventListener('change',editEnd);vi.addEventListener('blur',editEnd);
+    }
+  }
+}
+/* ═══ развилка: исходы на холсте (пины на узле) ═══ */
+function branchOutsHtml(n){
+  ensureBranch(n);
+  var ovIn=branchVarOverride(n);
+  var h='<div class="br-vin'+(ovIn?'':' none')+'" title="Вход переменной: потяните сюда связь от ноды переменной — она перебьёт переменные в условиях исходов">'+
+    '<i class="vpinn'+(ovIn?' has':'')+'" title="Вход переменной"></i>'+
+    '<span class="t">'+ic('variable',11)+'<span>переменная</span></span>'+
+    '<span class="vv">'+(ovIn?('⟵ '+esc(varName(ovIn))):'не подключена')+'</span>'+
+  '</div>';
+  n.outcomes.forEach(function(o,i){
+    var nm=o.label||('Исход '+(i+1));
+    h+='<div class="br-out" data-oid="'+esc(o.id)+'">'+
+      '<span class="lbl">'+esc(nm)+'</span>'+
+      '<span class="cnd'+(o.cond?' on':'')+'" title="'+(o.cond?esc('Условие: '+condText(o.cond)):'Без условия — путь всегда открыт')+'">'+esc(o.cond?('⟦ '+condText(o.cond)+' ⟧'):'без условия')+'</span>'+
+      '<button class="br-x" data-oid="'+esc(o.id)+'" title="Убрать исход">'+ic('x',10)+'</button>'+
+      '<i class="opin" data-out="'+esc(o.id)+'" title="Исход «'+esc(nm)+'» — тяните к другому узлу"></i>'+
+    '</div>';
+  });
+  h+='<button class="br-add" title="Добавить исход (пин на узле)">+ исход</button>';
+  return h;
+}
+function refreshBranchOutsBox(el,n){
+  var box=el.querySelector('.n-outs');
+  if(!box)return;
+  box.innerHTML=branchOutsHtml(n);
+  bindBranchOuts(el,n);
+}
+function bindBranchOuts(el,n){
+  ensureBranch(n);
+  var add=el.querySelector('.br-add');
+  if(add){
+    add.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+    add.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      discrete(function(){ensureBranch(n);n.outcomes.push({id:uid(),label:'',cond:null});});
+      renderAll();
+    });
+  }
+  Array.prototype.forEach.call(el.querySelectorAll('.br-x'),function(x){
+    x.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+    x.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var oid=x.getAttribute('data-oid');
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      discrete(function(){
+        n.outcomes=n.outcomes.filter(function(o){return o.id!==oid;});
+        if(!n.outcomes.length)delete n.outcomes;
+        project.edges=project.edges.filter(function(e){return !(e.from===n.id&&e.fromOut===oid);});
+      });
+      renderAll();
+    });
+  });
+  Array.prototype.forEach.call(el.querySelectorAll('.opin'),function(pin){
+    pin.addEventListener('pointerdown',function(ev){startConnectOut(ev,pin);});
+  });
+}
+function branchOutPortPos(nodeEl,oid){
+  if(!nodeEl)return null;
+  var portEl=nodeEl.querySelector('.opin[data-out="'+oid+'"]');
+  if(!portEl)return null;
+  var nr=nodeEl.getBoundingClientRect();
+  var pr=portEl.getBoundingClientRect();
+  return{
+    x:(pr.left+pr.width/2-nr.left)/vp.z+parseFloat(nodeEl.style.left||0),
+    y:(pr.top+pr.height/2-nr.top)/vp.z+parseFloat(nodeEl.style.top||0)
+  };
+}
+function branchVarInPos(nodeEl){
+  if(!nodeEl)return null;
+  var portEl=nodeEl.querySelector('.vpinn');
+  if(!portEl)return null;
+  var nr=nodeEl.getBoundingClientRect();
+  var pr=portEl.getBoundingClientRect();
+  return{
+    x:(pr.left+pr.width/2-nr.left)/vp.z+parseFloat(nodeEl.style.left||0),
+    y:(pr.top+pr.height/2-nr.top)/vp.z+parseFloat(nodeEl.style.top||0)
+  };
+}
+function startConnectOut(e,portEl){
+  e.stopPropagation();e.preventDefault();
+  var oid=portEl.getAttribute('data-out');
+  var nodeEl=portEl.closest('.node');
+  if(!nodeEl||!oid)return;
+  var nodeId=nodeEl.dataset.id;
+  var n=nodeById(nodeId);if(!n)return;
+  var lk=lockBlockedBy([nodeId]);
+  if(lk){showLockTip(e.clientX,e.clientY,lk);return;}
+  lockTake([nodeId]);
+  var pos=branchOutPortPos(nodeEl,oid);
+  if(!pos)return;
+  var prev=svgEl('path');prev.setAttribute('class','preview');
+  edgesSvg.appendChild(prev);
+  connS={from:nodeId,fromReply:null,fromOut:oid,fromPin:'out',x1:pos.x,y1:pos.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nodeId]};
+  document.body.classList.add('connecting');
 }
 /* ═══ заметки элементов ═══ */
 var NOTE_MAX=3;
@@ -3146,6 +3913,7 @@ function addNode(typeKey,x,y,select){
   var info=typeInfo(typeKey);
   var n={id:uid(),type:typeKey,gid:null,x:Math.round(x),y:Math.round(y),title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
   if(typeKey==='dialog'){ensureDialog(n);}
+  if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   mutate(function(){project.nodes.push(n);},{nodes:[n.id]});
   if(select)selectOnly(n.id);
   return n;
@@ -3156,6 +3924,12 @@ function cloneNode(src,x,y){
     color:src.color||null,tint:src.tint||0,dlgWidth:src.dlgWidth||null,notes:src.notes?JSON.parse(JSON.stringify(src.notes)):[]};
   if(src.type==='dialog'&&src.dialog){
     c.dialog=JSON.parse(JSON.stringify(src.dialog));
+  }
+  if(src.type==='varnode'){
+    c.vid=src.vid||null;c.varMode=(src.varMode==='get')?'get':'set';c.varOp=VARS_OPS[src.varOp]?src.varOp:'=';c.varVal=src.varVal;
+  }
+  if(src.type==='branch'&&Array.isArray(src.outcomes)){
+    c.outcomes=src.outcomes.map(function(o){return{id:o.id,label:o.label||'',cond:o.cond?{vid:o.cond.vid,op:o.cond.op,val:o.cond.val}:null};});
   }
   return c;
 }
@@ -3214,7 +3988,7 @@ function duplicateSel(){
   });
   var add=[];
   project.edges.forEach(function(e){
-    if(map.has(e.from)&&map.has(e.to))add.push({id:uid(),from:map.get(e.from),to:map.get(e.to),label:e.label,kind:e.kind,pts:(e.pts||[]).map(function(p){return{x:p.x,y:p.y};}),lt:e.lt,lp:e.lp,fromReply:e.fromReply||null,bd:e.bd?{dl:e.bd.dl,dy:e.bd.dy,dr:e.bd.dr}:{dl:0,dy:0,dr:0}});
+    if(map.has(e.from)&&map.has(e.to))add.push({id:uid(),from:map.get(e.from),to:map.get(e.to),label:e.label,kind:e.kind,pts:(e.pts||[]).map(function(p){return{x:p.x,y:p.y};}),lt:e.lt,lp:e.lp,fromReply:e.fromReply||null,fromOut:e.fromOut||null,bd:e.bd?{dl:e.bd.dl,dy:e.bd.dy,dr:e.bd.dr}:{dl:0,dy:0,dr:0}});
   });
   add.forEach(function(e){project.edges.push(e);});
   sel=new Set(spawn);
@@ -3799,7 +4573,7 @@ function startReplyConnect(e,portEl){
   if(!pos)return;
   var prev=svgEl('path');prev.setAttribute('class','preview');
   edgesSvg.appendChild(prev);
-  connS={from:nodeId,fromReply:replyId,fromPin:'out',x1:pos.x,y1:pos.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nodeId]};
+  connS={from:nodeId,fromReply:replyId,fromOut:null,fromPin:'out',x1:pos.x,y1:pos.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nodeId]};
   document.body.classList.add('connecting');
 }
 function startReplyOutDrag(e,portEl){
@@ -3844,7 +4618,7 @@ inDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
 function startOutDrag(e,nodeEl){
 e.stopPropagation();e.preventDefault();
 var nid=nodeEl.dataset.id;
-var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply;});
+var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply&&!ed.fromOut;});
 if(!outs.length){toast('У узла нет исходящих стрелок','warn');return;}
 var lkOu=lockBlockedBy([nid]);
 if(lkOu){showLockTip(e.clientX,e.clientY,lkOu);return;}
@@ -3881,10 +4655,10 @@ function startConnect(e,nodeEl){
     x1=n.x+nodeEl.offsetWidth;
     y1=n.y+nodeEl.offsetHeight/2;
   }
-  connS={from:id,fromReply:null,fromPin:'main',x1:x1,y1:y1,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[id]};
+  connS={from:id,fromReply:null,fromOut:null,fromPin:'main',x1:x1,y1:y1,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[id]};
   document.body.classList.add('connecting');
 }
-function createConnected(fromId,typeKey,cloneId,pt,fromReply){
+function createConnected(fromId,typeKey,cloneId,pt,fromReply,fromOut){
   var src=nodeById(fromId);if(!src)return;
   var n;
   if(cloneId){
@@ -3894,6 +4668,7 @@ function createConnected(fromId,typeKey,cloneId,pt,fromReply){
     var info=typeInfo(typeKey);
     n={id:uid(),type:typeKey,gid:null,x:0,y:0,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
     if(typeKey==='dialog')ensureDialog(n);
+    if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   }
   n.x=Math.round(pt.x-NODE_W/2);n.y=Math.round(pt.y-46);
   var tgtGroup=collapsedAncestorOf(src)?null:deepestGroupAt(pt.x,pt.y);
@@ -3901,16 +4676,16 @@ function createConnected(fromId,typeKey,cloneId,pt,fromReply){
   var eid=uid();
   mutate(function(){
     project.nodes.push(n);
-    project.edges.push({id:eid,from:fromId,to:n.id,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply||null});
+    project.edges.push({id:eid,from:fromId,to:n.id,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply||null,fromOut:fromOut||null});
   },{nodes:[n.id],edge:eid});
   resolveOverlaps(new Set([n.id]));
   selectOnly(n.id);
 }
-function connectMenuItems(fromId,pt,fromReply){
+function connectMenuItems(fromId,pt,fromReply,fromOut){
   var arr=[{head:'Создать и подключить'}];
   allTypeKeys().forEach(function(key){
     var info=typeInfo(key);
-    arr.push({dot:info.color,label:info.name+(TYPES[key]?'':' ·'),fn:function(){createConnected(fromId,key,null,pt,fromReply);}});
+    arr.push({dot:info.color,label:info.name+(TYPES[key]?'':' ·'),fn:function(){createConnected(fromId,key,null,pt,fromReply,fromOut);}});
   });
   var cands=[];
   allTypeKeys().forEach(function(key){
@@ -3924,7 +4699,7 @@ function connectMenuItems(fromId,pt,fromReply){
     arr.push({head:'Копия из раздела «На холсте»'});
     cands.forEach(function(n){
       var v=nodeVisual(n);
-      arr.push({dot:v.color,label:'«'+n.title+'»',fn:function(){createConnected(fromId,null,n.id,pt,fromReply);}});
+      arr.push({dot:v.color,label:'«'+n.title+'»',fn:function(){createConnected(fromId,null,n.id,pt,fromReply,fromOut);}});
     });
   }
   return arr;
@@ -3935,22 +4710,34 @@ function finishConnect(){
   if(connS.lk)lockGive(connS.lk);
   if(connS.prev&&connS.prev.parentNode)connS.prev.remove();
   if(connS.hl)connS.hl.classList.remove('drop-hover');
-  var from=connS.from,fromReply=connS.fromReply||null,to=connS.hl?connS.hl.dataset.id:null;
+  var from=connS.from,fromReply=connS.fromReply||null,fromOut=connS.fromOut||null,to=connS.hl?connS.hl.dataset.id:null;
+  var toVin=!!connS.hlVin&&!!to;
   var pt=(connS.wx!=null)?{x:connS.wx,y:connS.wy}:null;
   var cx=connS.cx,cy=connS.cy;
   connS=null;
   if(to&&to!==from){
-    var dup=project.edges.some(function(x){return x.from===from&&x.to===to&&x.fromReply===fromReply;});
+    var tnV=nodeById(to),fnV=nodeById(from);
+    if(toVin){
+      if(!tnV||tnV.type!=='branch'){toast('Вход «переменная» есть только у развилки','warn');return;}
+      if(!fnV||fnV.type!=='varnode'){toast('Ко входу «переменная» подключаются ноды переменных — перетащите переменную из вкладки «Переменные» на холст','warn');return;}
+      var dupV=project.edges.some(function(x){return x.from===from&&x.to===to&&x.tin==='var';});
+      if(dupV){toast('Эта переменная уже подключена к развилке','warn');return;}
+      var eidV=uid();
+      mutate(function(){project.edges.push({id:eidV,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:'var'});},{edge:eidV});
+      toast('Переменная подключена ко входу развилки — перебьёт переменные в условиях исходов');
+      return;
+    }
+    var dup=project.edges.some(function(x){return x.from===from&&x.to===to&&x.fromReply===fromReply&&(x.fromOut||null)===fromOut&&!x.tin;});
     if(dup)toast('Такая связь уже есть','warn');
     else{
       var eid=uid();
-      mutate(function(){project.edges.push({id:eid,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply});},{edge:eid});
+      mutate(function(){project.edges.push({id:eid,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply,fromOut:fromOut});},{edge:eid});
       selectEdgeOnly(eid);
     }
     return;
   }
   if(from&&pt){
-    openCtxMenu(cx,cy,connectMenuItems(from,pt,fromReply));
+    openCtxMenu(cx,cy,connectMenuItems(from,pt,fromReply,fromOut));
   }
 }
 function finishConnectCancel(){
@@ -4022,6 +4809,8 @@ canvas.addEventListener('pointerdown',function(e){
     return;
   }
   if(e.button===0){
+    var outPin=target.closest?target.closest('.opin'):null;
+    if(outPin){startConnectOut(e,outPin);return;}
     var replyPort=target.closest?target.closest('.dlg-reply-pin.out'):null;
     if(replyPort){
       if(modK){startReplyOutDrag(e,replyPort);}else{startReplyConnect(e,replyPort);}
@@ -4238,8 +5027,15 @@ window.addEventListener('pointermove',function(e){lastPtr.x=e.clientX;lastPtr.y=
     var elp=document.elementFromPoint(e.clientX,e.clientY);
     var under=elpp(elp);
     if(connS.hl)connS.hl.classList.remove('drop-hover');
-    connS.hl=null;
-    if(under&&under.dataset.id!==connS.from){under.classList.add('drop-hover');connS.hl=under;}
+    if(connS.hlVin){connS.hlVin.classList.remove('hl');connS.hlVin=null;}
+    connS.hl=null;connS.hlVin=null;
+    var vinEl=(elp&&elp.closest)?elp.closest('.br-vin'):null;
+    var vinNode=vinEl?vinEl.closest('.node'):null;
+    if(vinEl&&vinNode&&vinNode.dataset.id!==connS.from){
+      vinNode.classList.add('drop-hover');connS.hl=vinNode;
+      connS.hlVin=vinEl;vinEl.classList.add('hl');
+    }
+    else if(under&&under.dataset.id!==connS.from){under.classList.add('drop-hover');connS.hl=under;}
     return;
   }
   if(panS){vp.x=panS.vx+e.clientX-panS.sx;vp.y=panS.vy+e.clientY-panS.sy;applyView();return;}
@@ -4968,7 +5764,7 @@ function clearDropVisuals(){
 }
 canvas.addEventListener('dragover',function(e){
   var ty=e.dataTransfer.types;
-  if(ty.indexOf('text/vetvi-type')<0&&ty.indexOf('text/vetvi-clone')<0)return;
+  if(ty.indexOf('text/vetvi-type')<0&&ty.indexOf('text/vetvi-clone')<0&&ty.indexOf('text/vetvi-var')<0)return;
   e.preventDefault();e.dataTransfer.dropEffect='copy';
   canvas.classList.add('dropready');
   document.body.classList.add('dropping');
@@ -4999,6 +5795,7 @@ function attachNewTo(target,typeKey,cloneId){
     var info=typeInfo(typeKey);
     n={id:uid(),type:typeKey,gid:null,x:nx,y:ny,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
     if(typeKey==='dialog')ensureDialog(n);
+    if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   }
   var tgtGroup=collapsedAncestorOf(target)?null:deepestGroupAt(target.x+NODE_W/2,target.y+40);
   n.gid=tgtGroup?tgtGroup.id:null;
@@ -5013,12 +5810,27 @@ function attachNewTo(target,typeKey,cloneId){
 canvas.addEventListener('drop',function(e){
   var t=e.dataTransfer.getData('text/vetvi-type');
   var cl=e.dataTransfer.getData('text/vetvi-clone');
-  if(!t&&!cl){clearDropVisuals();return;}
+  var vr=e.dataTransfer.getData('text/vetvi-var');
+  if(!t&&!cl&&!vr){clearDropVisuals();return;}
   e.preventDefault();
   var eid=dropEdgeId;
   var hoverNode=palHover;
   clearDropVisuals();
   var w=toWorld(e.clientX,e.clientY);
+  /* переменная, перетащенная из вкладки «Переменные» → нода переменной */
+  if(vr&&!t&&!cl){
+    var vv=varById(vr);
+    if(vv){
+      var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null,varMode:'set',varOp:'=',varVal:defValOf(vv),vid:vv.id};
+      var tgV=deepestGroupAt(w.x,w.y);
+      vn.gid=tgV?tgV.id:null;
+      mutate(function(){project.nodes.push(vn);},{nodes:[vn.id]});
+      resolveOverlaps(new Set([vn.id]));
+      selectOnly(vn.id);
+      toast('Нода переменной «'+vv.name+'» создана. Режим «изменение» можно переключить на «чтение» в инспекторе.');
+    }
+    return;
+  }
   var edge=eid?edgeById(eid):null;
   if(edge){
 if(isBridge(edge)){toast('В мост нельзя вставить элемент','warn');return;}
@@ -5219,6 +6031,7 @@ canvas.addEventListener('contextmenu',function(e){
     if(!sel.has(id))selectOnly(id);
     var n=nodeById(id);
     var items=[
+      {ico:'play',label:'Играть отсюда',fn:function(){plStart(id);}},
       {ico:'copy',label:'Дублировать',fn:function(){var r=duplicateSel();if(r)startCarry(r.ids,r.pre);}},
       {ico:'target',label:'Центрировать',fn:function(){centerOn(n);}}
     ];
@@ -5300,6 +6113,7 @@ function isTyping(){
   return a&&((a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT')||a.isContentEditable);
 }
 window.addEventListener('keydown',function(e){
+  if(plIsOpen()){plKey(e);return;}
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
   if((e.key==='Control'||e.key==='Meta')&&!isTyping())document.body.classList.add('ctrlpan');
   if(isTyping()){
@@ -5348,6 +6162,7 @@ window.addEventListener('keydown',function(e){
     clearSel();return;
   }
   if(code==='KeyF'){if(sel.size===1)centerOn(nodeById(sel.values().next().value));return;}
+  if(code==='KeyP'&&!mod){e.preventDefault();plStart();return;}
   if(e.key==='0'){fitView(true);return;}
   if(e.key==='='||e.key==='+'){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1.15);return;}
   if(e.key==='-'){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1/1.15);return;}
@@ -5464,7 +6279,7 @@ function deleteCustomType(id){
 /* ═══ файлы ═══ */
 function exportJSON(){
   project.meta.modified=new Date().toISOString();
-return JSON.stringify({app:'vetvi',version:18,bend:bendMode,meta:project.meta,viewport:vp,nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,listHidden:project.listHidden},null,2);}
+return JSON.stringify({app:'vetvi',version:18,bend:bendMode,meta:project.meta,viewport:vp,nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,listHidden:project.listHidden,vars:varsList()},null,2);}
 function slug(s){
   var r=(s||'proekt').toLowerCase().replace(/[^a-zа-яё0-9]+/gi,'-').replace(/^-+|-+$/g,'');
   return r.slice(0,60)||'proekt';
@@ -5680,6 +6495,19 @@ function normalize(p){
       color:(typeof n.color==='string'&&/^#([0-9a-f]{6})$/i.test(n.color))?n.color:null,
       tint:(typeof n.tint==='number')?clamp(n.tint,-60,60):0,
 dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes:Array.isArray(n.notes)?n.notes.map(function(m){return{title:String(m.title||'').slice(0,80),html:String(m.html||''),hidden:!!m.hidden};}):[]};
+    if(t==='branch'&&Array.isArray(n.outcomes)){
+      var oc=n.outcomes.filter(function(o){return o&&typeof o.id==='string';}).slice(0,24).map(function(o){
+        var c=(o.cond&&typeof o.cond.vid==='string'&&COND_OPS[o.cond.op])?{vid:o.cond.vid.slice(0,40),op:o.cond.op,val:(o.cond.val===true)?true:((typeof o.cond.val==='number')?o.cond.val:(typeof o.cond.val==='string'?o.cond.val.slice(0,200):0))}:null;
+        return{id:o.id.slice(0,40),label:String(o.label||'').slice(0,60),cond:c};
+      });
+      if(oc.length)node.outcomes=oc;
+    }
+    if(t==='varnode'){
+      node.varMode=(n.varMode==='get')?'get':'set';
+      node.varOp=VARS_OPS[n.varOp]?n.varOp:'=';
+      node.varVal=(n.varVal===true)?true:((typeof n.varVal==='number')?n.varVal:(typeof n.varVal==='string'?n.varVal.slice(0,200):0));
+      if(typeof n.vid==='string'&&n.vid)node.vid=n.vid.slice(0,40);
+    }
     if(Array.isArray(n.participants))node.participants=n.participants.filter(function(p){return typeof p==='string';});
     if(t==='dialog'){
       node.dialog={
@@ -5696,24 +6524,47 @@ dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes
   }).map(function(e){
 var kk=KINDS[e.kind]?e.kind:'flow';
 if(e.bridge)kk='bridge';
+var econd=(e.cond&&typeof e.cond.vid==='string'&&COND_OPS[e.cond.op])?{vid:e.cond.vid.slice(0,40),op:e.cond.op,val:(e.cond.val===true)?true:((typeof e.cond.val==='number')?e.cond.val:(typeof e.cond.val==='string'?e.cond.val.slice(0,200):0))}:null;
 return{id:e.id||uid(),from:e.from,to:e.to,label:e.label||'',kind:kk,
 pts:Array.isArray(e.pts)?e.pts.filter(function(pt){return pt&&isFinite(pt.x)&&isFinite(pt.y);}).map(function(pt){return{x:+pt.x,y:+pt.y};}):[],
 lt:(typeof e.lt==='number')?clamp(e.lt,0.04,0.96):0.5,
 lp:(typeof e.lp==='number')?clamp(e.lp,-44,44):0,
 fromReply:(typeof e.fromReply==='string'&&e.fromReply)?e.fromReply:null,
-bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0}};
+fromOut:(typeof e.fromOut==='string'&&e.fromOut)?e.fromOut:null,
+tin:(e.tin==='var')?'var':null,
+bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0},cond:econd};
 });
+  /* исход, к которому привязана стрелка, должен существовать на развилке */
+  var outIds={};
+  p.nodes.forEach(function(nn){
+    if(nn.type==='branch'&&Array.isArray(nn.outcomes)){
+      var s={};nn.outcomes.forEach(function(o){s[o.id]=true;});outIds[nn.id]=s;
+    }
+  });
+  p.edges.forEach(function(e){
+    if(e.fromOut&&(!outIds[e.from]||!outIds[e.from][e.fromOut]))e.fromOut=null;
+  });
+  /* связь «переменная → вход развилки» должна идти от ноды переменной к развилке */
+  var typesById={};
+  p.nodes.forEach(function(nn){typesById[nn.id]=nn.type;});
+  p.edges.forEach(function(e){
+    if(e.tin==='var'&&(typesById[e.from]!=='varnode'||typesById[e.to]!=='branch'))e.tin=null;
+  });
   p.groups=p.groups.filter(function(g){
     return p.nodes.some(function(n){return n.gid===g.id;});
   });
   p.listHidden=Array.isArray(p.listHidden)?p.listHidden:(Array.isArray(p.hiddenTypes)?p.hiddenTypes:[]);
   p.listHidden=p.listHidden.filter(function(k){return TYPES[k]||cmap[k];});
+  p.vars=Array.isArray(p.vars)?p.vars.filter(function(v){return v&&typeof v.id==='string'&&typeof v.name==='string';}).map(function(v){
+    var type=VAR_TYPES[v.type]?v.type:((typeof v.val==='number')?'num':'str');
+    return{id:v.id.slice(0,40),name:String(v.name).slice(0,40),type:type,val:varCastVal(type,v.val)};
+  }):[];
   return p;
 }
 function loadProject(p,name){
   syncLeaveIfRoom();
   p=normalize(p);
-  project={meta:p.meta||{name:'Без названия',created:'',modified:''},nodes:p.nodes,edges:p.edges,customTypes:p.customTypes,groups:p.groups,listHidden:p.listHidden};
+  project={meta:p.meta||{name:'Без названия',created:'',modified:''},nodes:p.nodes,edges:p.edges,customTypes:p.customTypes,groups:p.groups,listHidden:p.listHidden,vars:p.vars||[]};
   project.groups.forEach(function(g){
     if(g.fold<2&&!g.bbox){
       var ms=allDescNodes(g.id),y0=1e9,y1=-1e9,hh={};
@@ -5790,7 +6641,7 @@ function guardOpen(){guardDirtyThen(openProject);}
 function newProject(){
   guardDirtyThen(function(){
     var now=new Date().toISOString();
-    project={meta:{name:'Новый проект',created:now,modified:now},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
+    project={meta:{name:'Новый проект',created:now,modified:now},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[]};
     sel.clear();selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;history=[];future=[];fileName=null;fileHandle=null;
     $('#projName').value=project.meta.name;
     markSaved();renderAll();fitView(false);
@@ -5918,6 +6769,8 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
+      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
+      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (number / string / boolean); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -5930,6 +6783,8 @@ $all('.ltab').forEach(function(b){
     $all('.ltab').forEach(function(x){x.classList.toggle('active',x===b);});
     $('#panePal').classList.toggle('active',b.dataset.t==='pal');
     $('#paneList').classList.toggle('active',b.dataset.t==='list');
+    $('#paneVars').classList.toggle('active',b.dataset.t==='vars');
+    if(b.dataset.t==='vars')renderVarsPane();
   };
 });
 $('#sQ').addEventListener('input',renderList);
@@ -6228,7 +7083,7 @@ function syncMe(){
 function syncDocObj(){
   return{app:'vetvi-room',version:1,meta:project.meta,bend:bendMode,
     nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,
-    groups:project.groups,listHidden:project.listHidden};
+    groups:project.groups,listHidden:project.listHidden,vars:varsList()};
 }
 function syncBusy(){
   return !!(dragS||gdrag||carryS||dlgResizeS||wpDrag||brDrag||lblDrag||inDrag||outDrag||repOutDrag||grestore||gcreateS||marS||knifeS||connS||isTyping()||
@@ -6284,6 +7139,7 @@ function syncApplyRemote(doc,fit,keepPid){
     project.customTypes=Array.isArray(doc.customTypes)?doc.customTypes:[];
     project.groups=Array.isArray(doc.groups)?doc.groups:[];
     project.listHidden=Array.isArray(doc.listHidden)?doc.listHidden:[];
+    project.vars=Array.isArray(doc.vars)?doc.vars:[];
     var ids=new Set(project.nodes.map(function(n){return n.id;}));
     var ns=new Set();sel.forEach(function(id){if(ids.has(id))ns.add(id);});sel=ns;
     var eids=new Set(project.edges.map(function(e){return e.id;}));
@@ -7080,6 +7936,670 @@ function initSync(){
     }
   },600);
 }
+/* ═══════════ режим новеллы: проигрывание сюжета ═══════════
+   Только чтение: ничего не меняет в project, JSON-структура данных не затрагивается.
+   Два режима: «граф» — обход по стрелкам от стартового блока (кнопка без выделения,
+   ПКМ «Играть отсюда»); «список» — то же самое внутри выделения: двигаемся только по
+   выбранным в диалогах веткам, невыбранные ветки и пути за закрытым условием
+   пропускаются (набор «dead»), а после тупика — следующий непройденный блок
+   выделения («visited»), и так до конца списка.
+   Диалог: описание и кнопки с вариантами реплик на одном экране; выбор реплики
+   ведёт по её ветке (дети реплики → стрелка от реплики → стрелка от блока).
+   Ноды переменных срабатывают молча и не выводятся как слайды. */
+var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null};
+function plIsOpen(){return PL.open;}
+function plPickStartNode(){
+  if(sel&&sel.size===1){
+    var c0=nodeById(sel.values().next().value);
+    if(c0)return c0;
+  }
+  var roots=project.nodes.filter(function(n){
+    return !project.edges.some(function(e){return e.to===n.id;});
+  });
+  var sc=roots.filter(function(n){return n.type==='scene';});
+  return sc[0]||roots[0]||project.nodes[0]||null;
+}
+/* блоки текущего выделения: узлы + содержимое выделенных групп (включая вложенные) */
+function plSelectionIds(){
+  if(!sel.size&&!selGroups.size)return null;
+  var seen=new Set(),out=[];
+  var add=function(n){if(n&&!seen.has(n.id)){seen.add(n.id);out.push(n);}};
+  sel.forEach(function(id){add(nodeById(id));});
+  selGroups.forEach(function(gid){allDescNodes(gid).forEach(function(n){add(n);});});
+  return out;
+}
+/* порядок проигрывания выделения: цепочки по стрелкам внутри выделения,
+   остальное — по положению на холсте (сверху вниз, слева направо) */
+function plBuildPlaylist(nodes){
+  var S=new Set(),arr=[];
+  nodes.forEach(function(n){if(n&&!S.has(n.id)){S.add(n.id);arr.push(n);}});
+  var byPos=function(a,b){return ((a.y||0)-(b.y||0))||((a.x||0)-(b.x||0))||0;};
+  var indeg={},outs={};
+  arr.forEach(function(n){indeg[n.id]=0;});
+  project.edges.forEach(function(e){
+    if(e.tin==='var')return; /* связь «переменная → вход развилки» — не поток проигрывания */
+    if(!S.has(e.from)||!S.has(e.to)||e.from===e.to)return;
+    var lst=outs[e.from]||(outs[e.from]=[]),dup=false;
+    for(var i=0;i<lst.length;i++)if(lst[i]&&lst[i].id===e.to){dup=true;break;}
+    if(dup)return; /* кратные стрелки между той же парой считаются один раз */
+    lst.push(nodeById(e.to));
+    indeg[e.to]=(indeg[e.to]||0)+1;
+  });
+  var ready=arr.filter(function(n){return !indeg[n.id];}).sort(byPos);
+  var out=[],done=new Set();
+  while(ready.length){
+    var n=ready.shift();
+    if(!n||done.has(n.id))continue;
+    done.add(n.id);out.push(n);
+    ((outs[n.id])||[]).forEach(function(t){
+      if(!t)return;
+      indeg[t.id]--;
+      if(indeg[t.id]<=0&&!done.has(t.id))ready.push(t);
+    });
+    ready.sort(byPos);
+  }
+  arr.filter(function(n){return !done.has(n.id);}).sort(byPos).forEach(function(n){out.push(n);}); /* циклы — в конец */
+  return out;
+}
+function plStart(nodeId){
+  if(PL.open)return;
+  /* есть выделение (блоки/группа) — проигрываем только его списком по порядку */
+  var list=null;
+  if(!nodeId){
+    var s=plSelectionIds();
+    if(s&&s.length){
+      list=plBuildPlaylist(s);
+      if(!list.length){toast('В выделении нет блоков для проигрывания','warn');return;}
+    }
+  }
+  closeCtx();closeModal();
+  PL.open=true;PL.nodeId=null;PL.replyId=null;PL.intro=false;
+  PL.typing=false;PL.full='';PL.hist=[];PL.path=[];
+  PL.vars={};
+  varsList().forEach(function(v){PL.vars[v.id]=v.val;});
+  PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();PL.set=null;
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  var start=null;
+  if(list){
+    PL.mode='list';PL.list=list.map(function(n){return n.id;});PL.idx=0;
+    PL.set=new Set(PL.list); /* играем только внутри выделения */
+    PL.startId=PL.list[0];
+    start=list[0];
+  }else{
+    PL.mode='graph';PL.list=[];PL.idx=-1;
+    start=nodeId?nodeById(nodeId):null;
+    if(!start)start=plPickStartNode();
+    if(!start){toast('Проект пуст — нечего проигрывать','warn');PL.open=false;return;}
+    PL.startId=start.id;
+  }
+  $('#player').classList.add('show');
+  $('#plEnd').classList.remove('show');
+  plRenderVars();
+  plRenderPath();
+  plGoNode(start);
+}
+function plExit(){
+  PL.open=false;PL.typing=false;
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  $('#player').classList.remove('show');
+  $('#plEnd').classList.remove('show');
+}
+function plRestart(){
+  var st=(PL.mode==='list')?nodeById(PL.list[0]):(PL.startId?nodeById(PL.startId):null);
+  if(!st){plExit();return;}
+  PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;
+  PL.vars={};
+  varsList().forEach(function(v){PL.vars[v.id]=v.val;});
+  PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();
+  plRenderVars();
+  $('#plEnd').classList.remove('show');
+  plRenderPath();
+  plGoNode(st);
+}
+function plPushHist(){
+  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null,varChanged:PL.varChanged?new Set(PL.varChanged):null,dead:PL.dead?new Set(PL.dead):null,visited:PL.visited?new Set(PL.visited):null});
+  if(PL.hist.length>120)PL.hist.shift();
+  plUpdateBackUI();
+}
+function plUpdateBackUI(){
+  var b=$('#plBackBtn');
+  if(b)b.style.opacity=PL.hist.length?'1':'.4';
+}
+function plBack(){
+  if(!PL.hist.length)return;
+  var s=PL.hist.pop();
+  /* ноды переменных невидимы в проигрывании: «Назад» перескакивает их (значения откатываются вместе с историей) */
+  while(true){
+    var nn=nodeById(s.nodeId);
+    if(!nn||nn.type!=='varnode')break;
+    if(!PL.hist.length){
+      PL.nodeId=s.nodeId;PL.replyId=null;PL.intro=false;PL.typing=false;
+      if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+      if(s.vars)PL.vars=Object.assign({},s.vars);
+      if(s.varChanged)PL.varChanged=s.varChanged;
+      if(s.dead)PL.dead=s.dead;
+      if(s.visited)PL.visited=s.visited;
+      plRenderVars();
+      if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
+      plShowEnd();return;
+    }
+    s=PL.hist.pop();
+  }
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  PL.typing=false;
+  $('#plEnd').classList.remove('show');
+  PL.nodeId=s.nodeId;PL.replyId=s.replyId;PL.intro=s.intro;
+  if(s.vars)PL.vars=Object.assign({},s.vars);
+  if(s.varChanged)PL.varChanged=s.varChanged;
+  if(s.dead)PL.dead=s.dead;
+  if(s.visited)PL.visited=s.visited;
+  plRenderVars();
+  if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
+  plShowCurrent();
+}
+/* показать текущее состояние (после «Назад») без записи в историю */
+function plShowCurrent(){
+  var n=nodeById(PL.nodeId);
+  if(!n){plShowEnd();return;}
+  if(PL.path.length&&PL.path[PL.path.length-1]!==n.id)PL.path.pop();
+  plRenderPath();
+  if(PL.intro&&n.type==='dialog'){
+    ensureDialog(n);
+    plShowSlide({name:null,color:nodeVisual(n).color,text:n.dialog.description||'…',chapter:n});
+    return;
+  }
+  if(PL.replyId&&n.type==='dialog'){
+    var r=findReply(n.dialog.replies,PL.replyId);
+    if(r){plShowReply(r,true);return;}
+  }
+  PL.replyId=null;PL.intro=false;
+  plGoNode(n,true);
+}
+function plTrackPath(id){
+  if(PL.path[PL.path.length-1]!==id)PL.path.push(id);
+  plRenderPath();
+}
+function plRenderPath(){
+  var el=$('#plPath');if(!el)return;
+  var html='';
+  if(PL.mode==='list'&&PL.list.length)html+='<span class="pl-cnt">'+(Math.max(0,PL.idx)+1)+' / '+PL.list.length+'</span>';
+  var tail=PL.path.slice(-4);
+  tail.forEach(function(id,i){
+    var n=nodeById(id);if(!n)return;
+    if(i||html)html+='<span class="sep">→</span>';
+    html+=(i===tail.length-1)?('<b>'+esc(n.title||'…')+'</b>'):('<span>'+esc(n.title||'…')+'</span>');
+  });
+  el.innerHTML=html;
+}
+function plCastName(n){
+  var ps=(n.type==='dialog')?(n.dialog&&n.dialog.participants||[]):(Array.isArray(n.participants)?n.participants:[]);
+  if(!ps.length)return null;
+  var nm=charName(ps[0]);
+  if(ps.length>1)nm+=' +'+(ps.length-1);
+  return nm;
+}
+function plChapterHtml(n){
+  var vis=nodeVisual(n);
+  return '<span class="pl-chip"><i class="dot" style="background:'+esc(vis.color)+'"></i>'+esc(vis.name||'')+'<span class="ttl">· '+esc(n.title||'')+'</span></span>';
+}
+function plClearChoices(){
+  var c=$('#plChoices');
+  c.innerHTML='';c.style.display='none';
+}
+/* HUD переменных + всплывашка изменения */
+var plFlashT=null;
+function plVarFlash(txt){
+  var el=$('#plVarFlash');if(!el)return;
+  el.textContent=txt;el.classList.add('show');
+  clearTimeout(plFlashT);
+  plFlashT=setTimeout(function(){el.classList.remove('show');},2600);
+}
+function plRenderVars(){
+  var el=$('#plVars');if(!el)return;
+  var l=varsList();
+  if(!l.length){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='';
+  el.innerHTML=l.map(function(v){
+    var cur=(PL.vars&&(PL.vars[v.id]!==undefined&&PL.vars[v.id]!==null))?PL.vars[v.id]:v.val;
+    var chg=PL.varChanged&&PL.varChanged.has(v.id);
+    return '<span class="pl-var'+(chg?' chg':'')+'"'+(chg?' title="значение изменилось в проигрывании"':'')+'><i>'+esc(v.name)+'</i><b>'+esc(varValText(cur,v))+'</b></span>';
+  }).join('');
+}
+/* варианты перехода от развилки: исходы с условиями (пины на узле) и условия на стрелках (старое поведение) */
+function plBranchChoices(n){
+  ensureBranch(n);
+  var outs=n.outcomes||[];
+  var nx=plNodeEdgeList(n);
+  var gen=nx.filter(function(e){return !e.fromOut;});
+  var hasCond=nx.some(function(e){return e.cond;})||outs.some(function(o){return o.cond;});
+  if(!outs.length){
+    if(!hasCond)return null;
+    return nx.map(function(e){
+      var c0=condWithOverride(e.cond,n);
+      var ok=!c0||condMet(c0,PL.vars);
+      return{label:plEdgeLabel(e),targets:[e.to],ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}};
+    });
+  }
+  if(outs.length===1&&!outs[0].cond&&!hasCond)return null; /* один выход без условия — авто-переход */
+  var items=[];
+  outs.forEach(function(o,i){
+    var ed=null;
+    for(var k=0;k<nx.length;k++){if(nx[k].fromOut===o.id){ed=nx[k];break;}}
+    var c0=condWithOverride(o.cond,n);
+    var ok=(!c0||condMet(c0,PL.vars))&&!!ed;
+    var why=null;
+    if(c0&&!condMet(c0,PL.vars))why='нужно: '+condText(c0);
+    else if(!ed)why='исход не подключён стрелкой';
+    items.push({label:o.label||('Исход '+(i+1)),targets:ed?[ed.to]:[],ok:ok,why:why,fn:function(){if(ed)plFollowEdge(ed);}});
+  });
+  gen.forEach(function(e){
+    var c0=condWithOverride(e.cond,n);
+    var ok=!c0||condMet(c0,PL.vars);
+    items.push({label:plEdgeLabel(e),targets:[e.to],ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}});
+  });
+  return items;
+}
+function plRenderBranchChoices(items){
+  var c=$('#plChoices');
+  c.innerHTML='';
+  items.forEach(function(it,i){
+    var b=document.createElement('button');
+    b.className='pl-choice'+(it.ok?'':' lock');
+    b.innerHTML='<span class="num">'+(i+1)+'</span><span class="lbl">'+esc(it.label)+(it.why?'<i class="why">путь закрыт — '+esc(it.why)+'</i>':'')+'</span>';
+    b.onclick=function(ev){
+      ev.stopPropagation();
+      if(!it.ok){plVarFlash('Путь закрыт: '+it.why);return;}
+      plPushHist();
+      plKillSiblings(items,it); /* непрошедшие исходы не проигрываем */
+      plClearChoices();it.fn();
+    };
+    c.appendChild(b);
+  });
+  c.style.display='flex';
+  $('#plHint').style.display='none';
+}
+function plRenderChoices(list){
+  var c=$('#plChoices');
+  c.innerHTML='';
+  list.forEach(function(it,i){
+    var b=document.createElement('button');
+    b.className='pl-choice';
+    b.innerHTML='<span class="num">'+(i+1)+'</span><span class="lbl">'+esc(it.label)+'</span>';
+    b.onclick=function(ev){
+      ev.stopPropagation();
+      plPushHist();
+      plKillSiblings(list,it); /* невыбранные ветки не проигрываем */
+      plClearChoices();it.fn();
+    };
+    c.appendChild(b);
+  });
+  c.style.display='flex';
+  $('#plHint').style.display='none';
+}
+function plType(text){
+  var tEl=$('#plText');
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  PL.full=text||'';PL.typing=true;
+  tEl.innerHTML='<span class="caret"></span>';
+  var dur=Math.min(2200,Math.max(260,PL.full.length*22));
+  var t0=performance.now();
+  PL.timer=setInterval(function(){
+    var k=clamp((performance.now()-t0)/dur,0,1);
+    tEl.innerHTML=esc(PL.full.slice(0,Math.floor(k*PL.full.length)))+'<span class="caret"></span>';
+    if(k>=1)plFinishType();
+  },33);
+}
+function plFinishType(){
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  PL.typing=false;
+  $('#plText').innerHTML=esc(PL.full);
+  plAfterType();
+}
+function plShowSlide(opts){
+  plHideEnd();
+  var box=$('#plBox');
+  $('#plChapter').innerHTML=opts.chapter?plChapterHtml(opts.chapter):'';
+  var nameEl=$('#plName');
+  if(opts.name){nameEl.textContent=opts.name;nameEl.classList.remove('hidden');}
+  else nameEl.classList.add('hidden');
+  box.style.setProperty('--plc',opts.color||'#e2a54e');
+  plClearChoices();
+  $('#plHint').style.display='';
+  $('#plHint').textContent='клик — далее ▸';
+  plType(opts.text||'');
+  box.classList.remove('pl-anim');
+  void box.offsetWidth;
+  box.classList.add('pl-anim');
+}
+function plGoNode(n,keepPath){
+  PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
+  if(PL.mode==='list'){
+    if(PL.visited)PL.visited.add(n.id);
+    var li=PL.list.indexOf(n.id);
+    if(li>=0)PL.idx=li;
+  }
+  if(!keepPath&&n.type!=='varnode')plTrackPath(n.id); /* нода переменной не попадает в путь проигрывания */
+  if(PL.vars&&!keepPath){
+    /* развилка не меняет переменные — только вычисляет исходы по условиям;
+       значения меняют только ноды переменных (режим «изменение») */
+    /* нода переменной: «изменение» — применяем операцию, «чтение» — считываем значение (всплывашка у HUD) */
+    if(n.type==='varnode'){
+      var vnS=n.vid?varById(n.vid):null;
+      if(vnS&&n.varMode==='set'){
+        var after=varApplyOp(n.varOp,PL.vars[vnS.id],n.varVal,varType(vnS));
+        PL.vars[vnS.id]=after;
+        if(PL.varChanged)PL.varChanged.add(vnS.id);
+        plRenderVars();
+        plVarFlash(varName(vnS.id)+' '+opSym(n.varOp)+' '+varValText(n.varVal,vnS)+'  →  '+varValText(after,vnS));
+      }else if(vnS){
+        var gv=(PL.vars[vnS.id]!==undefined&&PL.vars[vnS.id]!==null)?PL.vars[vnS.id]:vnS.val;
+        plVarFlash('чтение: '+vnS.name+' = '+varValText(gv,vnS));
+      }
+    }
+  }
+  /* нода переменной не выводится как слайд: срабатывает (меняет/читает значение) и сразу ведёт дальше */
+  if(n.type==='varnode'){plAfterVarnode(n,keepPath);return;}
+  if(n.type==='dialog'){
+    ensureDialog(n);
+    var desc=n.dialog.description||'';
+    var rs=n.dialog.replies||[];
+    if(desc){
+      PL.intro=true;
+      plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});
+      return;
+    }
+    /* без описания — сразу список выбора реплик (шапка слайда переключается на этот диалог) */
+    if(rs.length>1){
+      var bx=$('#plBox');
+      bx.style.setProperty('--plc',nodeVisual(n).color);
+      var chEl=$('#plChapter');if(chEl)chEl.innerHTML=plChapterHtml(n);
+      var nmEl=$('#plName'),nm2=plCastName(n);
+      if(nm2){nmEl.textContent=nm2;nmEl.classList.remove('hidden');}else nmEl.classList.add('hidden');
+      var txEl=$('#plText');if(txEl)txEl.innerHTML='';
+      plShowDialogChoices(n,rs);return;
+    }
+    if(rs.length===1){plShowReply(rs[0]);return;}
+    plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
+    return;
+  }
+  plShowSlide({name:plCastName(n),color:resolvedNodeColor(n,0),text:n.text||'…',chapter:n});
+}
+/* нода переменной: без слайда — сработала и ведёт дальше (по стрелке, в списке — следующий блок) */
+function plAfterVarnode(n,keepPath){
+  var vn=n.vid?varById(n.vid):null;
+  if(!vn)plVarFlash('Переменная не привязана — выберите её в инспекторе.');
+  var nx=plNodeEdgeList(n);
+  if(nx.length===1){
+    var c0=condWithOverride(nx[0].cond,n);
+    if(c0&&!condMet(c0,PL.vars)){plVarFlash('путь закрыт: '+condText(c0));plShowEnd();return;}
+    plFollowEdge(nx[0]);return;
+  }
+  if(nx.length>1){
+    var bc=plBranchChoices(n);
+    if(bc){plRenderBranchChoices(bc);return;}
+    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
+    return;
+  }
+  if(PL.mode==='list'){plListJumpNext();return;}
+  plShowEnd();
+}
+function plShowReply(r,noHist){
+  PL.replyId=r.id;PL.intro=false;
+  var name=r.speaker?charName(r.speaker):null;
+  var color=r.speaker?charColor(r.speaker):'#8b929c';
+  var n=nodeById(PL.nodeId);
+  plShowSlide({name:name,color:color,text:r.text||'…',chapter:n});
+}
+/* в режиме списка играем только внутри выделения: связь за его пределами — тупик */
+function plEdgePlayable(e){
+  if(PL.mode!=='list'||!PL.set)return true;
+  return PL.set.has(e.to);
+}
+/* список исходящих связей узла (без привязанных к репликам) */
+function plNodeEdgeList(n){
+  return project.edges.filter(function(e){return e.from===n.id&&!e.fromReply&&e.tin!=='var'&&plEdgePlayable(e);});
+}
+/* стрелки, привязанные к конкретной реплике */
+function plReplyEdges(n,r){
+  return project.edges.filter(function(e){return e.from===n.id&&e.fromReply===r.id&&e.tin!=='var'&&plEdgePlayable(e);});
+}
+/* все исходы узла (включая привязанные к репликам и исходам развилки) — для обхода веток */
+function plAllOutEdges(n){
+  return project.edges.filter(function(e){return e.from===n.id&&e.tin!=='var'&&plEdgePlayable(e);});
+}
+/* куда на холсте ведёт ветка реплики (реплика + её дети): цели стрелок от всего поддерева */
+function plReplyBranchTargets(n,r){
+  var ids=new Set();
+  (function walk(rr){if(!rr||ids.has(rr.id))return;ids.add(rr.id);(rr.children||[]).forEach(walk);})(r);
+  return project.edges.filter(function(e){return e.from===n.id&&e.tin!=='var'&&e.fromReply&&ids.has(e.fromReply)&&plEdgePlayable(e);}).map(function(e){return e.to;});
+}
+/* все ноды, достижимые из корней (для поиска общих частей веток) */
+function plReach(rootIds){
+  var seen=new Set(),q=[];
+  (rootIds||[]).forEach(function(id){if(id&&nodeById(id)&&!seen.has(id)){seen.add(id);q.push(id);}});
+  while(q.length){
+    var n=nodeById(q.shift());
+    if(!n)continue;
+    plAllOutEdges(n).forEach(function(e){if(!seen.has(e.to)&&nodeById(e.to)){seen.add(e.to);q.push(e.to);}});
+  }
+  return seen;
+}
+/* пометить ветку мёртвой (начиная с rootId): общие с живой веткой части остаются */
+function plMarkDeadFrom(rootId,alive){
+  if(!rootId||!nodeById(rootId)||PL.dead.has(rootId))return;
+  if(alive&&alive.has(rootId))return;
+  PL.dead.add(rootId);
+  var q=[rootId];
+  while(q.length){
+    var n=nodeById(q.shift());
+    if(!n)continue;
+    plAllOutEdges(n).forEach(function(e){
+      if(PL.dead.has(e.to))return;
+      if(alive&&alive.has(e.to))return;
+      PL.dead.add(e.to);q.push(e.to);
+    });
+  }
+}
+/* при выборе варианта невыбранные альтернативы (включая закрытые условием) считаются непройданными */
+function plKillSiblings(items,chosen){
+  if(!PL.dead)return;
+  var alive=plReach(chosen.targets||[]);
+  items.forEach(function(o){
+    if(o===chosen)return;
+    (o.targets||[]).forEach(function(t){plMarkDeadFrom(t,alive);});
+  });
+}
+function plEdgeLabel(e){
+  if(e.label)return e.label;
+  var t=nodeById(e.to);
+  return (t&&t.title)?t.title:'далее';
+}
+function plFollowEdge(e){
+  var t=nodeById(e.to);
+  if(!t||(PL.mode==='list'&&PL.set&&!PL.set.has(t.id))){
+    /* цель вне проигрывания: в списке — следующий непройденный блок, в графе — конец ветки */
+    if(PL.mode==='list')plListJumpNext();else plShowEnd();
+    return;
+  }
+  plGoNode(t);
+}
+function plShowEnd(){
+  PL.typing=false;
+  if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
+  plClearChoices();
+  $('#plHint').style.display='none';
+  var sub=document.querySelector('#plEnd .pl-sub');
+  if(sub)sub.textContent=(PL.mode==='list')?'выделенный фрагмент проигран':'эта ветка истории завершена';
+  $('#plEnd').classList.add('show');
+}
+/* диалог: список корневых реплик — игрок выбирает одну из них */
+function plShowDialogChoices(n,rs){
+  var items=rs.map(function(r){
+    var nm=r.speaker?charName(r.speaker):null;
+    return{label:(nm?nm+': ':'')+(r.text||'…'),targets:plReplyBranchTargets(n,r),fn:function(){plShowReply(r);}};
+  });
+  plRenderChoices(items);
+}
+function plHideEnd(){
+  $('#plEnd').classList.remove('show');
+  $('#plHint').style.display='';
+}
+/* режим «список» (проигрывание выделения): подсказка и переход к следующему непройденному блоку */
+function plListHint(){
+  $('#plHint').textContent=plListHasNext()?'клик — далее ▸':'клик — конец ▸';
+}
+function plListHasNext(){
+  if(PL.mode!=='list'||!PL.visited||!PL.dead)return false;
+  for(var i=0;i<PL.list.length;i++){
+    var id=PL.list[i];
+    if(PL.visited.has(id)||PL.dead.has(id))continue;
+    if(nodeById(id))return true;
+  }
+  return false;
+}
+function plShowAt(i){
+  PL.idx=i;
+  var n=(i>=0&&i<PL.list.length)?nodeById(PL.list[i]):null;
+  if(!n){plShowEnd();return;}
+  plGoNode(n);
+}
+/* тупик: следующий непройденный и не пропущенный блок выделения, иначе — конец */
+function plListJumpNext(){
+  if(PL.mode!=='list')return plShowEnd();
+  for(var i=0;i<PL.list.length;i++){
+    var id=PL.list[i];
+    if(PL.visited.has(id)||PL.dead.has(id))continue;
+    if(nodeById(id)){plShowAt(i);return;}
+  }
+  plShowEnd();
+}
+/* что показывать после завершения печатания: подсказка или выбор */
+function plAfterType(){
+  $('#plHint').style.display='';
+  var n=nodeById(PL.nodeId);
+  if(!n){plShowEnd();return;}
+  var mk=function(arr){
+    plRenderChoices(arr.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
+  };
+  /* описание диалога: после печати сразу показываем кнопки с вариантами реплик */
+  if(PL.intro){
+    var rs0=(n.type==='dialog'&&n.dialog&&n.dialog.replies)||[];
+    if(rs0.length>1){plShowDialogChoices(n,rs0);return;}
+    $('#plHint').textContent='клик — далее ▸';return;
+  }
+  if(PL.replyId&&n.type==='dialog'){
+    var r=findReply(n.dialog.replies,PL.replyId);
+    if(r){
+      var kids=r.children||[];
+      if(kids.length>1){
+        plRenderChoices(kids.map(function(ch){return{label:ch.text||'Продолжить…',targets:plReplyBranchTargets(n,ch),fn:function(){plShowReply(ch);}};}));
+        return;
+      }
+      if(kids.length===1){$('#plHint').textContent='клик — далее ▸';return;}
+      /* ветка выбранной реплики: сначала стрелки от реплики, потом стрелки от блока */
+      var ex=plReplyEdges(n,r);
+      if(ex.length>1){mk(ex);return;}
+      if(ex.length===1){
+        var cE=condWithOverride(ex[0].cond,n);
+        $('#plHint').textContent=(cE&&!condMet(cE,PL.vars))?('путь закрыт: '+condText(cE)+' · ← назад'):('далее: '+plEdgeLabel(ex[0])+' ▸');
+        return;
+      }
+      var nx=plNodeEdgeList(n);
+      if(nx.length>1){var bc=plBranchChoices(n);if(bc){plRenderBranchChoices(bc);return;}mk(nx);return;}
+      if(nx.length===1){
+        var cN=condWithOverride(nx[0].cond,n);
+        $('#plHint').textContent=(cN&&!condMet(cN,PL.vars))?('путь закрыт: '+condText(cN)+' · ← назад'):('далее: '+plEdgeLabel(nx[0])+' ▸');
+        return;
+      }
+    }
+  }
+  var nx2=plNodeEdgeList(n);
+  if(nx2.length>1){var bc2=plBranchChoices(n);if(bc2){plRenderBranchChoices(bc2);return;}mk(nx2);return;}
+  if(nx2.length===1){
+    var c2=condWithOverride(nx2[0].cond,n);
+    $('#plHint').textContent=(c2&&!condMet(c2,PL.vars))?('путь закрыт: '+condText(c2)+' · ← назад'):('далее: '+plEdgeLabel(nx2[0])+' ▸');return;
+  }
+  if(PL.mode==='list'){plListHint();return;} /* тупик: далее — следующий непройденный блок */
+  $('#plHint').textContent='клик — конец ▸';
+}
+/* клик/пробел: завершить печать → шаг вперёд */
+function plAdvance(){
+  if(PL.typing){plFinishType();return;}
+  if($('#plChoices').style.display==='flex')return; /* ждём выбор игрока */
+  if($('#plEnd').classList.contains('show'))return;
+  var n=nodeById(PL.nodeId);
+  if(!n){plShowEnd();return;}
+  if(PL.intro){
+    PL.intro=false;
+    var rs=(n.dialog&&n.dialog.replies)||[];
+    if(rs.length===1){plPushHist();plShowReply(rs[0]);return;}
+    if(rs.length>1){plShowDialogChoices(n,rs);return;} /* выбор реплики — ветка выбора (страховка) */
+    plPushHist();
+    plAfterNodeFinal(n);
+    return;
+  }
+  if(PL.replyId&&n.type==='dialog'){
+    var r=findReply(n.dialog.replies,PL.replyId);
+    if(r){
+      var kids=r.children||[];
+      if(kids.length===1){plPushHist();plShowReply(kids[0]);return;}
+      if(kids.length>1){plAfterType();return;} /* выбор не сделан — страховка */
+      /* ветка выбранной реплики: сначала стрелка от реплики, потом стрелки от блока */
+      var ex=plReplyEdges(n,r);
+      if(ex.length===1){
+        var cE=condWithOverride(ex[0].cond,n);
+        if(cE&&!condMet(cE,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(cE)+' · ← назад';return;}
+        plPushHist();plFollowEdge(ex[0]);return;
+      }
+      if(ex.length>1){plAfterType();return;} /* выбор не сделан — страховка */
+    }
+    plPushHist();
+    plAfterNodeFinal(n);
+    return;
+  }
+  plPushHist();
+  plAfterNodeFinal(n);
+}
+/* реплика/текст узла закончились → куда дальше (по стрелкам узла; в списке после тупика — следующий блок) */
+function plAfterNodeFinal(n){
+  var nx=plNodeEdgeList(n);
+  if(nx.length===1){
+    var c0=condWithOverride(nx[0].cond,n);
+    if(c0&&!condMet(c0,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(c0)+' · ← назад';return;}
+    plFollowEdge(nx[0]);return;
+  }
+  if(nx.length>1){
+    var bc=plBranchChoices(n);
+    if(bc){plRenderBranchChoices(bc);return;}
+    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
+    return;
+  }
+  if(PL.mode==='list'){plListJumpNext();return;}
+  plShowEnd();
+}
+function plKey(e){
+  if(e.key==='Escape'){e.preventDefault();plExit();return;}
+  if(e.key===' '||e.key==='Enter'||e.key==='ArrowRight'){e.preventDefault();plAdvance();return;}
+  if(e.key==='ArrowLeft'||e.key==='Backspace'){e.preventDefault();plBack();return;}
+  if(e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К'){e.preventDefault();plRestart();return;}
+  var m=/^Digit([1-9])$/.exec(e.code);
+  if(m){
+    var c=$('#plChoices');
+    var btn=c.querySelectorAll('.pl-choice')[parseInt(m[1],10)-1];
+    if(btn&&c.style.display==='flex'){e.preventDefault();btn.click();}
+  }
+}
+$('#player').addEventListener('click',function(e){
+  if(e.target.closest&&e.target.closest('button'))return;
+  plAdvance();
+});
+$('#plExitBtn').onclick=function(e){e.stopPropagation();plExit();};
+$('#plRestartBtn').onclick=function(e){e.stopPropagation();plRestart();};
+$('#plBackBtn').onclick=function(e){e.stopPropagation();plBack();};
+$('#plEndExit').onclick=function(e){e.stopPropagation();plExit();};
+$('#plEndRestart').onclick=function(e){e.stopPropagation();plRestart();};
+$('#plEndBack').onclick=function(e){e.stopPropagation();plBack();};
+$('#bPlay').onclick=function(){plStart();};
 /* ═══ запуск ═══ */
 try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key!=='Escape')return;if($('#noteModal').classList.contains('show')){closeNoteEditor();}if($('#noteViewModal').classList.contains('show')){closeNoteView();}},true);renderPalette();
   try{
