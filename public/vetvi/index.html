@@ -63,7 +63,12 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
 .sm-i kbd{margin-left:auto}
 #layout{flex:1;display:flex;min-height:0}
 aside{background:var(--panel);flex:none;display:flex;flex-direction:column;min-height:0}
-#left{width:264px;border-right:1px solid var(--line);animation:slideL .55s .08s cubic-bezier(.2,.8,.3,1) both}
+#left{width:264px;border-right:1px solid var(--line);animation:slideL .55s .08s cubic-bezier(.2,.8,.3,1) both;position:relative}
+/* правый край левой панели: тянется — меняет ширину (сохраняется в localStorage) */
+#leftGrip{position:absolute;top:0;right:-4px;width:9px;height:100%;cursor:col-resize;z-index:40;touch-action:none}
+#leftGrip::before{content:'';position:absolute;left:3px;top:0;bottom:0;width:3px;border-radius:2px;background:transparent;transition:background .15s}
+#leftGrip:hover::before,body.left-resizing #leftGrip::before{background:linear-gradient(180deg,rgba(226,165,78,.65),rgba(226,165,78,.25))}
+body.left-resizing{cursor:col-resize;user-select:none}
 @keyframes slideL{from{transform:translateX(-24px);opacity:0}}
 #right{width:302px;border-left:1px solid var(--line);animation:slideR .55s .08s cubic-bezier(.2,.8,.3,1) both;overflow-y:auto;padding:16px 16px 30px}
 @keyframes slideR{from{transform:translateX(24px);opacity:0}}
@@ -288,6 +293,31 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .v-hint{margin-top:12px;font-size:11.5px;line-height:1.65;color:var(--tx3);background:rgba(255,255,255,.025);border:1px dashed #2e333c;border-radius:10px;padding:10px 12px}
 .v-hint b{color:var(--tx2)}
 .v-empty{font-size:11.5px;color:var(--tx3);padding:4px 0}
+/* ── переменные: разворачивание строки (удобное редактирование) ── */
+.v-item{margin-bottom:8px}
+.v-item .v-row{margin-bottom:0}
+.v-item.dragging{opacity:.45}
+.v-fold{flex:0 0 20px;width:20px;height:28px;border:none;background:none;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:transform .18s,color .15s,background .15s;padding:0}
+.v-fold:hover{color:var(--tx);background:#262b33}
+.v-item:not(.open) .v-fold{transform:rotate(-90deg)}
+.v-item.open .v-fold{color:var(--acc)}
+.v-edit{display:none;margin-top:6px;background:#15181d;border:1px solid #2a2f38;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:9px}
+.v-item.open .v-edit{display:flex}
+.v-edit label{display:block;font:600 9.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tx3);margin:0 0 4px}
+.v-edit .ve-name{width:100%;box-sizing:border-box}
+.ve-types{display:flex;gap:4px}
+.ve-types button{flex:1;height:28px;border-radius:8px;border:1px solid #2e333c;background:#1b1f25;color:var(--tx3);font:600 11px var(--body);cursor:pointer;transition:.15s;padding:0}
+.ve-types button:hover{color:var(--tx2);border-color:#3a404b}
+.ve-types button.on{color:#221604;background:linear-gradient(180deg,#eab264,#d69637);border-color:#a97a2e}
+.ve-valrow{display:flex;gap:4px;align-items:center}
+.ve-valrow .ve-val{flex:1;min-width:0}
+.ve-step{flex:0 0 30px;height:30px;border-radius:8px;border:1px solid #2e333c;background:#1b1f25;color:var(--tx2);cursor:pointer;font:600 14px var(--body);transition:.15s;padding:0}
+.ve-step:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
+.ve-bools{display:flex;gap:6px}
+.ve-bools button{flex:1;height:32px;border-radius:8px;border:1px solid #2e333c;background:#1b1f25;color:var(--tx3);font:700 12px var(--mono);cursor:pointer;transition:.15s;padding:0}
+.ve-bools button:hover{color:var(--tx2);border-color:#3a404b}
+.ve-bools button.on{color:#221604;background:linear-gradient(180deg,#eab264,#d69637);border-color:#a97a2e}
+.ve-use{font:500 10.5px var(--body);color:var(--tx3);border-top:1px dashed #2a2f38;padding-top:7px;line-height:1.5}
 .n-vars{display:none;flex-wrap:wrap;gap:4px;margin-top:7px}
 .node.ex-0 .n-vars{margin-top:2px}
 .n-vars span{font:600 9.5px var(--mono);letter-spacing:.4px;color:#e8dfa8;background:rgba(214,201,106,.13);border:1px solid rgba(214,201,106,.42);border-radius:6px;padding:2px 7px;white-space:nowrap}
@@ -376,9 +406,10 @@ body.connecting .vpinn{cursor:copy}
 .node.t-varnode .n-vars{display:flex}
 #paneVars .v-row{cursor:grab}
 #paneVars .v-row.dragging{opacity:.45}
+#paneVars .v-row .v-del{margin-right:2px}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
 .v-row .v-type{flex:0 0 78px;padding:0 2px;font-size:10.5px}
-#paneVars .v-row .v-val{flex:0 0 46px;min-width:46px}
+#paneVars .v-row .v-val{flex:0 0 58px;min-width:58px}
 .v-add-btn{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .v-add-btn:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
 .dlg-children{margin-left:9px;padding-left:14px;position:relative;margin-top:3px}
@@ -3320,36 +3351,97 @@ function renderVarsPane(){
   }
   html+='<div id="vRows">';
   l.forEach(function(v){
+    var open=!!varsOpen[v.id];
     var typeOpts=Object.keys(VAR_TYPES).map(function(t){
       return '<option value="'+t+'"'+(varType(v)===t?' selected':'')+'>'+VAR_TYPES[t]+'</option>';
     }).join('');
-    html+='<div class="v-row" data-vid="'+esc(v.id)+'">'+
-      '<span class="v-grip" title="Перетащите на холст — создать ноду переменной">'+ic('grip',12)+'</span>'+
-      '<input class="inp v-name" value="'+esc(v.name)+'" maxlength="40" title="Название переменной" placeholder="название">'+
-      '<select class="inp v-type" title="Тип переменной">'+typeOpts+'</select>'+
-      varValControlHtml(v)+
-      '<button class="v-del" title="Удалить переменную">'+ic('x',12)+'</button>'+
+    html+='<div class="v-item'+(open?' open':'')+'" data-vid="'+esc(v.id)+'">'+
+      '<div class="v-row">'+
+        '<span class="v-grip" title="Перетащите на холст — создать ноду переменной">'+ic('grip',12)+'</span>'+
+        '<input class="inp v-name" value="'+esc(v.name)+'" maxlength="40" title="Название переменной" placeholder="название">'+
+        '<select class="inp v-type" title="Тип переменной">'+typeOpts+'</select>'+
+        varValControlHtml(v)+
+        '<button class="v-del" title="Удалить переменную">'+ic('x',12)+'</button>'+
+        '<button class="v-fold" title="'+(open?'Свернуть':'Развернуть для редактирования')+'">'+ic('chev',12)+'</button>'+
+      '</div>'+
+      (open?varEditHtml(v):'')+
     '</div>';
   });
   html+='</div>';
-  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов.</div>';
+  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов. Стрелка в строке разворачивает удобный редактор переменной.</div>';
   pane.innerHTML=html;
   var add=$('#vAdd');
   if(add)add.onclick=function(){
     var id='v'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
     discrete(function(){varsList().push({id:id,name:'переменная',type:'num',val:0});});
+    varsOpen[id]=true; /* новая переменная сразу разворачивается для редактирования */
     renderVarsPane();renderInspector();refreshAllBranchChips();
-    var rows=$all('#paneVars .v-row');var last=rows[rows.length-1];
-    if(last){var nm=last.querySelector('.v-name');nm.focus();nm.select();}
+    var items=$all('#paneVars .v-item');var last=items[items.length-1];
+    if(last){var tgt=last.querySelector('.ve-name')||last.querySelector('.v-name');if(tgt){tgt.focus();tgt.select();}}
   };
   bindVarsRows();
 }
+/* состояние разворота строк переменных (только во время сессии) */
+var varsOpen={};
+/* развёрнутый редактор переменной — крупный контроль имени, типа и начального значения */
+function varEditHtml(v){
+  var t=varType(v);
+  var types=Object.keys(VAR_TYPES).map(function(tk){
+    return '<button data-t="'+tk+'"'+(t===tk?' class="on"':'')+'>'+VAR_TYPES[tk]+'</button>';
+  }).join('');
+  var valCtl;
+  if(t==='num'){
+    valCtl='<div class="ve-valrow">'+
+      '<button class="ve-step" data-d="-1" title="−1">−</button>'+
+      '<input class="inp ve-val" value="'+esc(String(v.val))+'" title="Начальное значение">'+
+      '<button class="ve-step" data-d="1" title="+1">+</button>'+
+    '</div>';
+  }else if(t==='bool'){
+    valCtl='<div class="ve-bools">'+
+      '<button data-b="1"'+(isTrueVal(v.val)?' class="on"':'')+'>true</button>'+
+      '<button data-b="0"'+(isTrueVal(v.val)?'':' class="on"')+'>false</button>'+
+    '</div>';
+  }else{
+    valCtl='<input class="inp ve-val" value="'+esc(String(v.val==null?'':v.val))+'" title="Начальное значение" placeholder="текст">';
+  }
+  return '<div class="v-edit">'+
+    '<div><label>Название</label><input class="inp ve-name" value="'+esc(v.name)+'" maxlength="40" placeholder="название переменной"></div>'+
+    '<div><label>Тип</label><div class="ve-types">'+types+'</div></div>'+
+    '<div><label>Начальное значение</label>'+valCtl+'</div>'+
+    '<div class="ve-use">'+varUseText(v)+'</div>'+
+  '</div>';
+}
+/* где переменная используется на холсте (ноды, условия исходов, вход развилки) */
+function varUseText(v){
+  var nodes=0,conds=0,vin=0;
+  project.nodes.forEach(function(n){
+    if(n.type==='varnode'&&n.vid===v.id)nodes++;
+    if(Array.isArray(n.outcomes))n.outcomes.forEach(function(o){if(o.cond&&o.cond.vid===v.id)conds++;});
+  });
+  project.edges.forEach(function(e){
+    if(e.cond&&e.cond.vid===v.id)conds++;
+    if(e.tin==='var'){var src=nodeById(e.from);if(src&&src.type==='varnode'&&src.vid===v.id)vin++;}
+  });
+  var parts=[];
+  if(nodes)parts.push('ноды: '+nodes);
+  if(conds)parts.push('условия исходов: '+conds);
+  if(vin)parts.push('вход развилки: да');
+  return parts.length?('используется на холсте — '+parts.join(' · ')):'на холсте пока не используется';
+}
 function bindVarsRows(){
-  $all('#paneVars .v-row').forEach(function(row){
-    var vid=row.dataset.vid,v=varById(vid);if(!v)return;
+  $all('#paneVars .v-item').forEach(function(item){
+    var vid=item.dataset.vid,v=varById(vid);if(!v)return;
+    var row=item.querySelector('.v-row');
     var nm=row.querySelector('.v-name'),vl=row.querySelector('.v-val'),vt=row.querySelector('.v-type');
+    var openEd=function(){return item.classList.contains('open')?item.querySelector('.v-edit'):null;};
+    /* компактная строка */
     nm.addEventListener('focus',editStart);
-    nm.addEventListener('input',function(){v.name=nm.value;markDirty();refreshAllBranchChips();});
+    nm.addEventListener('input',function(){
+      v.name=nm.value;
+      var ed=openEd(),ve=ed&&ed.querySelector('.ve-name');
+      if(ve&&ve!==document.activeElement)ve.value=v.name;
+      markDirty();refreshAllBranchChips();
+    });
     nm.addEventListener('change',editEnd);nm.addEventListener('blur',editEnd);
     vt.addEventListener('change',function(){
       discrete(function(){
@@ -3380,6 +3472,7 @@ function bindVarsRows(){
         });
         project.edges.forEach(function(e){if(e.cond&&e.cond.vid===vid)e.cond=null;});
       });
+      delete varsOpen[vid];
       renderVarsPane();renderInspector();renderAll();
       toast('Переменная удалена (привязки очищены)','warn');
     };
@@ -3392,11 +3485,71 @@ function bindVarsRows(){
     row.addEventListener('dragstart',function(e){
       e.dataTransfer.setData('text/vetvi-var',vid);
       e.dataTransfer.effectAllowed='copy';
-      row.classList.add('dragging');
+      item.classList.add('dragging');
     });
     row.addEventListener('dragend',function(){
       row.removeAttribute('draggable');
-      row.classList.remove('dragging');
+      item.classList.remove('dragging');
+    });
+    /* разворачивание: стрелка в строке */
+    row.querySelector('.v-fold').onclick=function(){
+      var open=!item.classList.contains('open');
+      if(open)varsOpen[vid]=true;else delete varsOpen[vid];
+      renderVarsPane(); /* пересобрать редактор под текущий тип */
+    };
+    /* развёрнутый редактор: имя */
+    var ed=openEd();if(!ed)return;
+    var ve=ed.querySelector('.ve-name');
+    ve.addEventListener('focus',editStart);
+    ve.addEventListener('input',function(){
+      v.name=ve.value;
+      if(nm!==document.activeElement)nm.value=v.name;
+      markDirty();refreshAllBranchChips();
+    });
+    ve.addEventListener('change',editEnd);ve.addEventListener('blur',editEnd);
+    /* тип — сегментные кнопки */
+    Array.prototype.forEach.call(ed.querySelectorAll('.ve-types button'),function(b){
+      b.onclick=function(){
+        if(varType(v)===b.dataset.t)return;
+        discrete(function(){
+          v.type=b.dataset.t;
+          v.val=varCastVal(v.type,v.val);
+          if(v.type==='bool'&&typeof v.val!=='boolean')v.val=isTrueVal(v.val);
+        });
+        renderVarsPane();refreshAllBranchChips();renderInspector();
+      };
+    });
+    /* начальное значение */
+    var vev=ed.querySelector('.ve-val');
+    if(vev){
+      var isNum=varType(v)==='num';
+      vev.addEventListener('focus',editStart);
+      vev.addEventListener('input',function(){
+        v.val=varCastVal(isNum?'num':'str',vev.value);
+        if(vl!==document.activeElement)vl.value=String(v.val);
+        markDirty();refreshAllBranchChips();
+      });
+      vev.addEventListener('change',editEnd);vev.addEventListener('blur',editEnd);
+      if(isNum){
+        Array.prototype.forEach.call(ed.querySelectorAll('.ve-step'),function(st){
+          st.onclick=function(){
+            discrete(function(){v.val=varNum(v.val)+parseInt(st.dataset.d,10);});
+            var nv=String(v.val);
+            vev.value=nv;vl.value=nv;
+            refreshAllBranchChips();renderInspector();
+          };
+        });
+      }
+    }
+    /* boolean — крупные кнопки true/false */
+    var boolBtns=ed.querySelectorAll('.ve-bools button');
+    Array.prototype.forEach.call(boolBtns,function(b){
+      b.onclick=function(){
+        discrete(function(){v.val=b.dataset.b==='1';});
+        vl.value=b.dataset.b;
+        Array.prototype.forEach.call(boolBtns,function(x){x.classList.toggle('on',x===b);});
+        refreshAllBranchChips();renderInspector();
+      };
     });
   });
 }
@@ -6770,7 +6923,7 @@ $('#bHelp').onclick=function(){
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
       '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
-      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (number / string / boolean); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов</div>'+
+      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (number / string / boolean); стрелка в строке разворачивает удобный редактор (имя, тип, начальное значение, где используется); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов; правый край панели слева тянется — меняет её ширину</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -6787,6 +6940,35 @@ $all('.ltab').forEach(function(b){
     if(b.dataset.t==='vars')renderVarsPane();
   };
 });
+/* ═══ левая панель: тянем правый край — меняем ширину (сохраняется между сессиями) ═══ */
+(function(){
+  var left=$('#left');if(!left)return;
+  var LS_LEFT_W='vetvi-left-w',MIN=240,MAX=560;
+  var grip=document.createElement('i');
+  grip.id='leftGrip';grip.title='Потяните — изменить ширину панели';
+  left.appendChild(grip);
+  var saved=0;
+  try{saved=parseInt(localStorage.getItem(LS_LEFT_W)||'',10)||0;}catch(e){}
+  function applyW(w){left.style.width=Math.max(MIN,Math.min(MAX,Math.round(w)))+'px';}
+  /* на узких экранах панель управляется медиа-правилами — ширину не трогаем */
+  if(window.innerWidth>960)applyW(saved||300);
+  var rz=null;
+  grip.addEventListener('pointerdown',function(e){
+    if(window.innerWidth<=960)return;
+    e.preventDefault();e.stopPropagation();
+    rz={x0:e.clientX,w0:left.getBoundingClientRect().width};
+    document.body.classList.add('left-resizing');
+    try{grip.setPointerCapture(e.pointerId);}catch(_e){}
+  });
+  grip.addEventListener('pointermove',function(e){if(rz)applyW(rz.w0+(e.clientX-rz.x0));});
+  function endRz(){
+    if(!rz)return;rz=null;
+    document.body.classList.remove('left-resizing');
+    try{localStorage.setItem(LS_LEFT_W,String(parseInt(left.style.width,10)||300));}catch(e){}
+  }
+  grip.addEventListener('pointerup',endRz);
+  grip.addEventListener('pointercancel',endRz);
+})();
 $('#sQ').addEventListener('input',renderList);
 window.addEventListener('beforeunload',function(e){
   if(dirty){e.preventDefault();e.returnValue='';}
