@@ -297,6 +297,9 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .pl-var{display:flex;align-items:center;gap:9px;background:rgba(18,21,26,.85);border:1px solid #343b47;border-radius:9px;padding:5px 11px;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
 .pl-var i{font:500 11px var(--body);color:var(--tx3);font-style:normal;white-space:nowrap}
 .pl-var b{font:600 12.5px var(--mono);color:#e2a54e}
+.pl-var.chg{border-color:#8a6d33;background:rgba(43,32,14,.88)}
+.pl-var.chg b{color:#f0c268}
+.pl-var.chg i::after{content:' ↯';color:#c99a3f;font-style:normal}
 .pl-varflash{position:absolute;left:50%;top:15%;transform:translateX(-50%) translateY(-8px);background:rgba(20,23,29,.94);border:1px solid #d6c96a;color:#e8dfa8;font:600 13px var(--body);border-radius:10px;padding:9px 16px;opacity:0;pointer-events:none;transition:all .32s;z-index:9;max-width:80vw;text-align:center}
 .pl-varflash.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .pl-choice.lock{opacity:.42;cursor:not-allowed}
@@ -374,7 +377,7 @@ body.connecting .vpinn{cursor:copy}
 #paneVars .v-row{cursor:grab}
 #paneVars .v-row.dragging{opacity:.45}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
-.v-row .v-type{flex:0 0 64px;padding:0 2px;font-size:10.5px}
+.v-row .v-type{flex:0 0 78px;padding:0 2px;font-size:10.5px}
 #paneVars .v-row .v-val{flex:0 0 46px;min-width:46px}
 .v-add-btn{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .v-add-btn:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
@@ -1069,7 +1072,7 @@ function charColor(id){
 var VARS_OPS={'=':'=','+':'+','-':'−'};
 var COND_OPS={'==':'=','!=':'≠','>':'>','<':'<','>=':'≥','<=':'≤'};
 var COND_OPS_EQ={'==':'=','!=':'≠'};
-var VAR_TYPES={num:'Число',str:'Текст',bool:'Флаг'};
+var VAR_TYPES={num:'number',str:'string',bool:'boolean'};
 function varsList(){if(!Array.isArray(project.vars))project.vars=[];return project.vars;}
 function varById(id){var l=varsList();for(var i=0;i<l.length;i++)if(l[i].id===id)return l[i];return null;}
 function varName(id){var v=varById(id);return v?v.name:'?';}
@@ -1090,6 +1093,14 @@ function varCastVal(type,raw){
   return t.slice(0,200);
 }
 function varCast(v,raw){return varCastVal(varType(v),raw);}
+/* значение по умолчанию переменной — безопасный дефолт для новых привязок (не меняет поведение) */
+function defValOf(v){
+  if(!v)return 0;
+  var t=varType(v);
+  if(t==='bool')return v.val===true;
+  if(t==='str')return String(v.val==null?'':v.val).slice(0,200);
+  var n=varNum(v.val);return isFinite(n)?n:0;
+}
 function isTrueVal(x){return x===true||x==='true'||x==='да'||x==='Да'||x===1;}
 function varValText(val,v){
   var t=v?varType(v):'num';
@@ -3318,7 +3329,7 @@ function renderVarsPane(){
   var l=varsList();
   var html='<div class="v-head"><span>Переменные сюжета</span><button class="btn primary" id="vAdd" title="Создать переменную">+ Переменная</button></div>';
   if(!l.length){
-    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число, текст или флаг (да/нет), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br>3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.</div>';
+    html+='<div class="v-hint"><b>Переменных пока нет.</b><br><br>Переменная — это число (number), текст (string) или флаг да/нет (boolean), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br><br>1. Создайте переменную кнопкой выше.<br>2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br>3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.</div>';
   }
   html+='<div id="vRows">';
   l.forEach(function(v){
@@ -3416,7 +3427,7 @@ function opValControlHtml(o,v){
 function inspOpsHtml(n){
   var h='<label class="i-lab">Переменные (изменяются при входе в развилку)</label>';
   h+='<div id="iOps">'+opsRowHtml(n)+'</div>';
-  h+='<div style="margin:6px 0 10px"><button class="btn" id="iOpAdd" style="width:100%">'+ic('plus',14)+'Привязать переменную</button></div>';
+  h+='<div style="margin:6px 0 10px"><button class="btn" id="iOpAdd" style="width:100%">'+ic('plus',14)+'Изменить переменную при входе</button></div>';
   return h;
 }
 function opsRowHtml(n){
@@ -3467,7 +3478,7 @@ function bindInspOps(n){
   var add=$('#iOpAdd');
   if(add)add.onclick=function(){
     var l=varsList();if(!l.length){toast('Сначала создайте переменные — вкладка «Переменные» слева','warn');return;}
-    discrete(function(){if(!n.setVars)n.setVars=[];n.setVars.push({vid:l[0].id,op:'=',val:(varType(l[0])==='bool')?true:0});});
+    discrete(function(){if(!n.setVars)n.setVars=[];n.setVars.push({vid:l[0].id,op:'=',val:defValOf(l[0])});});
     renderInspector();refreshNodeVarsChip(n);
   };
 }
@@ -5882,7 +5893,7 @@ canvas.addEventListener('drop',function(e){
   if(vr&&!t&&!cl){
     var vv=varById(vr);
     if(vv){
-      var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null,varMode:'set',varOp:'=',varVal:(varType(vv)==='bool')?true:0,vid:vv.id};
+      var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null,varMode:'set',varOp:'=',varVal:defValOf(vv),vid:vv.id};
       var tgV=deepestGroupAt(w.x,w.y);
       vn.gid=tgV?tgV.id:null;
       mutate(function(){project.nodes.push(vn);},{nodes:[vn.id]});
@@ -6837,7 +6848,7 @@ $('#bHelp').onclick=function(){
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
       '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
-      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (число / текст / флаг); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов</div>'+
+      '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (number / string / boolean); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
@@ -8013,7 +8024,7 @@ function initSync(){
    Диалог: описание и кнопки с вариантами реплик на одном экране; выбор реплики
    ведёт по её ветке (дети реплики → стрелка от реплики → стрелка от блока).
    Ноды переменных срабатывают молча и не выводятся как слайды. */
-var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,set:null,visited:null,dead:null};
+var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null};
 function plIsOpen(){return PL.open;}
 function plPickStartNode(){
   if(sel&&sel.size===1){
@@ -8084,7 +8095,7 @@ function plStart(nodeId){
   PL.typing=false;PL.full='';PL.hist=[];PL.path=[];
   PL.vars={};
   varsList().forEach(function(v){PL.vars[v.id]=v.val;});
-  PL.dead=new Set();PL.visited=new Set();PL.set=null;
+  PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();PL.set=null;
   if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
   var start=null;
   if(list){
@@ -8117,14 +8128,14 @@ function plRestart(){
   PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;
   PL.vars={};
   varsList().forEach(function(v){PL.vars[v.id]=v.val;});
-  PL.dead=new Set();PL.visited=new Set();
+  PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();
   plRenderVars();
   $('#plEnd').classList.remove('show');
   plRenderPath();
   plGoNode(st);
 }
 function plPushHist(){
-  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null,dead:PL.dead?new Set(PL.dead):null,visited:PL.visited?new Set(PL.visited):null});
+  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null,varChanged:PL.varChanged?new Set(PL.varChanged):null,dead:PL.dead?new Set(PL.dead):null,visited:PL.visited?new Set(PL.visited):null});
   if(PL.hist.length>120)PL.hist.shift();
   plUpdateBackUI();
 }
@@ -8143,6 +8154,7 @@ function plBack(){
       PL.nodeId=s.nodeId;PL.replyId=null;PL.intro=false;PL.typing=false;
       if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
       if(s.vars)PL.vars=Object.assign({},s.vars);
+      if(s.varChanged)PL.varChanged=s.varChanged;
       if(s.dead)PL.dead=s.dead;
       if(s.visited)PL.visited=s.visited;
       plRenderVars();
@@ -8156,6 +8168,7 @@ function plBack(){
   $('#plEnd').classList.remove('show');
   PL.nodeId=s.nodeId;PL.replyId=s.replyId;PL.intro=s.intro;
   if(s.vars)PL.vars=Object.assign({},s.vars);
+  if(s.varChanged)PL.varChanged=s.varChanged;
   if(s.dead)PL.dead=s.dead;
   if(s.visited)PL.visited=s.visited;
   plRenderVars();
@@ -8226,7 +8239,8 @@ function plRenderVars(){
   el.style.display='';
   el.innerHTML=l.map(function(v){
     var cur=(PL.vars&&(PL.vars[v.id]!==undefined&&PL.vars[v.id]!==null))?PL.vars[v.id]:v.val;
-    return '<span class="pl-var"><i>'+esc(v.name)+'</i><b>'+esc(varValText(cur,v))+'</b></span>';
+    var chg=PL.varChanged&&PL.varChanged.has(v.id);
+    return '<span class="pl-var'+(chg?' chg':'')+'"'+(chg?' title="значение изменилось в проигрывании"':'')+'><i>'+esc(v.name)+'</i><b>'+esc(varValText(cur,v))+'</b></span>';
   }).join('');
 }
 /* варианты перехода от развилки: исходы с условиями (пины на узле) и условия на стрелках (старое поведение) */
@@ -8349,10 +8363,12 @@ function plGoNode(n,keepPath){
       var msgs=[];
       n.setVars.forEach(function(o){
         var v0=varById(o.vid);if(!v0)return;
+        var before=(PL.vars[o.vid]!==undefined&&PL.vars[o.vid]!==null)?PL.vars[o.vid]:v0.val;
         PL.vars[o.vid]=varApplyOp(o.op,PL.vars[o.vid],o.val,varType(v0));
-        msgs.push(opText(o));
+        if(PL.varChanged)PL.varChanged.add(o.vid);
+        msgs.push(varName(o.vid)+' '+opSym(o.op)+' '+varValText(o.val,v0)+'  →  '+varValText(PL.vars[o.vid],v0)+' (было: '+varValText(before,v0)+')');
       });
-      if(msgs.length){plRenderVars();plVarFlash(msgs.join(' · '));}
+      if(msgs.length){plRenderVars();plVarFlash((n.title?n.title+': ':'')+msgs.join(' · '));}
     }
     /* нода переменной: «изменение» — применяем операцию, «чтение» — считываем значение (всплывашка у HUD) */
     if(n.type==='varnode'){
@@ -8360,6 +8376,7 @@ function plGoNode(n,keepPath){
       if(vnS&&n.varMode==='set'){
         var after=varApplyOp(n.varOp,PL.vars[vnS.id],n.varVal,varType(vnS));
         PL.vars[vnS.id]=after;
+        if(PL.varChanged)PL.varChanged.add(vnS.id);
         plRenderVars();
         plVarFlash(varName(vnS.id)+' '+opSym(n.varOp)+' '+varValText(n.varVal,vnS)+'  →  '+varValText(after,vnS));
       }else if(vnS){
