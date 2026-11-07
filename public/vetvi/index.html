@@ -6836,7 +6836,7 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — они проиграются по порядку; без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
+      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
       '<div>вкладка «Переменные»</div><div>создавайте переменные с типами (число / текст / флаг); перетащите строку на холст — получится нода чтения или изменения переменной; в проигрывании ноды переменных не показываются как слайды — срабатывают и ведут дальше; ноду переменной можно соединить со входом «переменная» у развилки — она перебьёт переменные в условиях исходов</div>'+
       '<div>СКМ · <kbd>Space</kbd> · колесо · <kbd>0</kbd></div><div>панорама (всегда) · панорама · масштаб · вписать</div>'+
     '</div>',
@@ -8006,11 +8006,14 @@ function initSync(){
 /* ═══════════ режим новеллы: проигрывание сюжета ═══════════
    Только чтение: ничего не меняет в project, JSON-структура данных не затрагивается.
    Два режима: «граф» — обход по стрелкам от стартового блока (кнопка без выделения,
-   ПКМ «Играть отсюда»); «список» — выделенные блоки или группа проигрываются подряд
-   в порядке цепочек стрелок внутри выделения (блоки вне цепочек — по положению на
-   холсте: сверху вниз, слева направо). Диалоги: описание, затем реплики по дереву
-   (несколько детей реплики = выбор игрока; реплики кончились → следующий блок списка). */
-var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null};
+   ПКМ «Играть отсюда»); «список» — то же самое внутри выделения: двигаемся только по
+   выбранным в диалогах веткам, невыбранные ветки и пути за закрытым условием
+   пропускаются (набор «dead»), а после тупика — следующий непройденный блок
+   выделения («visited»), и так до конца списка.
+   Диалог: описание и кнопки с вариантами реплик на одном экране; выбор реплики
+   ведёт по её ветке (дети реплики → стрелка от реплики → стрелка от блока).
+   Ноды переменных срабатывают молча и не выводятся как слайды. */
+var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,set:null,visited:null,dead:null};
 function plIsOpen(){return PL.open;}
 function plPickStartNode(){
   if(sel&&sel.size===1){
@@ -8081,10 +8084,12 @@ function plStart(nodeId){
   PL.typing=false;PL.full='';PL.hist=[];PL.path=[];
   PL.vars={};
   varsList().forEach(function(v){PL.vars[v.id]=v.val;});
+  PL.dead=new Set();PL.visited=new Set();PL.set=null;
   if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
   var start=null;
   if(list){
     PL.mode='list';PL.list=list.map(function(n){return n.id;});PL.idx=0;
+    PL.set=new Set(PL.list); /* играем только внутри выделения */
     PL.startId=PL.list[0];
     start=list[0];
   }else{
@@ -8112,13 +8117,14 @@ function plRestart(){
   PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;
   PL.vars={};
   varsList().forEach(function(v){PL.vars[v.id]=v.val;});
+  PL.dead=new Set();PL.visited=new Set();
   plRenderVars();
   $('#plEnd').classList.remove('show');
   plRenderPath();
   plGoNode(st);
 }
 function plPushHist(){
-  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null});
+  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null,dead:PL.dead?new Set(PL.dead):null,visited:PL.visited?new Set(PL.visited):null});
   if(PL.hist.length>120)PL.hist.shift();
   plUpdateBackUI();
 }
@@ -8137,6 +8143,8 @@ function plBack(){
       PL.nodeId=s.nodeId;PL.replyId=null;PL.intro=false;PL.typing=false;
       if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
       if(s.vars)PL.vars=Object.assign({},s.vars);
+      if(s.dead)PL.dead=s.dead;
+      if(s.visited)PL.visited=s.visited;
       plRenderVars();
       if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
       plShowEnd();return;
@@ -8148,6 +8156,8 @@ function plBack(){
   $('#plEnd').classList.remove('show');
   PL.nodeId=s.nodeId;PL.replyId=s.replyId;PL.intro=s.intro;
   if(s.vars)PL.vars=Object.assign({},s.vars);
+  if(s.dead)PL.dead=s.dead;
+  if(s.visited)PL.visited=s.visited;
   plRenderVars();
   if(PL.mode==='list')PL.idx=PL.list.indexOf(s.nodeId);
   plShowCurrent();
@@ -8231,7 +8241,7 @@ function plBranchChoices(n){
     return nx.map(function(e){
       var c0=condWithOverride(e.cond,n);
       var ok=!c0||condMet(c0,PL.vars);
-      return{label:plEdgeLabel(e),ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}};
+      return{label:plEdgeLabel(e),targets:[e.to],ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}};
     });
   }
   if(outs.length===1&&!outs[0].cond&&!hasCond)return null; /* один выход без условия — авто-переход */
@@ -8244,12 +8254,12 @@ function plBranchChoices(n){
     var why=null;
     if(c0&&!condMet(c0,PL.vars))why='нужно: '+condText(c0);
     else if(!ed)why='исход не подключён стрелкой';
-    items.push({label:o.label||('Исход '+(i+1)),ok:ok,why:why,fn:function(){if(ed)plFollowEdge(ed);}});
+    items.push({label:o.label||('Исход '+(i+1)),targets:ed?[ed.to]:[],ok:ok,why:why,fn:function(){if(ed)plFollowEdge(ed);}});
   });
   gen.forEach(function(e){
     var c0=condWithOverride(e.cond,n);
     var ok=!c0||condMet(c0,PL.vars);
-    items.push({label:plEdgeLabel(e),ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}});
+    items.push({label:plEdgeLabel(e),targets:[e.to],ok:ok,why:(c0&&!ok)?('нужно: '+condText(c0)):null,fn:function(){plFollowEdge(e);}});
   });
   return items;
 }
@@ -8263,7 +8273,9 @@ function plRenderBranchChoices(items){
     b.onclick=function(ev){
       ev.stopPropagation();
       if(!it.ok){plVarFlash('Путь закрыт: '+it.why);return;}
-      plPushHist();plClearChoices();it.fn();
+      plPushHist();
+      plKillSiblings(items,it); /* непрошедшие исходы не проигрываем */
+      plClearChoices();it.fn();
     };
     c.appendChild(b);
   });
@@ -8277,7 +8289,12 @@ function plRenderChoices(list){
     var b=document.createElement('button');
     b.className='pl-choice';
     b.innerHTML='<span class="num">'+(i+1)+'</span><span class="lbl">'+esc(it.label)+'</span>';
-    b.onclick=function(ev){ev.stopPropagation();plPushHist();plClearChoices();it.fn();};
+    b.onclick=function(ev){
+      ev.stopPropagation();
+      plPushHist();
+      plKillSiblings(list,it); /* невыбранные ветки не проигрываем */
+      plClearChoices();it.fn();
+    };
     c.appendChild(b);
   });
   c.style.display='flex';
@@ -8320,6 +8337,11 @@ function plShowSlide(opts){
 }
 function plGoNode(n,keepPath){
   PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
+  if(PL.mode==='list'){
+    if(PL.visited)PL.visited.add(n.id);
+    var li=PL.list.indexOf(n.id);
+    if(li>=0)PL.idx=li;
+  }
   if(!keepPath&&n.type!=='varnode')plTrackPath(n.id); /* нода переменной не попадает в путь проигрывания */
   if(PL.vars&&!keepPath){
     /* развилка меняет переменные при входе игрока (при «Назад» значения восстанавливаются из истории) */
@@ -8357,19 +8379,26 @@ function plGoNode(n,keepPath){
       plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});
       return;
     }
-    /* без описания — сразу список выбора реплик */
-    if(rs.length>1){plShowDialogChoices(n,rs);return;}
+    /* без описания — сразу список выбора реплик (шапка слайда переключается на этот диалог) */
+    if(rs.length>1){
+      var bx=$('#plBox');
+      bx.style.setProperty('--plc',nodeVisual(n).color);
+      var chEl=$('#plChapter');if(chEl)chEl.innerHTML=plChapterHtml(n);
+      var nmEl=$('#plName'),nm2=plCastName(n);
+      if(nm2){nmEl.textContent=nm2;nmEl.classList.remove('hidden');}else nmEl.classList.add('hidden');
+      var txEl=$('#plText');if(txEl)txEl.innerHTML='';
+      plShowDialogChoices(n,rs);return;
+    }
     if(rs.length===1){plShowReply(rs[0]);return;}
     plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
     return;
   }
   plShowSlide({name:plCastName(n),color:resolvedNodeColor(n,0),text:n.text||'…',chapter:n});
 }
-/* нода переменной: без слайда — сработала и ведёт дальше (список — следующий блок, граф — по стрелке) */
+/* нода переменной: без слайда — сработала и ведёт дальше (по стрелке, в списке — следующий блок) */
 function plAfterVarnode(n,keepPath){
   var vn=n.vid?varById(n.vid):null;
   if(!vn)plVarFlash('Переменная не привязана — выберите её в инспекторе.');
-  if(PL.mode==='list'){plListNext();return;}
   var nx=plNodeEdgeList(n);
   if(nx.length===1){
     var c0=condWithOverride(nx[0].cond,n);
@@ -8379,9 +8408,10 @@ function plAfterVarnode(n,keepPath){
   if(nx.length>1){
     var bc=plBranchChoices(n);
     if(bc){plRenderBranchChoices(bc);return;}
-    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
+    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
     return;
   }
+  if(PL.mode==='list'){plListJumpNext();return;}
   plShowEnd();
 }
 function plShowReply(r,noHist){
@@ -8391,9 +8421,64 @@ function plShowReply(r,noHist){
   var n=nodeById(PL.nodeId);
   plShowSlide({name:name,color:color,text:r.text||'…',chapter:n});
 }
+/* в режиме списка играем только внутри выделения: связь за его пределами — тупик */
+function plEdgePlayable(e){
+  if(PL.mode!=='list'||!PL.set)return true;
+  return PL.set.has(e.to);
+}
 /* список исходящих связей узла (без привязанных к репликам) */
 function plNodeEdgeList(n){
-  return project.edges.filter(function(e){return e.from===n.id&&!e.fromReply&&e.tin!=='var';});
+  return project.edges.filter(function(e){return e.from===n.id&&!e.fromReply&&e.tin!=='var'&&plEdgePlayable(e);});
+}
+/* стрелки, привязанные к конкретной реплике */
+function plReplyEdges(n,r){
+  return project.edges.filter(function(e){return e.from===n.id&&e.fromReply===r.id&&e.tin!=='var'&&plEdgePlayable(e);});
+}
+/* все исходы узла (включая привязанные к репликам и исходам развилки) — для обхода веток */
+function plAllOutEdges(n){
+  return project.edges.filter(function(e){return e.from===n.id&&e.tin!=='var'&&plEdgePlayable(e);});
+}
+/* куда на холсте ведёт ветка реплики (реплика + её дети): цели стрелок от всего поддерева */
+function plReplyBranchTargets(n,r){
+  var ids=new Set();
+  (function walk(rr){if(!rr||ids.has(rr.id))return;ids.add(rr.id);(rr.children||[]).forEach(walk);})(r);
+  return project.edges.filter(function(e){return e.from===n.id&&e.tin!=='var'&&e.fromReply&&ids.has(e.fromReply)&&plEdgePlayable(e);}).map(function(e){return e.to;});
+}
+/* все ноды, достижимые из корней (для поиска общих частей веток) */
+function plReach(rootIds){
+  var seen=new Set(),q=[];
+  (rootIds||[]).forEach(function(id){if(id&&nodeById(id)&&!seen.has(id)){seen.add(id);q.push(id);}});
+  while(q.length){
+    var n=nodeById(q.shift());
+    if(!n)continue;
+    plAllOutEdges(n).forEach(function(e){if(!seen.has(e.to)&&nodeById(e.to)){seen.add(e.to);q.push(e.to);}});
+  }
+  return seen;
+}
+/* пометить ветку мёртвой (начиная с rootId): общие с живой веткой части остаются */
+function plMarkDeadFrom(rootId,alive){
+  if(!rootId||!nodeById(rootId)||PL.dead.has(rootId))return;
+  if(alive&&alive.has(rootId))return;
+  PL.dead.add(rootId);
+  var q=[rootId];
+  while(q.length){
+    var n=nodeById(q.shift());
+    if(!n)continue;
+    plAllOutEdges(n).forEach(function(e){
+      if(PL.dead.has(e.to))return;
+      if(alive&&alive.has(e.to))return;
+      PL.dead.add(e.to);q.push(e.to);
+    });
+  }
+}
+/* при выборе варианта невыбранные альтернативы (включая закрытые условием) считаются непройданными */
+function plKillSiblings(items,chosen){
+  if(!PL.dead)return;
+  var alive=plReach(chosen.targets||[]);
+  items.forEach(function(o){
+    if(o===chosen)return;
+    (o.targets||[]).forEach(function(t){plMarkDeadFrom(t,alive);});
+  });
 }
 function plEdgeLabel(e){
   if(e.label)return e.label;
@@ -8402,7 +8487,11 @@ function plEdgeLabel(e){
 }
 function plFollowEdge(e){
   var t=nodeById(e.to);
-  if(!t){plShowEnd();return;}
+  if(!t||(PL.mode==='list'&&PL.set&&!PL.set.has(t.id))){
+    /* цель вне проигрывания: в списке — следующий непройденный блок, в графе — конец ветки */
+    if(PL.mode==='list')plListJumpNext();else plShowEnd();
+    return;
+  }
   plGoNode(t);
 }
 function plShowEnd(){
@@ -8418,7 +8507,7 @@ function plShowEnd(){
 function plShowDialogChoices(n,rs){
   var items=rs.map(function(r){
     var nm=r.speaker?charName(r.speaker):null;
-    return{label:(nm?nm+': ':'')+(r.text||'…'),fn:function(){plShowReply(r);}};
+    return{label:(nm?nm+': ':'')+(r.text||'…'),targets:plReplyBranchTargets(n,r),fn:function(){plShowReply(r);}};
   });
   plRenderChoices(items);
 }
@@ -8426,9 +8515,18 @@ function plHideEnd(){
   $('#plEnd').classList.remove('show');
   $('#plHint').style.display='';
 }
-/* режим «список» (проигрывание выделения): подсказка и переход к следующему блоку */
+/* режим «список» (проигрывание выделения): подсказка и переход к следующему непройденному блоку */
 function plListHint(){
-  $('#plHint').textContent=(PL.idx>=PL.list.length-1)?'клик — конец ▸':'клик — далее ▸';
+  $('#plHint').textContent=plListHasNext()?'клик — далее ▸':'клик — конец ▸';
+}
+function plListHasNext(){
+  if(PL.mode!=='list'||!PL.visited||!PL.dead)return false;
+  for(var i=0;i<PL.list.length;i++){
+    var id=PL.list[i];
+    if(PL.visited.has(id)||PL.dead.has(id))continue;
+    if(nodeById(id))return true;
+  }
+  return false;
 }
 function plShowAt(i){
   PL.idx=i;
@@ -8436,47 +8534,63 @@ function plShowAt(i){
   if(!n){plShowEnd();return;}
   plGoNode(n);
 }
-function plListNext(){
-  if(PL.mode!=='list')return;
-  plShowAt(PL.idx+1);
+/* тупик: следующий непройденный и не пропущенный блок выделения, иначе — конец */
+function plListJumpNext(){
+  if(PL.mode!=='list')return plShowEnd();
+  for(var i=0;i<PL.list.length;i++){
+    var id=PL.list[i];
+    if(PL.visited.has(id)||PL.dead.has(id))continue;
+    if(nodeById(id)){plShowAt(i);return;}
+  }
+  plShowEnd();
 }
 /* что показывать после завершения печатания: подсказка или выбор */
 function plAfterType(){
   $('#plHint').style.display='';
   var n=nodeById(PL.nodeId);
   if(!n){plShowEnd();return;}
-  var mkChoices=function(arr){
-    plRenderChoices(arr.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
+  var mk=function(arr){
+    plRenderChoices(arr.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
   };
-  if(PL.intro){$('#plHint').textContent='клик — далее ▸';return;}
+  /* описание диалога: после печати сразу показываем кнопки с вариантами реплик */
+  if(PL.intro){
+    var rs0=(n.type==='dialog'&&n.dialog&&n.dialog.replies)||[];
+    if(rs0.length>1){plShowDialogChoices(n,rs0);return;}
+    $('#plHint').textContent='клик — далее ▸';return;
+  }
   if(PL.replyId&&n.type==='dialog'){
     var r=findReply(n.dialog.replies,PL.replyId);
     if(r){
       var kids=r.children||[];
       if(kids.length>1){
-        plRenderChoices(kids.map(function(ch){return{label:ch.text||'Продолжить…',fn:function(){plShowReply(ch);}};}));
+        plRenderChoices(kids.map(function(ch){return{label:ch.text||'Продолжить…',targets:plReplyBranchTargets(n,ch),fn:function(){plShowReply(ch);}};}));
         return;
       }
       if(kids.length===1){$('#plHint').textContent='клик — далее ▸';return;}
-      if(PL.mode==='list'){plListHint();return;} /* в списке — просто следующий блок */
-      var ex=project.edges.filter(function(e){return e.from===n.id&&e.fromReply===r.id;});
-      if(ex.length>1){mkChoices(ex);return;}
-      if(ex.length===1){$('#plHint').textContent='далее: '+plEdgeLabel(ex[0])+' ▸';return;}
+      /* ветка выбранной реплики: сначала стрелки от реплики, потом стрелки от блока */
+      var ex=plReplyEdges(n,r);
+      if(ex.length>1){mk(ex);return;}
+      if(ex.length===1){
+        var cE=condWithOverride(ex[0].cond,n);
+        $('#plHint').textContent=(cE&&!condMet(cE,PL.vars))?('путь закрыт: '+condText(cE)+' · ← назад'):('далее: '+plEdgeLabel(ex[0])+' ▸');
+        return;
+      }
       var nx=plNodeEdgeList(n);
-      if(nx.length>1){mkChoices(nx);return;}
-      if(nx.length===1){$('#plHint').textContent='далее: '+plEdgeLabel(nx[0])+' ▸';return;}
-      $('#plHint').textContent='клик — конец ▸';
-      return;
+      if(nx.length>1){var bc=plBranchChoices(n);if(bc){plRenderBranchChoices(bc);return;}mk(nx);return;}
+      if(nx.length===1){
+        var cN=condWithOverride(nx[0].cond,n);
+        $('#plHint').textContent=(cN&&!condMet(cN,PL.vars))?('путь закрыт: '+condText(cN)+' · ← назад'):('далее: '+plEdgeLabel(nx[0])+' ▸');
+        return;
+      }
     }
   }
-  if(PL.mode==='list'){plListHint();return;} /* в списке стрелки не ветвят */
   var nx2=plNodeEdgeList(n);
-  if(nx2.length>1){var bc=plBranchChoices(n);if(bc){plRenderBranchChoices(bc);return;}mkChoices(nx2);return;}
+  if(nx2.length>1){var bc2=plBranchChoices(n);if(bc2){plRenderBranchChoices(bc2);return;}mk(nx2);return;}
   if(nx2.length===1){
     var c2=condWithOverride(nx2[0].cond,n);
-    if(c2&&!condMet(c2,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(c2)+' · ← назад';return;}
-    $('#plHint').textContent='далее: '+plEdgeLabel(nx2[0])+' ▸';return;
+    $('#plHint').textContent=(c2&&!condMet(c2,PL.vars))?('путь закрыт: '+condText(c2)+' · ← назад'):('далее: '+plEdgeLabel(nx2[0])+' ▸');return;
   }
+  if(PL.mode==='list'){plListHint();return;} /* тупик: далее — следующий непройденный блок */
   $('#plHint').textContent='клик — конец ▸';
 }
 /* клик/пробел: завершить печать → шаг вперёд */
@@ -8490,7 +8604,7 @@ function plAdvance(){
     PL.intro=false;
     var rs=(n.dialog&&n.dialog.replies)||[];
     if(rs.length===1){plPushHist();plShowReply(rs[0]);return;}
-    if(rs.length>1){plShowDialogChoices(n,rs);return;} /* выбор реплики — ветка выбора */
+    if(rs.length>1){plShowDialogChoices(n,rs);return;} /* выбор реплики — ветка выбора (страховка) */
     plPushHist();
     plAfterNodeFinal(n);
     return;
@@ -8501,10 +8615,14 @@ function plAdvance(){
       var kids=r.children||[];
       if(kids.length===1){plPushHist();plShowReply(kids[0]);return;}
       if(kids.length>1){plAfterType();return;} /* выбор не сделан — страховка */
-      if(PL.mode!=='list'){
-        var ex=project.edges.filter(function(e){return e.from===n.id&&e.fromReply===r.id;});
-        if(ex.length){plPushHist();plFollowEdge(ex[0]);return;}
+      /* ветка выбранной реплики: сначала стрелка от реплики, потом стрелки от блока */
+      var ex=plReplyEdges(n,r);
+      if(ex.length===1){
+        var cE=condWithOverride(ex[0].cond,n);
+        if(cE&&!condMet(cE,PL.vars)){$('#plHint').textContent='путь закрыт: '+condText(cE)+' · ← назад';return;}
+        plPushHist();plFollowEdge(ex[0]);return;
       }
+      if(ex.length>1){plAfterType();return;} /* выбор не сделан — страховка */
     }
     plPushHist();
     plAfterNodeFinal(n);
@@ -8513,9 +8631,8 @@ function plAdvance(){
   plPushHist();
   plAfterNodeFinal(n);
 }
-/* реплика/текст узла закончились → куда дальше (следующий блок списка, исходы узла или конец) */
+/* реплика/текст узла закончились → куда дальше (по стрелкам узла; в списке после тупика — следующий блок) */
 function plAfterNodeFinal(n){
-  if(PL.mode==='list'){plListNext();return;}
   var nx=plNodeEdgeList(n);
   if(nx.length===1){
     var c0=condWithOverride(nx[0].cond,n);
@@ -8525,9 +8642,10 @@ function plAfterNodeFinal(n){
   if(nx.length>1){
     var bc=plBranchChoices(n);
     if(bc){plRenderBranchChoices(bc);return;}
-    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),fn:function(){plFollowEdge(e);}};}));
+    plRenderChoices(nx.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
     return;
   }
+  if(PL.mode==='list'){plListJumpNext();return;}
   plShowEnd();
 }
 function plKey(e){
