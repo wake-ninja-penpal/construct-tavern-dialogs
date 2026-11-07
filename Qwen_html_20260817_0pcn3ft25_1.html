@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VN Constructor v8 — Node Graph, Live Edit, Variables</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://pixijs.download/v7.3.2/pixi.min.js"></script>
+<style>
+body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;margin:0}
+#app{height:100vh;display:flex;flex-direction:column}
+.canvas-container{position:relative;flex:1;background:#000;overflow:hidden}
+#pixi-canvas{display:block}
+.ui-overlay{position:absolute;border:2px dashed rgba(99,102,241,.8);background:rgba(99,102,241,.15);cursor:move;z-index:20}
+.ui-overlay:hover{border-color:rgba(236,72,153,1);background:rgba(236,72,153,.2)}
+.ui-overlay .label{position:absolute;top:-22px;left:0;background:rgba(99,102,241,1);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}
+.ui-overlay.overridden{border-style:solid;border-color:rgba(236,72,153,1);background:rgba(236,72,153,.18)}
+.ui-overlay.overridden .label{background:rgba(236,72,153,1)}
+.drag-handle{cursor:grab;user-select:none}.drag-handle:active{cursor:grabbing}
+.qte-bar{position:absolute;top:30%;left:50%;transform:translateX(-50%);width:420px}
+.qte-track{height:22px;background:rgba(0,0,0,.6);border:2px solid #fff;border-radius:11px;position:relative;overflow:hidden;cursor:pointer}
+.qte-zone{position:absolute;top:0;bottom:0;background:rgba(34,197,94,.6)}
+.qte-marker{position:absolute;top:-6px;width:5px;height:34px;background:#fbbf24;border-radius:2px}
+.inp{background:#1e293b;border:1px solid #475569;border-radius:.25rem;padding:.25rem .5rem;font-size:.75rem;color:#e2e8f0;outline:none}
+.inp:focus{border-color:#6366f1}
+.graph-node{position:absolute;width:260px;background:#1e293b;border:1px solid #475569;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.4);cursor:grab}
+.graph-node:active{cursor:grabbing}
+.graph-row{position:relative;display:flex;align-items:center;gap:4px;height:26px;padding:0 8px;font-size:11px;color:#cbd5e1;border-top:1px solid #334155;cursor:pointer}
+.graph-row:hover{background:#334155}
+.graph-port-row{position:absolute;right:-7px;top:50%;margin-top:-6px;width:12px;height:12px;border-radius:50%;background:#ec4899;border:2px solid #fff;cursor:crosshair;z-index:5}
+.graph-port-row:hover{transform:scale(1.3)}
+</style>
+</head>
+<body class="bg-slate-900 text-slate-100">
+<div id="app">
+
+<header class="bg-slate-800 border-b border-slate-700 p-3 flex justify-between items-center shadow-lg z-20">
+    <h1 class="text-lg font-bold flex items-center gap-2"><span>🎬</span> VN Constructor <span class="text-xs text-indigo-400 font-normal">v8 · Graph+Vars+LiveEdit</span></h1>
+    <div class="flex gap-2">
+        <button @click="setMode('edit')" :class="mode==='edit'?'bg-indigo-600':'bg-slate-700 hover:bg-slate-600'" class="px-3 py-1.5 rounded text-sm font-medium transition">🛠 Редактор</button>
+        <button @click="setMode('graph')" :class="mode==='graph'?'bg-indigo-600':'bg-slate-700 hover:bg-slate-600'" class="px-3 py-1.5 rounded text-sm font-medium transition">🕸 Граф</button>
+        <button @click="setMode('layout')" :class="mode==='layout'?'bg-pink-600':'bg-slate-700 hover:bg-slate-600'" class="px-3 py-1.5 rounded text-sm font-medium transition">🎨 UI</button>
+        <button @click="startLive()" :class="mode==='live'?'bg-cyan-600':'bg-slate-700 hover:bg-slate-600'" class="px-3 py-1.5 rounded text-sm font-medium transition">🎮 Live</button>
+        <button @click="startPreview" class="bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded text-sm font-medium transition">▶ Играть</button>
+        <div class="w-px bg-slate-600 mx-1"></div>
+        <button @click="importJson" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-sm font-medium transition">📥</button>
+        <button @click="exportJson" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-sm font-medium transition">📤</button>
+        <input type="file" ref="fileInput" @change="handleFileImport" class="hidden" accept=".json">
+    </div>
+</header>
+
+<!-- РЕДАКТОР -->
+<div v-if="mode==='edit'" class="flex flex-1 overflow-hidden">
+<aside class="w-72 bg-slate-800 border-r border-slate-700 p-4 flex flex-col overflow-y-auto">
+    <h2 class="font-bold mb-2 text-slate-300 text-sm uppercase tracking-wide">Персонажи</h2>
+    <button @click="addCharacter" class="mb-2 bg-pink-600 hover:bg-pink-500 text-white py-1.5 rounded text-xs font-medium transition">+ Персонаж</button>
+    <ul class="space-y-1 mb-4">
+        <li v-for="ch in characters" :key="ch.id" @click="editCharacter(ch)" class="p-2 bg-slate-700/50 hover:bg-slate-700 rounded cursor-pointer text-xs flex items-center gap-2 transition">
+            <span class="w-3 h-3 rounded-full flex-shrink-0" :style="{background: ch.color}"></span>
+            <span class="font-medium truncate">{{ ch.name }}</span>
+            <span class="ml-auto text-slate-500">{{ ch.sprite ? '🖼' : '—' }}</span>
+        </li>
+    </ul>
+    <h2 class="font-bold mb-2 text-slate-300 text-sm uppercase tracking-wide">Переменные</h2>
+    <ul class="space-y-1 mb-2">
+        <li v-for="v in variables" :key="v.id" class="p-1.5 bg-slate-700/50 rounded text-xs flex items-center gap-1">
+            <input v-model="v.name" class="inp !bg-transparent !border-transparent w-20">
+            <span class="text-slate-500">=</span>
+            <input type="number" v-model.number="v.initial" class="inp !bg-transparent !border-transparent w-12">
+            <button @click="variables=variables.filter(x=>x.id!==v.id)" class="ml-auto text-red-400 hover:text-red-300">✕</button>
+        </li>
+    </ul>
+    <button @click="addVariable" class="mb-4 bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded text-xs font-medium transition">+ Переменная</button>
+    <h2 class="font-bold mb-2 text-slate-300 text-sm uppercase tracking-wide">Сцены</h2>
+    <button @click="addScene" class="mb-2 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded text-xs font-medium transition">+ Сцена</button>
+    <ul class="space-y-1.5">
+        <li v-for="(scene, idx) in scenes" :key="scene.id" @click="selectScene(scene.id)"
+            @dragover.prevent="dragOverSceneIdx=idx" @dragleave="dragOverSceneIdx=null" @drop.prevent="dropScene(idx)"
+            :class="[currentSceneId===scene.id?'bg-indigo-600/30 border-indigo-500 text-white':'border-slate-600 hover:bg-slate-700 text-slate-300', dragOverSceneIdx===idx?'ring-2 ring-pink-500':'']"
+            class="p-2 border rounded cursor-pointer text-xs transition flex items-center gap-2">
+            <span class="drag-handle text-slate-500 hover:text-slate-300" draggable="true" @dragstart="dragSceneStart(idx,$event)" @dragend="sceneDragCleanup">⋮</span>
+            <div class="flex-1 min-w-0"><div class="font-medium truncate">{{ scene.title }}</div><div class="text-[10px] opacity-60">Сцена {{ idx+1 }} · {{ scene.nodes.length }} узл.</div></div>
+        </li>
+    </ul>
+</aside>
+
+<main v-if="currentScene" class="flex-1 p-6 overflow-y-auto bg-slate-900">
+<div class="max-w-5xl mx-auto space-y-6">
+    <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-3">
+        <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-xs font-bold text-slate-400 uppercase mb-1">Название</label><input v-model="currentScene.title" class="w-full inp !text-sm !py-2"></div>
+            <div><label class="block text-xs font-bold text-slate-400 uppercase mb-1">Фон (color / url)</label><input v-model="currentScene.background" class="w-full inp !text-sm !py-2"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="flex gap-2 items-center"><label class="text-xs text-slate-400 whitespace-nowrap">🎵 Музыка:</label><input v-model="currentScene.music" placeholder="url / пусто=продолжить / stop" class="flex-1 inp"><button @click="testAudio(currentScene.music,'music')" class="text-xs text-cyan-400 hover:text-cyan-300">▶</button></div>
+            <div class="flex gap-2 items-center"><label class="text-xs text-slate-400 whitespace-nowrap">🔊 Переход:</label><input v-model="currentScene.transitionSound" placeholder="url" class="flex-1 inp"><button @click="testAudio(currentScene.transitionSound,'sfx')" class="text-xs text-cyan-400 hover:text-cyan-300">▶</button></div>
+        </div>
+        <div class="flex gap-3 items-center">
+            <label class="text-xs text-slate-400">Переход сцены:</label>
+            <select v-model="currentScene.transition" class="inp"><option value="fade">fade</option><option value="none">нет</option></select>
+            <button @click="openLayoutForScene" class="ml-auto text-pink-400 hover:text-pink-300 text-xs font-medium">🎨 UI этой сцены</button>
+        </div>
+    </div>
+
+    <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+        <div class="flex justify-between items-center mb-3">
+            <h3 class="font-bold text-slate-200">Узлы <span class="text-xs text-slate-500 font-normal">(тяни за ⋮)</span></h3>
+            <div class="flex gap-2">
+                <button @click="addNode('dialogue')" class="text-xs bg-sky-600 hover:bg-sky-500 px-3 py-1.5 rounded font-medium">+ Диалог</button>
+                <button @click="addNode('choice')" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded font-medium">+ Выбор</button>
+                <button @click="addNode('minigame')" class="text-xs bg-pink-600 hover:bg-pink-500 px-3 py-1.5 rounded font-medium">+ Мини-игра</button>
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-1.5 mb-3 text-xs">
+            <button @click="filterCharIds=[]" :class="!filterCharIds.length?'bg-slate-200 text-slate-900':'bg-slate-700 text-slate-300'" class="px-2 py-1 rounded-full font-medium transition">Все</button>
+            <button @click="toggleFilter('')" :class="filterCharIds.includes('')?'bg-slate-200 text-slate-900':'bg-slate-700 text-slate-300'" class="px-2 py-1 rounded-full font-medium transition">Рассказчик</button>
+            <button v-for="ch in characters" :key="ch.id" @click="toggleFilter(ch.id)" class="px-2 py-1 rounded-full font-medium transition border border-slate-600 flex items-center gap-1" style="background:#334155" :class="filterCharIds.includes(ch.id)?'!bg-slate-200 !text-slate-900':''">
+                <span class="w-2 h-2 rounded-full" :style="{background: ch.color}"></span>{{ ch.name }}
+            </button>
+        </div>
+
+        <div class="space-y-2">
+        <div v-for="item in visibleNodes" :key="item.idx"
+             @dragover.prevent="dragOverNodeIdx=item.idx" @dragleave="dragOverNodeIdx=null" @drop.prevent="dropNode(item.idx)"
+             :class="dragOverNodeIdx===item.idx?'ring-2 ring-pink-500':''"
+             class="flex gap-2 items-start bg-slate-900/60 p-3 rounded-lg border border-slate-700 border-l-4"
+             :style="{borderLeftColor: nodeColor(item.n)}">
+            <span v-if="!filterCharIds.length" class="drag-handle text-slate-500 hover:text-slate-300 pt-1" draggable="true" @dragstart="dragNodeStart(item.idx,$event)" @dragend="nodeDragCleanup">⋮</span>
+            <div class="flex-shrink-0 w-20 pt-1">
+                <span v-if="item.n.type==='dialogue'" class="text-[10px] bg-sky-600/30 text-sky-300 px-2 py-1 rounded font-bold">DIALOGUE</span>
+                <span v-else-if="item.n.type==='choice'" class="text-[10px] bg-amber-600/30 text-amber-300 px-2 py-1 rounded font-bold">CHOICE</span>
+                <span v-else class="text-[10px] bg-pink-600/30 text-pink-300 px-2 py-1 rounded font-bold">MINIGAME</span>
+            </div>
+            <div class="flex-1">
+                <template v-if="item.n.type==='dialogue'">
+                    <div class="flex gap-2">
+                        <char-picker class="w-1/4" :model-value="item.n.characterId" @update:model-value="v=>item.n.characterId=v" :characters="characters"></char-picker>
+                        <div class="flex-1 relative">
+                            <textarea v-model="item.n.text" rows="2" class="w-full inp !text-sm resize-none pr-14" placeholder="Текст реплики..."></textarea>
+                            <div class="absolute top-1 right-1 flex gap-1">
+                                <button @click="textModalNode=item.n" class="text-slate-400 hover:text-white text-xs bg-slate-700 rounded px-1.5">⤢</button>
+                                <button @click="item.n.text=''" class="text-slate-400 hover:text-red-400 text-xs bg-slate-700 rounded px-1.5">✕</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-2 items-center">
+                        <input v-model="item.n.sprite" placeholder="URL спрайта-оверрайда (опц.)" class="flex-1 inp">
+                        <span class="text-xs text-slate-400 whitespace-nowrap">далее →</span>
+                        <scene-picker class="w-44" :model-value="item.n.next" @update:model-value="v=>item.n.next=v" :scenes="scenes" placeholder="след. узел"></scene-picker>
+                    </div>
+                    <div class="mt-2 text-xs">
+                        <div class="flex items-center gap-2 text-slate-400 mb-1">
+                            <span>🎭 На сцене:</span>
+                            <char-picker class="w-44" :model-value="''" @update:model-value="v=>addStageEntry(item.n,v)" :characters="characters" placeholder="+ поставить персонажа"></char-picker>
+                        </div>
+                        <div v-for="(st,si) in item.n.stage" :key="si" class="flex gap-1.5 items-center mb-1 flex-wrap">
+                            <span class="w-20 truncate font-medium" :style="{color: charById(st.cid)?.color}">{{ charById(st.cid)?.name || '?' }}</span>
+                            <label>X%</label><input type="number" v-model.number="st.x" class="inp w-14">
+                            <label>Y%</label><input type="number" v-model.number="st.y" class="inp w-14">
+                            <label>Масш.</label><input type="number" step="0.1" v-model.number="st.scale" class="inp w-14">
+                            <label class="flex items-center gap-1"><input type="checkbox" v-model="st.flip"> флип</label>
+                            <button @click="item.n.stage.splice(si,1)" class="text-red-400 hover:text-red-300">✕</button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-2 items-center text-xs flex-wrap">
+                        <select v-model="item.n.animation" class="inp"><option v-for="a in ANIMATIONS" :value="a.value">🎞 {{ a.label }}</option></select>
+                        <label class="text-slate-400">🔊</label><input v-model="item.n.sound" placeholder="звук url" class="inp w-32">
+                        <button @click="testAudio(item.n.sound,'sfx')" class="text-cyan-400 hover:text-cyan-300">▶</button>
+                        <button @click="openLayoutForNode(item.idx)" class="ml-auto text-pink-400 hover:text-pink-300 font-medium">🎨 UI реплики</button>
+                    </div>
+                    <!-- УСЛОВИЕ + ЭФФЕКТЫ -->
+                    <div class="flex gap-2 mt-2 items-center text-xs flex-wrap">
+                        <span class="text-slate-400">🧮 Условие:</span>
+                        <select :value="item.n.condition?.varId||''" @change="setCond(item.n,'varId',$event.target.value)" class="inp">
+                            <option value="">нет</option><option v-for="v in variables" :value="v.id">{{ v.name }}</option>
+                        </select>
+                        <template v-if="item.n.condition&&item.n.condition.varId">
+                            <select :value="item.n.condition.op" @change="setCond(item.n,'op',$event.target.value)" class="inp"><option v-for="op in OPS" :value="op">{{ op }}</option></select>
+                            <input type="number" :value="item.n.condition.value" @input="setCond(item.n,'value',$event.target.value)" class="inp w-16">
+                        </template>
+                    </div>
+                    <div class="flex gap-2 mt-1 items-center text-xs flex-wrap">
+                        <span class="text-slate-400">📈 Эффекты:</span>
+                        <span v-for="(f,fi) in item.n.effects" :key="fi" class="flex items-center gap-1 bg-slate-800 rounded px-1.5 py-0.5">
+                            <select v-model="f.varId" class="inp !bg-transparent"><option v-for="v in variables" :value="v.id">{{ v.name }}</option></select>
+                            <select v-model="f.op" class="inp !bg-transparent"><option value="add">+=</option><option value="set">=</option></select>
+                            <input type="number" v-model.number="f.value" class="inp !bg-transparent w-14">
+                            <button @click="item.n.effects.splice(fi,1)" class="text-red-400">✕</button>
+                        </span>
+                        <button @click="addEffect(item.n)" class="text-emerald-400 hover:text-emerald-300">+ эффект</button>
+                    </div>
+                </template>
+
+                <template v-else-if="item.n.type==='choice'">
+                    <div v-for="(opt,oi) in item.n.options" :key="oi" class="flex gap-2 mb-1 items-center flex-wrap">
+                        <input v-model="opt.text" placeholder="Текст кнопки" class="flex-1 inp !text-sm">
+                        <scene-picker class="w-44" :model-value="opt.target" @update:model-value="v=>opt.target=v" :scenes="scenes" allow-end></scene-picker>
+                        <select :value="opt.condition?.varId||''" @change="setCond(opt,'varId',$event.target.value)" class="inp" title="Условие показа варианта">
+                            <option value="">🧮 нет</option><option v-for="v in variables" :value="v.id">{{ v.name }}</option>
+                        </select>
+                        <template v-if="opt.condition&&opt.condition.varId">
+                            <select :value="opt.condition.op" @change="setCond(opt,'op',$event.target.value)" class="inp"><option v-for="op in OPS" :value="op">{{ op }}</option></select>
+                            <input type="number" :value="opt.condition.value" @input="setCond(opt,'value',$event.target.value)" class="inp w-14">
+                        </template>
+                        <button @click="item.n.options.splice(oi,1)" class="text-red-400 hover:text-red-300 px-1">✕</button>
+                    </div>
+                    <button @click="item.n.options.push({text:'',target:''})" class="text-xs text-slate-400 hover:text-slate-200 mt-1">+ Вариант</button>
+                </template>
+
+                <template v-else>
+                    <div class="flex gap-2">
+                        <select v-model="item.n.miniGameType" class="inp !text-sm"><option value="qte">QTE</option><option value="clicker">Кликер</option><option value="memory">Память</option></select>
+                        <input v-model="item.n.title" placeholder="Название испытания" class="flex-1 inp !text-sm">
+                    </div>
+                    <div class="flex gap-2 mt-2 items-center text-xs text-slate-400">
+                        <template v-if="item.n.miniGameType!=='clicker'"><label>Сложность:</label><input type="number" min="1" max="10" v-model.number="item.n.difficulty" class="inp w-16"></template>
+                        <template v-else><label>Кликов:</label><input type="number" min="1" v-model.number="item.n.target" class="inp w-16"><label>Секунд:</label><input type="number" min="1" v-model.number="item.n.timeLimit" class="inp w-16"></template>
+                    </div>
+                    <div class="flex gap-2 mt-2 items-center">
+                        <span class="text-xs text-emerald-400 whitespace-nowrap">Успех →</span>
+                        <scene-picker class="flex-1" :model-value="item.n.successTarget" @update:model-value="v=>item.n.successTarget=v" :scenes="scenes" allow-end></scene-picker>
+                        <span class="text-xs text-red-400 whitespace-nowrap">Провал →</span>
+                        <scene-picker class="flex-1" :model-value="item.n.failTarget" @update:model-value="v=>item.n.failTarget=v" :scenes="scenes" allow-end></scene-picker>
+                    </div>
+                    <div class="flex gap-2 mt-2 items-center text-xs flex-wrap">
+                        <span class="text-slate-400">🧮 Условие:</span>
+                        <select :value="item.n.condition?.varId||''" @change="setCond(item.n,'varId',$event.target.value)" class="inp"><option value="">нет</option><option v-for="v in variables" :value="v.id">{{ v.name }}</option></select>
+                        <template v-if="item.n.condition&&item.n.condition.varId">
+                            <select :value="item.n.condition.op" @change="setCond(item.n,'op',$event.target.value)" class="inp"><option v-for="op in OPS" :value="op">{{ op }}</option></select>
+                            <input type="number" :value="item.n.condition.value" @input="setCond(item.n,'value',$event.target.value)" class="inp w-16">
+                        </template>
+                        <button @click="addEffect(item.n)" class="text-emerald-400 hover:text-emerald-300 ml-2">+ эффект</button>
+                        <span v-for="(f,fi) in item.n.effects" :key="fi" class="flex items-center gap-1 bg-slate-800 rounded px-1.5 py-0.5">
+                            <select v-model="f.varId" class="inp !bg-transparent"><option v-for="v in variables" :value="v.id">{{ v.name }}</option></select>
+                            <select v-model="f.op" class="inp !bg-transparent"><option value="add">+=</option><option value="set">=</option></select>
+                            <input type="number" v-model.number="f.value" class="inp !bg-transparent w-14">
+                            <button @click="item.n.effects.splice(fi,1)" class="text-red-400">✕</button>
+                        </span>
+                    </div>
+                </template>
+            </div>
+            <button @click="currentScene.nodes.splice(item.idx,1)" class="text-slate-500 hover:text-red-400 px-2">✕</button>
+        </div>
+        <div v-if="!visibleNodes.length" class="text-center py-6 text-slate-500 text-sm italic">Нет узлов под фильтр</div>
+        </div>
+    </div>
+</div>
+</main>
+</div>
+
+<!-- ГРАФ -->
+<div v-if="mode==='graph'" class="flex-1 overflow-auto bg-slate-950 relative">
+    <div class="sticky top-2 z-30 bg-slate-800/95 border border-slate-700 rounded-lg p-2 flex items-center gap-2 text-xs shadow-xl w-max mx-2 mt-2">
+        <span class="text-indigo-400 font-bold">🕸 Граф</span>
+        <button @click="addScene" class="bg-indigo-600 hover:bg-indigo-500 px-2 py-1 rounded">+ Сцена</button>
+        <button @click="autoLayout" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded">Автораскладка</button>
+        <button @click="setMode('edit')" class="text-slate-400 hover:text-white px-2 py-1">← Редактор</button>
+        <span class="text-slate-500 ml-2">клик по строке = Live · ⚙ = условия/эффекты · розовую точку тяни на другую сцену</span>
+    </div>
+    <div ref="graphCanvas" class="relative" style="width:3000px;height:2000px">
+        <svg class="absolute inset-0" width="3000" height="2000">
+            <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+            <g v-for="(e,ei) in allEdges" :key="ei">
+                <path :d="e.path" fill="none" :stroke="e.color" stroke-width="2" :stroke-dasharray="e.dashed?'6 4':''" marker-end="url(#arrow)" opacity="0.85"/>
+                <path :d="e.path" fill="none" stroke="transparent" stroke-width="14" style="pointer-events:stroke;cursor:pointer" @click="openEdgeModal(e)"/>
+                <text :x="e.mx" :y="e.my-8" fill="#94a3b8" font-size="10" text-anchor="middle">{{ e.label }}</text>
+            </g>
+            <path v-if="linkDrag" :d="tempPath" fill="none" stroke="#ec4899" stroke-width="2" stroke-dasharray="6 4"/>
+        </svg>
+
+        <div v-for="scene in scenes" :key="scene.id" class="graph-node"
+             :class="currentSceneId===scene.id?'!border-indigo-500':''"
+             :style="{left: nodePos(scene).x+'px', top: nodePos(scene).y+'px', height: cardH(scene)+'px'}"
+             @mousedown="startNodeDrag(scene,$event)">
+            <div class="flex items-center gap-1 px-2 h-8 border-b border-slate-600">
+                <span class="text-xs font-bold truncate flex-1">{{ scene.title }}</span>
+                <button @click.stop="selectScene(scene.id); setMode('edit')" class="text-slate-400 hover:text-white text-xs">✏️</button>
+            </div>
+            <div v-for="(n,ni) in scene.nodes" :key="ni" class="graph-row" @click.stop="startLive(scene.id,ni)">
+                <span>{{ n.type==='dialogue'?'💬':n.type==='choice'?'❓':'🎮' }}</span>
+                <span class="truncate flex-1">{{ n.type==='dialogue' ? (charById(n.characterId)?.name||'Расск.')+': '+(n.text||'').slice(0,16) : n.type==='choice' ? 'Выбор ('+n.options.length+')' : (n.title||'').slice(0,16) }}</span>
+                <span v-if="n.condition&&n.condition.varId" title="Условие">🧮</span>
+                <span v-if="n.effects&&n.effects.length" title="Эффекты">📈</span>
+                <button v-if="n.type!=='dialogue'||true" @click.stop="graphModal=n" class="text-slate-500 hover:text-white" title="Условия/эффекты">⚙</button>
+                <span class="graph-port-row" @mousedown.stop="startLinkDragFromNode(scene,ni,$event)"></span>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="pendingLink" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" @click.self="pendingLink=null">
+        <div class="bg-slate-800 rounded-xl border border-slate-600 w-full max-w-md p-5">
+            <h3 class="font-bold text-sm mb-3">🔗 {{ sceneById(pendingLink.from)?.title }} → {{ sceneById(pendingLink.to)?.title }}</h3>
+            <div class="space-y-1 max-h-72 overflow-y-auto">
+                <button v-for="(a,ai) in linkActionsForNode(pendingLink.from, pendingLink.srcNi)" :key="ai" @click="applyPending(a.src)" class="w-full text-left text-xs bg-slate-700 hover:bg-slate-600 rounded px-3 py-2 transition">{{ a.label }}</button>
+            </div>
+            <button @click="pendingLink=null" class="mt-3 text-xs text-slate-400 hover:text-white">Отмена</button>
+        </div>
+    </div>
+
+    <div v-if="edgeModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" @click.self="edgeModal=null">
+        <div class="bg-slate-800 rounded-xl border border-slate-600 w-full max-w-md p-5 space-y-3">
+            <h3 class="font-bold text-sm">✂️ Связь: {{ edgeModal.label }}</h3>
+            <div class="flex items-center gap-2 text-xs text-slate-400">Цель:
+                <scene-picker class="flex-1" :model-value="edgeModal.target" @update:model-value="changeEdgeTarget" :scenes="scenes" allow-end></scene-picker>
+            </div>
+            <div class="flex justify-between">
+                <button @click="removeEdge" class="text-xs text-red-400 hover:text-red-300"> Удалить</button>
+                <button @click="edgeModal=null" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="graphModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" @click.self="graphModal=null">
+        <div class="bg-slate-800 rounded-xl border border-slate-600 w-full max-w-md p-5 space-y-3">
+            <h3 class="font-bold text-sm">⚙ Узел: {{ graphModal.type }}</h3>
+            <div class="flex gap-2 items-center text-xs">
+                <span class="text-slate-400">🧮 Условие:</span>
+                <select :value="graphModal.condition?.varId||''" @change="setCond(graphModal,'varId',$event.target.value)" class="inp"><option value="">нет</option><option v-for="v in variables" :value="v.id">{{ v.name }}</option></select>
+                <template v-if="graphModal.condition&&graphModal.condition.varId">
+                    <select :value="graphModal.condition.op" @change="setCond(graphModal,'op',$event.target.value)" class="inp"><option v-for="op in OPS" :value="op">{{ op }}</option></select>
+                    <input type="number" :value="graphModal.condition.value" @input="setCond(graphModal,'value',$event.target.value)" class="inp w-16">
+                </template>
+            </div>
+            <div class="flex gap-2 items-center text-xs flex-wrap">
+                <span class="text-slate-400">📈 Эффекты:</span>
+                <span v-for="(f,fi) in graphModal.effects" :key="fi" class="flex items-center gap-1 bg-slate-700 rounded px-1.5 py-0.5">
+                    <select v-model="f.varId" class="inp !bg-transparent"><option v-for="v in variables" :value="v.id">{{ v.name }}</option></select>
+                    <select v-model="f.op" class="inp !bg-transparent"><option value="add">+=</option><option value="set">=</option></select>
+                    <input type="number" v-model.number="f.value" class="inp !bg-transparent w-14">
+                    <button @click="graphModal.effects.splice(fi,1)" class="text-red-400">✕</button>
+                </span>
+                <button @click="addEffect(graphModal)" class="text-emerald-400">+ эффект</button>
+            </div>
+            <button @click="graphModal=null" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded">Готово</button>
+        </div>
+    </div>
+</div>
+
+<!-- UI LAYOUT -->
+<div v-if="mode==='layout'" class="flex-1 relative overflow-hidden flex flex-col">
+<div class="canvas-container" :style="layoutBgStyle">
+    <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-slate-800/95 border border-slate-700 rounded-lg p-2 flex items-center gap-2 text-xs shadow-xl">
+        <span class="text-slate-400">Область:</span>
+        <select v-model="layoutScope" class="inp"><option value="global">🌍 Глобально</option><option value="scene">🎬 Сцена</option><option value="node">💬 Реплика</option></select>
+        <select v-if="layoutScope==='node'" v-model.number="layoutNodeIndex" class="inp max-w-56"><option v-for="(d,i) in dialogueNodes" :value="i">{{ charById(d.characterId)?.name || 'Рассказчик' }}: {{ (d.text||'').slice(0,20) }}</option></select>
+        <button @click="resetScopeLayout" class="text-red-400 hover:text-red-300 px-2 py-1">Сбросить</button>
+        <button @click="setMode('edit')" class="text-slate-400 hover:text-white px-2 py-1">← Редактор</button>
+    </div>
+    <div v-for="el in layoutElements" :key="el.key" class="ui-overlay" :class="isOverridden(el.key)?'overridden':''" :style="overlayStyle(resolvedLayout[el.key])" @mousedown="startDrag($event,el.key)">
+        <span class="label">{{ el.label }}{{ isOverridden(el.key)?' · своя':'' }}</span>
+    </div>
+</div>
+</div>
+
+<!-- LIVE -->
+<div v-if="mode==='live'" class="flex-1 relative overflow-hidden flex">
+<div class="flex-1 flex flex-col relative">
+<div class="canvas-container">
+    <canvas id="pixi-canvas"></canvas>
+    <div v-if="liveUiEdit" v-for="el in layoutElements" :key="el.key" class="ui-overlay" :class="isOverridden(el.key)?'overridden':''" :style="overlayStyle(resolvedLayout[el.key])" @mousedown="startDrag($event,el.key)">
+        <span class="label">{{ el.label }}</span>
+    </div>
+    <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-slate-800/95 border border-slate-700 rounded-lg p-2 flex items-center gap-2 text-xs shadow-xl">
+        <span class="text-cyan-400 font-bold">LIVE</span>
+        <select v-model.number="liveSceneId" class="inp"><option v-for="s in scenes" :value="s.id">{{ s.title }}</option></select>
+        <button @click="liveNodeIndex=Math.max(0,liveNodeIndex-1)" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded">◀</button>
+        <select v-model.number="liveNodeIndex" class="inp max-w-64"><option v-for="(n,i) in liveScene?.nodes||[]" :value="i">{{ i+1 }}. {{ n.type==='dialogue' ? (charById(n.characterId)?.name||'Расск.')+': '+(n.text||'').slice(0,16) : n.type }}</option></select>
+        <button @click="liveNodeIndex=Math.min((liveScene?.nodes.length||1)-1,liveNodeIndex+1)" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded">▶</button>
+        <label class="flex items-center gap-1 text-pink-400"><input type="checkbox" v-model="liveUiEdit"> 🎨 UI</label>
+        <select v-if="liveUiEdit" v-model="layoutScope" class="inp"><option value="global">🌍</option><option value="scene">🎬</option><option value="node">💬</option></select>
+        <button @click="setMode('edit')" class="text-slate-400 hover:text-white px-2 py-1">←</button>
+    </div>
+    <div class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-slate-800/90 px-4 py-1.5 rounded-lg text-xs text-slate-300 border border-slate-700">Таскай персонажей · редактируй справа · 🎨 UI = двигать интерфейс</div>
+</div>
+</div>
+<aside class="w-80 bg-slate-800 border-l border-slate-700 p-3 overflow-y-auto space-y-3 text-xs">
+    <div class="font-bold text-sm">🎮 Live-редактор</div>
+    <div class="bg-slate-900/60 rounded p-2 space-y-0.5">
+        <div v-for="v in variables" :key="v.id" class="flex justify-between"><span class="text-slate-400">{{ v.name }}</span><b>{{ varsState[v.id] ?? v.initial }}</b></div>
+    </div>
+    <div v-if="liveScene" class="space-y-2">
+        <div><label class="text-slate-400">Фон сцены</label><input v-model="liveScene.background" class="inp w-full mt-1"></div>
+        <div><label class="text-slate-400">Музыка (url / stop)</label><input v-model="liveScene.music" class="inp w-full mt-1"></div>
+    </div>
+    <div v-if="liveNode && liveNode.type==='dialogue'" class="space-y-2">
+        <div><label class="text-slate-400">Текст реплики</label><textarea v-model="liveNode.text" rows="3" class="inp w-full mt-1 resize-none"></textarea></div>
+        <div><label class="text-slate-400">Анимация</label><select v-model="liveNode.animation" class="inp w-full mt-1"><option v-for="a in ANIMATIONS" :value="a.value">{{ a.label }}</option></select></div>
+        <div>
+            <label class="text-slate-400">Персонажи на сцене</label>
+            <div v-for="(st,si) in liveNode.stage" :key="si" class="mt-1 bg-slate-900/60 rounded p-2 space-y-1">
+                <div class="flex items-center gap-1">
+                    <span class="font-medium truncate flex-1" :style="{color: charById(st.cid)?.color}">{{ charById(st.cid)?.name }}</span>
+                    <label class="flex items-center gap-1"><input type="checkbox" v-model="st.flip"> флип</label>
+                    <button @click="liveNode.stage.splice(si,1)" class="text-red-400">✕</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-500">Масштаб</span>
+                    <input type="range" min="0.3" max="2.5" step="0.05" v-model.number="st.scale" class="flex-1">
+                    <b class="w-8">{{ st.scale }}</b>
+                </div>
+                <input v-model="st.sprite" placeholder="URL картинки (оверрайд)" class="inp w-full">
+            </div>
+            <char-picker class="block mt-1" :model-value="''" @update:model-value="v=>addStageEntry(liveNode,v)" :characters="characters" placeholder="+ поставить персонажа"></char-picker>
+        </div>
+    </div>
+    <div v-else-if="liveNode && liveNode.type==='choice'" class="space-y-1">
+        <label class="text-slate-400">Варианты выбора</label>
+        <div v-for="(opt,oi) in liveNode.options" :key="oi"><input v-model="opt.text" class="inp w-full"></div>
+    </div>
+    <div v-else-if="liveNode" class="space-y-1">
+        <label class="text-slate-400">Мини-игра</label>
+        <input v-model="liveNode.title" class="inp w-full">
+    </div>
+</aside>
+</div>
+
+<!-- ПРЕВЬЮ -->
+<div v-if="mode==='preview'" class="flex-1 relative overflow-hidden flex flex-col">
+<div class="canvas-container">
+    <canvas id="pixi-canvas"></canvas>
+    <div class="absolute top-4 left-4 bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-xs space-y-0.5 z-10">
+        <div v-for="v in variables" :key="v.id"><span class="text-slate-400">{{ v.name }}:</span> <b>{{ varsState[v.id] ?? 0 }}</b></div>
+    </div>
+    <div v-if="activeMiniGame && activeMiniGame.miniGameType==='qte'" class="qte-bar">
+        <div class="text-center text-white text-xl font-bold mb-3 drop-shadow-lg">⚡ {{ activeMiniGame.title }}</div>
+        <div class="qte-track" @click="qteAttempt"><div class="qte-zone" :style="{left:qteZoneStart+'%',width:qteZoneWidth+'%'}"></div><div class="qte-marker" :style="{left:qteMarkerPos+'%'}"></div></div>
+        <div class="text-center text-slate-300 text-sm mt-3">Попыток: {{ qteAttemptsLeft }} · ПРОБЕЛ/клик</div>
+    </div>
+    <div v-if="activeMiniGame && activeMiniGame.miniGameType==='clicker'" class="absolute inset-0 flex items-center justify-center bg-black/60 cursor-pointer" @click="clickerClick">
+        <div class="text-center text-white select-none"><div class="text-6xl font-bold mb-4">{{ clickerCount }} / {{ activeMiniGame.target }}</div><div class="text-xl mb-2">👊 {{ activeMiniGame.title }}</div><div class="text-xs text-slate-400 mt-4">Осталось: {{ clickerTimeLeft }}с</div></div>
+    </div>
+    <div v-if="activeMiniGame && activeMiniGame.miniGameType==='memory'" class="absolute inset-0 flex items-center justify-center bg-black/70">
+        <div class="text-center select-none"><div class="text-white text-xl font-bold mb-2">🧠 {{ activeMiniGame.title }}</div>
+        <div class="text-slate-300 text-sm mb-4" v-if="memoryPhase==='watch'">Смотрите...</div><div class="text-slate-300 text-sm mb-4" v-else>Ваш ход! {{ memoryInputIndex }} / {{ memorySequence.length }}</div>
+        <div class="grid grid-cols-2 gap-3"><button v-for="(c,i) in memoryColors" :key="i" @click="memoryPadClick(i)" class="w-28 h-28 rounded-xl border-4 border-white/20 transition-all duration-150" :class="[c.base, memoryFlash===i?c.flash:'opacity-60']"></button></div></div>
+    </div>
+    <button @click="exitPreview" class="absolute top-4 right-4 bg-red-500/80 hover:bg-red-500 text-white px-3 py-1.5 rounded text-sm font-medium transition">✕ Выйти</button>
+</div>
+</div>
+
+<!-- МОДАЛКИ -->
+<div v-if="textModalNode" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" @click.self="textModalNode=null">
+    <div class="bg-slate-800 rounded-xl border border-slate-600 w-full max-w-3xl h-[80vh] flex flex-col p-4">
+        <div class="flex justify-between items-center mb-2">
+            <h3 class="font-bold text-sm">📝 {{ charById(textModalNode.characterId)?.name || 'Рассказчик' }}</h3>
+            <div class="flex gap-2">
+                <button @click="textModalNode.text=''" class="text-xs text-red-400 hover:text-red-300">Очистить</button>
+                <button @click="textModalNode=null" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded">✕ Закрыть</button>
+            </div>
+        </div>
+        <textarea v-model="textModalNode.text" class="flex-1 bg-slate-900 border border-slate-600 rounded-lg p-4 text-sm leading-relaxed outline-none focus:border-indigo-500 resize-none"></textarea>
+    </div>
+</div>
+
+<div v-if="charModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" @click.self="charModal=null">
+    <div class="bg-slate-800 rounded-xl border border-slate-600 w-full max-w-md p-5 space-y-3">
+        <h3 class="font-bold">👤 Персонаж</h3>
+        <div><label class="block text-xs text-slate-400 mb-1">Имя</label><input v-model="charModal.name" class="w-full inp !text-sm"></div>
+        <div class="flex gap-3 items-end">
+            <div class="flex-1"><label class="block text-xs text-slate-400 mb-1">Цвет</label><input type="color" v-model="charModal.color" class="w-full h-9 bg-slate-900 border border-slate-600 rounded cursor-pointer"></div>
+            <span class="w-10 h-9 rounded flex items-center justify-center text-xs font-bold text-slate-900" :style="{background: charModal.color}">Aa</span>
+        </div>
+        <div><label class="block text-xs text-slate-400 mb-1">Спрайт (url)</label><input v-model="charModal.sprite" placeholder="https://..." class="w-full inp !text-sm"></div>
+        <div class="flex justify-between pt-2">
+            <button @click="deleteCharacter(charModal)" class="text-xs text-red-400 hover:text-red-300">🗑 Удалить</button>
+            <button @click="charModal=null" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded font-medium">Готово</button>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
+
+const DEFAULT_LAYOUT = () => ({
+    dialogueBox: { x: 5, y: 70, w: 90, h: 22 },
+    nameLabel: { x: 7, y: 66, w: 25, h: 4 },
+    choicesBlock: { x: 25, y: 30, w: 50, h: 40 }
+});
+const ANIMATIONS = [
+    { value:'none', label:'Без анимации' }, { value:'fadeIn', label:'Появление' },
+    { value:'slideLeft', label:'Слайд слева' }, { value:'slideRight', label:'Слайд справа' },
+    { value:'zoomIn', label:'Зум' }, { value:'bounce', label:'Отскок' }, { value:'shake', label:'Тряска' }
+];
+const PALETTE = ['#ec4899','#22d3ee','#a3e635','#f59e0b','#a78bfa','#34d399','#fb7185','#facc15'];
+const OPS = ['>','<','>=','<=','==','!='];
+const EASE = {
+    linear: t => t,
+    outCubic: t => 1 - Math.pow(1 - t, 3),
+    outBack: t => { const c1=1.70158,c3=c1+1; return 1 + c3*Math.pow(t-1,3) + c1*Math.pow(t-1,2); },
+    outBounce: t => { const n1=7.5625,d1=2.75; if(t<1/d1)return n1*t*t; if(t<2/d1)return n1*(t-=1.5/d1)*t+.75; if(t<2.5/d1)return n1*(t-=2.25/d1)*t+.9375; return n1*(t-=2.625/d1)*t+.984375; }
+};
+
+let tweens = [], rafId = null, lastTs = 0;
+function addTween(duration, easeName, onUpdate, onDone){ const tw={t:0,duration:Math.max(1,duration||0),ease:EASE[easeName]||EASE.linear,onUpdate,onDone,dead:false}; tweens.push(tw); return tw; }
+function killTween(tw){ if(tw)tw.dead=true; }
+function tickTweens(ms){ if(!isFinite(ms)||ms<0)ms=16; for(const tw of tweens){ if(tw.dead)continue; tw.t+=ms; const k=Math.min(1,tw.t/tw.duration); tw.onUpdate(tw.ease(k),k); if(k>=1){tw.dead=true; if(tw.onDone)tw.onDone();} } tweens=tweens.filter(t=>!t.dead); }
+function startTweenLoop(){ stopTweenLoop(); lastTs=performance.now(); const loop=(ts)=>{ const dt=Math.min(100,Math.max(0,ts-lastTs)); lastTs=ts; tickTweens(dt); rafId=requestAnimationFrame(loop); }; rafId=requestAnimationFrame(loop); }
+function stopTweenLoop(){ if(rafId)cancelAnimationFrame(rafId); rafId=null; }
+
+let musicEl=null, currentMusicUrl=null;
+function playMusic(url){ if(!musicEl){ musicEl=new Audio(); musicEl.loop=true; musicEl.volume=.5; } if(currentMusicUrl===url)return; musicEl.pause(); currentMusicUrl=url; musicEl.src=url; musicEl.play().catch(()=>{}); }
+function stopMusic(){ if(musicEl)musicEl.pause(); currentMusicUrl=null; }
+function playSfx(url){ if(!url)return; const a=new Audio(url); a.volume=.7; a.play().catch(()=>{}); }
+function testAudio(url,type){ if(!url)return; if(type==='music')playMusic(url); else playSfx(url); }
+
+function loadSprite(url, onOk, onErr){
+    const tex = PIXI.Texture.from(url);
+    if (tex.baseTexture && tex.baseTexture.valid) onOk(tex);
+    else if (tex.baseTexture) { tex.baseTexture.once('loaded', ()=>onOk(tex)); tex.baseTexture.once('error', ()=>{ if(onErr)onErr(); }); }
+    else onOk(tex);
+}
+
+const app = createApp({
+setup(){
+    const mode = ref('edit');
+    const fileInput = ref(null);
+    const graphCanvas = ref(null);
+
+    const globalLayout = ref(DEFAULT_LAYOUT());
+    const characters = ref([
+        { id: 1, name: 'Главный герой', color: '#22d3ee', sprite: '' },
+        { id: 2, name: 'Алиса', color: '#ec4899', sprite: '' }
+    ]);
+    const nextCharId = ref(3);
+    const variables = ref([
+        { id: 1, name: 'trust', initial: 0 },
+        { id: 2, name: 'affection', initial: 0 }
+    ]);
+    const nextVarId = ref(3);
+    const varsState = ref({});
+
+    const scenes = ref([
+        { id:1, title:'Пробуждение', background:'#0f172a', transition:'fade', music:'', transitionSound:'', layout:null, gx:60, gy:80,
+          nodes:[
+            { type:'dialogue', characterId:'', text:'Вы открываете глаза. В комнате темно.', sprite:'', next:'', animation:'fadeIn', sound:'', stage:[], layout:null, effects:[], condition:null },
+            { type:'dialogue', characterId:1, text:'Голова раскалывается... Где я?', sprite:'', next:'', animation:'slideLeft', sound:'', stage:[{cid:1,x:35,y:45,scale:1,flip:false,sprite:''}], layout:null, effects:[], condition:null },
+            { type:'dialogue', characterId:2, text:'Ты наконец-то проснулся.', sprite:'', next:'', animation:'slideRight', sound:'', stage:[{cid:1,x:30,y:45,scale:1,flip:false,sprite:''},{cid:2,x:70,y:45,scale:1.1,flip:false,sprite:''}], layout:null, effects:[{varId:2,op:'add',value:1}], condition:null },
+            { type:'dialogue', characterId:2, text:'(секрет: Алиса довольна твоей реакцией)', sprite:'', next:'', animation:'none', sound:'', stage:[], layout:null, effects:[], condition:{varId:2,op:'>=',value:1} },
+            { type:'minigame', miniGameType:'qte', title:'Уклониться!', difficulty:3, target:15, timeLimit:5, successTarget:2, failTarget:3, effects:[], condition:null },
+            { type:'choice', options:[ {text:'Кто вы?!',target:2,condition:null}, {text:'Попытаться сбежать',target:3,condition:null} ] }
+          ]},
+        { id:2, title:'Разговор с Алисой', background:'#312e81', transition:'fade', music:'', transitionSound:'', layout:null, gx:400, gy:80,
+          nodes:[
+            { type:'dialogue', characterId:2, text:'Меня зовут Алиса.', sprite:'', next:'', animation:'zoomIn', sound:'', stage:[{cid:2,x:50,y:45,scale:1.2,flip:false,sprite:''}], layout:null, effects:[], condition:null },
+            { type:'dialogue', characterId:1, text:'Звучит угрожающе...', sprite:'', next:'', animation:'shake', sound:'', stage:[{cid:1,x:50,y:45,scale:1,flip:false,sprite:''}], layout:null, effects:[{varId:1,op:'add',value:1}], condition:null },
+            { type:'minigame', miniGameType:'memory', title:'Код замка', difficulty:2, target:15, timeLimit:5, successTarget:3, failTarget:3, effects:[], condition:null }
+          ]},
+        { id:3, title:'Побег', background:'#7f1d1d', transition:'fade', music:'', transitionSound:'', layout:null, gx:740, gy:80,
+          nodes:[
+            { type:'dialogue', characterId:'', text:'Дверь заперта снаружи.', sprite:'', next:'', animation:'none', sound:'', stage:[], layout:null, effects:[], condition:null },
+            { type:'minigame', miniGameType:'clicker', title:'Выломать дверь!', difficulty:3, target:15, timeLimit:5, successTarget:2, failTarget:1, effects:[], condition:null }
+          ]}
+    ]);
+
+    const currentSceneId = ref(1);
+    const nextId = ref(4);
+    const currentScene = computed(()=>scenes.value.find(s=>s.id===currentSceneId.value));
+    const dialogueNodes = computed(()=>currentScene.value?currentScene.value.nodes.filter(n=>n.type==='dialogue'):[]);
+    function charById(id){ return characters.value.find(c=>c.id===id); }
+    function sceneById(id){ return scenes.value.find(s=>s.id===id); }
+    function varName(id){ const v=variables.value.find(x=>x.id===id); return v?v.name:'?'; }
+    function nodeColor(n){ if(n.type!=='dialogue')return '#475569'; const ch=charById(n.characterId); return ch?ch.color:'#64748b'; }
+
+    // === ПЕРЕМЕННЫЕ / УСЛОВИЯ ===
+    function addVariable(){ variables.value.push({ id: nextVarId.value++, name: 'var'+(nextVarId.value-1), initial: 0 }); }
+    function setCond(obj,key,val){
+        if(!obj.condition)obj.condition={varId:'',op:'>',value:0};
+        if(key==='varId'){ if(!val){ obj.condition=null; return; } obj.condition.varId=Number(val); }
+        else if(key==='op')obj.condition.op=val;
+        else obj.condition.value=Number(val)||0;
+    }
+    function addEffect(node){ if(!node.effects)node.effects=[]; node.effects.push({varId:variables.value[0]?.id,op:'add',value:1}); }
+    function evalCond(c){ if(!c||!c.varId)return true; const v=varsState.value[c.varId]??0; const n=Number(c.value)||0; switch(c.op){ case '>':return v>n; case '<':return v<n; case '>=':return v>=n; case '<=':return v<=n; case '==':return v===n; case '!=':return v!==n; } return true; }
+    function applyEffects(node){ (node.effects||[]).forEach(f=>{ if(!f.varId)return; const cur=varsState.value[f.varId]??0; varsState.value[f.varId]= f.op==='set'? (Number(f.value)||0) : cur+(Number(f.value)||0); }); }
+    function findValidIndex(scene, start){ for(let i=start;i<scene.nodes.length;i++){ if(evalCond(scene.nodes[i].condition))return i; } return -1; }
+
+    const charModal = ref(null);
+    function addCharacter(){ const ch={ id: nextCharId.value++, name:'Новый персонаж', color: PALETTE[characters.value.length%PALETTE.length], sprite:'' }; characters.value.push(ch); charModal.value=ch; }
+    function editCharacter(ch){ charModal.value=ch; }
+    function deleteCharacter(ch){ characters.value=characters.value.filter(c=>c.id!==ch.id); charModal.value=null; }
+
+    const filterCharIds = ref([]);
+    function toggleFilter(id){ const i=filterCharIds.value.indexOf(id); if(i>=0)filterCharIds.value.splice(i,1); else filterCharIds.value.push(id); }
+    const visibleNodes = computed(()=>{ if(!currentScene.value)return[]; return currentScene.value.nodes.map((n,idx)=>({n,idx})).filter(it=>!filterCharIds.value.length || (it.n.type==='dialogue' && filterCharIds.value.includes(it.n.characterId ?? ''))); });
+
+    const textModalNode = ref(null);
+
+    // === LAYOUT ===
+    const layoutScope = ref('global');
+    const layoutNodeIndex = ref(0);
+    const liveUiEdit = ref(false);
+    const layoutElements = [ {key:'dialogueBox',label:'Диалоговое окно'},{key:'nameLabel',label:'Имя персонажа'},{key:'choicesBlock',label:'Блок выборов'} ];
+    const layoutSelectedNode = computed(()=>dialogueNodes.value[layoutNodeIndex.value]||null);
+    const liveScene = computed(()=>scenes.value.find(s=>s.id===liveSceneId.value));
+    const liveNode = computed(()=>liveScene.value?liveScene.value.nodes[liveNodeIndex.value]:null);
+    const scopeScene = computed(()=>mode.value==='live'?liveScene.value:currentScene.value);
+    const scopeNode = computed(()=>mode.value==='live' ? (liveNode.value&&liveNode.value.type==='dialogue'?liveNode.value:null) : layoutSelectedNode.value);
+    function mergeLayout(scene,node){ const res=JSON.parse(JSON.stringify(globalLayout.value)); if(scene&&scene.layout)for(const k in scene.layout)res[k]={...res[k],...scene.layout[k]}; if(node&&node.layout)for(const k in node.layout)res[k]={...res[k],...node.layout[k]}; return res; }
+    const resolvedLayout = computed(()=>mergeLayout(scopeScene.value, layoutScope.value==='node'?scopeNode.value:null));
+    function getScopeObj(create){ if(layoutScope.value==='global')return globalLayout.value; if(layoutScope.value==='scene'){ if(!scopeScene.value)return null; if(!scopeScene.value.layout&&create)scopeScene.value.layout={}; return scopeScene.value.layout; } const node=scopeNode.value; if(!node)return null; if(!node.layout&&create)node.layout={}; return node.layout; }
+    function isOverridden(key){ const o=getScopeObj(false); return !!(o&&o[key]); }
+    function resetScopeLayout(){ if(layoutScope.value==='global')globalLayout.value=DEFAULT_LAYOUT(); else if(layoutScope.value==='scene'&&scopeScene.value)scopeScene.value.layout=null; else if(scopeNode.value)scopeNode.value.layout=null; }
+    function openLayoutForScene(){ layoutScope.value='scene'; mode.value='layout'; }
+    function openLayoutForNode(idx){ const node=currentScene.value.nodes[idx]; layoutScope.value='node'; layoutNodeIndex.value=Math.max(0,dialogueNodes.value.indexOf(node)); mode.value='layout'; }
+    const layoutBgStyle = computed(()=>{ const bg=currentScene.value?currentScene.value.background:'#000'; if(bg&&(bg.startsWith('http')||bg.startsWith('data:')))return{backgroundImage:`url(${bg})`,backgroundSize:'cover',backgroundPosition:'center'}; return{backgroundColor:bg||'#000'}; });
+    function overlayStyle(l){ return{left:l.x+'%',top:l.y+'%',width:(l.w||20)+'%',height:(l.h||10)+'%'}; }
+    let dragState=null;
+    function startDrag(e,key){ const obj=getScopeObj(true); if(!obj)return; const rect=e.target.closest('.canvas-container').getBoundingClientRect(); const start=resolvedLayout.value[key]; dragState={key,obj,start:{...start},rect,ox:e.clientX-rect.left-(start.x/100*rect.width),oy:e.clientY-rect.top-(start.y/100*rect.height)}; document.addEventListener('mousemove',onDrag); document.addEventListener('mouseup',stopDrag); e.preventDefault(); }
+    function onDrag(e){ if(!dragState)return; const{key,obj,rect,ox,oy,start}=dragState; const x=Math.max(0,Math.min(100-(start.w||20),((e.clientX-rect.left-ox)/rect.width)*100)); const y=Math.max(0,Math.min(100-(start.h||10),((e.clientY-rect.top-oy)/rect.height)*100)); obj[key]={...start,x,y}; }
+    function stopDrag(){ dragState=null; document.removeEventListener('mousemove',onDrag); document.removeEventListener('mouseup',stopDrag); }
+
+    function setMode(m){ if(m!=='preview'&&m!=='live'&&pixiApp){ pixiApp.destroy(true); pixiApp=null; stopTweenLoop(); } mode.value=m; }
+
+    // === РЕДАКТОР ===
+    function addScene(){ const id=nextId.value++; const i=scenes.value.length; scenes.value.push({id,title:`Новая сцена ${id}`,background:'#475569',transition:'fade',music:'',transitionSound:'',layout:null,gx:60+(i%3)*340,gy:80+Math.floor(i/3)*260,nodes:[newDialogue()]}); currentSceneId.value=id; }
+    function selectScene(id){ currentSceneId.value=id; layoutNodeIndex.value=0; }
+    function newDialogue(){ return{type:'dialogue',characterId:'',text:'',sprite:'',next:'',animation:'none',sound:'',stage:[],layout:null,effects:[],condition:null}; }
+    function addNode(type){ if(!currentScene.value)return; if(type==='dialogue')currentScene.value.nodes.push(newDialogue()); else if(type==='choice')currentScene.value.nodes.push({type:'choice',options:[{text:'Вариант 1',target:'',condition:null}]}); else currentScene.value.nodes.push({type:'minigame',miniGameType:'qte',title:'Испытание',difficulty:3,target:10,timeLimit:5,successTarget:'',failTarget:'',effects:[],condition:null}); }
+    function addStageEntry(node,cid){ if(!cid)return; if(!node.stage)node.stage=[]; const presets=[25,50,75]; node.stage.push({cid,x:presets[node.stage.length%3],y:45,scale:1,flip:false,sprite:''}); }
+
+    const dragSceneIdx=ref(null),dragOverSceneIdx=ref(null),dragNodeIdx=ref(null),dragOverNodeIdx=ref(null);
+    function dragSceneStart(i,e){ dragSceneIdx.value=i; e.dataTransfer.setData('text/plain',String(i)); }
+    function dropScene(i){ const f=dragSceneIdx.value; if(f!==null&&f!==i){ const[it]=scenes.value.splice(f,1); scenes.value.splice(i,0,it);} sceneDragCleanup(); }
+    function sceneDragCleanup(){ dragSceneIdx.value=null; dragOverSceneIdx.value=null; }
+    function dragNodeStart(i,e){ dragNodeIdx.value=i; e.dataTransfer.setData('text/plain',String(i)); }
+    function dropNode(i){ const f=dragNodeIdx.value; if(f!==null&&f!==i&&currentScene.value){ const[it]=currentScene.value.nodes.splice(f,1); currentScene.value.nodes.splice(i,0,it);} nodeDragCleanup(); }
+    function nodeDragCleanup(){ dragNodeIdx.value=null; dragOverNodeIdx.value=null; }
+
+    // === ГРАФ ===
+    const NODE_W=260, HEADER=32, ROW_H=26;
+    function nodePos(s){ const i=scenes.value.indexOf(s); return { x: s.gx ?? 60+(i%3)*340, y: s.gy ?? 80+Math.floor(i/3)*260 }; }
+    function cardH(s){ return HEADER + Math.max(1,(s.nodes||[]).length)*ROW_H + 4; }
+    function rowY(s,ni){ return nodePos(s).y + HEADER + ni*ROW_H + ROW_H/2; }
+    function autoLayout(){ scenes.value.forEach((s,i)=>{ s.gx=60+(i%3)*340; s.gy=80+Math.floor(i/3)*260; }); }
+    const allEdges = computed(()=>{
+        const list=[];
+        scenes.value.forEach(scene=>{
+            const p=nodePos(scene);
+            scene.nodes.forEach((n,ni)=>{
+                const x1=p.x+NODE_W, y1=rowY(scene,ni);
+                const push=(target,kind,label,src,dashed)=>{ const t=sceneById(target); if(!t)return; const tp=nodePos(t); const x2=tp.x, y2=tp.y+HEADER/2+8; const dx=Math.max(50,Math.abs(x2-x1)/2);
+                    list.push({target,kind,label,src,fromId:scene.id,dashed, path:`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`, mx:(x1+x2)/2, my:(y1+y2)/2,
+                        color: kind==='choice'?'#f59e0b': kind==='success'?'#34d399': kind==='fail'?'#f87171':'#38bdf8'}); };
+                if(n.type==='dialogue'&&n.next)push(n.next,'next','→ '+(n.text||'').slice(0,8),{ni,kind:'next'},!!(n.condition&&n.condition.varId));
+                if(n.type==='choice')(n.options||[]).forEach((o,oi)=>{ if(o.target)push(o.target,'choice','❓ '+(o.text||'').slice(0,8),{ni,oi,kind:'opt'},!!(o.condition&&o.condition.varId)); });
+                if(n.type==='minigame'){ if(n.successTarget)push(n.successTarget,'success','✅',{ni,kind:'success'},false); if(n.failTarget)push(n.failTarget,'fail','❌',{ni,kind:'fail'},false); }
+            });
+        });
+        return list;
+    });
+
+    let nodeDrag=null;
+    function startNodeDrag(scene,e){
+        if(e.target.closest('.graph-port-row')||e.target.closest('button'))return;
+        const rect=graphCanvas.value.getBoundingClientRect(); const p=nodePos(scene);
+        nodeDrag={scene, ox:e.clientX-rect.left-p.x, oy:e.clientY-rect.top-p.y};
+        document.addEventListener('mousemove',onNodeDrag); document.addEventListener('mouseup',stopNodeDrag);
+        e.preventDefault();
+    }
+    function onNodeDrag(e){ if(!nodeDrag||!graphCanvas.value)return; const rect=graphCanvas.value.getBoundingClientRect(); nodeDrag.scene.gx=Math.max(0,e.clientX-rect.left-nodeDrag.ox); nodeDrag.scene.gy=Math.max(0,e.clientY-rect.top-nodeDrag.oy); }
+    function stopNodeDrag(){ nodeDrag=null; document.removeEventListener('mousemove',onNodeDrag); document.removeEventListener('mouseup',stopNodeDrag); }
+
+    const linkDrag = ref(null);
+    const pendingLink = ref(null);
+    const edgeModal = ref(null);
+    const graphModal = ref(null);
+    const tempPath = computed(()=>{ if(!linkDrag.value)return''; const s=sceneById(linkDrag.value.fromId); return `M ${nodePos(s).x+NODE_W} ${rowY(s,linkDrag.value.srcNi)} L ${linkDrag.value.x} ${linkDrag.value.y}`; });
+    function startLinkDragFromNode(scene,ni,e){
+        const rect=graphCanvas.value.getBoundingClientRect();
+        linkDrag.value={fromId:scene.id, srcNi:ni, x:e.clientX-rect.left, y:e.clientY-rect.top};
+        document.addEventListener('mousemove',onLinkDrag); document.addEventListener('mouseup',onLinkUp);
+        e.preventDefault();
+    }
+    function onLinkDrag(e){ if(!linkDrag.value||!graphCanvas.value)return; const rect=graphCanvas.value.getBoundingClientRect(); linkDrag.value.x=e.clientX-rect.left; linkDrag.value.y=e.clientY-rect.top; }
+    function onLinkUp(e){
+        document.removeEventListener('mousemove',onLinkDrag); document.removeEventListener('mouseup',onLinkUp);
+        if(linkDrag.value&&graphCanvas.value){
+            const rect=graphCanvas.value.getBoundingClientRect();
+            const x=e.clientX-rect.left, y=e.clientY-rect.top;
+            const target=scenes.value.find(s=>{ const p=nodePos(s); return x>=p.x&&x<=p.x+NODE_W&&y>=p.y&&y<=p.y+cardH(s); });
+            if(target&&target.id!==linkDrag.value.fromId)pendingLink.value={from:linkDrag.value.fromId, srcNi:linkDrag.value.srcNi, to:target.id};
+        }
+        linkDrag.value=null;
+    }
+    function linkActionsForNode(fromId, ni){
+        const scene=sceneById(fromId); const n=scene?.nodes[ni]; const acts=[]; if(!n)return acts;
+        if(n.type==='dialogue')acts.push({label:`➡️ переход после реплики (next)`,src:{ni,kind:'next'}});
+        if(n.type==='choice'){ (n.options||[]).forEach((o,oi)=>acts.push({label:`❓ вариант ${oi+1}: "${(o.text||'').slice(0,18)}" → цель`,src:{ni,oi,kind:'opt'}})); acts.push({label:'❓ + новый вариант',src:{ni,kind:'newopt'}}); }
+        if(n.type==='minigame'){ acts.push({label:`✅ успех →`,src:{ni,kind:'success'}}); acts.push({label:`❌ провал →`,src:{ni,kind:'fail'}}); }
+        return acts;
+    }
+    function applyLinkSrc(src, fromId, targetId){
+        const scene=sceneById(fromId); if(!scene)return; const n=scene.nodes[src.ni]; if(!n)return;
+        if(src.kind==='next')n.next=targetId;
+        else if(src.kind==='opt')n.options[src.oi].target=targetId;
+        else if(src.kind==='newopt')n.options.push({text:'Новый вариант',target:targetId,condition:null});
+        else if(src.kind==='success')n.successTarget=targetId;
+        else if(src.kind==='fail')n.failTarget=targetId;
+    }
+    function applyPending(src){ applyLinkSrc(src,pendingLink.value.from,pendingLink.value.to); pendingLink.value=null; }
+    function openEdgeModal(e){ edgeModal.value={...e}; }
+    function changeEdgeTarget(id){ applyLinkSrc(edgeModal.value.src, edgeModal.value.fromId, id); edgeModal.value.target=id; if(!id)edgeModal.value=null; }
+    function removeEdge(){ const m=edgeModal.value; const scene=sceneById(m.fromId); const n=scene?.nodes[m.src.ni]; if(n){ if(m.src.kind==='opt')n.options.splice(m.src.oi,1); else applyLinkSrc(m.src,m.fromId,''); } edgeModal.value=null; }
+
+    // === IMPORT/EXPORT ===
+    function toId(v){ if(v===''||v===null||v===undefined)return''; const n=parseInt(v); return isNaN(n)?'':n; }
+    function exportJson(){ const data={version:'4.0',title:'Моя новелла',globalLayout:globalLayout.value,characters:characters.value,variables:variables.value,scenes:scenes.value}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='novel.json'; a.click(); URL.revokeObjectURL(url); }
+    function importJson(){ fileInput.value.click(); }
+    function handleFileImport(e){ const file=e.target.files[0]; if(!file)return; const reader=new FileReader();
+        reader.onload=(ev)=>{ try{
+            const data=JSON.parse(ev.target.result);
+            if(data.globalLayout)globalLayout.value=data.globalLayout; else if(data.uiLayout)globalLayout.value=data.uiLayout;
+            if(data.characters)characters.value=data.characters;
+            if(data.variables)variables.value=data.variables;
+            if(data.scenes){ data.scenes.forEach(s=>{ s.nodes=s.nodes||[]; s.nodes.forEach(n=>{
+                n.effects=n.effects||[]; n.condition=n.condition||null;
+                if(n.type==='dialogue'){ n.next=toId(n.next); n.animation=n.animation||'none'; n.stage=n.stage||[]; if(n.character!==undefined&&n.characterId===undefined){ const ch=characters.value.find(c=>c.name===n.character); n.characterId=ch?ch.id:''; delete n.character; } }
+                if(n.type==='choice')(n.options||[]).forEach(o=>{o.target=toId(o.target); o.condition=o.condition||null;});
+                if(n.type==='minigame'){ n.successTarget=toId(n.successTarget); n.failTarget=toId(n.failTarget); }
+            });}); scenes.value=data.scenes; }
+            if(scenes.value.length)currentSceneId.value=scenes.value[0].id;
+            alert('Импортировано!');
+        }catch(err){ alert('Ошибка JSON: '+err.message); } };
+        reader.readAsText(file); e.target.value='';
+    }
+
+    // === PIXI ===
+    let pixiApp=null, lastSceneId=null, typingState=null, lastAppliedKey=null;
+    const previewSceneId=ref(null), previewNodeIndex=ref(0), activeMiniGame=ref(null);
+    const liveSceneId=ref(1), liveNodeIndex=ref(0);
+
+    const qteMarkerPos=ref(0),qteZoneStart=ref(40),qteZoneWidth=ref(20),qteAttemptsLeft=ref(3);
+    let qteAnimationId=null,qteDirection=1;
+    const clickerCount=ref(0),clickerTimeLeft=ref(0); let clickerInterval=null;
+    const memoryPhase=ref('idle'),memorySequence=ref([]),memoryInputIndex=ref(0),memoryFlash=ref(-1);
+    const memoryColors=[{base:'bg-red-600',flash:'bg-red-300 opacity-100 scale-105'},{base:'bg-green-600',flash:'bg-green-300 opacity-100 scale-105'},{base:'bg-blue-600',flash:'bg-blue-300 opacity-100 scale-105'},{base:'bg-yellow-500',flash:'bg-yellow-200 opacity-100 scale-105'}];
+    let memoryTimeouts=[];
+
+    const currentPreviewScene=computed(()=>scenes.value.find(s=>s.id===previewSceneId.value));
+    const currentPreviewNode=computed(()=>currentPreviewScene.value?currentPreviewScene.value.nodes[previewNodeIndex.value]:null);
+
+    function initPixi(){ return nextTick(()=>{
+        const canvas=document.getElementById('pixi-canvas'); if(!canvas)return;
+        if(pixiApp){ pixiApp.destroy(true); pixiApp=null; }
+        tweens=[]; typingState=null;
+        const container=canvas.parentElement;
+        pixiApp=new PIXI.Application({view:canvas,width:container.clientWidth,height:container.clientHeight,backgroundColor:0x000000,antialias:true,resolution:window.devicePixelRatio||1,autoDensity:true});
+        startTweenLoop();
+        new ResizeObserver(()=>{ if(pixiApp&&canvas.parentElement){ pixiApp.renderer.resize(canvas.parentElement.clientWidth,canvas.parentElement.clientHeight); mode.value==='preview'?renderPreviewState():renderLiveState(); } }).observe(container);
+        pixiApp.view.addEventListener('click',handleCanvasClick);
+    }); }
+
+    function addBackground(W,H,bg){
+        const isUrl=bg&&(bg.startsWith('http')||bg.startsWith('data:'));
+        const g=new PIXI.Graphics(); g.beginFill(!isUrl&&bg&&bg.startsWith('#')?parseInt(bg.slice(1),16):0x222222); g.drawRect(0,0,W,H); g.endFill(); pixiApp.stage.addChild(g);
+        if(isUrl){ loadSprite(bg,(tex)=>{ if(!pixiApp)return; const sp=new PIXI.Sprite(tex); sp.width=W; sp.height=H; pixiApp.stage.addChildAt(sp,1); },()=>{}); }
+    }
+
+    function drawStage(W,H,scene,node,o){
+        const stage=(node&&node.stage&&node.stage.length)?node.stage:null;
+        if(stage){
+            stage.forEach(entry=>{
+                const ch=charById(entry.cid); if(!ch)return;
+                const holder=new PIXI.Container();
+                holder.x=(entry.x/100)*W; holder.y=(entry.y/100)*H;
+                const rw=(28/100)*W*(entry.scale||1), rh=(55/100)*H*(entry.scale||1);
+                const isSpeaker=node&&entry.cid===node.characterId;
+                const url=entry.sprite || (o.nodeOverrideSprite&&isSpeaker?o.nodeOverrideSprite:'') || ch.sprite || '';
+                const colorInt=parseInt(ch.color.slice(1),16);
+                const ph=new PIXI.Graphics(); ph.beginFill(colorInt,.4); ph.lineStyle(2,colorInt,.9); ph.drawRoundedRect(-rw/2,-rh/2,rw,rh,10); ph.endFill(); if(entry.flip)ph.scale.x=-1; holder.addChild(ph);
+                const lbl=new PIXI.Text(ch.name,{fontFamily:'Arial',fontSize:14,fill:0xffffff}); lbl.anchor.set(.5); holder.addChild(lbl);
+                if(url&&(url.startsWith('http')||url.startsWith('data:'))){
+                    loadSprite(url,(tex)=>{ if(!holder.parent)return; holder.removeChild(ph); holder.removeChild(lbl); const sp=new PIXI.Sprite(tex); sp.anchor.set(.5); sp.width=rw; sp.height=rh; if(entry.flip)sp.scale.x=-Math.abs(sp.scale.x); holder.addChildAt(sp,0); },()=>{});
+                }
+                holder.alpha=isSpeaker?1:.55;
+                pixiApp.stage.addChild(holder);
+                if(isSpeaker)applyAnim(holder,W,H);
+                if(o.interactive){ holder.eventMode='static'; holder.cursor='move'; holder.on('pointerdown',()=>startLiveDrag(entry,holder)); }
+            });
+        } else if(node&&node.sprite&&(node.sprite.startsWith('http')||node.sprite.startsWith('data:'))){
+            loadSprite(node.sprite,(tex)=>{ if(!pixiApp)return; const sp=new PIXI.Sprite(tex); sp.anchor.set(.5); sp.width=.3*W; sp.height=.55*H; sp.x=W/2; sp.y=H*.45; pixiApp.stage.addChild(sp); },()=>{});
+        }
+    }
+    function applyAnim(holder,W,H){
+        const node=mode.value==='live'?liveNode.value:currentPreviewNode.value;
+        const anim=node?(node.animation||'none'):'none';
+        const cx=holder.x, cy=holder.y;
+        if(anim==='fadeIn'){ holder.alpha=0; addTween(450,'linear',e=>{holder.alpha=e;}); }
+        else if(anim==='slideLeft'){ holder.x=cx-W*.35; addTween(450,'outCubic',e=>{holder.x=cx-W*.35*(1-e);}); }
+        else if(anim==='slideRight'){ holder.x=cx+W*.35; addTween(450,'outCubic',e=>{holder.x=cx+W*.35*(1-e);}); }
+        else if(anim==='zoomIn'){ holder.scale.set(.01); addTween(450,'outBack',e=>{holder.scale.set(Math.max(.01,e));}); }
+        else if(anim==='bounce'){ holder.y=cy-H*.2; addTween(700,'outBounce',e=>{holder.y=cy-H*.2*(1-e);}); }
+        else if(anim==='shake'){ addTween(500,'linear',(e,k)=>{holder.x=cx+Math.sin(k*40)*20*(1-k);},()=>{holder.x=cx;}); }
+    }
+
+    function drawDialogueUI(W,H,node,layout,o){
+        const ch=charById(node.characterId);
+        const colorInt=ch?parseInt(ch.color.slice(1),16):0xffd700;
+        if(ch){ const nl=layout.nameLabel; const nameText=new PIXI.Text(ch.name,{fontFamily:'Arial',fontSize:20,fill:colorInt,fontWeight:'bold',stroke:0x000000,strokeThickness:3}); nameText.x=(nl.x/100)*W; nameText.y=(nl.y/100)*H; pixiApp.stage.addChild(nameText); }
+        const db=layout.dialogueBox;
+        const dbX=(db.x/100)*W,dbY=(db.y/100)*H,dbW=(db.w/100)*W,dbH=(db.h/100)*H;
+        const box=new PIXI.Graphics(); box.beginFill(0x0f172a,.85); box.lineStyle(2,colorInt,.6); box.drawRoundedRect(dbX,dbY,dbW,dbH,12); box.endFill();
+        if(o.typewriter){ box.alpha=0; addTween(250,'linear',e=>{box.alpha=e;}); }
+        pixiApp.stage.addChild(box);
+        const text=new PIXI.Text(o.typewriter?'':(node.text||''),{fontFamily:'Arial',fontSize:18,fill:0xffffff,wordWrap:true,wordWrapWidth:Math.max(50,dbW-40),lineHeight:26});
+        text.x=dbX+20; text.y=dbY+20; pixiApp.stage.addChild(text);
+        if(o.typewriter)startTypewriter(text,node.text||'');
+        const hint=new PIXI.Text(o.typewriter?'[ клик — текст, клик — далее ]':'',{fontFamily:'Arial',fontSize:12,fill:0x888888,fontStyle:'italic'});
+        hint.anchor.set(1,1); hint.x=dbX+dbW-20; hint.y=dbY+dbH-15; pixiApp.stage.addChild(hint);
+    }
+    function startTypewriter(textObj,full){ if(!full){textObj.text='';typingState=null;return;} textObj.text=''; const duration=Math.min(2500,full.length*25); const tw=addTween(duration,'linear',e=>{textObj.text=full.slice(0,Math.floor(e*full.length));},()=>{textObj.text=full;typingState=null;}); typingState={tw,textObj,full}; }
+
+    function renderChoices(W,H,node,layout,interactive){
+        const cb=layout.choicesBlock; const cbX=(cb.x/100)*W,cbY=(cb.y/100)*H,cbW=(cb.w/100)*W;
+        const title=new PIXI.Text('Что вы сделаете?',{fontFamily:'Arial',fontSize:28,fill:0xffffff,fontWeight:'bold',stroke:0x000000,strokeThickness:4}); title.anchor.set(.5,0); title.x=cbX+cbW/2; title.y=cbY-50; pixiApp.stage.addChild(title);
+        const opts=node.options.filter(o=>evalCond(o.condition));
+        opts.forEach((opt,i)=>{ const btnH=50,btnY=cbY+i*(btnH+10);
+            const btn=new PIXI.Graphics(); btn.beginFill(0x4f46e5); btn.lineStyle(2,0x818cf8); btn.drawRoundedRect(cbX,btnY,cbW,btnH,10); btn.endFill();
+            if(interactive){ btn.eventMode='static'; btn.cursor='pointer'; btn.on('pointertap',()=>{ const t=scenes.value.find(s=>s.id===parseInt(opt.target)); if(t)enterScene(t.id); else showEnd(W,H); }); }
+            pixiApp.stage.addChild(btn);
+            const label=new PIXI.Text(opt.text||'(пусто)',{fontFamily:'Arial',fontSize:18,fill:0xffffff,fontWeight:'bold'}); label.anchor.set(.5); label.x=cbX+cbW/2; label.y=btnY+btnH/2; pixiApp.stage.addChild(label);
+        });
+    }
+    function showEnd(W,H){ const t=new PIXI.Text('~ КОНЕЦ ~',{fontFamily:'Arial',fontSize:48,fill:0xffd700,fontWeight:'bold',stroke:0x000000,strokeThickness:4}); t.anchor.set(.5); t.x=W/2; t.y=H/2; pixiApp.stage.addChild(t); }
+    function dims(){ return{W:pixiApp.renderer.width/(window.devicePixelRatio||1),H:pixiApp.renderer.height/(window.devicePixelRatio||1)}; }
+
+    function renderPreviewState(){
+        if(!pixiApp)return; const{W,H}=dims();
+        tweens=[]; typingState=null; pixiApp.stage.removeChildren();
+        if(!currentPreviewScene.value)return; const scene=currentPreviewScene.value;
+        addBackground(W,H,scene.background);
+        const node=currentPreviewNode.value; if(!node)return;
+        const layout=mergeLayout(scene,node);
+        if(node.type==='dialogue'){
+            const key=scene.id+':'+previewNodeIndex.value;
+            if(lastAppliedKey!==key){ applyEffects(node); lastAppliedKey=key; }
+            drawStage(W,H,scene,node,{interactive:false,nodeOverrideSprite:node.sprite}); drawDialogueUI(W,H,node,layout,{typewriter:true}); if(node.sound)playSfx(node.sound);
+        }
+        else if(node.type==='choice'){ if(node.effects&&lastAppliedKey!==scene.id+':'+previewNodeIndex.value){ applyEffects(node); lastAppliedKey=scene.id+':'+previewNodeIndex.value; } drawStage(W,H,scene,node,{interactive:false}); renderChoices(W,H,node,layout,true); }
+        else renderMinigameIntro(W,H,node);
+        if(lastSceneId!==scene.id){ handleSceneAudio(scene); if(scene.transition!=='none'){ const ov=new PIXI.Graphics(); ov.beginFill(0x000000); ov.drawRect(0,0,W,H); ov.endFill(); pixiApp.stage.addChild(ov); addTween(600,'linear',e=>{ov.alpha=1-e;},()=>{if(ov.parent)ov.parent.removeChild(ov);}); } }
+        lastSceneId=scene.id;
+    }
+    function handleSceneAudio(scene){ if(scene.music==='stop')stopMusic(); else if(scene.music)playMusic(scene.music); if(scene.transitionSound)playSfx(scene.transitionSound); }
+
+    function enterScene(id){
+        const s=sceneById(id); if(!s)return;
+        previewSceneId.value=id;
+        const vi=findValidIndex(s,0);
+        if(vi<0){ previewNodeIndex.value=0; renderPreviewState(); const{W,H}=dims(); showEnd(W,H); return; }
+        previewNodeIndex.value=vi;
+        renderPreviewState();
+    }
+
+    function renderLiveState(){
+        if(!pixiApp)return; const{W,H}=dims();
+        tweens=[]; pixiApp.stage.removeChildren();
+        const scene=liveScene.value; if(!scene)return;
+        addBackground(W,H,scene.background);
+        const node=liveNode.value; if(!node)return;
+        const layout=mergeLayout(scene,node);
+        if(node.type==='dialogue'){ drawStage(W,H,scene,node,{interactive:true,nodeOverrideSprite:node.sprite}); drawDialogueUI(W,H,node,layout,{typewriter:false}); }
+        else if(node.type==='choice'){ drawStage(W,H,scene,node,{interactive:true}); renderChoices(W,H,node,layout,false); }
+        else renderMinigameIntro(W,H,node);
+    }
+
+    let liveDrag=null;
+    function startLiveDrag(entry,holder){ const rect=pixiApp.view.getBoundingClientRect(); liveDrag={entry,holder,rect}; document.addEventListener('mousemove',onLiveDrag); document.addEventListener('mouseup',stopLiveDrag); }
+    function onLiveDrag(e){ if(!liveDrag)return; const{entry,holder,rect}=liveDrag; entry.x=Math.max(0,Math.min(100,((e.clientX-rect.left)/rect.width)*100)); entry.y=Math.max(0,Math.min(100,((e.clientY-rect.top)/rect.height)*100)); holder.x=(entry.x/100)*rect.width; holder.y=(entry.y/100)*rect.height; }
+    function stopLiveDrag(){ liveDrag=null; document.removeEventListener('mousemove',onLiveDrag); document.removeEventListener('mouseup',stopLiveDrag); }
+
+    function handleCanvasClick(){
+        if(mode.value!=='preview'||activeMiniGame.value)return;
+        const node=currentPreviewNode.value; if(!node)return;
+        if(node.type==='dialogue'){ if(typingState){ killTween(typingState.tw); typingState.textObj.text=typingState.full; typingState=null; } else advanceNode(); }
+        else if(node.type==='minigame')startMinigame(node);
+    }
+
+    function startPreview(){
+        mode.value='preview'; lastSceneId=null; lastAppliedKey=null; stopMusic();
+        const init={}; variables.value.forEach(v=>init[v.id]=v.initial); varsState.value=init;
+        initPixi().then(()=>{ activeMiniGame.value=null; enterScene(scenes.value[0].id); });
+    }
+    function startLive(sceneId,ni){ mode.value='live'; liveSceneId.value=sceneId||currentSceneId.value; liveNodeIndex.value=ni||0; const init={}; variables.value.forEach(v=>init[v.id]=v.initial); varsState.value=init; initPixi().then(renderLiveState); }
+    const liveSig=computed(()=>{ const s=liveScene.value,n=liveNode.value; return JSON.stringify([s?.background,s?.music,n?.text,n?.characterId,n?.animation,n?.type,(n?.stage||[]).map(e=>[e.cid,e.scale,e.flip,e.sprite||0]),(n?.options||[]).map(o=>o.text)]); });
+    watch([liveSceneId,liveNodeIndex,liveSig],()=>{ if(mode.value==='live'&&pixiApp)renderLiveState(); });
+    watch(resolvedLayout,()=>{ if(mode.value==='live'&&pixiApp)renderLiveState(); },{deep:true});
+
+    function advanceNode(){
+        if(!currentPreviewScene.value)return; const scene=currentPreviewScene.value; const node=currentPreviewNode.value;
+        const vi=findValidIndex(scene, previewNodeIndex.value+1);
+        if(vi>=0){ previewNodeIndex.value=vi; renderPreviewState(); return; }
+        if(node&&node.type==='dialogue'&&node.next){ enterScene(node.next); return; }
+        const{W,H}=dims(); showEnd(W,H);
+    }
+
+    // === МИНИ-ИГРЫ ===
+    function startMinigame(node){ if(activeMiniGame.value)return; activeMiniGame.value=node; if(node.miniGameType==='qte')startQTE(node); else if(node.miniGameType==='clicker')startClicker(node); else startMemory(node); }
+    function startQTE(node){ qteMarkerPos.value=0; qteDirection=1; const d=Math.min(Math.max(node.difficulty||3,1),10); qteZoneWidth.value=Math.max(8,30-d*2.2); qteZoneStart.value=5+Math.random()*(90-qteZoneWidth.value); qteAttemptsLeft.value=3; const speed=.7+d*.25; const animate=()=>{ qteMarkerPos.value+=speed*qteDirection; if(qteMarkerPos.value>=100){qteMarkerPos.value=100;qteDirection=-1;} if(qteMarkerPos.value<=0){qteMarkerPos.value=0;qteDirection=1;} qteAnimationId=requestAnimationFrame(animate); }; animate(); }
+    function qteAttempt(){ if(!activeMiniGame.value||activeMiniGame.value.miniGameType!=='qte')return; const p=qteMarkerPos.value; if(p>=qteZoneStart.value&&p<=qteZoneStart.value+qteZoneWidth.value)finishMinigame(true); else{ qteAttemptsLeft.value--; if(qteAttemptsLeft.value<=0)finishMinigame(false);} }
+    function startClicker(node){ clickerCount.value=0; clickerTimeLeft.value=node.timeLimit||5; clickerInterval=setInterval(()=>{ clickerTimeLeft.value--; if(clickerTimeLeft.value<=0)finishMinigame(false); },1000); }
+    function clickerClick(){ if(!activeMiniGame.value||activeMiniGame.value.miniGameType!=='clicker')return; clickerCount.value++; if(clickerCount.value>=activeMiniGame.value.target)finishMinigame(true); }
+    function startMemory(node){ const len=Math.min(3+(node.difficulty||3),8); memorySequence.value=Array.from({length:len},()=>Math.floor(Math.random()*4)); memoryInputIndex.value=0; memoryPhase.value='watch'; memoryTimeouts.forEach(clearTimeout); memoryTimeouts=[]; memorySequence.value.forEach((pad,i)=>{ memoryTimeouts.push(setTimeout(()=>{ memoryFlash.value=pad; memoryTimeouts.push(setTimeout(()=>{memoryFlash.value=-1;},350)); },600*i+600)); }); memoryTimeouts.push(setTimeout(()=>{memoryPhase.value='input';},600*memorySequence.value.length+600)); }
+    function memoryPadClick(pad){ if(memoryPhase.value!=='input'||!activeMiniGame.value)return; memoryFlash.value=pad; setTimeout(()=>{memoryFlash.value=-1;},200); if(pad===memorySequence.value[memoryInputIndex.value]){ memoryInputIndex.value++; if(memoryInputIndex.value>=memorySequence.value.length)finishMinigame(true);} else finishMinigame(false); }
+    function finishMinigame(success){ if(qteAnimationId)cancelAnimationFrame(qteAnimationId); if(clickerInterval)clearInterval(clickerInterval); memoryTimeouts.forEach(clearTimeout); qteAnimationId=null; clickerInterval=null; memoryTimeouts=[]; memoryPhase.value='idle'; memoryFlash.value=-1; const node=activeMiniGame.value; activeMiniGame.value=null; if(!node)return; const t=scenes.value.find(s=>s.id===(success?parseInt(node.successTarget):parseInt(node.failTarget))); if(t)enterScene(t.id); else renderPreviewState(); }
+
+    function exitPreview(){ if(qteAnimationId)cancelAnimationFrame(qteAnimationId); if(clickerInterval)clearInterval(clickerInterval); memoryTimeouts.forEach(clearTimeout); activeMiniGame.value=null; stopTweenLoop(); stopMusic(); if(pixiApp){pixiApp.destroy(true);pixiApp=null;} mode.value='edit'; }
+
+    function handleKey(e){ if(e.code==='Space'&&activeMiniGame.value&&activeMiniGame.value.miniGameType==='qte'){ e.preventDefault(); qteAttempt(); } }
+    onMounted(()=>window.addEventListener('keydown',handleKey));
+    onUnmounted(()=>{ window.removeEventListener('keydown',handleKey); stopTweenLoop(); });
+
+    return{
+        mode,fileInput,graphCanvas,scenes,currentSceneId,currentScene,dialogueNodes,characters,ANIMATIONS,OPS,
+        variables,varsState,varName,addVariable,setCond,addEffect,
+        charById,sceneById,nodeColor,addCharacter,editCharacter,deleteCharacter,charModal,
+        filterCharIds,toggleFilter,visibleNodes,textModalNode,
+        setMode,addScene,selectScene,addNode,addStageEntry,
+        dragOverSceneIdx,dragOverNodeIdx,dragSceneStart,dropScene,sceneDragCleanup,dragNodeStart,dropNode,nodeDragCleanup,
+        nodePos,cardH,autoLayout,allEdges,startNodeDrag,linkDrag,tempPath,startLinkDragFromNode,pendingLink,linkActionsForNode,applyPending,edgeModal,openEdgeModal,changeEdgeTarget,removeEdge,graphModal,
+        exportJson,importJson,handleFileImport,testAudio,
+        globalLayout,layoutScope,layoutNodeIndex,layoutElements,layoutSelectedNode,resolvedLayout,isOverridden,resetScopeLayout,openLayoutForScene,openLayoutForNode,overlayStyle,startDrag,layoutBgStyle,liveUiEdit,
+        liveSceneId,liveNodeIndex,liveScene,liveNode,startLive,
+        startPreview,exitPreview,
+        activeMiniGame,qteMarkerPos,qteZoneStart,qteZoneWidth,qteAttemptsLeft,qteAttempt,
+        clickerCount,clickerTimeLeft,clickerClick,
+        memoryPhase,memorySequence,memoryInputIndex,memoryFlash,memoryColors,memoryPadClick
+    };
+}
+});
+
+app.component('scene-picker',{
+    props:{modelValue:{default:''},scenes:{type:Array,default:()=>[]},allowEnd:{type:Boolean,default:false},placeholder:{type:String,default:'Выбрать сцену'}},
+    emits:['update:modelValue'],
+    data(){return{open:false,search:''};},
+    computed:{
+        label(){ if(this.modelValue===''||this.modelValue===null||this.modelValue===undefined)return this.allowEnd?'— Конец новеллы —':this.placeholder; const s=this.scenes.find(sc=>sc.id===this.modelValue); return s?s.title:this.placeholder; },
+        filtered(){ const q=this.search.trim().toLowerCase(); if(!q)return this.scenes; return this.scenes.filter(s=>s.title.toLowerCase().includes(q)||String(s.id)===q); }
+    },
+    methods:{ pick(id){this.$emit('update:modelValue',id);this.open=false;this.search='';}, toggle(){this.open=!this.open; if(this.open)this.$nextTick(()=>{if(this.$refs.search)this.$refs.search.focus();});} },
+    template:`
+    <div class="relative">
+        <button type="button" @click="toggle" class="w-full text-left bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs hover:border-indigo-500 flex items-center justify-between gap-1 transition">
+            <span class="truncate" :class="modelValue?'text-slate-200':'text-slate-500'">{{ label }}</span><span class="text-slate-500">▾</span>
+        </button>
+        <div v-if="open" class="fixed inset-0 z-40" @click="open=false"></div>
+        <div v-if="open" class="absolute z-50 mt-1 w-64 bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden">
+            <input v-model="search" ref="search" placeholder="Поиск сцены..." class="w-full bg-slate-900 px-2 py-1.5 text-xs outline-none border-b border-slate-700 text-slate-200">
+            <ul class="max-h-40 overflow-y-auto">
+                <li v-if="allowEnd" @click="pick('')" class="px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-700 cursor-pointer italic">— Конец новеллы —</li>
+                <li v-for="s in filtered" :key="s.id" @click="pick(s.id)" class="px-2 py-1.5 text-xs hover:bg-slate-700 cursor-pointer flex justify-between gap-2" :class="s.id===modelValue?'text-indigo-400 font-bold':'text-slate-200'"><span class="truncate">{{ s.title }}</span><span class="text-slate-500">#{{ s.id }}</span></li>
+                <li v-if="!filtered.length" class="px-2 py-1.5 text-xs text-slate-500 italic">Ничего не найдено</li>
+            </ul>
+        </div>
+    </div>`
+});
+
+app.component('char-picker',{
+    props:{modelValue:{default:''},characters:{type:Array,default:()=>[]},placeholder:{type:String,default:'Рассказчик'}},
+    emits:['update:modelValue'],
+    data(){return{open:false,search:''};},
+    computed:{
+        label(){ if(!this.modelValue)return this.placeholder; const c=this.characters.find(ch=>ch.id===this.modelValue); return c?c.name:this.placeholder; },
+        filtered(){ const q=this.search.trim().toLowerCase(); if(!q)return this.characters; return this.characters.filter(c=>c.name.toLowerCase().includes(q)); }
+    },
+    methods:{ pick(id){this.$emit('update:modelValue',id);this.open=false;this.search='';}, toggle(){this.open=!this.open; if(this.open)this.$nextTick(()=>{if(this.$refs.search)this.$refs.search.focus();});} },
+    template:`
+    <div class="relative">
+        <button type="button" @click="toggle" class="w-full text-left bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs hover:border-pink-500 flex items-center justify-between gap-1 transition">
+            <span class="truncate flex items-center gap-1.5" :class="modelValue?'text-slate-200':'text-slate-500'">
+                <span v-if="modelValue" class="w-2 h-2 rounded-full flex-shrink-0" :style="{background:(characters.find(c=>c.id===modelValue)||{}).color}"></span>{{ label }}
+            </span><span class="text-slate-500">▾</span>
+        </button>
+        <div v-if="open" class="fixed inset-0 z-40" @click="open=false"></div>
+        <div v-if="open" class="absolute z-50 mt-1 w-64 bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden">
+            <input v-model="search" ref="search" placeholder="Поиск персонажа..." class="w-full bg-slate-900 px-2 py-1.5 text-xs outline-none border-b border-slate-700 text-slate-200">
+            <ul class="max-h-40 overflow-y-auto">
+                <li @click="pick('')" class="px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-700 cursor-pointer italic">Рассказчик</li>
+                <li v-for="c in filtered" :key="c.id" @click="pick(c.id)" class="px-2 py-1.5 text-xs hover:bg-slate-700 cursor-pointer flex items-center gap-2" :class="c.id===modelValue?'text-pink-400 font-bold':'text-slate-200'"><span class="w-2.5 h-2.5 rounded-full" :style="{background:c.color}"></span><span class="truncate">{{ c.name }}</span></li>
+                <li v-if="!filtered.length" class="px-2 py-1.5 text-xs text-slate-500 italic">Никого не нашли</li>
+            </ul>
+        </div>
+    </div>`
+});
+
+app.mount('#app');
+</script>
+</body>
+</html>
