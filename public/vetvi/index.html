@@ -246,6 +246,16 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .gc-row.sub{color:var(--tx3)}
 .gc-pin{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;pointer-events:none;flex:none}
 .gc-pin.in{left:-5px}.gc-pin.out{right:-5px}
+/* очереди нод */
+.gcard.q{border-style:solid;border-color:rgba(226,165,78,.55)}
+.gcard.q:hover{border-color:rgba(226,165,78,.8)}
+.gcard.q.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
+.gc-row .q-num{flex:none;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:rgba(226,165,78,.18);color:#e2a54e;font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.gc-row .q-btns{display:flex;gap:2px;flex:none;opacity:.35;transition:opacity .12s}
+.gc-row:hover .q-btns{opacity:1}
+.q-btn{width:16px;height:16px;border-radius:4px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#cfd4da;font-size:10px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;font-family:inherit}
+.q-btn:hover{background:rgba(255,255,255,.16);color:#fff}
+.q-btn.qx:hover{background:rgba(224,113,78,.35);border-color:rgba(224,113,78,.7);color:#fff}
 .node{position:absolute;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;box-shadow:0 6px 18px rgba(0,0,0,.38);cursor:grab;user-select:none;transition:transform .16s,box-shadow .16s,border-color .16s}
 .node:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.5);border-color:#404653}
 .node.dragging{cursor:grabbing;box-shadow:0 18px 38px rgba(0,0,0,.6)}
@@ -933,6 +943,7 @@ var ICONS={
 };
 var EXTRA_ICONS={
   play:'<path d="M7.5 5.5v13l11-6.5z"/><path d="M4.5 5.5v13"/>',
+  queue:'<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.1"/><circle cx="3.7" cy="12" r="1.1"/><circle cx="3.7" cy="18" r="1.1"/>',
   sword:'<path d="M19.5 4.5 9 15"/><path d="M19.5 4.5l-4 .7M19.5 4.5l-.7 4"/><path d="M6.5 13.5l4 4"/><path d="M4.5 19.5l3-3"/>',
   shield:'<path d="M12 3l7 3v5.5c0 4.8-3.4 7.7-7 9.5-3.6-1.8-7-4.7-7-9.5V6z"/>',
   bow:'<path d="M5 19C5 11 11 5 19 5"/><path d="M5 19 19 5"/><path d="M12 12l7-7m0 0h-3.5M19 5v3.5"/>',
@@ -1461,6 +1472,7 @@ function groupDropTargetAt(wx,wy,excludeIds){
   return best;
 }
 function captureNodesInto(g){
+  if(g.stack)return 0;
   var r=groupRectWorld(g);
   if(!r)return 0;
   var cnt=0;
@@ -1508,6 +1520,7 @@ function reparentAfterMove(g){
   if(captureNodesInto(g)>0)changed=true;
   var excl=new Set([g.id].concat(descGroupIds(g.id)));
   var target=c?groupDropTargetAt(c.x,c.y,excl):null;
+  if(target&&target.stack)target=null;
   var newPar=target?target.id:null;
   if((g.parent||null)!==newPar){g.parent=newPar;changed=true;}
   return changed;
@@ -1679,21 +1692,39 @@ function renderGroups(){
       if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
       framesLayer.appendChild(el);
     }else{
-      el.className='gcard';
+      el.className='gcard'+(g.stack?' q':'');
       el.dataset.gid=g.id;
       el.style.left=(g.x||0)+'px';el.style.top=(g.y||0)+'px';
       var btnIco=g.fold===1?ic('chev',11):ic('expand',11);
       var btnTitle=g.fold===1?'Сжать до компакта':'Развернуть группу';
-      var direct=membersOf(g.id);
+      var direct=g.stack?stackOrderIds(g).map(function(x){return nodeById(x);}).filter(Boolean):membersOf(g.id);
       var childGroups=project.groups.filter(function(cg){return cg.parent===g.id;});
-      var rows=direct.map(function(n){
-        var v=nodeVisual(n);
-        return '<div class="gc-row" data-nid="'+n.id+'">'+
-          '<i class="gc-pin in" style="border-color:'+esc(v.color)+'"></i>'+
-          '<span class="dot" style="background:'+esc(v.color)+';color:'+esc(v.color)+'"></span>'+
-          '<span class="t">'+esc(n.title)+'</span>'+
-          '<i class="gc-pin out" style="border-color:'+esc(v.color)+'"></i></div>';
-      }).join('');
+      var rows;
+      if(g.stack){
+        rows=direct.map(function(n,i){
+          var v=nodeVisual(n);
+          return '<div class="gc-row" data-nid="'+n.id+'" title="Двойной клик — открыть ноду">'+
+            '<span class="q-num">'+(i+1)+'</span>'+
+            '<i class="gc-pin in" style="border-color:'+esc(v.color)+'"></i>'+
+            '<span class="dot" style="background:'+esc(v.color)+';color:'+esc(v.color)+'"></span>'+
+            '<span class="t">'+esc(n.title)+'</span>'+
+            '<span class="q-btns">'+
+              (i>0?'<button class="q-btn" data-qa="up" data-nid="'+n.id+'" title="Передвинуть выше">↑</button>':'')+
+              (i<direct.length-1?'<button class="q-btn" data-qa="down" data-nid="'+n.id+'" title="Передвинуть ниже">↓</button>':'')+
+              '<button class="q-btn qx" data-qa="out" data-nid="'+n.id+'" title="Вывести из очереди">✕</button>'+
+            '</span>'+
+            '<i class="gc-pin out" style="border-color:'+esc(v.color)+'"></i></div>';
+        }).join('');
+      }else{
+        rows=direct.map(function(n){
+          var v=nodeVisual(n);
+          return '<div class="gc-row" data-nid="'+n.id+'">'+
+            '<i class="gc-pin in" style="border-color:'+esc(v.color)+'"></i>'+
+            '<span class="dot" style="background:'+esc(v.color)+';color:'+esc(v.color)+'"></span>'+
+            '<span class="t">'+esc(n.title)+'</span>'+
+            '<i class="gc-pin out" style="border-color:'+esc(v.color)+'"></i></div>';
+        }).join('');
+      }
       childGroups.forEach(function(cg){
         rows+='<div class="gc-row sub" data-ngid="'+cg.id+'">'+
           '<i class="gc-pin in" style="border-color:'+esc(gColor(cg))+'"></i>'+
@@ -1711,6 +1742,16 @@ function renderGroups(){
     }
     groupEls.set(g.id,el);
     applyGroupStyle(g);
+    if(g.fold<2&&g.stack){
+      Array.prototype.forEach.call(el.querySelectorAll('.q-btn'),function(b){
+        b.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+        b.addEventListener('click',function(ev){ev.stopPropagation();stackRowAction(g.id,b.getAttribute('data-qa'),b.getAttribute('data-nid'));});
+      });
+      Array.prototype.forEach.call(el.querySelectorAll('.gc-row[data-nid]'),function(row){
+        row.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+        row.addEventListener('click',function(ev){ev.stopPropagation();selectOnly(row.getAttribute('data-nid'));});
+      });
+    }
   });
   refreshGroupFrames();
 }
@@ -3071,7 +3112,8 @@ function renderInspNode(){
       '<label class="i-lab">Описание</label>'+
       '<textarea class="inp" id="dlgDesc" placeholder="Кратко о чём диалог, контекст…" style="min-height:60px">'+esc(d.description)+'</textarea>'+
       '<label class="i-lab">Реплики ('+countReplies(d.replies)+')</label>'+
-      '<div style="margin-top:6px"><button class="btn primary" id="dlgEditReplies" style="width:100%">'+ic('pencil',14)+'Редактировать реплики</button></div>'+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+      '<div style="margin-top:6px"><button class="btn primary" id="dlgEditReplies" style="width:100%">'+ic('pencil',14)+'Редактировать реплики</button></div>'+
+      (d.replies.length>=2?'<div style="margin-top:6px"><button class="btn" id="dlgSplitBtn" style="width:100%" title="Разбить диалог на отдельные ноды — по одной на реплику">'+ic('expand',14)+'Разбить на реплики ('+d.replies.length+')</button></div>':'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
       '<div class="i-actions">'+
         '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
         '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -3129,6 +3171,8 @@ function renderInspNode(){
     if(editBtn){
       editBtn.onclick=function(){openDlgEditor(n);};
     }
+    var splitBtn=$('#dlgSplitBtn');
+    if(splitBtn)splitBtn.onclick=function(){splitDialogNode(n.id);};
     $all('#iSt button').forEach(function(b){
       b.onclick=function(){
         discrete(function(){n.status=b.dataset.s;});
@@ -3274,6 +3318,8 @@ function renderInspMulti(){
     '<p>Выделенные группы станут вложенными в новую. Узлы внутри выделенных групп останутся в них.</p></div>'+
     '<div class="grp-row"><input class="inp" id="mgName" placeholder="Название группы…" maxlength="60">'+
     '<button class="btn primary" id="mgGo" title="Сгруппировать (Ctrl+G)">Сгруппировать</button></div>'+
+    (sel.size>=2&&selAllDialogs()?'<button class="btn primary" id="mgMerge" style="width:100%;margin-top:8px">'+ic('dialog',14)+'Объединить в один диалог</button>':'')+
+    (sel.size>=2&&selAllStackable()?'<button class="btn" id="mgQueue" style="width:100%;margin-top:8px">'+ic('queue',14)+'Собрать в очередь (по порядку выделения)</button>':'')+
     '<div class="i-actions">'+
       '<button class="btn" id="gAlign" title="Ctrl+Shift+A">'+ic('alignH')+'Выровнять</button>'+
       '<button class="btn" id="gDup">'+ic('copy')+'Дубль</button>'+
@@ -3283,6 +3329,8 @@ function renderInspMulti(){
   $('#gDel').onclick=removeSelected;
   $('#gAlign').onclick=alignSelH;
   $('#mgGo').onclick=function(){createGroupFromSel(($('#mgName').value||'').trim());};
+  var mgM=$('#mgMerge');if(mgM)mgM.onclick=mergeDialogNodes;
+  var mgQ=$('#mgQueue');if(mgQ)mgQ.onclick=stackFromSelection;
   $('#mgName').addEventListener('keydown',function(ev){
     if(ev.key==='Enter')createGroupFromSel(($('#mgName').value||'').trim());
   });
@@ -4505,6 +4553,23 @@ function ungroup(gid){
   var lkUg=lockBlockedBy([gid].concat(membersOf(gid).map(function(n){return n.id;})));
   if(lkUg){showLockTip(lastPtr.x,lastPtr.y,lkUg);return;}
   pushHistory(serialize());
+  if(g.stack){
+    var ids=stackOrderIds(g);
+    ids.forEach(function(id,i){
+      var n=nodeById(id);
+      if(!n)return;
+      n.gid=g.parent||null;
+      n.x=Math.round(g.x||0);
+      n.y=Math.round((g.y||0)+i*130);
+    });
+    project.groups=project.groups.filter(function(x){return x.id!==gid;});
+    selGroups.delete(gid);
+    if(selGroup===gid)selGroup=null;
+    resolveOverlaps(new Set(ids));
+    renderAll();markDirty();
+    toast('Очередь разобрана — авто-связи «кто за кем» сохранены','warn');
+    return;
+  }
   project.nodes.forEach(function(n){if(n.gid===gid)n.gid=g.parent||null;});
   project.groups.forEach(function(cg){if(cg.parent===gid)cg.parent=g.parent||null;});
   project.groups=project.groups.filter(function(x){return x.id!==gid;});
@@ -4539,10 +4604,233 @@ function cycleGroupFold(gid){
 function leaveGroup(nodeId){
   var n=nodeById(nodeId);if(!n||!n.gid)return;
   var gid=n.gid;
+  var g=groupById(gid);
+  if(g&&g.stack){
+    var order0=stackOrderIds(g);
+    var idx=order0.indexOf(nodeId);
+    var prev=idx>0?order0[idx-1]:null;
+    var next=(idx>=0&&idx<order0.length-1)?order0[idx+1]:null;
+    discrete(function(){
+      project.edges=project.edges.filter(function(e){return !(e.q&&(e.from===nodeId||e.to===nodeId));});
+      n.gid=g.parent||null;
+      g.order=order0.filter(function(x){return x!==nodeId;});
+      if(prev&&next&&!project.edges.some(function(e){return e.from===prev&&e.to===next&&e.tin!=='var';}))project.edges.push(stackChainEdgeObj(prev,next));
+      var pk=stackParkPos(g,Math.max(0,idx));n.x=pk.x;n.y=pk.y;
+    });
+    if(!g.order.length){
+      project.groups=project.groups.filter(function(x){return x.id!==gid;});
+      selGroups.delete(gid);
+      if(selGroup===gid)selGroup=null;
+    }
+    renderAll();
+    toast('Узел выведен из очереди','warn');
+    return;
+  }
   discrete(function(){n.gid=null;});
   if(allDescNodes(gid).length===0)project.groups=project.groups.filter(function(g){return g.id!==gid;});
   renderAll();
   toast('Узел исключён из группы','warn');
+}
+/* ═══ очереди нод (стек-карточки) ═══ */
+function stackableType(t){return t!=='char'&&t!=='note';}
+function stackGroupOf(n){var g=groupOfNode(n);return (g&&g.stack)?g:null;}
+function stackOrderIds(g){
+  var members=membersOf(g.id),known={},out=[];
+  members.forEach(function(m){known[m.id]=true;});
+  (Array.isArray(g.order)?g.order:[]).forEach(function(id){if(known[id]){out.push(id);known[id]=false;}});
+  members.forEach(function(m){if(known[m.id])out.push(m.id);});
+  return out;
+}
+function stackChainEdgeObj(aId,bId){return{id:uid(),from:aId,to:bId,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:null,bd:{dl:0,dy:0,dr:0},cond:null,q:1};}
+function stackRebuildChains(g){
+  var ids=stackOrderIds(g),set=new Set(ids);
+  project.edges=project.edges.filter(function(e){return !(e.q&&set.has(e.from)&&set.has(e.to));});
+  for(var i=0;i<ids.length-1;i++){
+    var a=ids[i],b=ids[i+1];
+    var exists=project.edges.some(function(e){return e.from===a&&e.to===b&&e.tin!=='var';});
+    if(!exists)project.edges.push(stackChainEdgeObj(a,b));
+  }
+}
+function stackParkPos(g,idx){return{x:Math.round((g.x||0)+GCARD_W+36),y:Math.round((g.y||0)+14+idx*40)};}
+function stackSyncParks(g){
+  stackOrderIds(g).forEach(function(id,i){
+    var n=nodeById(id);if(!n)return;
+    var pk=stackParkPos(g,i);n.x=pk.x;n.y=pk.y;
+  });
+}
+function stackAppend(g,nid){
+  var ids=stackOrderIds(g);
+  if(ids.indexOf(nid)>=0)return false;
+  g.order=ids.concat([nid]);
+  var n=nodeById(nid);
+  if(n){n.gid=g.id;var pk=stackParkPos(g,ids.length);n.x=pk.x;n.y=pk.y;}
+  stackRebuildChains(g);
+  return true;
+}
+function stackDropTargetAt(dragId,wp){
+  var dn=nodeById(dragId);if(!dn||!stackableType(dn.type)||stackGroupOf(dn))return null;
+  var dEl=nodeEls.get(dragId);
+  if(!dEl||dEl.style.display==='none')return null;
+  var cx,cy;
+  if(wp){cx=wp.x;cy=wp.y;}
+  else{cx=dn.x+dEl.offsetWidth/2;cy=dn.y+dEl.offsetHeight/2;}
+  var best=null,bestD=1e9;
+  project.nodes.forEach(function(o){
+    if(o.id===dragId||!stackableType(o.type))return;
+    var oel=nodeEls.get(o.id);
+    if(!oel||oel.style.display==='none')return;
+    var ow=oel.offsetWidth,oh=oel.offsetHeight;
+    if(cx>=o.x&&cx<=o.x+ow&&cy>=o.y&&cy<=o.y+oh){
+      var d=Math.abs(o.x+ow/2-cx)+Math.abs(o.y+oh/2-cy);
+      if(d<bestD){bestD=d;best=o;}
+    }
+  });
+  return best;
+}
+function stackDropCreate(dragId,targetId,pre){
+  var A=nodeById(dragId),T=nodeById(targetId);
+  if(!A||!T)return false;
+  var sg=stackGroupOf(T);
+  pushHistory(pre);
+  if(sg){
+    var ids=stackOrderIds(sg);
+    sg.order=ids.concat([dragId]);
+    A.gid=sg.id;
+    var pk=stackParkPos(sg,ids.length);A.x=pk.x;A.y=pk.y;
+    stackRebuildChains(sg);
+    renderAll();markDirty();
+    toast('«'+A.title+'» добавлена в очередь «'+sg.name+'» (позиция '+(ids.length+1)+')');
+    return true;
+  }
+  var g={id:uid(),name:'Очередь',fold:1,x:Math.round(T.x),y:Math.round(T.y),parent:T.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:[T.id,dragId]};
+  project.groups.push(g);
+  T.gid=g.id;A.gid=g.id;
+  var pk2=stackParkPos(g,1);A.x=pk2.x;A.y=pk2.y;
+  project.edges.push(stackChainEdgeObj(T.id,A.id));
+  sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
+  renderAll();markDirty();
+  toast('Объединены в очередь: «'+T.title+'» → «'+A.title+'». Порядок меняется кнопками ↑/↓ на строках');
+  return true;
+}
+function stackRowAction(gid,act,nid){
+  var g=groupById(gid);if(!g||!g.stack)return;
+  var lk=lockBlockedBy(stackOrderIds(g));if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+  var ids=stackOrderIds(g);
+  var i=ids.indexOf(nid);if(i<0)return;
+  if(act==='out'){leaveGroup(nid);return;}
+  if(act==='up'&&i>0){pushHistory(serialize());ids[i]=ids[i-1];ids[i-1]=nid;g.order=ids;stackRebuildChains(g);renderAll();markDirty();}
+  else if(act==='down'&&i<ids.length-1){pushHistory(serialize());ids[i]=ids[i+1];ids[i+1]=nid;g.order=ids;stackRebuildChains(g);renderAll();markDirty();}
+}
+function stackFromSelection(){
+  var ids=[];
+  sel.forEach(function(id){var n=nodeById(id);if(n&&stackableType(n.type)&&!stackGroupOf(n))ids.push(id);});
+  if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум две ноды вне очередей','warn');return;}
+  var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+  pushHistory(serialize());
+  var first=nodeById(ids[0]);
+  var g={id:uid(),name:'Очередь',fold:1,x:Math.round(first.x),y:Math.round(first.y),parent:first.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:ids.slice()};
+  project.groups.push(g);
+  ids.forEach(function(id,i){
+    var n=nodeById(id);n.gid=g.id;
+    var pk=stackParkPos(g,i);n.x=pk.x;n.y=pk.y;
+  });
+  stackRebuildChains(g);
+  sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
+  renderAll();markDirty();
+  toast('Очередь из '+ids.length+' нод собрана (порядок — по порядку выделения)');
+}
+function selAllOfType(fn){
+  if(sel.size<2||selGroups.size)return false;
+  var arr=Array.from(sel);
+  for(var i=0;i<arr.length;i++){var n=nodeById(arr[i]);if(!n||!fn(n))return false;}
+  return true;
+}
+function selAllDialogs(){return selAllOfType(function(n){return n.type==='dialog';});}
+function selAllStackable(){return selAllOfType(function(n){return stackableType(n.type)&&!stackGroupOf(n);});}
+/* ═══ разбивка диалога на реплики и обратное объединение ═══ */
+function splitDialogNode(id){
+  var n=nodeById(id);
+  if(!n||n.type!=='dialog')return;
+  ensureDialog(n);
+  var reps=n.dialog.replies;
+  if(reps.length<2){toast('Нужен диалог минимум с двумя репликами верхнего уровня','warn');return;}
+  var lk=lockBlockedBy([n.id]);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+  var gS=stackGroupOf(n);
+  var kS=gS?stackOrderIds(gS).indexOf(n.id):-1;
+  pushHistory(serialize());
+  var elS=nodeEls.get(n.id);
+  var hS=(elS&&elS.style.display!=='none')?elS.offsetHeight:150;
+  var wS=(elS&&elS.style.display!=='none')?elS.offsetWidth:dlgNodeWidth(n);
+  var baseX=Math.max(20,Math.round(n.x-(wS+64))),baseY=n.y;
+  if(gS){var pk0=stackParkPos(gS,Math.max(0,kS));baseX=pk0.x;baseY=pk0.y;}
+  var created=[];
+  reps.forEach(function(r,i){
+    var t=(i===0)?(n.title||'Диалог'):((r.text||('Реплика '+(i+1))).slice(0,42));
+    var c={id:uid(),type:'dialog',gid:null,x:baseX,y:baseY+i*175,title:t,text:'',status:n.status||'idea',tags:(n.tags||[]).slice(),expand:1,color:n.color||null,tint:n.tint||0,dlgWidth:n.dlgWidth||null,notes:i===0?(n.notes||[]):[],
+      dialog:{participants:(n.dialog.participants||[]).slice(),description:(i===0)?(n.dialog.description||''):'',replies:[JSON.parse(JSON.stringify(r))]}};
+    project.nodes.push(c);created.push(c);
+  });
+  project.edges.forEach(function(e){
+    if(e.to===n.id)e.to=created[0].id;
+  });
+  project.edges.forEach(function(e){
+    if(e.from===n.id&&e.fromReply){
+      var idx=-1;
+      for(var i=0;i<reps.length;i++){if(findReply([reps[i]],e.fromReply)){idx=i;break;}}
+      if(idx>=0)e.from=created[idx].id;
+    }else if(e.from===n.id&&!e.fromOut&&e.tin!=='var'){
+      e.from=created[created.length-1].id;e.fromOut=null;
+    }
+  });
+  project.nodes=project.nodes.filter(function(x){return x.id!==n.id;});
+  project.edges=project.edges.filter(function(e){return e.from!==n.id&&e.to!==n.id;});
+  if(gS){
+    var newOrder=stackOrderIds(gS).filter(function(x){return x!==n.id;});
+    var ins=created.map(function(c){return c.id;});
+    newOrder.splice.apply(newOrder,[Math.max(0,kS),0].concat(ins));
+    gS.order=newOrder;
+    created.forEach(function(c){c.gid=gS.id;});
+    stackRebuildChains(gS);
+  }else{
+    for(var ci=0;ci<created.length-1;ci++)project.edges.push(stackChainEdgeObj(created[ci].id,created[ci+1].id));
+  }
+  sel=new Set([created[0].id]);selEdges.clear();selEdge=null;selGroups.clear();selGroup=null;
+  renderAll({nodes:created.map(function(c){return c.id;})});
+  if(!gS)resolveOverlaps(new Set(created.map(function(c){return c.id;})));
+  markDirty();
+  toast('Диалог разбит на '+created.length+' нод — стрелки реплик сохранены'+(gS?' (внутри очереди)':''));
+}
+function mergeDialogNodes(){
+  var ids=[];
+  sel.forEach(function(id){var n=nodeById(id);if(n&&n.type==='dialog')ids.push(id);});
+  if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум два диалога (только ноды «Диалог»)','warn');return;}
+  for(var i=0;i<ids.length;i++){if(stackGroupOf(nodeById(ids[i]))){toast('Ноды внутри очереди объединять нельзя — сначала выведите их (✕ на строке очереди)','warn');return;}}
+  var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+  pushHistory(serialize());
+  var first=nodeById(ids[0]);
+  ensureDialog(first);
+  var reps=[],desc='',parts=[],gidSame=null,gidDiff=false;
+  ids.forEach(function(id){
+    var n=nodeById(id);ensureDialog(n);
+    reps=reps.concat(n.dialog.replies.map(function(r){return JSON.parse(JSON.stringify(r));}));
+    if(!desc&&n.dialog.description)desc=n.dialog.description;
+    (n.dialog.participants||[]).forEach(function(p){if(parts.indexOf(p)<0)parts.push(p);});
+    var gg=n.gid||null;
+    if(gidSame===null)gidSame=gg;else if(gidSame!==gg)gidDiff=true;
+  });
+  var m={id:uid(),type:'dialog',gid:gidDiff?null:gidSame,x:first.x,y:first.y,title:first.title,text:'',status:first.status||'idea',tags:(first.tags||[]).slice(),expand:(first.expand===0||first.expand===1||first.expand===2)?first.expand:1,color:first.color||null,tint:first.tint||0,dlgWidth:first.dlgWidth||null,notes:first.notes||[],dialog:{participants:parts,description:desc,replies:reps}};
+  var idset=new Set(ids);
+  project.edges=project.edges.filter(function(e){return !(idset.has(e.from)&&idset.has(e.to));});
+  project.edges.forEach(function(e){
+    if(idset.has(e.to))e.to=m.id;
+    if(idset.has(e.from)){e.from=m.id;if(!e.fromReply)e.fromOut=null;}
+  });
+  project.nodes.push(m);
+  project.nodes=project.nodes.filter(function(n){return !idset.has(n.id);});
+  sel=new Set([m.id]);selEdges.clear();selEdge=null;selGroups.clear();selGroup=null;
+  renderAll({nodes:[m.id]});
+  markDirty();
+  toast('Объединено в один диалог: '+countReplies(reps)+' репл. (порядок реплик — по порядку выделения)');
 }
 /* ═══ встраивание в связь, автораздвижка ═══ */
 function splitPtsAtHalf(e,g){
@@ -5416,7 +5704,20 @@ return;
         if(hel2)hel2.classList.add('drop-hover-g');
       }
       dragS.hoverG=hg;
-      if(sel.size===1){
+      var stT=(sel.size===1)?stackDropTargetAt(sel.values().next().value,wp):null;
+      if(dragS.stackHl&&(!stT||stT.id!==dragS.stackHl.id)){
+        var shlE=nodeEls.get(dragS.stackHl.id);
+        if(shlE)shlE.classList.remove('drop-hover');
+        dragS.stackHl=null;
+      }
+      if(stT&&(!dragS.stackHl||stT.id!==dragS.stackHl.id)){
+        var shlE2=nodeEls.get(stT.id);
+        if(shlE2)shlE2.classList.add('drop-hover');
+        dragS.stackHl=stT;
+      }
+      if(stT){
+        setDropEdge(null);dragS.dropEdge=null;
+      }else if(sel.size===1){
 var deId=nearestEdgeAt(wp.x,wp.y,16/vp.z,sel);
 if(deId){var deE=edgeById(deId);if(deE&&isBridge(deE))deId=null;}
 dragS.dropEdge=deId;
@@ -5707,7 +6008,7 @@ knifeS=null;return;
     var ch=false;
     if(gdrag.moved){
       var ggU=groupById(gdrag.gid);
-      if(ggU)ch=reparentAfterMove(ggU);
+      if(ggU){ch=reparentAfterMove(ggU);if(ggU.stack)stackSyncParks(ggU);}
     }
     if(gdrag.moved&&gdrag.pre!==serialize()){pushHistory(gdrag.pre);markDirty();}
     if(ch){
@@ -5730,6 +6031,17 @@ knifeS=null;return;
       if(hgel)hgel.classList.remove('drop-hover-g');
       dragS.hoverG=null;
     }
+    if(dragS.stackHl){
+      var shlE3=nodeEls.get(dragS.stackHl.id);
+      if(shlE3)shlE3.classList.remove('drop-hover');
+      dragS.stackHl=null;
+    }
+    if(!dragS.extract&&dragS.moved&&sel.size===1){
+      var stId=sel.values().next().value;
+      var wPU=toWorld(e.clientX,e.clientY);
+      var stT=stackDropTargetAt(stId,wPU);
+      if(stT){stackDropCreate(stId,stT.id,dragS.pre);dragS=null;return;}
+    }
     if(!dragS.extract&&dragS.moved&&dragS.dropEdge&&sel.size===1){
 var n=nodeById(sel.values().next().value);
 var ed=edgeById(dragS.dropEdge);
@@ -5743,8 +6055,20 @@ else if(n&&ed)toast('В мост нельзя вставить элемент','
         var h=(nel&&nel.style.display!=='none')?nel.offsetHeight:90;
         var w=(nel&&nel.style.display!=='none')?nel.offsetWidth:NODE_W;
         var tg=deepestGroupAt(nn.x+w/2,nn.y+h/2);
-        var ngid=tg?tg.id:null;
-        if((nn.gid||null)!==ngid){nn.gid=ngid;changedG=true;}
+        var appended=false;
+        if(tg&&tg.stack){
+          appended=stackAppend(tg,nn.id);
+        }else if(!tg){
+          var wpS=toWorld(e.clientX,e.clientY);
+          var tgS=deepestGroupAt(wpS.x,wpS.y);
+          if(tgS&&tgS.stack)appended=stackAppend(tgS,nn.id);
+        }
+        if(!appended){
+          var ngid=tg?tg.id:null;
+          if((nn.gid||null)!==ngid){nn.gid=ngid;changedG=true;}
+        }else{
+          changedG=true;
+        }
       });
       if(dragS.pre!==serialize()){pushHistory(dragS.pre);markDirty();}
       if(changedG)renderAll();
@@ -6188,6 +6512,12 @@ canvas.addEventListener('contextmenu',function(e){
       {ico:'copy',label:'Дублировать',fn:function(){var r=duplicateSel();if(r)startCarry(r.ids,r.pre);}},
       {ico:'target',label:'Центрировать',fn:function(){centerOn(n);}}
     ];
+    if(n.type==='dialog'){
+      ensureDialog(n);
+      if(n.dialog.replies.length>=2)items.push({ico:'expand',label:'Разбить на реплики ('+n.dialog.replies.length+')',fn:function(){splitDialogNode(n.id);}});
+    }
+    if(sel.size>=2&&selAllDialogs())items.push({ico:'dialog',label:'Объединить в один диалог',fn:mergeDialogNodes});
+    if(sel.size>=2&&selAllStackable())items.push({ico:'queue',label:'Собрать в очередь',fn:stackFromSelection});
     if(sel.size+selGroups.size>1){
       items.push({ico:'alignH',label:'Распределить по строкам…',fn:function(){openDistributeModal();}});
       items.push({ico:'expand',label:'Растянуть в строку по связям',fn:function(){stretchSelected();}});
@@ -6244,7 +6574,7 @@ canvas.addEventListener('contextmenu',function(e){
       itemsG.push({ico:'x',label:'Вынуть из родителя',fn:function(){discrete(function(){g.parent=null;});renderAll();}});
     }
     itemsG.push('-');
-    itemsG.push({ico:'trash',label:'Распустить группу',danger:true,fn:function(){ungroup(gid);}});
+    itemsG.push({ico:'trash',label:g.stack?'Разобрать очередь (связи сохранятся)':'Распустить группу',danger:true,fn:function(){ungroup(gid);}});
     openCtxMenu(e.clientX,e.clientY,itemsG);
     return;
   }
@@ -6624,6 +6954,8 @@ function normalize(p){
       bbox:Array.isArray(g.bbox)?g.bbox:null,
       hh:g.hh||null,
       auto:g.auto===true,
+      stack:!!g.stack,
+      order:Array.isArray(g.order)?g.order.filter(function(x){return typeof x==='string';}):[],
       fx:(typeof g.fx==='number')?g.fx:null,
       fy:(typeof g.fy==='number')?g.fy:null,
       fw:(typeof g.fw==='number')?g.fw:null,
@@ -6685,6 +7017,7 @@ lp:(typeof e.lp==='number')?clamp(e.lp,-44,44):0,
 fromReply:(typeof e.fromReply==='string'&&e.fromReply)?e.fromReply:null,
 fromOut:(typeof e.fromOut==='string'&&e.fromOut)?e.fromOut:null,
 tin:(e.tin==='var')?'var':null,
+q:(e.q===1)?1:null,
 bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0},cond:econd};
 });
   /* исход, к которому привязана стрелка, должен существовать на развилке */
@@ -6917,6 +7250,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
+      '<div>очереди нод</div><div>перетащите ноду на другую — объединятся в очередь с авто-связями «кто за кем» (номера на строках — порядок); на карточке: ↑/↓ — порядок, ✕ — вывести, клик по строке — открыть ноду, ПКМ — разобрать; сброс ноды на карточку очереди — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в очередь»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
