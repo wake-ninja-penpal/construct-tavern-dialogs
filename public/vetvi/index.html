@@ -140,14 +140,14 @@ body.left-resizing{cursor:col-resize;user-select:none}
 #canvas{position:absolute;inset:0;overflow:hidden;background-color:var(--bg);touch-action:none;background-image:radial-gradient(circle,#22252b 1px,transparent 1.3px)}
 #canvas.dropready{outline:2px dashed rgba(226,165,78,.35);outline-offset:-10px}
 body.space #canvas,body.ctrlpan #canvas{cursor:grab}
-body.panning #canvas,body.panning .groupbox,body.panning .gcard,body.panning .node{cursor:grabbing!important}
+body.panning #canvas,body.panning .groupbox,body.panning .gcard,body.panning .qcard,body.panning .node{cursor:grabbing!important}
 #lockTip{position:fixed;z-index:400;left:0;top:0;transform:translate(-50%,-150%);background:rgba(26,28,33,.97);border:1px solid #6a4a3a;border-radius:9px;padding:7px 13px;font:600 12px var(--body);color:#f4d9b8;white-space:nowrap;box-shadow:0 10px 28px rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .16s;display:flex;align-items:center;gap:8px}
 #lockTip.show{opacity:1}
 #lockTip .lt-dot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 8px currentColor}
 .gbadge.lbadge{border-style:solid;font-weight:700}
 /* обводка объектов, которые прямо сейчас редактирует другой участник (цветом участника) */
 .node.lkb{border-color:var(--lkc,#8b929c)!important;box-shadow:0 0 0 1.5px var(--lkc,#8b929c),0 0 18px -4px var(--lkc,#8b929c),0 6px 18px rgba(0,0,0,.38)!important}
-.groupbox.lkb,.gcard.lkb{border-color:var(--lkc,#8b929c)!important;border-style:solid!important;box-shadow:0 0 0 2px var(--lkc,#8b929c),0 0 24px -6px var(--lkc,#8b929c)!important}
+.groupbox.lkb,.gcard.lkb,.qcard.lkb{border-color:var(--lkc,#8b929c)!important;border-style:solid!important;box-shadow:0 0 0 2px var(--lkc,#8b929c),0 0 24px -6px var(--lkc,#8b929c)!important}
 #edges .edge.lkb .line{stroke:var(--lkc,#8b929c)!important;filter:drop-shadow(0 0 5px var(--lkc,#8b929c))}
 /* список проектов */
 .pj-list{max-height:340px;overflow-y:auto;margin:10px 0 4px;display:flex;flex-direction:column;gap:6px}
@@ -221,7 +221,7 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .groupbox{position:absolute;border:1.5px dashed var(--gbcol,rgba(160,168,180,.4));background:var(--gbfill,transparent);border-radius:14px;cursor:default;transition:border-color .18s,box-shadow .18s}
 .groupbox:hover{border-color:var(--gbhov,rgba(195,203,215,.6))}
 .groupbox.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
-.groupbox.drop-hover-g,.gcard.drop-hover-g{border-color:var(--acc2)!important;box-shadow:0 0 0 4px rgba(240,193,121,.25)!important}
+.groupbox.drop-hover-g,.gcard.drop-hover-g,.qcard.drop-hover-g{border-color:var(--acc2)!important;box-shadow:0 0 0 4px rgba(240,193,121,.25)!important}
 .gb-head{position:absolute;top:-13px;left:10px;display:flex;align-items:center;gap:7px;background:#1d2027;border:1px solid #343945;border-radius:8px;padding:3px 8px;box-shadow:0 4px 10px rgba(0,0,0,.35);cursor:grab;z-index:4;max-width:90%}
 .groupbox.sel .gb-head,.gcard.sel .gb-head{border-color:var(--acc)}
 .gb-name{font-size:11.5px;font-weight:600;color:var(--tx);white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
@@ -246,16 +246,32 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .gc-row.sub{color:var(--tx3)}
 .gc-pin{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;pointer-events:none;flex:none}
 .gc-pin.in{left:-5px}.gc-pin.out{right:-5px}
-/* очереди нод */
-.gcard.q{border-style:solid;border-color:rgba(226,165,78,.55)}
-.gcard.q:hover{border-color:rgba(226,165,78,.8)}
-.gcard.q.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
-.gc-row .q-num{flex:none;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:rgba(226,165,78,.18);color:#e2a54e;font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
-.gc-row .q-btns{display:flex;gap:2px;flex:none;opacity:.35;transition:opacity .12s}
-.gc-row:hover .q-btns{opacity:1}
-.q-btn{width:16px;height:16px;border-radius:4px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#cfd4da;font-size:10px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;font-family:inherit}
-.q-btn:hover{background:rgba(255,255,255,.16);color:#fff}
-.q-btn.qx:hover{background:rgba(224,113,78,.35);border-color:rgba(224,113,78,.7);color:#fff}
+/* очередь — отдельный элемент (не группа): читаемое содержимое, перетаскивание строк, без разворачивания */
+.qcard{position:absolute;width:300px;background:linear-gradient(#262015,#1a1712);border:1.5px solid rgba(226,165,78,.6);border-radius:12px;cursor:grab;box-shadow:0 8px 22px rgba(0,0,0,.45);transition:transform .16s,box-shadow .16s,border-color .16s;user-select:none}
+.qcard:hover{transform:translateY(-2px);border-color:rgba(226,165,78,.85);box-shadow:0 12px 28px rgba(0,0,0,.55)}
+.qcard.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
+.qcard.spawn{animation:nodeIn .5s cubic-bezier(.2,.9,.3,1.15) both}
+.q-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(226,165,78,.25);color:#e2a54e;font-size:11px;font-weight:700;letter-spacing:.3px}
+.q-head .q-ico{width:14px;height:14px;flex:none;opacity:.9}
+.q-head .q-cnt{margin-left:auto;flex:none;font-size:10px;font-weight:600;background:rgba(226,165,78,.18);color:#e2a54e;border-radius:8px;padding:1px 7px}
+.q-list{padding:5px 0 7px}
+.q-item{position:relative;display:flex;align-items:flex-start;gap:8px;margin:4px 9px;padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);cursor:grab}
+.q-item:hover{background:rgba(255,255,255,.06)}
+.q-num{flex:none;min-width:16px;height:16px;margin-top:1px;padding:0 4px;border-radius:8px;background:rgba(226,165,78,.18);color:#e2a54e;font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.q-item .q-body{flex:1;min-width:0}
+.q-item .q-title{font-size:11px;font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-item .q-text{font-size:10px;color:var(--tx2);line-height:1.5;margin-top:3px}
+.q-item .q-text .q-line{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-item .q-text .q-line.desc{color:var(--tx)}
+.q-item .q-text .q-line.more{color:var(--tx3);font-style:italic}
+.q-item .q-x{flex:none;width:16px;height:16px;margin-top:1px;border-radius:4px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#cfd4da;font-size:10px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;font-family:inherit;opacity:.4;transition:opacity .12s,background .12s}
+.q-item:hover .q-x{opacity:1}
+.q-item .q-x:hover{background:rgba(224,113,78,.35);border-color:rgba(224,113,78,.7);color:#fff}
+.q-item.q-src{opacity:.35;border-style:dashed}
+.q-item.q-ins-above{box-shadow:inset 0 2px 0 0 var(--acc)}
+.q-item.q-ins-below{box-shadow:inset 0 -2px 0 0 var(--acc)}
+.q-empty{padding:10px 12px;font-size:10px;color:var(--tx3)}
+.gm-snip{color:var(--tx3);font-size:10px}
 .node{position:absolute;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;box-shadow:0 6px 18px rgba(0,0,0,.38);cursor:grab;user-select:none;transition:transform .16s,box-shadow .16s,border-color .16s}
 .node:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.5);border-color:#404653}
 .node.dragging{cursor:grabbing;box-shadow:0 18px 38px rgba(0,0,0,.6)}
@@ -883,7 +899,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <script>
 'use strict';
 (function(){
-var NODE_W=216, GRID=26, GCARD_W=200, LS_KEY='vetvi-autosave-v17', MAX_DLG_DEPTH=10, DLG_REPLY_INDENT=23;
+var NODE_W=216, GRID=26, GCARD_W=200, QCARD_W=300, LS_KEY='vetvi-autosave-v17', MAX_DLG_DEPTH=10, DLG_REPLY_INDENT=23;
 function $(s){return document.querySelector(s);}
 function $all(s){return Array.prototype.slice.call(document.querySelectorAll(s));}
 function uid(){return Math.random().toString(36).slice(2,10);}
@@ -1028,7 +1044,8 @@ var history=[], future=[], preSnap=null;
 var dirty=false, fileName=null, fileHandle=null;
 var snapOn=true, gridOn=true, spaceDown=false, bendMode='smooth';
 var nodeEls=new Map(), edgeEls=new Map(), groupEls=new Map();
-var panS=null, dragS=null, marS=null, connS=null, gdrag=null, lblDrag=null, wpDrag=null, rpDrag=null, grestore=null, inDrag=null, knifeS=null, gcreateS=null, carryS=null, dlgResizeS=null, brDrag=null, outDrag=null, repOutDrag=null;
+var panS=null, dragS=null, marS=null, connS=null, gdrag=null, lblDrag=null, wpDrag=null, rpDrag=null, grestore=null, inDrag=null, knifeS=null, gcreateS=null, carryS=null, dlgResizeS=null, brDrag=null, outDrag=null, repOutDrag=null, qRowDrag=null;
+var qLastIns=null;
 var activeGroupDragIds=null;
 var palHover=null, rpHover=null;
 var animT=null, flashT=null, menuOpen=false, modalBtns=[];
@@ -1437,7 +1454,7 @@ function groupRectWorld(g){
     return{x:el.offsetLeft,y:el.offsetTop,w:el.offsetWidth,h:el.offsetHeight};
   }
   if(!el||el.style.display==='none')return null;
-  return{x:g.x||0,y:g.y||0,w:GCARD_W,h:el.offsetHeight||44};
+  return{x:g.x||0,y:g.y||0,w:g.stack?QCARD_W:GCARD_W,h:el.offsetHeight||44};
 }
 function rectCenterOf(g){
   var r=groupRectWorld(g);
@@ -1676,13 +1693,36 @@ function applyGroupStyle(g){
 }
 function renderGroups(){
   $all('#framesLayer .groupbox').forEach(function(el){el.remove();});
-  $all('#world .gcard').forEach(function(el){el.remove();});
+  $all('#world .gcard,#world .qcard').forEach(function(el){el.remove();});
   groupEls.clear();
   var sorted=project.groups.slice().sort(function(a,b){return groupDepth(a)-groupDepth(b);});
   sorted.forEach(function(g){
     var ms=allDescNodes(g.id);
     var el=document.createElement('div');
-    if(g.fold===2){
+    if(g.stack){
+      /* очередь — отдельный элемент (не группа): строки с содержимым диалогов, порядок — перетаскиванием, разворачивания нет */
+      el.className='qcard';
+      el.dataset.gid=g.id;
+      el.style.left=(g.x||0)+'px';el.style.top=(g.y||0)+'px';
+      var direct=stackOrderIds(g).map(function(x){return nodeById(x);}).filter(Boolean);
+      var rows=direct.map(function(n,i){
+        var v=nodeVisual(n);
+        return '<div class="q-item" data-nid="'+n.id+'" title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
+          '<span class="q-num">'+(i+1)+'</span>'+
+          '<div class="q-body">'+
+            '<div class="q-title" style="color:'+esc(v.color)+'">'+esc(n.title||'')+'</div>'+
+            qNodeContentHtml(n)+
+          '</div>'+
+          '<button class="q-x" data-nid="'+n.id+'" title="Вывести из очереди">✕</button>'+
+        '</div>';
+      }).join('');
+      el.innerHTML='<div class="q-head">'+ic('queue',14)+
+        '<span class="q-name">'+esc(g.name)+'</span>'+
+        '<span class="q-cnt">'+direct.length+'</span></div>'+
+        '<div class="q-list">'+(rows||'<div class="q-empty">Очередь пуста</div>')+'</div>';
+      if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
+      worldEl.appendChild(el);
+    }else if(g.fold===2){
       el.className='groupbox';
       el.dataset.gid=g.id;
       el.innerHTML='<div class="gb-head"><span class="gb-name">'+esc(g.name)+'</span><span class="gb-cnt">'+ms.length+'</span><button class="gb-fold" title="Свернуть группу">'+ic('chevUp',11)+'</button></div>'+
@@ -1692,39 +1732,21 @@ function renderGroups(){
       if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
       framesLayer.appendChild(el);
     }else{
-      el.className='gcard'+(g.stack?' q':'');
+      el.className='gcard';
       el.dataset.gid=g.id;
       el.style.left=(g.x||0)+'px';el.style.top=(g.y||0)+'px';
       var btnIco=g.fold===1?ic('chev',11):ic('expand',11);
       var btnTitle=g.fold===1?'Сжать до компакта':'Развернуть группу';
-      var direct=g.stack?stackOrderIds(g).map(function(x){return nodeById(x);}).filter(Boolean):membersOf(g.id);
+      var direct=membersOf(g.id);
       var childGroups=project.groups.filter(function(cg){return cg.parent===g.id;});
-      var rows;
-      if(g.stack){
-        rows=direct.map(function(n,i){
-          var v=nodeVisual(n);
-          return '<div class="gc-row" data-nid="'+n.id+'" title="Двойной клик — открыть ноду">'+
-            '<span class="q-num">'+(i+1)+'</span>'+
-            '<i class="gc-pin in" style="border-color:'+esc(v.color)+'"></i>'+
-            '<span class="dot" style="background:'+esc(v.color)+';color:'+esc(v.color)+'"></span>'+
-            '<span class="t">'+esc(n.title)+'</span>'+
-            '<span class="q-btns">'+
-              (i>0?'<button class="q-btn" data-qa="up" data-nid="'+n.id+'" title="Передвинуть выше">↑</button>':'')+
-              (i<direct.length-1?'<button class="q-btn" data-qa="down" data-nid="'+n.id+'" title="Передвинуть ниже">↓</button>':'')+
-              '<button class="q-btn qx" data-qa="out" data-nid="'+n.id+'" title="Вывести из очереди">✕</button>'+
-            '</span>'+
-            '<i class="gc-pin out" style="border-color:'+esc(v.color)+'"></i></div>';
-        }).join('');
-      }else{
-        rows=direct.map(function(n){
-          var v=nodeVisual(n);
-          return '<div class="gc-row" data-nid="'+n.id+'">'+
-            '<i class="gc-pin in" style="border-color:'+esc(v.color)+'"></i>'+
-            '<span class="dot" style="background:'+esc(v.color)+';color:'+esc(v.color)+'"></span>'+
-            '<span class="t">'+esc(n.title)+'</span>'+
-            '<i class="gc-pin out" style="border-color:'+esc(v.color)+'"></i></div>';
-        }).join('');
-      }
+      var rows=direct.map(function(n){
+        var v=nodeVisual(n);
+        return '<div class="gc-row" data-nid="'+n.id+'">'+
+          '<i class="gc-pin in" style="border-color:'+esc(v.color)+'"></i>'+
+          '<span class="dot" style="background:'+esc(v.color)+';color:'+esc(v.color)+'"></span>'+
+          '<span class="t">'+esc(n.title)+'</span>'+
+          '<i class="gc-pin out" style="border-color:'+esc(v.color)+'"></i></div>';
+      }).join('');
       childGroups.forEach(function(cg){
         rows+='<div class="gc-row sub" data-ngid="'+cg.id+'">'+
           '<i class="gc-pin in" style="border-color:'+esc(gColor(cg))+'"></i>'+
@@ -1742,14 +1764,18 @@ function renderGroups(){
     }
     groupEls.set(g.id,el);
     applyGroupStyle(g);
-    if(g.fold<2&&g.stack){
-      Array.prototype.forEach.call(el.querySelectorAll('.q-btn'),function(b){
+    if(g.stack){
+      Array.prototype.forEach.call(el.querySelectorAll('.q-x'),function(b){
         b.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
-        b.addEventListener('click',function(ev){ev.stopPropagation();stackRowAction(g.id,b.getAttribute('data-qa'),b.getAttribute('data-nid'));});
+        b.addEventListener('click',function(ev){ev.stopPropagation();stackRowAction(g.id,'out',b.getAttribute('data-nid'));});
       });
-      Array.prototype.forEach.call(el.querySelectorAll('.gc-row[data-nid]'),function(row){
-        row.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
-        row.addEventListener('click',function(ev){ev.stopPropagation();selectOnly(row.getAttribute('data-nid'));});
+      Array.prototype.forEach.call(el.querySelectorAll('.q-item[data-nid]'),function(row){
+        row.addEventListener('pointerdown',function(ev){
+          ev.stopPropagation();
+          if(ev.button!==0)return;
+          qLastIns=null;
+          qRowDrag={gid:g.id,nid:row.getAttribute('data-nid'),row:row,sx:ev.clientX,sy:ev.clientY,moved:false};
+        });
       });
     }
   });
@@ -1762,7 +1788,7 @@ function groupBounds(gid,visited){
   var g=groupById(gid);if(!g)return null;
   if(g.fold<2){
     var cel=groupEls.get(gid),ch=cel?cel.offsetHeight:44;
-    return{minX:g.x||0,minY:g.y||0,maxX:(g.x||0)+GCARD_W,maxY:(g.y||0)+ch};
+    return{minX:g.x||0,minY:g.y||0,maxX:(g.x||0)+(g.stack?QCARD_W:GCARD_W),maxY:(g.y||0)+ch};
   }
   if(!g.auto&&g.fx!=null&&g.fw!=null&&g.fh!=null){
     return{minX:g.fx,minY:g.fy,maxX:g.fx+g.fw,maxY:g.fy+g.fh};
@@ -2034,7 +2060,7 @@ function spreadFrac(gid,edgeId,dir){
 }
 function cardRowPoint(g,n,side){
   var cardEl=groupEls.get(g.id);if(!cardEl)return null;
-  var row=cardEl.querySelector('.gc-row[data-nid="'+n.id+'"]');
+  var row=cardEl.querySelector('.gc-row[data-nid="'+n.id+'"],.q-item[data-nid="'+n.id+'"]');
   if(!row){
     var anc=groupOfNode(n),guard=0;
     while(anc&&anc.parent&&anc.parent!==g.id&&guard++<30){anc=groupById(anc.parent);}
@@ -2061,7 +2087,7 @@ function edgeAnchors(e){
       else{
         var elGA=groupEls.get(gaB.id),hGA=elGA?elGA.offsetHeight:44;
         var faB=memberFrac(gaB,na);if(faB===null)faB=spreadFrac(gaB.id,e.id,'out');
-        x1b=gaB.x+GCARD_W;y1b=gaB.y+hGA*faB;
+        x1b=gaB.x+(gaB.stack?QCARD_W:GCARD_W);y1b=gaB.y+hGA*faB;
       }
     }else{x1b=na.x+wA0;y1b=na.y+hA0/2;}
     if(gbB){
@@ -2101,7 +2127,7 @@ function edgeAnchors(e){
       var elA=groupEls.get(ga.id),hA=elA?elA.offsetHeight:44;
       var fa=memberFrac(ga,na);
       if(fa===null)fa=spreadFrac(ga.id,e.id,'out');
-      x1=ga.x+GCARD_W;y1=ga.y+hA*fa;
+      x1=ga.x+(ga.stack?QCARD_W:GCARD_W);y1=ga.y+hA*fa;
     }
   }else{
     var a=nodeEls.get(na.id);if(!a)return null;
@@ -2741,6 +2767,48 @@ function renderInspGroup(){
   var gid=(selGroup&&selGroups.has(selGroup))?selGroup:selGroups.values().next().value;
   var g=groupById(gid);
   if(!g){selGroup=null;selGroups.clear();return renderInspEmpty();}
+  var msQ=allDescNodes(g.id);
+  if(g.stack){
+    /* очередь: отдельный инспектор — без вида/цвета/авторазмера, порядок и содержимое */
+    var idsQ=stackOrderIds(g);
+    var listQ=idsQ.map(function(id,i){
+      var nQ=nodeById(id);if(!nQ)return'';
+      var vQ=nodeVisual(nQ);
+      var snip='';
+      if(nQ.type==='dialog'){
+        ensureDialog(nQ);
+        var dq=(nQ.dialog.description||'').trim();
+        var rq=(nQ.dialog.replies||[]).map(function(r){return (r.text||'').trim();}).filter(Boolean);
+        snip=[dq].concat(rq).slice(0,2).join(' · ');
+      }else{snip=(nQ.text||'').trim();}
+      if(snip.length>70)snip=snip.slice(0,70)+'…';
+      return '<div class="gm-row" data-nid="'+nQ.id+'"><span class="q-num">'+(i+1)+'</span><span class="dot" style="background:'+esc(vQ.color)+'"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nQ.title)+(snip?' <span class="gm-snip">— '+esc(snip)+'</span>':'')+'</span></div>';
+    }).join('');
+    insp.innerHTML=
+      '<div class="i-cap">Очередь</div>'+
+      '<label class="i-lab">Название</label>'+
+      '<input class="inp" id="igName" value="'+esc(g.name)+'" maxlength="60">'+
+      '<div class="i-meta">Развернуть в группу нельзя — очередь только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически.</div>'+
+      '<label class="i-lab">Порядок ('+idsQ.length+')</label>'+
+      '<div class="gm-list">'+listQ+'</div>'+
+      '<div class="i-actions">'+
+        '<button class="btn danger" id="igUng">'+ic('x')+'Разобрать очередь (связи сохранятся)</button>'+
+      '</div>'+
+      '<div class="i-meta">тип: очередь нод<br>ID: '+esc(g.id)+' · входов в очередь: '+project.edges.filter(function(e){var f0=idsQ[0];return f0&&e.to===f0&&e.tin!=='var';}).length+'</div>';
+    var inpQ=$('#igName');
+    inpQ.addEventListener('focus',editStart);
+    inpQ.addEventListener('input',function(){
+      g.name=inpQ.value;
+      var lbl=document.querySelector('.qcard[data-gid="'+g.id+'"] .q-name');
+      if(lbl)lbl.textContent=g.name;
+      updateGroupBadges();
+      markDirty();
+    });
+    inpQ.addEventListener('change',editEnd);
+    inpQ.addEventListener('blur',editEnd);
+    $('#igUng').onclick=function(){ungroup(g.id);};
+    return;
+  }
   var ms=allDescNodes(g.id);
   var list=ms.map(function(n){
     var v=nodeVisual(n);
@@ -2780,7 +2848,7 @@ function renderInspGroup(){
   inp.addEventListener('focus',editStart);
   inp.addEventListener('input',function(){
     g.name=inp.value;
-    var lbl=document.querySelector('.groupbox[data-gid="'+g.id+'"] .gb-name')||document.querySelector('.gcard[data-gid="'+g.id+'"] .gb-name');
+    var lbl=document.querySelector('.groupbox[data-gid="'+g.id+'"] .gb-name')||document.querySelector('.gcard[data-gid="'+g.id+'"] .gb-name')||document.querySelector('.qcard[data-gid="'+g.id+'"] .q-name');
     if(lbl)lbl.textContent=g.name;
     updateGroupBadges();
     markDirty();
@@ -2842,7 +2910,7 @@ function openDlgEditor(n){
   $('#dlgModal').classList.add('show');
 }
 function closeDlgEditor(){
-  if(dlgModalNode)lockGive([dlgModalNode.id]);
+  if(dlgModalNode){refreshQueueRowContent(dlgModalNode.id);lockGive([dlgModalNode.id]);}
   $('#dlgModal').classList.remove('show');
   dlgModalNode=null;
 }
@@ -2916,6 +2984,7 @@ function dlgModalBind(chars){
       txt.addEventListener('input',function(){
         r.text=txt.value;
         markDirty();
+        refreshQueueRowContent(n.id);
         var nodeEl=nodeEls.get(n.id);
         if(nodeEl){
           var tree=nodeEl.querySelector('.dlg-tree');
@@ -3162,6 +3231,7 @@ function renderInspNode(){
       descD.addEventListener('input',function(){
         d.description=descD.value;
         if(el)setNodeText(el,n);
+        refreshQueueRowContent(n.id);
         markDirty();
       });
       descD.addEventListener('change',editEnd);
@@ -4593,6 +4663,7 @@ function prepareGroupCard(g){
 }
 function cycleGroupFold(gid){
   var g=groupById(gid);if(!g)return;
+  if(g.stack){toast('Очередь нельзя развернуть в группу — только «Разобрать очередь» (ПКМ по карточке очереди)','warn');return;}
   pushHistory(serialize());
   var wasOpen=g.fold===2;
   g.fold=g.fold===2?1:(g.fold===1?0:2);
@@ -4655,7 +4726,7 @@ function stackRebuildChains(g){
     if(!exists)project.edges.push(stackChainEdgeObj(a,b));
   }
 }
-function stackParkPos(g,idx){return{x:Math.round((g.x||0)+GCARD_W+36),y:Math.round((g.y||0)+14+idx*40)};}
+function stackParkPos(g,idx){return{x:Math.round((g.x||0)+QCARD_W+36),y:Math.round((g.y||0)+14+idx*40)};}
 function stackSyncParks(g){
   stackOrderIds(g).forEach(function(id,i){
     var n=nodeById(id);if(!n)return;
@@ -4717,18 +4788,105 @@ function stackDropCreate(dragId,targetId,pre){
   stackRebuildChains(g);
   sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
   renderAll();markDirty();
-  toast('Объединены в очередь: «'+T.title+'» → «'+A.title+'» — стандартная связь по порядку, старые связи «'+A.title+'» убраны. Порядок меняется кнопками ↑/↓');
+  toast('Объединены в очередь: «'+T.title+'» → «'+A.title+'» — стандартная связь по порядку, старые связи «'+A.title+'» убраны. Порядок меняется перетаскиванием строк');
   return true;
 }
 function stackRowAction(gid,act,nid){
   var g=groupById(gid);if(!g||!g.stack)return;
   var lk=lockBlockedBy(stackOrderIds(g));if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
-  var ids=stackOrderIds(g);
-  var i=ids.indexOf(nid);if(i<0)return;
-  if(act==='out'){leaveGroup(nid);return;}
-  if(act==='up'&&i>0){pushHistory(serialize());ids[i]=ids[i-1];ids[i-1]=nid;g.order=ids;stackRebuildChains(g);renderAll();markDirty();}
-  else if(act==='down'&&i<ids.length-1){pushHistory(serialize());ids[i]=ids[i+1];ids[i+1]=nid;g.order=ids;stackRebuildChains(g);renderAll();markDirty();}
+  if(act==='out')leaveGroup(nid);
 }
+/* читаемое содержимое ноды для строки очереди: диалог (описание + реплики) или текст */
+function qNodeContentHtml(n){
+  if(!n)return'';
+  var lines=[];
+  if(n.type==='dialog'){
+    ensureDialog(n);
+    var d=(n.dialog.description||'').trim();
+    if(d)lines.push({t:d,cls:'desc'});
+    (n.dialog.replies||[]).forEach(function(r){
+      var t=(r.text||'').trim();if(!t)return;
+      lines.push({t:'— '+t,cls:''});
+    });
+  }else{
+    var t=(n.text||'').trim();
+    if(t)lines.push({t:t,cls:''});
+    if(n.type==='branch'&&Array.isArray(n.outs)){
+      n.outs.forEach(function(o){var s=(o.label||o.name||'').trim();if(s)lines.push({t:'→ '+s,cls:''});});
+    }
+  }
+  if(!lines.length)return'';
+  var max=4,html='';
+  for(var i=0;i<Math.min(max,lines.length);i++)html+='<span class="q-line '+(lines[i].cls||'')+'">'+esc(lines[i].t.slice(0,140))+'</span>';
+  if(lines.length>max)html+='<span class="q-line more">… ещё '+(lines.length-max)+'</span>';
+  return '<div class="q-text">'+html+'</div>';
+}
+/* живое обновление содержимого строки очереди (при редактировании описания/реплик) */
+function refreshQueueRowContent(nid){
+  var n=nodeById(nid);if(!n)return;
+  var g=stackGroupOf(n);if(!g)return;
+  var cardEl=groupEls.get(g.id);if(!cardEl)return;
+  var row=cardEl.querySelector('.q-item[data-nid="'+nid+'"]');if(!row)return;
+  var body=row.querySelector('.q-body');if(!body)return;
+  var v=nodeVisual(n);
+  body.innerHTML='<div class="q-title" style="color:'+esc(v.color)+'">'+esc(n.title||'')+'</div>'+qNodeContentHtml(n);
+}
+/* перетаскивание строк очереди: подсветка места вставки */
+function qRowUnmark(){
+  $all('.q-item.q-ins-above,.q-item.q-ins-below').forEach(function(r){r.classList.remove('q-ins-above','q-ins-below');});
+}
+function qRowMark(y){
+  qRowUnmark();
+  if(!qRowDrag)return;
+  var list=qRowDrag.row.parentElement;if(!list)return;
+  var rows=Array.prototype.filter.call(list.querySelectorAll('.q-item[data-nid]'),function(r){return r!==qRowDrag.row&&r.style.display!=='none';});
+  var idx=rows.length;
+  for(var i=0;i<rows.length;i++){
+    var rc=rows[i].getBoundingClientRect();
+    if(y<rc.top+rc.height/2){idx=i;break;}
+  }
+  qLastIns=idx;
+  if(idx<rows.length)rows[idx].classList.add('q-ins-above');
+  else if(rows.length)rows[rows.length-1].classList.add('q-ins-below');
+}
+function qRowApply(gid,nid,insIdx){
+  var g=groupById(gid);if(!g||!g.stack)return;
+  var lk=lockBlockedBy(stackOrderIds(g));if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+  var ids=stackOrderIds(g);
+  var from=ids.indexOf(nid);if(from<0)return;
+  var rest=ids.filter(function(x){return x!==nid;});
+  if(insIdx==null||insIdx<0)insIdx=rest.length;
+  if(insIdx>rest.length)insIdx=rest.length;
+  var newOrder=rest.slice(0,insIdx).concat([nid],rest.slice(insIdx));
+  if(newOrder.join('\u0001')===ids.join('\u0001'))return;
+  pushHistory(serialize());
+  g.order=newOrder;
+  stackRebuildChains(g);
+  stackSyncParks(g);
+  renderAll();markDirty();
+  toast('Порядок очереди изменён — связи «кто за кем» перестроены');
+}
+window.addEventListener('pointermove',function(e){
+  if(!qRowDrag)return;
+  if(!qRowDrag.moved&&Math.abs(e.clientY-qRowDrag.sy)+Math.abs(e.clientX-qRowDrag.sx)>6){
+    qRowDrag.moved=true;
+    qRowDrag.row.classList.add('q-src');
+  }
+  if(qRowDrag.moved)qRowMark(e.clientY);
+});
+window.addEventListener('pointerup',function(e){
+  if(!qRowDrag)return;
+  var qd=qRowDrag;qRowDrag=null;
+  qd.row.classList.remove('q-src');
+  qRowUnmark();
+  if(qd.moved){qRowApply(qd.gid,qd.nid,qLastIns);qLastIns=null;}
+  else if(e.button===0||e.button===undefined){var nn=nodeById(qd.nid);if(nn)selectOnly(qd.nid);}
+});
+window.addEventListener('pointercancel',function(){
+  if(!qRowDrag)return;
+  qRowDrag.row.classList.remove('q-src');
+  qRowDrag=null;qLastIns=null;qRowUnmark();
+});
 function stackFromSelection(){
   var ids=[];
   sel.forEach(function(id){var n=nodeById(id);if(n&&stackableType(n.type)&&!stackGroupOf(n))ids.push(id);});
@@ -5344,11 +5502,11 @@ return;
       e.stopPropagation();return;
     }
   }
-  var gbox=target.closest?target.closest('.groupbox,.gcard'):null;
+  var gbox=target.closest?target.closest('.groupbox,.gcard,.qcard'):null;
   if(gbox&&e.button===0&&!e.altKey){
     if(spaceDown)return;
     var gid=gbox.dataset.gid;
-    var isCard=gbox.classList.contains('gcard');
+    var isCard=gbox.classList.contains('gcard')||gbox.classList.contains('qcard');
     var onHead=target.closest&&target.closest('.gb-head');
     var okGrab=isCard||!!onHead;
     if(!okGrab){
@@ -6107,7 +6265,7 @@ canvas.addEventListener('dblclick',function(e){
   if(t.closest&&(t.closest('.n-fold')||t.closest('.port')||t.closest('.dlg-reply-pin')||t.closest('.n-title-inp')))return;
   var nodeEl=t.closest?t.closest('.node'):null;
   var edgeEl=t.closest?t.closest('.edge'):null;
-  var gbD=t.closest?t.closest('.groupbox,.gcard'):null;
+  var gbD=t.closest?t.closest('.groupbox,.gcard,.qcard'):null;
   if(nodeEl){
     var idd=nodeEl.dataset.id;
     var lkDb=lockBlockedBy([idd]);
@@ -6513,7 +6671,7 @@ canvas.addEventListener('contextmenu',function(e){
   var t=e.target;
   var nodeEl=t.closest?t.closest('.node'):null;
   var edgeG=t.closest?t.closest('.edge'):null;
-  var gb=t.closest?t.closest('.groupbox,.gcard'):null;
+  var gb=t.closest?t.closest('.groupbox,.gcard,.qcard'):null;
   if(nodeEl){
     var id=nodeEl.dataset.id;
     if(!sel.has(id))selectOnly(id);
@@ -6574,6 +6732,19 @@ canvas.addEventListener('contextmenu',function(e){
     var gid=gb.dataset.gid;
     var g=groupById(gid);if(!g)return;
     selectGroup(gid);
+    if(g.stack){
+      /* очередь: отдельное меню — без сворачивания/разворачивания, только разборка */
+      var itemsQ=[
+        {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}}
+      ];
+      if(g.parent){
+        itemsQ.push({ico:'x',label:'Вынуть из родителя',fn:function(){discrete(function(){g.parent=null;});renderAll();}});
+      }
+      itemsQ.push('-');
+      itemsQ.push({ico:'trash',label:'Разобрать очередь (связи сохранятся)',danger:true,fn:function(){ungroup(gid);}});
+      openCtxMenu(e.clientX,e.clientY,itemsQ);
+      return;
+    }
     var nextName=g.fold===2?'Свернуть в список':(g.fold===1?'Сжать в компакта':'Развернуть группу');
     var itemsG=[
       {ico:'chev',label:nextName,fn:function(){cycleGroupFold(gid);}},
@@ -6585,7 +6756,7 @@ canvas.addEventListener('contextmenu',function(e){
       itemsG.push({ico:'x',label:'Вынуть из родителя',fn:function(){discrete(function(){g.parent=null;});renderAll();}});
     }
     itemsG.push('-');
-    itemsG.push({ico:'trash',label:g.stack?'Разобрать очередь (связи сохранятся)':'Распустить группу',danger:true,fn:function(){ungroup(gid);}});
+    itemsG.push({ico:'trash',label:'Распустить группу',danger:true,fn:function(){ungroup(gid);}});
     openCtxMenu(e.clientX,e.clientY,itemsG);
     return;
   }
@@ -7261,7 +7432,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>очереди нод</div><div>перетащите ноду на другую — объединятся в очередь с авто-связями «кто за кем» (номера на строках — порядок); на карточке: ↑/↓ — порядок, ✕ — вывести, клик по строке — открыть ноду, ПКМ — разобрать; сброс ноды на карточку очереди — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в очередь»</div>'+
+      '<div>очереди нод</div><div>перетащите ноду на другую — объединятся в очередь с авто-связями «кто за кем» (при помещении в очередь старые связи ноды убираются); очередь — отдельный элемент: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ — вывести ноду, клик по строке — выбрать ноду, ПКМ по карточке — только «Разобрать очередь» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку очереди — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в очередь»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
