@@ -4642,6 +4642,10 @@ function stackOrderIds(g){
   return out;
 }
 function stackChainEdgeObj(aId,bId){return{id:uid(),from:aId,to:bId,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:null,bd:{dl:0,dy:0,dr:0},cond:null,q:1};}
+/* при помещении ноды в очередь её старые связи убираются (связи переменных не трогаем) */
+function stackDetachEdges(nid){
+  project.edges=project.edges.filter(function(e){return e.tin==='var'||(e.from!==nid&&e.to!==nid);});
+}
 function stackRebuildChains(g){
   var ids=stackOrderIds(g),set=new Set(ids);
   project.edges=project.edges.filter(function(e){return !(e.q&&set.has(e.from)&&set.has(e.to));});
@@ -4661,6 +4665,7 @@ function stackSyncParks(g){
 function stackAppend(g,nid){
   var ids=stackOrderIds(g);
   if(ids.indexOf(nid)>=0)return false;
+  stackDetachEdges(nid);
   g.order=ids.concat([nid]);
   var n=nodeById(nid);
   if(n){n.gid=g.id;var pk=stackParkPos(g,ids.length);n.x=pk.x;n.y=pk.y;}
@@ -4694,22 +4699,25 @@ function stackDropCreate(dragId,targetId,pre){
   pushHistory(pre);
   if(sg){
     var ids=stackOrderIds(sg);
+    /* нода попадает в очередь: старые связи убираются, новая — по порядку очереди */
+    stackDetachEdges(dragId);
     sg.order=ids.concat([dragId]);
     A.gid=sg.id;
     var pk=stackParkPos(sg,ids.length);A.x=pk.x;A.y=pk.y;
     stackRebuildChains(sg);
     renderAll();markDirty();
-    toast('«'+A.title+'» добавлена в очередь «'+sg.name+'» (позиция '+(ids.length+1)+')');
+    toast('«'+A.title+'» добавлена в очередь «'+sg.name+'» (позиция '+(ids.length+1)+') — старые связи убраны, добавлена связь от предыдущей ноды');
     return true;
   }
   var g={id:uid(),name:'Очередь',fold:1,x:Math.round(T.x),y:Math.round(T.y),parent:T.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:[T.id,dragId]};
+  stackDetachEdges(dragId);
   project.groups.push(g);
   T.gid=g.id;A.gid=g.id;
   var pk2=stackParkPos(g,1);A.x=pk2.x;A.y=pk2.y;
-  project.edges.push(stackChainEdgeObj(T.id,A.id));
+  stackRebuildChains(g);
   sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
   renderAll();markDirty();
-  toast('Объединены в очередь: «'+T.title+'» → «'+A.title+'». Порядок меняется кнопками ↑/↓ на строках');
+  toast('Объединены в очередь: «'+T.title+'» → «'+A.title+'» — стандартная связь по порядку, старые связи «'+A.title+'» убраны. Порядок меняется кнопками ↑/↓');
   return true;
 }
 function stackRowAction(gid,act,nid){
@@ -4732,12 +4740,14 @@ function stackFromSelection(){
   project.groups.push(g);
   ids.forEach(function(id,i){
     var n=nodeById(id);n.gid=g.id;
+    /* первая нода — якорь: её связи сохраняются (вход в очередь); остальные — старые связи убираются */
+    if(i>0)stackDetachEdges(id);
     var pk=stackParkPos(g,i);n.x=pk.x;n.y=pk.y;
   });
   stackRebuildChains(g);
   sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
   renderAll();markDirty();
-  toast('Очередь из '+ids.length+' нод собрана (порядок — по порядку выделения)');
+  toast('Очередь из '+ids.length+' нод собрана: связи перестроены по порядку (как «кто за кем»), вход в первую ноду сохранён');
 }
 function selAllOfType(fn){
   if(sel.size<2||selGroups.size)return false;
@@ -4778,7 +4788,8 @@ function splitDialogNode(id){
       var idx=-1;
       for(var i=0;i<reps.length;i++){if(findReply([reps[i]],e.fromReply)){idx=i;break;}}
       if(idx>=0)e.from=created[idx].id;
-    }else if(e.from===n.id&&!e.fromOut&&e.tin!=='var'){
+    }else if(e.from===n.id&&e.tin!=='var'){
+      /* обычный выход диалога (и его общий исход) уходит последней ноде */
       e.from=created[created.length-1].id;e.fromOut=null;
     }
   });
