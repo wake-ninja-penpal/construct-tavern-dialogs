@@ -251,6 +251,14 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .qcard:hover{transform:translateY(-2px);border-color:rgba(226,165,78,.85);box-shadow:0 12px 28px rgba(0,0,0,.55)}
 .qcard.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
 .qcard.spawn{animation:nodeIn .5s cubic-bezier(.2,.9,.3,1.15) both}
+/* входы/выходы очереди: вход = первая нода очереди, выход = последняя */
+.qport{position:absolute;width:22px;height:22px;border-radius:50%;background:transparent;z-index:6;opacity:0;transition:opacity .15s}
+.qport::after{content:'';position:absolute;inset:6px;border-radius:50%;background:#0f1114;border:2px solid #565c66;transition:all .15s}
+.qport.in{left:-11px;top:6px;cursor:crosshair}
+.qport.out{right:-11px;top:6px;cursor:grab}
+.qcard:hover .qport,.qcard.sel .qport,body.connecting .qport,body.dropping .qport{opacity:1}
+.qport:hover::after{border-color:var(--acc);background:#2a2113;transform:scale(1.25);box-shadow:0 0 10px rgba(226,165,78,.5)}
+.qcard.drop-hover{border-color:var(--acc)!important;box-shadow:0 0 0 4px var(--accd),0 12px 26px rgba(0,0,0,.5)!important}
 .q-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(226,165,78,.25);color:#e2a54e;font-size:11px;font-weight:700;letter-spacing:.3px}
 .q-head .q-ico{width:14px;height:14px;flex:none;opacity:.9}
 .q-head .q-cnt{margin-left:auto;flex:none;font-size:10px;font-weight:600;background:rgba(226,165,78,.18);color:#e2a54e;border-radius:8px;padding:1px 7px}
@@ -1708,18 +1716,22 @@ function renderGroups(){
       var rows=direct.map(function(n,i){
         var v=nodeVisual(n);
         return '<div class="q-item" data-nid="'+n.id+'" title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
+          '<i class="gc-pin in" style="border-color:'+esc(v.color)+'" title="вход строки — сюда приходят стрелки к ноде"></i>'+
           '<span class="q-num">'+(i+1)+'</span>'+
           '<div class="q-body">'+
             '<div class="q-title" style="color:'+esc(v.color)+'">'+esc(n.title||'')+'</div>'+
             qNodeContentHtml(n)+
           '</div>'+
           '<button class="q-x" data-nid="'+n.id+'" title="Вывести из очереди">✕</button>'+
+          '<i class="gc-pin out" style="border-color:'+esc(v.color)+'" title="выход строки — отсюда уходят стрелки от ноды"></i>'+
         '</div>';
       }).join('');
-      el.innerHTML='<div class="q-head">'+ic('queue',14)+
+      el.innerHTML='<i class="qport in" title="вход очереди (первая нода) — потяните, чтобы перенести входящие стрелки"></i>'+
+        '<div class="q-head">'+ic('queue',14)+
         '<span class="q-name">'+esc(g.name)+'</span>'+
         '<span class="q-cnt">'+direct.length+'</span></div>'+
-        '<div class="q-list">'+(rows||'<div class="q-empty">Очередь пуста</div>')+'</div>';
+        '<div class="q-list">'+(rows||'<div class="q-empty">Очередь пуста</div>')+'</div>'+
+        '<i class="qport out" title="выход очереди (последняя нода) — тяните к другому элементу · Ctrl+тянуть — перенести исходящие стрелки"></i>';
       if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
       worldEl.appendChild(el);
     }else if(g.fold===2){
@@ -5243,6 +5255,89 @@ previews.push({eid:ed.id,p:p});
 });
 outDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
 }
+/* ═══ входы/выходы очереди: вход = первая нода очереди, выход = последняя ═══ */
+function queueEntryId(g){var ids=stackOrderIds(g);return ids.length?ids[0]:null;}
+function queueExitId(g){var ids=stackOrderIds(g);return ids.length?ids[ids.length-1]:null;}
+function qCardPortAnchor(g,out){
+  var el=groupEls.get(g.id);
+  return{x:(g.x||0)+(out?(el?el.offsetWidth:QCARD_W):0),y:(g.y||0)+17};
+}
+/* цель сброса стрелки: нода → её id, карточка очереди → вход (первая нода) */
+function elemTargetNodeId(el){
+  if(!el)return null;
+  if(el.classList&&el.classList.contains('qcard')){
+    var gq=groupById(el.dataset.gid);
+    return gq?queueEntryId(gq):null;
+  }
+  return el.dataset.id||null;
+}
+/* цель для переноса исходящих: карточка очереди → выход (последняя нода) */
+function elemTargetExitNodeId(el){
+  if(!el)return null;
+  if(el.classList&&el.classList.contains('qcard')){
+    var gq=groupById(el.dataset.gid);
+    return gq?queueExitId(gq):null;
+  }
+  return el.dataset.id||null;
+}
+function elppQ(elp){
+  var n=elpp(elp);
+  if(n)return n;
+  var q=(elp&&elp.closest)?elp.closest('.qcard'):null;
+  return (q&&q.style.display!=='none')?q:null;
+}
+function startQueueConnect(e,g){
+  e.stopPropagation();e.preventDefault();
+  var id=queueExitId(g);
+  if(!id){toast('Очередь пуста','warn');return;}
+  var lkC=lockBlockedBy([id]);
+  if(lkC){showLockTip(e.clientX,e.clientY,lkC);return;}
+  lockTake([id]);
+  selectGroup(g.id);
+  var prev=svgEl('path');prev.setAttribute('class','preview');
+  edgesSvg.appendChild(prev);
+  var a=qCardPortAnchor(g,true);
+  connS={from:id,fromReply:null,fromOut:null,fromPin:'main',x1:a.x,y1:a.y,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[id]};
+  document.body.classList.add('connecting');
+}
+function startQueuePinDrag(e,g){
+  e.stopPropagation();e.preventDefault();
+  var nid=queueEntryId(g);
+  if(!nid){toast('Очередь пуста','warn');return;}
+  var inc=project.edges.filter(function(ed){return ed.to===nid;});
+  if(!inc.length){toast('У очереди нет входящих стрелок — вход свободен','warn');return;}
+  var lkPi=lockBlockedBy([nid]);
+  if(lkPi){showLockTip(e.clientX,e.clientY,lkPi);return;}
+  lockTake([nid]);
+  selectGroup(g.id);
+  var previews=[];
+  inc.forEach(function(ed){
+    var r=edgeEls.get(ed.id);if(r)r.g.style.display='none';
+    var p=svgEl('path');p.setAttribute('class','preview');
+    edgesSvg.appendChild(p);
+    previews.push({eid:ed.id,p:p});
+  });
+  inDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
+}
+function startQueueOutDrag(e,g){
+  e.stopPropagation();e.preventDefault();
+  var nid=queueExitId(g);
+  if(!nid){toast('Очередь пуста','warn');return;}
+  var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply&&!ed.fromOut;});
+  if(!outs.length){toast('У очереди нет исходящих стрелок','warn');return;}
+  var lkOu=lockBlockedBy([nid]);
+  if(lkOu){showLockTip(e.clientX,e.clientY,lkOu);return;}
+  lockTake([nid]);
+  selectGroup(g.id);
+  var previews=[];
+  outs.forEach(function(ed){
+    var r=edgeEls.get(ed.id);if(r)r.g.style.display='none';
+    var p=svgEl('path');p.setAttribute('class','preview');
+    edgesSvg.appendChild(p);
+    previews.push({eid:ed.id,p:p});
+  });
+  outDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
+}
 function dlgResizeBandHit(n,el,wx,wy){
   if(!n||n.type!=='dialog'||!el)return false;
   var w=el.offsetWidth,h=el.offsetHeight;
@@ -5320,12 +5415,16 @@ function finishConnect(){
   if(connS.lk)lockGive(connS.lk);
   if(connS.prev&&connS.prev.parentNode)connS.prev.remove();
   if(connS.hl)connS.hl.classList.remove('drop-hover');
-  var from=connS.from,fromReply=connS.fromReply||null,fromOut=connS.fromOut||null,to=connS.hl?connS.hl.dataset.id:null;
+  var hlEl=connS.hl;
+  var from=connS.from,fromReply=connS.fromReply||null,fromOut=connS.fromOut||null,to=hlEl?elemTargetNodeId(hlEl):null;
   var toVin=!!connS.hlVin&&!!to;
   var pt=(connS.wx!=null)?{x:connS.wx,y:connS.wy}:null;
   var cx=connS.cx,cy=connS.cy;
   connS=null;
   if(to&&to!==from){
+    var hlQ=(hlEl&&hlEl.classList&&hlEl.classList.contains('qcard'))?groupById(hlEl.dataset.gid):null;
+    var srcQ=nodeById(from)?stackGroupOf(nodeById(from)):null;
+    if(hlQ&&srcQ&&hlQ.id===srcQ.id){toast('Очередь не может подключаться к самой себе','warn');return;}
     var tnV=nodeById(to),fnV=nodeById(from);
     if(toVin){
       if(!tnV||tnV.type!=='branch'){toast('Вход «переменная» есть только у развилки','warn');return;}
@@ -5398,7 +5497,7 @@ canvas.addEventListener('pointerdown',function(e){
   var target=e.target;
   if(target.closest&&target.closest('.n-title-inp'))return;
   var modK=e.ctrlKey||e.metaKey;
-  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.n-fold')))){
+  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.qport')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.n-fold')))){
     if(e.shiftKey){
       /* Ctrl+Shift+ЛКМ — нарисовать новую группу */
       gcreateS={sx:e.clientX,sy:e.clientY};
@@ -5419,6 +5518,18 @@ canvas.addEventListener('pointerdown',function(e){
     return;
   }
   if(e.button===0){
+    var qPort=target.closest?target.closest('.qport'):null;
+    if(qPort){
+      var qCardEl=target.closest?target.closest('.qcard'):null;
+      var gq0=qCardEl?groupById(qCardEl.dataset.gid):null;
+      if(gq0&&gq0.stack&&gq0.fold<2){
+        if(qPort.classList.contains('in'))startQueuePinDrag(e,gq0);
+        else if(modK)startQueueOutDrag(e,gq0);
+        else startQueueConnect(e,gq0);
+        return;
+      }
+      return;
+    }
     var outPin=target.closest?target.closest('.opin'):null;
     if(outPin){startConnectOut(e,outPin);return;}
     var replyPort=target.closest?target.closest('.dlg-reply-pin.out'):null;
@@ -5635,7 +5746,7 @@ window.addEventListener('pointermove',function(e){lastPtr.x=e.clientX;lastPtr.y=
     connS.wx=p.x;connS.wy=p.y;connS.cx=e.clientX;connS.cy=e.clientY;
     connS.prev.setAttribute('d','M'+connS.x1+' '+connS.y1+' C '+(connS.x1+80)+' '+connS.y1+', '+(p.x-80)+' '+p.y+', '+p.x+' '+p.y);
     var elp=document.elementFromPoint(e.clientX,e.clientY);
-    var under=elpp(elp);
+    var under=elppQ(elp);
     if(connS.hl)connS.hl.classList.remove('drop-hover');
     if(connS.hlVin){connS.hlVin.classList.remove('hl');connS.hlVin=null;}
     connS.hl=null;connS.hlVin=null;
@@ -5645,7 +5756,16 @@ window.addEventListener('pointermove',function(e){lastPtr.x=e.clientX;lastPtr.y=
       vinNode.classList.add('drop-hover');connS.hl=vinNode;
       connS.hlVin=vinEl;vinEl.classList.add('hl');
     }
-    else if(under&&under.dataset.id!==connS.from){under.classList.add('drop-hover');connS.hl=under;}
+    else if(under){
+      var tC=elemTargetNodeId(under);
+      var okC=!!tC&&tC!==connS.from;
+      if(okC&&under.classList&&under.classList.contains('qcard')){
+        var gqC=groupById(under.dataset.gid);
+        var srcC=nodeById(connS.from);
+        if(gqC&&srcC&&stackGroupOf(srcC)===gqC)okC=false;
+      }
+      if(okC){under.classList.add('drop-hover');connS.hl=under;}
+    }
     return;
   }
   if(panS){vp.x=panS.vx+e.clientX-panS.sx;vp.y=panS.vy+e.clientY-panS.sy;applyView();return;}
@@ -5658,10 +5778,11 @@ var an=edgeAnchors(ed);if(!an)return;
 pr.p.setAttribute('d','M'+an.x1+' '+an.y1+' L '+wI.x+' '+wI.y);
 });
 var elpI=document.elementFromPoint(e.clientX,e.clientY);
-var underI=elpp(elpI);
+var underI=elppQ(elpI);
 if(inDrag.hl)inDrag.hl.classList.remove('drop-hover');
 inDrag.hl=null;
-if(underI&&underI.dataset.id!==inDrag.nid){underI.classList.add('drop-hover');inDrag.hl=underI;}
+var tI=elemTargetNodeId(underI);
+if(underI&&tI&&tI!==inDrag.nid){underI.classList.add('drop-hover');inDrag.hl=underI;}
 return;
 }
 if(outDrag){
@@ -5673,10 +5794,11 @@ var an=edgeAnchors(ed);if(!an)return;
 pr.p.setAttribute('d','M'+wO.x+' '+wO.y+' L '+an.x2+' '+an.y2);
 });
 var elpO=document.elementFromPoint(e.clientX,e.clientY);
-var underO=elpp(elpO);
+var underO=elppQ(elpO);
 if(outDrag.hl)outDrag.hl.classList.remove('drop-hover');
 outDrag.hl=null;
-    if(underO&&underO.dataset.id!==outDrag.nid){underO.classList.add('drop-hover');outDrag.hl=underO;}
+var tO=elemTargetExitNodeId(underO);
+if(underO&&tO&&tO!==outDrag.nid){underO.classList.add('drop-hover');outDrag.hl=underO;}
     return;
   }
   if(repOutDrag){
@@ -5688,10 +5810,11 @@ outDrag.hl=null;
       pr.p.setAttribute('d','M'+wR.x+' '+wR.y+' L '+an.x2+' '+an.y2);
     });
     var elpR=document.elementFromPoint(e.clientX,e.clientY);
-    var underR=elpp(elpR);
+    var underR=elppQ(elpR);
+    var tR=elemTargetNodeId(underR);
     if(repOutDrag.hl&&repOutDrag.hl!==underR)repOutDrag.hl.classList.remove('drop-hover');
     repOutDrag.hl=underR;
-    if(underR&&underR.dataset.id!==repOutDrag.nid)underR.classList.add('drop-hover');
+    if(underR&&tR&&tR!==repOutDrag.nid)underR.classList.add('drop-hover');
     return;
   }
   if(knifeS){
@@ -5993,7 +6116,7 @@ window.addEventListener('pointerup',function(e){if(mmResizeS){var mb0=$('#miniMa
 if(inDrag.lk)lockGive(inDrag.lk);
 inDrag.previews.forEach(function(pr){if(pr.p&&pr.p.parentNode)pr.p.remove();});
 if(inDrag.hl)inDrag.hl.classList.remove('drop-hover');
-var tgt=inDrag.hl?nodeById(inDrag.hl.dataset.id):null;
+var tgt=inDrag.hl?nodeById(elemTargetNodeId(inDrag.hl)):null;
 if(tgt&&tgt.id!==inDrag.nid&&inDrag.moved){
 pushHistory(inDrag.pre);
 var applied=0;
@@ -6013,7 +6136,7 @@ if(outDrag){
 if(outDrag.lk)lockGive(outDrag.lk);
 outDrag.previews.forEach(function(pr){if(pr.p&&pr.p.parentNode)pr.p.remove();});
 if(outDrag.hl)outDrag.hl.classList.remove('drop-hover');
-var tgtO=outDrag.hl?nodeById(outDrag.hl.dataset.id):null;
+var tgtO=outDrag.hl?nodeById(elemTargetExitNodeId(outDrag.hl)):null;
 if(tgtO&&tgtO.id!==outDrag.nid&&outDrag.moved){
 pushHistory(outDrag.pre);
 var appliedO=0;
@@ -6035,8 +6158,8 @@ outDrag.previews.forEach(function(pr){var r=edgeEls.get(pr.eid);if(r)r.g.style.d
     if(repOutDrag.hl)repOutDrag.hl.classList.remove('drop-hover');
     var elpU=document.elementFromPoint(e.clientX,e.clientY);
     var pinU=elpU&&elpU.closest?elpU.closest('.dlg-reply-pin.out'):null;
-    var nodeU=elpp(elpU);
-    var tgtN=nodeU?nodeU.dataset.id:null;
+    var nodeU=elppQ(elpU);
+    var tgtN=nodeU?elemTargetNodeId(nodeU):null;
     var tgtR=null;
     if(pinU){
       var pinNode=pinU.closest('.node');
