@@ -246,9 +246,10 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .gc-row.sub{color:var(--tx3)}
 .gc-pin{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;pointer-events:none;flex:none}
 .gc-pin.in{left:-5px}.gc-pin.out{right:-5px}
-/* очередь — отдельный элемент (не группа): читаемое содержимое, перетаскивание строк, без разворачивания */
-.qcard{position:absolute;width:300px;background:linear-gradient(#262015,#1a1712);border:1.5px solid rgba(226,165,78,.6);border-radius:12px;cursor:grab;box-shadow:0 8px 22px rgba(0,0,0,.45);transition:transform .16s,box-shadow .16s,border-color .16s;user-select:none}
-.qcard:hover{transform:translateY(-2px);border-color:rgba(226,165,78,.85);box-shadow:0 12px 28px rgba(0,0,0,.55)}
+/* очередь — отдельный элемент (не группа): читаемое содержимое, перетаскивание строк, без разворачивания.
+   Цвет карточки — как у обычных нод (тёмный нейтральный + возможность задать свой цвет в инспекторе) */
+.qcard{position:absolute;width:300px;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;cursor:grab;box-shadow:0 6px 18px rgba(0,0,0,.38);transition:transform .16s,box-shadow .16s,border-color .16s;user-select:none}
+.qcard:hover{transform:translateY(-2px);border-color:var(--qchov,#404653);box-shadow:0 12px 26px rgba(0,0,0,.5)}
 .qcard.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
 .qcard.spawn{animation:nodeIn .5s cubic-bezier(.2,.9,.3,1.15) both}
 /* входы/выходы очереди: вход = первая нода очереди, выход = последняя */
@@ -259,13 +260,17 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .qcard:hover .qport,.qcard.sel .qport,body.connecting .qport,body.dropping .qport{opacity:1}
 .qport:hover::after{border-color:var(--acc);background:#2a2113;transform:scale(1.25);box-shadow:0 0 10px rgba(226,165,78,.5)}
 .qcard.drop-hover{border-color:var(--acc)!important;box-shadow:0 0 0 4px var(--accd),0 12px 26px rgba(0,0,0,.5)!important}
-.q-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(226,165,78,.25);color:#e2a54e;font-size:11px;font-weight:700;letter-spacing:.3px}
+.q-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--qcb,rgba(160,168,180,.22));color:var(--qc,#9aa1ac);font-size:11px;font-weight:700;letter-spacing:.3px}
 .q-head .q-ico{width:14px;height:14px;flex:none;opacity:.9}
-.q-head .q-cnt{margin-left:auto;flex:none;font-size:10px;font-weight:600;background:rgba(226,165,78,.18);color:#e2a54e;border-radius:8px;padding:1px 7px}
+.q-head .q-cnt{margin-left:auto;flex:none;font-size:10px;font-weight:600;background:var(--qcbg,rgba(160,168,180,.16));color:var(--qc,#9aa1ac);border-radius:8px;padding:1px 7px}
 .q-list{padding:5px 0 7px}
 .q-item{position:relative;display:flex;align-items:flex-start;gap:8px;margin:4px 9px;padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);cursor:grab}
+/* плашки закреплённых персонажей строки очереди (как у нод) */
+.q-cast{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.q-cast:empty{display:none}
+.q-cast span{display:inline-flex;align-items:center;min-width:0;max-width:100%;padding:1px 6px;border-radius:5px;font-size:9px;font-weight:700;letter-spacing:.2px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#16181d}
 .q-item:hover{background:rgba(255,255,255,.06)}
-.q-num{flex:none;min-width:16px;height:16px;margin-top:1px;padding:0 4px;border-radius:8px;background:rgba(226,165,78,.18);color:#e2a54e;font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.q-num{flex:none;min-width:16px;height:16px;margin-top:1px;padding:0 4px;border-radius:8px;background:var(--qcbg,rgba(160,168,180,.16));color:var(--qc,#9aa1ac);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
 .q-item .q-body{flex:1;min-width:0}
 .q-item .q-title{font-size:11px;font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .q-item .q-text{font-size:10px;color:var(--tx2);line-height:1.5;margin-top:3px}
@@ -1694,10 +1699,41 @@ var FOLD_ICONS=['chev','chevUp','expand'];
 var FOLD_TITLES=['Развернуть','Развернуть полностью','Свернуть'];
 function applyGroupStyle(g){
   var el=groupEls.get(g.id);if(!el)return;
+  if(g.stack){applyQueueStyle(g);return;}
   var a=gAlpha(g),c=gColor(g);
   el.style.setProperty('--gbcol',hexToRgba(c,Math.min(1,a+0.15)));
   el.style.setProperty('--gbhov',hexToRgba(c,Math.min(1,a+0.3)));
   el.style.setProperty('--gbfill',hexToRgba(c,a*0.13));
+}
+/* цвет карточки очереди — как у нод: по умолчанию нейтральный тёмный,
+   при заданном цвете — градиент и рамка от этого цвета (+яркость), акцент шапки/бейджей следует за цветом */
+function applyQueueStyle(g){
+  var el=groupEls.get(g.id);if(!el)return;
+  var c=g.color?shadeHex(g.color,clamp((typeof g.tint==='number')?g.tint:0,-60,60)):null;
+  if(c){
+    el.style.background='linear-gradient('+shadeHex(c,10)+','+shadeHex(c,-8)+')';
+    el.style.borderColor=shadeHex(c,-30);
+  }else{
+    el.style.background='';el.style.borderColor='';
+  }
+  var acc=c||'#9aa1ac';
+  el.style.setProperty('--qc',acc);
+  el.style.setProperty('--qcb',hexToRgba(acc,0.25));
+  el.style.setProperty('--qcbg',hexToRgba(acc,0.16));
+  el.style.setProperty('--qchov',hexToRgba(acc,0.6));
+}
+/* закреплённые персонажи строки очереди: у диалогов — участники диалога, у остальных — участники ноды.
+   color — цвет первого персонажа (им обводится строка), html — плашки с именами (как .n-cast у нод) */
+function qRowCast(n){
+  if(!n)return{ps:[],color:null,html:''};
+  var ps=(n.type==='dialog')?(((n.dialog&&n.dialog.participants)||[])):(Array.isArray(n.participants)?n.participants:[]);
+  ps=ps.filter(function(p){return nodeById(p);});
+  var cc=ps.length?charColor(ps[0]):null;
+  var html=ps.length?'<div class="q-cast">'+ps.map(function(pid){
+    var c=charColor(pid);
+    return '<span data-cid="'+esc(pid)+'" title="Прикреплённый персонаж" style="background:'+esc(c)+'">'+esc(charName(pid))+'</span>';
+  }).join('')+'</div>':'';
+  return{ps:ps,color:cc,html:html};
 }
 function renderGroups(){
   $all('#framesLayer .groupbox').forEach(function(el){el.remove();});
@@ -1715,15 +1751,18 @@ function renderGroups(){
       var direct=stackOrderIds(g).map(function(x){return nodeById(x);}).filter(Boolean);
       var rows=direct.map(function(n,i){
         var v=nodeVisual(n);
-        return '<div class="q-item" data-nid="'+n.id+'" title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
-          '<i class="gc-pin in" style="border-color:'+esc(v.color)+'" title="вход строки — сюда приходят стрелки к ноде"></i>'+
+        var cast=qRowCast(n);
+        var rowCol=cast.color||v.color;
+        return '<div class="q-item" data-nid="'+n.id+'"'+(cast.color?' style="border-color:'+esc(hexToRgba(cast.color,.6))+'"':'')+' title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
+          '<i class="gc-pin in" style="border-color:'+esc(rowCol)+'" title="вход строки — сюда приходят стрелки к ноде"></i>'+
           '<span class="q-num">'+(i+1)+'</span>'+
           '<div class="q-body">'+
-            '<div class="q-title" style="color:'+esc(v.color)+'">'+esc(n.title||'')+'</div>'+
+            '<div class="q-title" style="color:'+esc(rowCol)+'">'+esc(n.title||'')+'</div>'+
+            cast.html+
             qNodeContentHtml(n)+
           '</div>'+
           '<button class="q-x" data-nid="'+n.id+'" title="Вывести из очереди">✕</button>'+
-          '<i class="gc-pin out" style="border-color:'+esc(v.color)+'" title="выход строки — отсюда уходят стрелки от ноды"></i>'+
+          '<i class="gc-pin out" style="border-color:'+esc(rowCol)+'" title="выход строки — отсюда уходят стрелки от ноды"></i>'+
         '</div>';
       }).join('');
       el.innerHTML='<i class="qport in" title="вход очереди (первая нода) — потяните, чтобы перенести входящие стрелки"></i>'+
@@ -2781,11 +2820,14 @@ function renderInspGroup(){
   if(!g){selGroup=null;selGroups.clear();return renderInspEmpty();}
   var msQ=allDescNodes(g.id);
   if(g.stack){
-    /* очередь: отдельный инспектор — без вида/цвета/авторазмера, порядок и содержимое */
+    /* очередь: отдельный инспектор — цвет карточки задаётся как у нод, без вида/авторазмера */
     var idsQ=stackOrderIds(g);
+    var tQ=(typeof g.tint==='number')?g.tint:0;
     var listQ=idsQ.map(function(id,i){
       var nQ=nodeById(id);if(!nQ)return'';
       var vQ=nodeVisual(nQ);
+      var castQ=qRowCast(nQ);
+      var dotQ=castQ.color||vQ.color;
       var snip='';
       if(nQ.type==='dialog'){
         ensureDialog(nQ);
@@ -2794,12 +2836,19 @@ function renderInspGroup(){
         snip=[dq].concat(rq).slice(0,2).join(' · ');
       }else{snip=(nQ.text||'').trim();}
       if(snip.length>70)snip=snip.slice(0,70)+'…';
-      return '<div class="gm-row" data-nid="'+nQ.id+'"><span class="q-num">'+(i+1)+'</span><span class="dot" style="background:'+esc(vQ.color)+'"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nQ.title)+(snip?' <span class="gm-snip">— '+esc(snip)+'</span>':'')+'</span></div>';
+      return '<div class="gm-row" data-nid="'+nQ.id+'"><span class="q-num">'+(i+1)+'</span><span class="dot" style="background:'+esc(dotQ)+';color:'+esc(dotQ)+'"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nQ.title)+(snip?' <span class="gm-snip">— '+esc(snip)+'</span>':'')+'</span>'+(castQ.html||'')+'</div>';
     }).join('');
+    var colSwQ=PALETTE_COLORS.map(function(c){
+      return '<button class="swatch'+(g.color===c?' on':'')+'" data-qc="'+c+'" style="background:'+c+'" title="'+c+'"></button>';
+    }).join('');
+    colSwQ+='<button class="swatch reset'+(g.color?'':' on')+'" data-qc="" title="Сбросить к обычному цвету нод">'+ic('x',12)+'</button>';
     insp.innerHTML=
       '<div class="i-cap">Очередь</div>'+
       '<label class="i-lab">Название</label>'+
       '<input class="inp" id="igName" value="'+esc(g.name)+'" maxlength="60">'+
+      '<label class="i-lab">Цвет фона карточки</label><div class="swatches" id="iqSw">'+colSwQ+'</div>'+
+      '<label class="i-lab">Яркость цвета: <span id="iqTintVal">'+(tQ>0?'+':'')+tQ+'%</span></label>'+
+      '<input type="range" class="inp" id="iqTint" min="-60" max="60" value="'+tQ+'">'+
       '<div class="i-meta">Развернуть в группу нельзя — очередь только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически.</div>'+
       '<label class="i-lab">Порядок ('+idsQ.length+')</label>'+
       '<div class="gm-list">'+listQ+'</div>'+
@@ -2818,6 +2867,24 @@ function renderInspGroup(){
     });
     inpQ.addEventListener('change',editEnd);
     inpQ.addEventListener('blur',editEnd);
+    $all('#iqSw .swatch').forEach(function(s){
+      s.onclick=function(){
+        var v=s.dataset.qc||null;
+        discrete(function(){g.color=v;if(!v)g.tint=0;});
+        applyGroupStyle(g);renderInspector();
+      };
+    });
+    var trQ=$('#iqTint');
+    trQ.addEventListener('pointerdown',editStart);
+    trQ.addEventListener('focus',editStart);
+    trQ.addEventListener('input',function(){
+      g.tint=+trQ.value;
+      $('#iqTintVal').textContent=(g.tint>0?'+':'')+g.tint+'%';
+      applyGroupStyle(g);
+      markDirty();
+    });
+    trQ.addEventListener('change',editEnd);
+    trQ.addEventListener('blur',editEnd);
     $('#igUng').onclick=function(){ungroup(g.id);};
     return;
   }
@@ -4833,7 +4900,7 @@ function qNodeContentHtml(n){
   if(lines.length>max)html+='<span class="q-line more">… ещё '+(lines.length-max)+'</span>';
   return '<div class="q-text">'+html+'</div>';
 }
-/* живое обновление содержимого строки очереди (при редактировании описания/реплик) */
+/* живое обновление содержимого строки очереди (при редактировании описания/реплик/участников) */
 function refreshQueueRowContent(nid){
   var n=nodeById(nid);if(!n)return;
   var g=stackGroupOf(n);if(!g)return;
@@ -4841,7 +4908,11 @@ function refreshQueueRowContent(nid){
   var row=cardEl.querySelector('.q-item[data-nid="'+nid+'"]');if(!row)return;
   var body=row.querySelector('.q-body');if(!body)return;
   var v=nodeVisual(n);
-  body.innerHTML='<div class="q-title" style="color:'+esc(v.color)+'">'+esc(n.title||'')+'</div>'+qNodeContentHtml(n);
+  var cast=qRowCast(n);
+  var rowCol=cast.color||v.color;
+  body.innerHTML='<div class="q-title" style="color:'+esc(rowCol)+'">'+esc(n.title||'')+'</div>'+(cast.html||'')+qNodeContentHtml(n);
+  row.style.borderColor=cast.color?hexToRgba(cast.color,.6):'';
+  Array.prototype.forEach.call(row.querySelectorAll('.gc-pin'),function(p){p.style.borderColor=rowCol;});
 }
 /* перетаскивание строк очереди: подсветка места вставки */
 function qRowUnmark(){
@@ -7255,6 +7326,7 @@ function normalize(p){
       parent:(typeof g.parent==='string'&&g.parent!==g.id)?g.parent:null,
       color:(typeof g.color==='string'&&/^#([0-9a-f]{6})$/i.test(g.color))?g.color:null,
       alpha:(typeof g.alpha==='number')?clamp(g.alpha,0.1,1):0.55,
+      tint:(typeof g.tint==='number')?clamp(g.tint,-60,60):0,
       badge:!!g.badge,
       bbox:Array.isArray(g.bbox)?g.bbox:null,
       hh:g.hh||null,
