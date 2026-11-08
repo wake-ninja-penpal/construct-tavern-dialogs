@@ -536,9 +536,17 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 @keyframes pulseDot{50%{box-shadow:0 0 0 4px rgba(226,165,78,.18)}}
 .st-mid{flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .st-right{display:flex;gap:16px;align-items:center}
-#stAuto{color:var(--ok);opacity:0;transition:opacity .4s}
+#stAuto{color:var(--ok);opacity:.62;transition:opacity .4s;cursor:default;white-space:nowrap;border-radius:8px;padding:3px 9px}
+#stAuto:hover,#stAuto:focus-visible{opacity:1;background:rgba(255,255,255,.045);outline:none}
 #stAuto.flash{opacity:1}
-#stMod{white-space:nowrap;color:var(--tx3)}
+/* всплывашка «кто и когда менял проект» — наведение на «автосохранение» в статусной строке */
+#editTip{position:fixed;z-index:400;background:rgba(24,26,31,.97);border:1px solid #333a45;border-radius:11px;padding:10px 13px;font:11.5px var(--body);color:var(--tx2);box-shadow:0 12px 32px rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .16s;min-width:210px;max-width:340px;transform:translate(-50%,-100%)}
+#editTip.show{opacity:1}
+#editTip .et-cap{font:600 9.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase;color:var(--tx3);margin-bottom:6px;white-space:nowrap}
+#editTip .et-row{display:flex;align-items:center;gap:8px;line-height:2;white-space:nowrap}
+#editTip .et-dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 6px currentColor}
+#editTip .et-who{color:var(--tx)}
+#editTip .et-when{color:var(--tx3)}
 #toasts{position:fixed;right:16px;bottom:44px;display:flex;flex-direction:column;gap:8px;z-index:90}
 .toast{display:flex;align-items:center;gap:9px;background:#1d2027;border:1px solid #32363f;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--tx2);box-shadow:var(--sh);animation:tIn .3s cubic-bezier(.2,.9,.3,1.2) both;max-width:340px}
 .toast.out{animation:tOut .3s forwards}
@@ -828,7 +836,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <footer id="status">
   <div class="st-left"><span id="stFile">—</span><span id="stDirty"></span></div>
   <div class="spacer"></div>
-  <div class="st-right"><span id="stMod" style="display:none" title="Когда проект последний раз менялся"></span><span id="stCounts"></span><span id="stAuto">✓ автосохранение</span></div>
+  <div class="st-right"><span id="stCounts"></span><span id="stAuto" tabindex="0" aria-label="Когда проект изменён последний раз и кто это сделал">✓ автосохранение</span></div>
 </footer>
 <div id="ctx"></div>
 <div id="player">
@@ -920,6 +928,29 @@ function uid(){return Math.random().toString(36).slice(2,10);}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function fmtD(iso){try{return new Date(iso).toLocaleDateString('ru-RU',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return '—';}}
+/* время последнего изменения: коротко — для статусной строки, подробно — для всплывашки */
+function fmtWhenShort(iso){
+  if(!iso)return '';
+  try{
+    var d=new Date(iso),n=new Date();
+    var t=d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    if(d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate())return t;
+    return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+t;
+  }catch(e){return '';}
+}
+function fmtWhenLong(iso){
+  if(!iso)return '';
+  try{
+    var d=new Date(iso),n=new Date();
+    var t=d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    var day=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+    var today=new Date(n.getFullYear(),n.getMonth(),n.getDate());
+    var diff=Math.round((today-day)/864e5);
+    if(diff===0)return 'сегодня в '+t;
+    if(diff===-1)return 'вчера в '+t;
+    return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})+', в '+t;
+  }catch(e){return '';}
+}
 function hexToRgba(hex,a){
   var h=String(hex||'').replace('#','');
   if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
@@ -1322,7 +1353,7 @@ function editEnd(){
     },220);
   }
 }
-function markDirty(){dirty=true;project.meta.modified=new Date().toISOString();updateStatus();scheduleAutosave();syncQueueState();}
+function markDirty(){dirty=true;project.meta.modified=new Date().toISOString();noteEditor();updateStatus();scheduleAutosave();syncQueueState();}
 function markSaved(){dirty=false;updateStatus();}
 function scheduleAutosave(){
   clearTimeout(flashT);
@@ -1335,36 +1366,61 @@ function scheduleAutosave(){
     var a=$('#stAuto');a.classList.add('flash');setTimeout(function(){a.classList.remove('flash');},1100);
   },700);
 }
-/* подпись «изменён: …» в статус-баре — когда проект менялся последний раз.
-   Время берётся из meta.modified (ставится в markDirty при любом изменении и сохраняется в файле/автосейве) */
-function fmtModStamp(iso){
-  if(!iso)return '';
-  var t=new Date(iso);if(isNaN(t))return '';
-  var now=new Date();
-  var pad=function(x){return (x<10?'0':'')+x;};
-  var hm=pad(t.getHours())+':'+pad(t.getMinutes());
-  var sameDay=function(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();};
-  if(sameDay(t,now))return (now-t<45e3)?'только что':hm;
-  if(sameDay(t,new Date(now.getTime()-864e5)))return 'вчера, '+hm;
-  var dm=pad(t.getDate())+'.'+pad(t.getMonth()+1);
-  if(t.getFullYear()===now.getFullYear())return dm+', '+hm;
-  return dm+'.'+t.getFullYear()+', '+hm;
-}
-function updateModStamp(){
-  var el=$('#stMod');if(!el)return;
-  var iso=(project.meta&&project.meta.modified)||'';
-  var s=fmtModStamp(iso);
-  el.textContent=s?('изменён: '+s):'';
-  el.style.display=s?'':'none';
-  if(s){var t=new Date(iso);if(!isNaN(t))el.title='Последнее изменение проекта: '+t.toLocaleString('ru-RU');}
-}
-setInterval(updateModStamp,30000);
 function updateStatus(){
   $('#stFile').textContent=fileName||project.meta.name;
   $('#stDirty').classList.toggle('show',dirty);
   $('#stCounts').textContent='узлов: '+project.nodes.length+' · связей: '+project.edges.length+' · групп: '+project.groups.length;
-  updateModStamp();
+  var when=fmtWhenShort(project.meta.modified);
+  $('#stAuto').textContent='✓ автосохранение'+(when?' · '+when:'');
 }
+/* ── кто и когда последним менял проект ──
+   Локально это «вы»; в комнате совместного доступа — участник синхронизации
+   (имя/цвет, под которым его видят другие). meta.editLog — необязательное поле,
+   хранит последних редакторов и переносится вместе с документом комнаты:
+   у всех участников видно, кто менял проект и когда. */
+function editIdentity(){
+  if(typeof syncState!=='undefined'&&syncState&&syncState.enabled&&syncState.mode!=='copy'){
+    var m=syncMe();
+    if(m&&m.id)return{id:m.id,name:m.name,color:m.color};
+  }
+  return{id:'вы',name:'вы',color:'#8b929c'};
+}
+function noteEditor(){
+  try{
+    var me=editIdentity(),now=project.meta.modified;
+    var log=Array.isArray(project.meta.editLog)?project.meta.editLog.slice():[];
+    if(log[0]&&log[0].id===me.id){log[0].name=me.name;log[0].color=me.color;log[0].at=now;}
+    else{log.unshift({id:me.id,name:me.name,color:me.color,at:now});if(log.length>5)log.length=5;}
+    project.meta.editLog=log;
+    project.meta.lastEditBy={id:me.id,name:me.name,color:me.color,at:now};
+  }catch(e){}
+}
+/* всплывашка над «✓ автосохранение»: когда проект изменён последний раз и кто это делал */
+var editTipEl=null;
+function editTipShow(){
+  if(!editTipEl){editTipEl=document.createElement('div');editTipEl.id='editTip';editTipEl.setAttribute('role','tooltip');document.body.appendChild(editTipEl);}
+  var m=project.meta||{},log=Array.isArray(m.editLog)?m.editLog:[],rows='';
+  for(var i=0;i<log.length;i++){
+    var e=log[i],c=e.color||'#8b929c';
+    rows+='<div class="et-row"><span class="et-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="et-who">'+esc(e.name||'—')+'</span><span class="et-when">'+esc(fmtWhenLong(e.at))+'</span></div>';
+  }
+  if(!rows)rows='<div class="et-row"><span>'+(m.modified?'Изменён: '+esc(fmtWhenLong(m.modified)):'Изменений пока не было')+'</span></div>';
+  editTipEl.innerHTML='<div class="et-cap">Последнее изменение</div>'+rows;
+  var a=$('#stAuto');if(!a)return;
+  var r=a.getBoundingClientRect();
+  editTipEl.style.left=Math.max(150,Math.min(innerWidth-150,r.left+r.width/2))+'px';
+  editTipEl.style.top=Math.max(70,r.top-10)+'px';
+  editTipEl.classList.add('show');
+}
+function editTipHide(){if(editTipEl)editTipEl.classList.remove('show');}
+(function(){
+  var a=$('#stAuto');if(!a)return;
+  a.addEventListener('mouseenter',editTipShow);
+  a.addEventListener('mouseleave',editTipHide);
+  a.addEventListener('focus',editTipShow);
+  a.addEventListener('blur',editTipHide);
+  window.addEventListener('blur',editTipHide);
+})();
 /* ═══ типы и группы ═══ */
 function customById(id){
   if(!id)return null;
@@ -1793,7 +1849,7 @@ function renderGroups(){
       }).join('');
       el.innerHTML='<i class="qport in" title="вход цепочки (первая нода) — потяните, чтобы перенести входящие стрелки"></i>'+
         '<div class="q-head">'+ic('queue',14)+
-        '<span class="q-name">'+esc(g.name)+'</span>'+
+        '<span class="q-name">'+esc(g.name==='Очередь'?'Цепочка':g.name)+'</span>'+
         '<span class="q-cnt">'+direct.length+'</span></div>'+
         '<div class="q-list">'+(rows||'<div class="q-empty">Цепочка пуста</div>')+'</div>'+
         '<i class="qport out" title="выход цепочки (последняя нода) — тяните к другому элементу · Ctrl+тянуть — перенести исходящие стрелки"></i>';
