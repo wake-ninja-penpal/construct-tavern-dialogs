@@ -246,13 +246,13 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .gc-row.sub{color:var(--tx3)}
 .gc-pin{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;pointer-events:none;flex:none}
 .gc-pin.in{left:-5px}.gc-pin.out{right:-5px}
-/* очередь — отдельный элемент (не группа): читаемое содержимое, перетаскивание строк, без разворачивания.
+/* цепочка — отдельный элемент (не группа): читаемое содержимое, перетаскивание строк, без разворачивания.
    Цвет карточки — как у обычных нод (тёмный нейтральный + возможность задать свой цвет в инспекторе) */
 .qcard{position:absolute;width:300px;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;cursor:grab;box-shadow:0 6px 18px rgba(0,0,0,.38);transition:transform .16s,box-shadow .16s,border-color .16s;user-select:none}
 .qcard:hover{transform:translateY(-2px);border-color:var(--qchov,#404653);box-shadow:0 12px 26px rgba(0,0,0,.5)}
 .qcard.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
 .qcard.spawn{animation:nodeIn .5s cubic-bezier(.2,.9,.3,1.15) both}
-/* входы/выходы очереди: вход = первая нода очереди, выход = последняя */
+/* входы/выходы цепочки: вход = первая нода цепочки, выход = последняя */
 .qport{position:absolute;width:22px;height:22px;border-radius:50%;background:transparent;z-index:6;opacity:0;transition:opacity .15s}
 .qport::after{content:'';position:absolute;inset:6px;border-radius:50%;background:#0f1114;border:2px solid #565c66;transition:all .15s}
 .qport.in{left:-11px;top:6px;cursor:crosshair}
@@ -265,7 +265,7 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .q-head .q-cnt{margin-left:auto;flex:none;font-size:10px;font-weight:600;background:var(--qcbg,rgba(160,168,180,.16));color:var(--qc,#9aa1ac);border-radius:8px;padding:1px 7px}
 .q-list{padding:5px 0 7px}
 .q-item{position:relative;display:flex;align-items:flex-start;gap:8px;margin:4px 9px;padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);cursor:grab}
-/* плашки закреплённых персонажей строки очереди (как у нод) */
+/* плашки закреплённых персонажей строки цепочки (как у нод) */
 .q-cast{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .q-cast:empty{display:none}
 .q-cast span{display:inline-flex;align-items:center;min-width:0;max-width:100%;padding:1px 6px;border-radius:5px;font-size:9px;font-weight:700;letter-spacing:.2px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#16181d}
@@ -538,6 +538,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .st-right{display:flex;gap:16px;align-items:center}
 #stAuto{color:var(--ok);opacity:0;transition:opacity .4s}
 #stAuto.flash{opacity:1}
+#stMod{white-space:nowrap;color:var(--tx3)}
 #toasts{position:fixed;right:16px;bottom:44px;display:flex;flex-direction:column;gap:8px;z-index:90}
 .toast{display:flex;align-items:center;gap:9px;background:#1d2027;border:1px solid #32363f;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--tx2);box-shadow:var(--sh);animation:tIn .3s cubic-bezier(.2,.9,.3,1.2) both;max-width:340px}
 .toast.out{animation:tOut .3s forwards}
@@ -827,7 +828,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <footer id="status">
   <div class="st-left"><span id="stFile">—</span><span id="stDirty"></span></div>
   <div class="spacer"></div>
-  <div class="st-right"><span id="stCounts"></span><span id="stAuto">✓ автосохранение</span></div>
+  <div class="st-right"><span id="stMod" style="display:none" title="Когда проект последний раз менялся"></span><span id="stCounts"></span><span id="stAuto">✓ автосохранение</span></div>
 </footer>
 <div id="ctx"></div>
 <div id="player">
@@ -1334,10 +1335,35 @@ function scheduleAutosave(){
     var a=$('#stAuto');a.classList.add('flash');setTimeout(function(){a.classList.remove('flash');},1100);
   },700);
 }
+/* подпись «изменён: …» в статус-баре — когда проект менялся последний раз.
+   Время берётся из meta.modified (ставится в markDirty при любом изменении и сохраняется в файле/автосейве) */
+function fmtModStamp(iso){
+  if(!iso)return '';
+  var t=new Date(iso);if(isNaN(t))return '';
+  var now=new Date();
+  var pad=function(x){return (x<10?'0':'')+x;};
+  var hm=pad(t.getHours())+':'+pad(t.getMinutes());
+  var sameDay=function(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();};
+  if(sameDay(t,now))return (now-t<45e3)?'только что':hm;
+  if(sameDay(t,new Date(now.getTime()-864e5)))return 'вчера, '+hm;
+  var dm=pad(t.getDate())+'.'+pad(t.getMonth()+1);
+  if(t.getFullYear()===now.getFullYear())return dm+', '+hm;
+  return dm+'.'+t.getFullYear()+', '+hm;
+}
+function updateModStamp(){
+  var el=$('#stMod');if(!el)return;
+  var iso=(project.meta&&project.meta.modified)||'';
+  var s=fmtModStamp(iso);
+  el.textContent=s?('изменён: '+s):'';
+  el.style.display=s?'':'none';
+  if(s){var t=new Date(iso);if(!isNaN(t))el.title='Последнее изменение проекта: '+t.toLocaleString('ru-RU');}
+}
+setInterval(updateModStamp,30000);
 function updateStatus(){
   $('#stFile').textContent=fileName||project.meta.name;
   $('#stDirty').classList.toggle('show',dirty);
   $('#stCounts').textContent='узлов: '+project.nodes.length+' · связей: '+project.edges.length+' · групп: '+project.groups.length;
+  updateModStamp();
 }
 /* ═══ типы и группы ═══ */
 function customById(id){
@@ -1705,7 +1731,7 @@ function applyGroupStyle(g){
   el.style.setProperty('--gbhov',hexToRgba(c,Math.min(1,a+0.3)));
   el.style.setProperty('--gbfill',hexToRgba(c,a*0.13));
 }
-/* цвет карточки очереди — как у нод: по умолчанию нейтральный тёмный,
+/* цвет карточки цепочки — как у нод: по умолчанию нейтральный тёмный,
    при заданном цвете — градиент и рамка от этого цвета (+яркость), акцент шапки/бейджей следует за цветом */
 function applyQueueStyle(g){
   var el=groupEls.get(g.id);if(!el)return;
@@ -1722,7 +1748,7 @@ function applyQueueStyle(g){
   el.style.setProperty('--qcbg',hexToRgba(acc,0.16));
   el.style.setProperty('--qchov',hexToRgba(acc,0.6));
 }
-/* закреплённые персонажи строки очереди: у диалогов — участники диалога, у остальных — участники ноды.
+/* закреплённые персонажи строки цепочки: у диалогов — участники диалога, у остальных — участники ноды.
    color — цвет первого персонажа (им обводится строка), html — плашки с именами (как .n-cast у нод) */
 function qRowCast(n){
   if(!n)return{ps:[],color:null,html:''};
@@ -1744,7 +1770,7 @@ function renderGroups(){
     var ms=allDescNodes(g.id);
     var el=document.createElement('div');
     if(g.stack){
-      /* очередь — отдельный элемент (не группа): строки с содержимым диалогов, порядок — перетаскиванием, разворачивания нет */
+      /* цепочка — отдельный элемент (не группа): строки с содержимым диалогов, порядок — перетаскиванием, разворачивания нет */
       el.className='qcard';
       el.dataset.gid=g.id;
       el.style.left=(g.x||0)+'px';el.style.top=(g.y||0)+'px';
@@ -1761,16 +1787,16 @@ function renderGroups(){
             cast.html+
             qNodeContentHtml(n)+
           '</div>'+
-          '<button class="q-x" data-nid="'+n.id+'" title="Вывести из очереди">✕</button>'+
+          '<button class="q-x" data-nid="'+n.id+'" title="Вывести из цепочки">✕</button>'+
           '<i class="gc-pin out" style="border-color:'+esc(rowCol)+'" title="выход строки — отсюда уходят стрелки от ноды"></i>'+
         '</div>';
       }).join('');
-      el.innerHTML='<i class="qport in" title="вход очереди (первая нода) — потяните, чтобы перенести входящие стрелки"></i>'+
+      el.innerHTML='<i class="qport in" title="вход цепочки (первая нода) — потяните, чтобы перенести входящие стрелки"></i>'+
         '<div class="q-head">'+ic('queue',14)+
         '<span class="q-name">'+esc(g.name)+'</span>'+
         '<span class="q-cnt">'+direct.length+'</span></div>'+
-        '<div class="q-list">'+(rows||'<div class="q-empty">Очередь пуста</div>')+'</div>'+
-        '<i class="qport out" title="выход очереди (последняя нода) — тяните к другому элементу · Ctrl+тянуть — перенести исходящие стрелки"></i>';
+        '<div class="q-list">'+(rows||'<div class="q-empty">Цепочка пуста</div>')+'</div>'+
+        '<i class="qport out" title="выход цепочки (последняя нода) — тяните к другому элементу · Ctrl+тянуть — перенести исходящие стрелки"></i>';
       if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
       worldEl.appendChild(el);
     }else if(g.fold===2){
@@ -2820,7 +2846,7 @@ function renderInspGroup(){
   if(!g){selGroup=null;selGroups.clear();return renderInspEmpty();}
   var msQ=allDescNodes(g.id);
   if(g.stack){
-    /* очередь: отдельный инспектор — цвет карточки задаётся как у нод, без вида/авторазмера */
+    /* цепочка: отдельный инспектор — цвет карточки задаётся как у нод, без вида/авторазмера */
     var idsQ=stackOrderIds(g);
     var tQ=(typeof g.tint==='number')?g.tint:0;
     var listQ=idsQ.map(function(id,i){
@@ -2843,19 +2869,19 @@ function renderInspGroup(){
     }).join('');
     colSwQ+='<button class="swatch reset'+(g.color?'':' on')+'" data-qc="" title="Сбросить к обычному цвету нод">'+ic('x',12)+'</button>';
     insp.innerHTML=
-      '<div class="i-cap">Очередь</div>'+
+      '<div class="i-cap">Цепочка</div>'+
       '<label class="i-lab">Название</label>'+
       '<input class="inp" id="igName" value="'+esc(g.name)+'" maxlength="60">'+
       '<label class="i-lab">Цвет фона карточки</label><div class="swatches" id="iqSw">'+colSwQ+'</div>'+
       '<label class="i-lab">Яркость цвета: <span id="iqTintVal">'+(tQ>0?'+':'')+tQ+'%</span></label>'+
       '<input type="range" class="inp" id="iqTint" min="-60" max="60" value="'+tQ+'">'+
-      '<div class="i-meta">Развернуть в группу нельзя — очередь только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически.</div>'+
+      '<div class="i-meta">Развернуть в группу нельзя — цепочка только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически.</div>'+
       '<label class="i-lab">Порядок ('+idsQ.length+')</label>'+
       '<div class="gm-list">'+listQ+'</div>'+
       '<div class="i-actions">'+
-        '<button class="btn danger" id="igUng">'+ic('x')+'Разобрать очередь (связи сохранятся)</button>'+
+        '<button class="btn danger" id="igUng">'+ic('x')+'Разобрать цепочку (связи сохранятся)</button>'+
       '</div>'+
-      '<div class="i-meta">тип: очередь нод<br>ID: '+esc(g.id)+' · входов в очередь: '+project.edges.filter(function(e){var f0=idsQ[0];return f0&&e.to===f0&&e.tin!=='var';}).length+'</div>';
+      '<div class="i-meta">тип: цепочка нод<br>ID: '+esc(g.id)+' · входов в цепочку: '+project.edges.filter(function(e){var f0=idsQ[0];return f0&&e.to===f0&&e.tin!=='var';}).length+'</div>';
     var inpQ=$('#igName');
     inpQ.addEventListener('focus',editStart);
     inpQ.addEventListener('input',function(){
@@ -3468,7 +3494,7 @@ function renderInspMulti(){
     '<div class="grp-row"><input class="inp" id="mgName" placeholder="Название группы…" maxlength="60">'+
     '<button class="btn primary" id="mgGo" title="Сгруппировать (Ctrl+G)">Сгруппировать</button></div>'+
     (sel.size>=2&&selAllDialogs()?'<button class="btn primary" id="mgMerge" style="width:100%;margin-top:8px">'+ic('dialog',14)+'Объединить в один диалог</button>':'')+
-    (sel.size>=2&&selAllStackable()?'<button class="btn" id="mgQueue" style="width:100%;margin-top:8px">'+ic('queue',14)+'Собрать в очередь (по порядку выделения)</button>':'')+
+    (sel.size>=2&&selAllStackable()?'<button class="btn" id="mgQueue" style="width:100%;margin-top:8px">'+ic('queue',14)+'Собрать в цепочку (по порядку выделения)</button>':'')+
     '<div class="i-actions">'+
       '<button class="btn" id="gAlign" title="Ctrl+Shift+A">'+ic('alignH')+'Выровнять</button>'+
       '<button class="btn" id="gDup">'+ic('copy')+'Дубль</button>'+
@@ -4716,7 +4742,7 @@ function ungroup(gid){
     if(selGroup===gid)selGroup=null;
     resolveOverlaps(new Set(ids));
     renderAll();markDirty();
-    toast('Очередь разобрана — авто-связи «кто за кем» сохранены','warn');
+    toast('Цепочка разобрана — авто-связи «кто за кем» сохранены','warn');
     return;
   }
   project.nodes.forEach(function(n){if(n.gid===gid)n.gid=g.parent||null;});
@@ -4742,7 +4768,7 @@ function prepareGroupCard(g){
 }
 function cycleGroupFold(gid){
   var g=groupById(gid);if(!g)return;
-  if(g.stack){toast('Очередь нельзя развернуть в группу — только «Разобрать очередь» (ПКМ по карточке очереди)','warn');return;}
+  if(g.stack){toast('Цепочку нельзя развернуть в группу — только «Разобрать цепочку» (ПКМ по карточке цепочки)','warn');return;}
   pushHistory(serialize());
   var wasOpen=g.fold===2;
   g.fold=g.fold===2?1:(g.fold===1?0:2);
@@ -4773,7 +4799,7 @@ function leaveGroup(nodeId){
       if(selGroup===gid)selGroup=null;
     }
     renderAll();
-    toast('Узел выведен из очереди','warn');
+    toast('Узел выведен из цепочки','warn');
     return;
   }
   discrete(function(){n.gid=null;});
@@ -4781,7 +4807,7 @@ function leaveGroup(nodeId){
   renderAll();
   toast('Узел исключён из группы','warn');
 }
-/* ═══ очереди нод (стек-карточки) ═══ */
+/* ═══ цепочки нод (стек-карточки) ═══ */
 function stackableType(t){return t!=='char'&&t!=='note';}
 function stackGroupOf(n){var g=groupOfNode(n);return (g&&g.stack)?g:null;}
 function stackOrderIds(g){
@@ -4792,7 +4818,7 @@ function stackOrderIds(g){
   return out;
 }
 function stackChainEdgeObj(aId,bId){return{id:uid(),from:aId,to:bId,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:null,bd:{dl:0,dy:0,dr:0},cond:null,q:1};}
-/* при помещении ноды в очередь её старые связи убираются (связи переменных не трогаем) */
+/* при помещении ноды в цепочку её старые связи убираются (связи переменных не трогаем) */
 function stackDetachEdges(nid){
   project.edges=project.edges.filter(function(e){return e.tin==='var'||(e.from!==nid&&e.to!==nid);});
 }
@@ -4849,17 +4875,17 @@ function stackDropCreate(dragId,targetId,pre){
   pushHistory(pre);
   if(sg){
     var ids=stackOrderIds(sg);
-    /* нода попадает в очередь: старые связи убираются, новая — по порядку очереди */
+    /* нода попадает в цепочку: старые связи убираются, новая — по порядку цепочки */
     stackDetachEdges(dragId);
     sg.order=ids.concat([dragId]);
     A.gid=sg.id;
     var pk=stackParkPos(sg,ids.length);A.x=pk.x;A.y=pk.y;
     stackRebuildChains(sg);
     renderAll();markDirty();
-    toast('«'+A.title+'» добавлена в очередь «'+sg.name+'» (позиция '+(ids.length+1)+') — старые связи убраны, добавлена связь от предыдущей ноды');
+    toast('«'+A.title+'» добавлена в цепочку «'+sg.name+'» (позиция '+(ids.length+1)+') — старые связи убраны, добавлена связь от предыдущей ноды');
     return true;
   }
-  var g={id:uid(),name:'Очередь',fold:1,x:Math.round(T.x),y:Math.round(T.y),parent:T.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:[T.id,dragId]};
+  var g={id:uid(),name:'Цепочка',fold:1,x:Math.round(T.x),y:Math.round(T.y),parent:T.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:[T.id,dragId]};
   stackDetachEdges(dragId);
   project.groups.push(g);
   T.gid=g.id;A.gid=g.id;
@@ -4867,7 +4893,7 @@ function stackDropCreate(dragId,targetId,pre){
   stackRebuildChains(g);
   sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
   renderAll();markDirty();
-  toast('Объединены в очередь: «'+T.title+'» → «'+A.title+'» — стандартная связь по порядку, старые связи «'+A.title+'» убраны. Порядок меняется перетаскиванием строк');
+  toast('Объединены в цепочку: «'+T.title+'» → «'+A.title+'» — стандартная связь по порядку, старые связи «'+A.title+'» убраны. Порядок меняется перетаскиванием строк');
   return true;
 }
 function stackRowAction(gid,act,nid){
@@ -4875,7 +4901,7 @@ function stackRowAction(gid,act,nid){
   var lk=lockBlockedBy(stackOrderIds(g));if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
   if(act==='out')leaveGroup(nid);
 }
-/* читаемое содержимое ноды для строки очереди: диалог (описание + реплики) или текст */
+/* читаемое содержимое ноды для строки цепочки: диалог (описание + реплики) или текст */
 function qNodeContentHtml(n){
   if(!n)return'';
   var lines=[];
@@ -4900,7 +4926,7 @@ function qNodeContentHtml(n){
   if(lines.length>max)html+='<span class="q-line more">… ещё '+(lines.length-max)+'</span>';
   return '<div class="q-text">'+html+'</div>';
 }
-/* живое обновление содержимого строки очереди (при редактировании описания/реплик/участников) */
+/* живое обновление содержимого строки цепочки (при редактировании описания/реплик/участников) */
 function refreshQueueRowContent(nid){
   var n=nodeById(nid);if(!n)return;
   var g=stackGroupOf(n);if(!g)return;
@@ -4914,7 +4940,7 @@ function refreshQueueRowContent(nid){
   row.style.borderColor=cast.color?hexToRgba(cast.color,.6):'';
   Array.prototype.forEach.call(row.querySelectorAll('.gc-pin'),function(p){p.style.borderColor=rowCol;});
 }
-/* перетаскивание строк очереди: подсветка места вставки */
+/* перетаскивание строк цепочки: подсветка места вставки */
 function qRowUnmark(){
   $all('.q-item.q-ins-above,.q-item.q-ins-below').forEach(function(r){r.classList.remove('q-ins-above','q-ins-below');});
 }
@@ -4947,7 +4973,7 @@ function qRowApply(gid,nid,insIdx){
   stackRebuildChains(g);
   stackSyncParks(g);
   renderAll();markDirty();
-  toast('Порядок очереди изменён — связи «кто за кем» перестроены');
+  toast('Порядок цепочки изменён — связи «кто за кем» перестроены');
 }
 window.addEventListener('pointermove',function(e){
   if(!qRowDrag)return;
@@ -4973,22 +4999,22 @@ window.addEventListener('pointercancel',function(){
 function stackFromSelection(){
   var ids=[];
   sel.forEach(function(id){var n=nodeById(id);if(n&&stackableType(n.type)&&!stackGroupOf(n))ids.push(id);});
-  if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум две ноды вне очередей','warn');return;}
+  if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум две ноды вне цепочек','warn');return;}
   var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
   pushHistory(serialize());
   var first=nodeById(ids[0]);
-  var g={id:uid(),name:'Очередь',fold:1,x:Math.round(first.x),y:Math.round(first.y),parent:first.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:ids.slice()};
+  var g={id:uid(),name:'Цепочка',fold:1,x:Math.round(first.x),y:Math.round(first.y),parent:first.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:ids.slice()};
   project.groups.push(g);
   ids.forEach(function(id,i){
     var n=nodeById(id);n.gid=g.id;
-    /* первая нода — якорь: её связи сохраняются (вход в очередь); остальные — старые связи убираются */
+    /* первая нода — якорь: её связи сохраняются (вход в цепочку); остальные — старые связи убираются */
     if(i>0)stackDetachEdges(id);
     var pk=stackParkPos(g,i);n.x=pk.x;n.y=pk.y;
   });
   stackRebuildChains(g);
   sel.clear();selEdges.clear();selEdge=null;selGroups=new Set([g.id]);selGroup=g.id;
   renderAll();markDirty();
-  toast('Очередь из '+ids.length+' нод собрана: связи перестроены по порядку (как «кто за кем»), вход в первую ноду сохранён');
+  toast('Цепочка из '+ids.length+' нод собрана: связи перестроены по порядку (как «кто за кем»), вход в первую ноду сохранён');
 }
 function selAllOfType(fn){
   if(sel.size<2||selGroups.size)return false;
@@ -5050,13 +5076,13 @@ function splitDialogNode(id){
   renderAll({nodes:created.map(function(c){return c.id;})});
   if(!gS)resolveOverlaps(new Set(created.map(function(c){return c.id;})));
   markDirty();
-  toast('Диалог разбит на '+created.length+' нод — стрелки реплик сохранены'+(gS?' (внутри очереди)':''));
+  toast('Диалог разбит на '+created.length+' нод — стрелки реплик сохранены'+(gS?' (внутри цепочки)':''));
 }
 function mergeDialogNodes(){
   var ids=[];
   sel.forEach(function(id){var n=nodeById(id);if(n&&n.type==='dialog')ids.push(id);});
   if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум два диалога (только ноды «Диалог»)','warn');return;}
-  for(var i=0;i<ids.length;i++){if(stackGroupOf(nodeById(ids[i]))){toast('Ноды внутри очереди объединять нельзя — сначала выведите их (✕ на строке очереди)','warn');return;}}
+  for(var i=0;i<ids.length;i++){if(stackGroupOf(nodeById(ids[i]))){toast('Ноды внутри цепочки объединять нельзя — сначала выведите их (✕ на строке цепочки)','warn');return;}}
   var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
   pushHistory(serialize());
   var first=nodeById(ids[0]);
@@ -5326,14 +5352,14 @@ previews.push({eid:ed.id,p:p});
 });
 outDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
 }
-/* ═══ входы/выходы очереди: вход = первая нода очереди, выход = последняя ═══ */
+/* ═══ входы/выходы цепочки: вход = первая нода цепочки, выход = последняя ═══ */
 function queueEntryId(g){var ids=stackOrderIds(g);return ids.length?ids[0]:null;}
 function queueExitId(g){var ids=stackOrderIds(g);return ids.length?ids[ids.length-1]:null;}
 function qCardPortAnchor(g,out){
   var el=groupEls.get(g.id);
   return{x:(g.x||0)+(out?(el?el.offsetWidth:QCARD_W):0),y:(g.y||0)+17};
 }
-/* цель сброса стрелки: нода → её id, карточка очереди → вход (первая нода) */
+/* цель сброса стрелки: нода → её id, карточка цепочки → вход (первая нода) */
 function elemTargetNodeId(el){
   if(!el)return null;
   if(el.classList&&el.classList.contains('qcard')){
@@ -5342,7 +5368,7 @@ function elemTargetNodeId(el){
   }
   return el.dataset.id||null;
 }
-/* цель для переноса исходящих: карточка очереди → выход (последняя нода) */
+/* цель для переноса исходящих: карточка цепочки → выход (последняя нода) */
 function elemTargetExitNodeId(el){
   if(!el)return null;
   if(el.classList&&el.classList.contains('qcard')){
@@ -5360,7 +5386,7 @@ function elppQ(elp){
 function startQueueConnect(e,g){
   e.stopPropagation();e.preventDefault();
   var id=queueExitId(g);
-  if(!id){toast('Очередь пуста','warn');return;}
+  if(!id){toast('Цепочка пуста','warn');return;}
   var lkC=lockBlockedBy([id]);
   if(lkC){showLockTip(e.clientX,e.clientY,lkC);return;}
   lockTake([id]);
@@ -5374,9 +5400,9 @@ function startQueueConnect(e,g){
 function startQueuePinDrag(e,g){
   e.stopPropagation();e.preventDefault();
   var nid=queueEntryId(g);
-  if(!nid){toast('Очередь пуста','warn');return;}
+  if(!nid){toast('Цепочка пуста','warn');return;}
   var inc=project.edges.filter(function(ed){return ed.to===nid;});
-  if(!inc.length){toast('У очереди нет входящих стрелок — вход свободен','warn');return;}
+  if(!inc.length){toast('У цепочки нет входящих стрелок — вход свободен','warn');return;}
   var lkPi=lockBlockedBy([nid]);
   if(lkPi){showLockTip(e.clientX,e.clientY,lkPi);return;}
   lockTake([nid]);
@@ -5393,9 +5419,9 @@ function startQueuePinDrag(e,g){
 function startQueueOutDrag(e,g){
   e.stopPropagation();e.preventDefault();
   var nid=queueExitId(g);
-  if(!nid){toast('Очередь пуста','warn');return;}
+  if(!nid){toast('Цепочка пуста','warn');return;}
   var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply&&!ed.fromOut;});
-  if(!outs.length){toast('У очереди нет исходящих стрелок','warn');return;}
+  if(!outs.length){toast('У цепочки нет исходящих стрелок','warn');return;}
   var lkOu=lockBlockedBy([nid]);
   if(lkOu){showLockTip(e.clientX,e.clientY,lkOu);return;}
   lockTake([nid]);
@@ -5495,7 +5521,7 @@ function finishConnect(){
   if(to&&to!==from){
     var hlQ=(hlEl&&hlEl.classList&&hlEl.classList.contains('qcard'))?groupById(hlEl.dataset.gid):null;
     var srcQ=nodeById(from)?stackGroupOf(nodeById(from)):null;
-    if(hlQ&&srcQ&&hlQ.id===srcQ.id){toast('Очередь не может подключаться к самой себе','warn');return;}
+    if(hlQ&&srcQ&&hlQ.id===srcQ.id){toast('Цепочка не может подключаться к самой себе','warn');return;}
     var tnV=nodeById(to),fnV=nodeById(from);
     if(toVin){
       if(!tnV||tnV.type!=='branch'){toast('Вход «переменная» есть только у развилки','warn');return;}
@@ -6880,7 +6906,7 @@ canvas.addEventListener('contextmenu',function(e){
       if(n.dialog.replies.length>=2)items.push({ico:'expand',label:'Разбить на реплики ('+n.dialog.replies.length+')',fn:function(){splitDialogNode(n.id);}});
     }
     if(sel.size>=2&&selAllDialogs())items.push({ico:'dialog',label:'Объединить в один диалог',fn:mergeDialogNodes});
-    if(sel.size>=2&&selAllStackable())items.push({ico:'queue',label:'Собрать в очередь',fn:stackFromSelection});
+    if(sel.size>=2&&selAllStackable())items.push({ico:'queue',label:'Собрать в цепочку',fn:stackFromSelection});
     if(sel.size+selGroups.size>1){
       items.push({ico:'alignH',label:'Распределить по строкам…',fn:function(){openDistributeModal();}});
       items.push({ico:'expand',label:'Растянуть в строку по связям',fn:function(){stretchSelected();}});
@@ -6927,7 +6953,7 @@ canvas.addEventListener('contextmenu',function(e){
     var g=groupById(gid);if(!g)return;
     selectGroup(gid);
     if(g.stack){
-      /* очередь: отдельное меню — без сворачивания/разворачивания, только разборка */
+      /* цепочка: отдельное меню — без сворачивания/разворачивания, только разборка */
       var itemsQ=[
         {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}}
       ];
@@ -6935,7 +6961,7 @@ canvas.addEventListener('contextmenu',function(e){
         itemsQ.push({ico:'x',label:'Вынуть из родителя',fn:function(){discrete(function(){g.parent=null;});renderAll();}});
       }
       itemsQ.push('-');
-      itemsQ.push({ico:'trash',label:'Разобрать очередь (связи сохранятся)',danger:true,fn:function(){ungroup(gid);}});
+      itemsQ.push({ico:'trash',label:'Разобрать цепочку (связи сохранятся)',danger:true,fn:function(){ungroup(gid);}});
       openCtxMenu(e.clientX,e.clientY,itemsQ);
       return;
     }
@@ -7627,7 +7653,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>очереди нод</div><div>перетащите ноду на другую — объединятся в очередь с авто-связями «кто за кем» (при помещении в очередь старые связи ноды убираются); очередь — отдельный элемент: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ — вывести ноду, клик по строке — выбрать ноду, ПКМ по карточке — только «Разобрать очередь» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку очереди — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в очередь»</div>'+
+      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ — вывести ноду, клик по строке — выбрать ноду, ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
