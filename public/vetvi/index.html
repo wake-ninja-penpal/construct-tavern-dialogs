@@ -604,6 +604,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .ld-old{text-decoration:line-through;opacity:.72}
 .ld-new{color:#d7dce4}
 .ld-arr{opacity:.6}
+.ld-dot{display:inline-block;width:11px;height:11px;border-radius:3px;border:1px solid rgba(255,255,255,.25);vertical-align:-1px}
 .ld-more{opacity:.55}
 #toasts{position:fixed;right:16px;bottom:44px;display:flex;flex-direction:column;gap:8px;z-index:90}
 .toast{display:flex;align-items:center;gap:9px;background:#1d2027;border:1px solid #32363f;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--tx2);box-shadow:var(--sh);animation:tIn .3s cubic-bezier(.2,.9,.3,1.2) both;max-width:340px}
@@ -1425,7 +1426,7 @@ function markSaved(){dirty=false;updateStatus();}
    переменные добавлены, удалены, изменены — до 8 позиций в каждом разделе).
    Записи переживают отмену (undo не трогает meta), автосохраняются и переносятся
    с документом комнаты; при получении чужого состояния журналы объединяются по id записи. */
-var pendingLog=null,logFlushT=null,logManT=null,logModalIdx=-1,logFilterNode=null,logViewList=[];
+var pendingLog=null,logFlushT=null,logManT=null,logModalIdx=-1,logFilterNode=null,logFilterGroup=null,logViewList=[];
 function scheduleLogFlush(){clearTimeout(logFlushT);logFlushT=setTimeout(flushPendingLog,700);}
 function logActionEntry(entry){
   try{
@@ -1456,7 +1457,7 @@ function flushPendingLog(){
   if(!d)return;
   logActionEntry({id:uid()+uid(),t:p.t,by:p.by,act:p.label||logDiffSummary(d),diff:d});
 }
-var LOG_F_N={title:'название',text:'текст',status:'статус',color:'цвет',tint:'яркость',x:'позиция',y:'позиция',expand:'сворачивание',dlgWidth:'ширина',dialog:'реплики/участники',notes:'заметки',gid:'группа',outcomes:'исходы',outs:'исходы',type:'тип'};
+var LOG_F_N={title:'название',text:'текст',status:'статус',color:'цвет',tint:'яркость',x:'позиция',y:'позиция',expand:'сворачивание',dlgWidth:'ширина',dialog:'реплики/участники',notes:'заметки',gid:'группа',outcomes:'исходы',outs:'исходы',type:'тип',vid:'переменная',varMode:'режим',varOp:'операция'};
 var LOG_F_E={label:'подпись',cond:'условие',pts:'изгибы',fromReply:'исход из реплики',fromOut:'исход',from:'перенаправление',to:'перенаправление',bd:'форма моста',kind:'тип линии',lt:'якорь подписи',lp:'якорь подписи'};
 var LOG_F_G={name:'название',color:'цвет',tint:'яркость',fold:'вид',stack:'тип',parent:'вложенность',alpha:'прозрачность',badge:'ярлык',auto:'авторазмер',fx:'рамка',fy:'рамка',fw:'рамка',fh:'рамка',order:'порядок'};
 function logDiffKeys(o,nb,map,skip){
@@ -1481,39 +1482,94 @@ function logStable(o){
     return v;
   });
 }
-/* старый/новый текст для журнала: правки текста нод, описания и реплик диалогов */
+/* старый/новый текст для журнала: правки любых полей нод — название, текст, статус, цвет,
+   яркость, участники диалога, описание и реплики (включая вложенные), исходы развилок,
+   значения переменных, заметки — старое зачёркнуто, новое рядом */
 function logTxtOne(s){s=String(s==null?'':s).replace(/\s+/g,' ').trim();if(!s)return '';if(s.length>90)s=s.slice(0,90)+'…';return s;}
-function logNodeTextDiff(a,b){
+function logFlatReplies(rs,out,pm,pid){
+  (Array.isArray(rs)?rs:[]).forEach(function(r){
+    if(!r||!r.id)return;
+    out.push(r);pm[r.id]=pid||null;
+    if(Array.isArray(r.children))logFlatReplies(r.children,out,pm,r.id);
+  });
+  return out;
+}
+function logVarValTxt(v){if(v===true)return 'да';if(v===false)return 'нет';if(typeof v==='number')return String(v);return logTxtOne(v);}
+function logNotesTxt(ns){
+  var t=(Array.isArray(ns)?ns:[]).map(function(m){return logTxtOne(m&&m.title)||'без названия';});
+  return t.length?t.join('; '):'—';
+}
+function logNodeTextDiff(a,b,ma,mb){
   var out=[];
-  function add(k,xa,xb){out.push({k:k,a:logTxtOne(xa),b:logTxtOne(xb)});}
+  function add(k,xa,xb,da,db){out.push({k:k,a:logTxtOne(xa),b:logTxtOne(xb),da:da||null,db:db||null});}
+  function addRaw(k,xa,xb){out.push({k:k,a:logTxtOne(xa),b:logTxtOne(xb)});}
+  if(typeof a.title==='string'&&typeof b.title==='string'&&a.title.trim()!==b.title.trim())add('название',a.title,b.title);
   if(typeof a.text==='string'&&typeof b.text==='string'&&a.text.trim()!==b.text.trim())add('текст',a.text,b.text);
+  if(a.status!==b.status)add('статус',STATUS[a.status]||a.status||'',STATUS[b.status]||b.status||'');
+  if((a.color||null)!==(b.color||null))out.push({k:'цвет',a:a.color?'':'обычный',b:b.color?'':'обычный',da:a.color||null,db:b.color||null});
+  if(((typeof a.tint==='number')?a.tint:0)!==((typeof b.tint==='number')?b.tint:0))addRaw('яркость',((typeof a.tint==='number')?a.tint:0)+'%',((typeof b.tint==='number')?b.tint:0)+'%');
+  /* участники: id → названия по снимкам состояния (до/после) */
+  var pa=(a.dialog&&Array.isArray(a.dialog.participants))?a.dialog.participants:(Array.isArray(a.participants)?a.participants:[]);
+  var pb=(b.dialog&&Array.isArray(b.dialog.participants))?b.dialog.participants:(Array.isArray(b.participants)?b.participants:[]);
+  if(JSON.stringify(pa||[])!==JSON.stringify(pb||[])){
+    function names(arr,mp){return ((arr||[]).map(function(id){var nn=(mp&&mp[id])||nodeById(id);return '«'+((nn&&nn.title)||'?')+'»';}).join(', ')||'—');}
+    addRaw('участники',names(pa,ma),names(pb,mb));
+  }
   if(a.dialog&&b.dialog){
     var da=(a.dialog.description||'').trim(),db=(b.dialog.description||'').trim();
     if(da!==db)add('описание',da,db);
-    var ra=Array.isArray(a.dialog.replies)?a.dialog.replies:[],rb=Array.isArray(b.dialog.replies)?b.dialog.replies:[];
-    var mb={},seen={};
-    rb.forEach(function(r){if(r&&r.id)mb[r.id]=r;});
+    var pmA={},ra=logFlatReplies(a.dialog.replies,[],pmA,null),rb=logFlatReplies(b.dialog.replies,[],{},null);
+    var mb2={},seen={};
+    rb.forEach(function(r){mb2[r.id]=r;});
     ra.forEach(function(r){
-      if(!r||!r.id)return;
       seen[r.id]=1;
-      var nb=mb[r.id],ta=(r.text||'').trim();
-      if(!nb){if(ta)add('реплика удалена',ta,'');return;}
+      var nb=mb2[r.id],ta=(r.text||'').trim();
+      if(!nb){
+        /* реплика исчезла: показываем только верхнюю исчезнувшую в своей ветке (потомки и так пропали вместе с ней) */
+        var par=pmA[r.id];
+        if((!par||mb2[par])&&ta)add('реплика удалена',ta,'');
+        return;
+      }
       var tb=(nb.text||'').trim();
       if(ta!==tb)add('реплика',ta,tb);
     });
-    rb.forEach(function(r){if(r&&r.id&&!seen[r.id]){var tb=(r.text||'').trim();if(tb)add('реплика добавлена','',tb);}});
+    rb.forEach(function(r){if(!seen[r.id]){var tb=(r.text||'').trim();if(tb)add('реплика добавлена','',tb);}});
   }
+  if(Array.isArray(a.outcomes)||Array.isArray(b.outcomes)){
+    var oa={},ob={},oseen={};
+    (a.outcomes||[]).forEach(function(o){if(o&&o.id)oa[o.id]=o;});
+    (b.outcomes||[]).forEach(function(o){if(o&&o.id)ob[o.id]=o;});
+    (a.outcomes||[]).forEach(function(o){
+      if(!o||!o.id)return;oseen[o.id]=1;
+      var nb=ob[o.id],ta=(o.label||'').trim();
+      if(!nb){if(ta)add('исход удалён',ta,'');return;}
+      var tb=(nb.label||'').trim();
+      if(ta!==tb)add('исход',ta,tb);
+    });
+    (b.outcomes||[]).forEach(function(o){if(o&&o.id&&!oseen[o.id]){var tb=(o.label||'').trim();if(tb)add('исход добавлен','',tb);}});
+  }
+  if(a.type==='varnode'&&b.type==='varnode'){
+    if(JSON.stringify(a.varVal)!==JSON.stringify(b.varVal))addRaw('значение переменной',logVarValTxt(a.varVal),logVarValTxt(b.varVal));
+    if(a.varOp!==b.varOp)addRaw('операция',String(a.varOp||'='),String(b.varOp||'='));
+    if(a.varMode!==b.varMode)addRaw('режим',a.varMode==='get'?'чтение':'запись',b.varMode==='get'?'чтение':'запись');
+    if(a.vid!==b.vid)addRaw('переменная',varName(a.vid)||'—',varName(b.vid)||'—');
+  }
+  if(logStable(a.notes||[])!==logStable(b.notes||[]))addRaw('заметки',logNotesTxt(a.notes),logNotesTxt(b.notes));
   if(!out.length)return null;
   return{items:out.slice(0,6),more:out.length>6?out.length-6:0};
 }
 function logTxtDiffHtml(td){
   if(!td||!Array.isArray(td.items)||!td.items.length)return '';
+  function logSideHtml(hex,txt,cls){
+    if(hex)return '<span class="ld-dot" style="background:'+esc(hex)+'" title="'+esc(hex)+'"></span>';
+    if(txt)return '<span class="'+cls+'">«'+esc(txt)+'»</span>';
+    return '';
+  }
   var h='<div class="log-dtxt">';
   td.items.forEach(function(t){
+    var va=logSideHtml(t.da,t.a,'ld-old'),vb=logSideHtml(t.db,t.b,'ld-new');
     h+='<div class="ld-row"><span class="ld-k">'+esc(t.k)+':</span> ';
-    if(t.a)h+='<span class="ld-old">«'+esc(t.a)+'»</span>';
-    if(t.a&&t.b)h+='<span class="ld-arr"> → </span>';
-    if(t.b)h+='<span class="ld-new">«'+esc(t.b)+'»</span>';
+    if(va||vb){h+=va;if(va&&vb)h+='<span class="ld-arr"> → </span>';h+=vb;}
     h+='</div>';
   });
   if(td.more)h+='<div class="ld-row ld-more">… ещё '+td.more+'</div>';
@@ -1547,16 +1603,32 @@ function logDiff(preStr,curStr){
   }
   sec('nA',na.add,function(n){return[n.id,(n.title||'')];},8);
   sec('nD',na.del,function(n){return[n.id,(n.title||'')];},8);
-  sec('nC',na.chg,function(p){var td=logNodeTextDiff(p.a,p.b);return[p.a.id,(p.a.title||''),logDiffKeys(p.a,p.b,LOG_F_N).join(', ')].concat(td?[td]:[]);},8);
+  sec('nC',na.chg,function(p){var td=logNodeTextDiff(p.a,p.b,na.ma,na.mb);return[p.a.id,(p.a.title||''),logDiffKeys(p.a,p.b,LOG_F_N).join(', ')].concat(td?[td]:[]);},8);
   sec('eA',ea.add,function(e){return[e.id,eDesc(e,na.mb)];},8);
   sec('eD',ea.del,function(e){return[e.id,eDesc(e,na.ma)];},8);
-  sec('eC',ea.chg,function(p){return[p.a.id,eDesc(p.a,na.ma),logDiffKeys(p.a,p.b,LOG_F_E).join(', ')];},8);
+  sec('eC',ea.chg,function(p){
+    var items=[];
+    if((p.a.label||'')!==(p.b.label||''))items.push({k:'подпись',a:logTxtOne(p.a.label),b:logTxtOne(p.b.label)});
+    if(logStable(p.a.cond||null)!==logStable(p.b.cond||null))items.push({k:'условие',a:condText(p.a.cond)||'—',b:condText(p.b.cond)||'—'});
+    var td=items.length?{items:items.slice(0,4),more:items.length>4?items.length-4:0}:null;
+    return[p.a.id,eDesc(p.a,na.ma),logDiffKeys(p.a,p.b,LOG_F_E).join(', ')].concat(td?[td]:[]);
+  },8);
   sec('gA',ga.add,function(g){return[g.id,(g.name||'')];},8);
   sec('gD',ga.del,function(g){return[g.id,(g.name||'')];},8);
-  sec('gC',ga.chg,function(p){return[p.a.id,(p.a.name||''),logDiffKeys(p.a,p.b,LOG_F_G,{bbox:1,hh:1}).join(', ')];},8);
+  sec('gC',ga.chg,function(p){
+    var td=((p.a.name||'')!==(p.b.name||''))?{items:[{k:'название',a:logTxtOne(p.a.name),b:logTxtOne(p.b.name)}],more:0}:null;
+    return[p.a.id,(p.a.name||''),logDiffKeys(p.a,p.b,LOG_F_G,{bbox:1,hh:1}).join(', ')].concat(td?[td]:[]);
+  },8);
   sec('vA',va.add,function(v){return[v.id,(v.name||'')];},8);
   sec('vD',va.del,function(v){return[v.id,(v.name||'')];},8);
-  sec('vC',va.chg,function(p){var f=[];if((p.a.name||'')!==(p.b.name||''))f.push('название');if(p.a.type!==p.b.type)f.push('тип');if(JSON.stringify(p.a.val)!==JSON.stringify(p.b.val))f.push('значение');return[p.a.id,(p.a.name||''),f.join(', ')];},8);
+  sec('vC',va.chg,function(p){
+    var f=[],items=[];
+    if((p.a.name||'')!==(p.b.name||'')){f.push('название');items.push({k:'название',a:logTxtOne(p.a.name),b:logTxtOne(p.b.name)});}
+    if(p.a.type!==p.b.type)f.push('тип');
+    if(JSON.stringify(p.a.val)!==JSON.stringify(p.b.val)){f.push('значение');items.push({k:'значение',a:logVarValTxt(p.a.val),b:logVarValTxt(p.b.val)});}
+    var td=items.length?{items:items,more:0}:null;
+    return[p.a.id,(p.a.name||''),f.join(', ')].concat(td?[td]:[]);
+  },8);
   if(!Object.keys(d).length)return null;
   var ids=[];
   na.add.concat(na.chg.map(function(p){return p.a;})).forEach(function(n){if(ids.indexOf(n.id)<0&&ids.length<12)ids.push(n.id);});
@@ -1575,6 +1647,12 @@ function logDiff(preStr,curStr){
   ea.add.concat(ea.del).forEach(function(e){keepN(e.from);keepN(e.to);});
   ea.chg.forEach(function(p){keepN(p.a.from);keepN(p.a.to);keepN(p.b.from);keepN(p.b.to);});
   d.nodes=nids;
+  /* полный список затронутых групп (для журнала по группе/цепочке) — до 60 id */
+  var gidsL=[];
+  function keepG(id){if(id&&gidsL.indexOf(id)<0&&gidsL.length<60)gidsL.push(id);}
+  ga.add.concat(ga.del).forEach(function(g){keepG(g.id);});
+  ga.chg.forEach(function(p){keepG(p.a.id);keepG(p.b.id);});
+  d.groups=gidsL;
   return d;
 }
 function logDiffSummary(d){
@@ -1609,11 +1687,11 @@ function logDetailsHtml(d){
   h+=logDetSec('изменены ноды',d.nC,d.nCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+logTxtDiffHtml(x[3])+'</div>';});
   h+=logDetSec('добавлены связи',d.eA,d.eAN,function(x){return '<div class="log-item">+ '+esc(x[1])+'</div>';});
   h+=logDetSec('удалены связи',d.eD,d.eDN,function(x){return '<div class="log-item">− '+esc(x[1])+'</div>';});
-  h+=logDetSec('изменены связи',d.eC,d.eCN,function(x){return '<div class="log-item">'+esc(x[1])+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  h+=logDetSec('изменены связи',d.eC,d.eCN,function(x){return '<div class="log-item">'+esc(x[1])+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+logTxtDiffHtml(x[3])+'</div>';});
   h+=logDetSec('добавлены группы',d.gA,d.gAN,function(x){return '<div class="log-item">+ <b>'+esc(x[1]||'')+'</b></div>';});
   h+=logDetSec('удалены группы',d.gD,d.gDN,function(x){return '<div class="log-item">− <b>'+esc(x[1]||'')+'</b></div>';});
-  h+=logDetSec('изменены группы',d.gC,d.gCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
-  h+=logDetSec('переменные',(d.vA||[]).concat(d.vD||[]).concat(d.vC||[]),(d.vAN||0)+(d.vDN||0)+(d.vCN||0),function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  h+=logDetSec('изменены группы',d.gC,d.gCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+logTxtDiffHtml(x[3])+'</div>';});
+  h+=logDetSec('переменные',(d.vA||[]).concat(d.vD||[]).concat(d.vC||[]),(d.vAN||0)+(d.vDN||0)+(d.vCN||0),function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+logTxtDiffHtml(x[3])+'</div>';});
   return (h||'<div class="log-item log-fields">Изменение без структурных правок</div>');
 }
 function logFocus(e){
@@ -1654,7 +1732,7 @@ function openLogModal(){
   if(logModalIdx<0)logModalIdx=0;
   renderLogModal();
 }
-function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logModalIdx=-1;}
+function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logFilterGroup=null;logModalIdx=-1;}
 /* журнал по конкретной ноде: совпадение записи с нодой (по diff.nodes новых записей,
    по разделам нод/ids — для старых, по названию в тексте действия — как последний шанс) */
 function logEntryForNode(e,id){
@@ -1673,23 +1751,50 @@ function logEntryForNode(e,id){
 function logFiltered(){
   var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
   if(logFilterNode)log=log.filter(function(e){return logEntryForNode(e,logFilterNode);});
+  if(logFilterGroup)log=log.filter(function(e){return logEntryForGroup(e,logFilterGroup);});
   return log;
 }
 function openNodeLog(id){
-  logFilterNode=id||null;
+  logFilterGroup=null;logFilterNode=id||null;
   logModalIdx=0;
   openLogModal();
+}
+/* журнал по группе/цепочке: записи о самой группе (переименование, цвет, преобразования,
+   разборка) плюс записи о её нодах — полный след цепочки или группы в журнале */
+function openGroupLog(gid){
+  logFilterNode=null;logFilterGroup=gid||null;
+  logModalIdx=0;
+  openLogModal();
+}
+function logEntryForGroup(e,gid){
+  if(!e)return false;
+  var d=e.diff;
+  if(d){
+    if(Array.isArray(d.groups)&&d.groups.indexOf(gid)>=0)return true;
+    var hit=false;
+    ['gA','gD','gC'].forEach(function(k){if(hit)return;(d[k]||[]).forEach(function(x){if(x&&x[0]===gid)hit=true;});});
+    if(hit)return true;
+    if(Array.isArray(d.ids)&&d.ids.indexOf(gid)>=0)return true;
+  }
+  var g=groupById(gid);
+  if(g){
+    var ms=allDescNodes(g.id);
+    for(var i=0;i<ms.length;i++){if(ms[i]&&logEntryForNode(e,ms[i].id))return true;}
+  }
+  return false;
 }
 function renderLogModal(){
   var log=logFiltered();
   logViewList=log;
   var fn=logFilterNode?nodeById(logFilterNode):null;
+  var fg=logFilterGroup?groupById(logFilterGroup):null;
   var cap=$('#logModal .dlg-modal-title');
-  if(cap)cap.textContent=logFilterNode?('Журнал: «'+((fn&&fn.title)||'нода удалена')+'»'):'Журнал действий';
-  $('#logNavInfo').textContent=logFilterNode?('записей: '+log.length+(fn?'':' · нода удалена')):('записей: '+log.length);
-  var la=$('#logAll');if(la)la.style.display=logFilterNode?'':'none';
+  if(cap)cap.textContent=logFilterNode?('Журнал: «'+((fn&&fn.title)||'нода удалена')+'»'):(logFilterGroup?('Журнал: «'+((fg&&fg.name)||'группа удалена')+'»'):'Журнал действий');
+  var gone=logFilterNode?(!fn):(logFilterGroup?(!fg):false);
+  $('#logNavInfo').textContent='записей: '+log.length+(gone?' · объект удалён':'');
+  var la=$('#logAll');if(la)la.style.display=(logFilterNode||logFilterGroup)?'':'none';
   var body=$('#logModalBody');
-  if(!log.length){body.innerHTML='<div class="log-empty">'+(logFilterNode?'Для этой ноды пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.')+'</div>';return;}
+  if(!log.length){var emptyMsg=logFilterNode?'Для этой ноды пока нет записей в журнале.':(logFilterGroup?'Для этой группы пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.');body.innerHTML='<div class="log-empty">'+emptyMsg+'</div>';return;}
   if(logModalIdx>=log.length)logModalIdx=0;
   var rows=log.map(function(e,i){
     var c=(e.by&&e.by.color)||'#8b929c',nm=(e.by&&e.by.name)||'—',open=i===logModalIdx;
@@ -1724,7 +1829,7 @@ function logNavStep(dir){
 }
 $('#logModalClose').onclick=closeLogModal;
 $('#logDone').onclick=closeLogModal;
-$('#logAll').onclick=function(){logFilterNode=null;logModalIdx=0;renderLogModal();};
+$('#logAll').onclick=function(){logFilterNode=null;logFilterGroup=null;logModalIdx=0;renderLogModal();};
 $('#logPrev').onclick=function(){logNavStep(-1);};
 $('#logNext').onclick=function(){logNavStep(1);};
 $('#bLog').onclick=openLogModal;
@@ -1842,6 +1947,19 @@ function typeInfo(key){
 function nodeVisual(n){
   var info=typeInfo(n.type);
   return{color:resolvedNodeColor(n,0),icon:info.icon||'note',name:info.name,baseColor:info.color||'#8b929c'};
+}
+/* актуализирует заголовок ноды везде, где он уже нарисован: холст, строка цепочки,
+   строка компакт-карты группы, список типов в панели слева */
+function syncNodeTitleDom(id){
+  var n=nodeById(id);if(!n)return;
+  var el=nodeEls.get(id);
+  if(el){var tE=el.querySelector('.n-title');if(tE)tE.textContent=n.title;}
+  var qr=document.querySelector('.q-item[data-nid="'+id+'"] .q-title');
+  if(qr)qr.textContent=n.title;
+  var gr=document.querySelector('.gc-row[data-nid="'+id+'"] .t');
+  if(gr)gr.textContent=n.title;
+  var pc=document.querySelector('#palList .cv-card[data-node="'+id+'"] .pal-name');
+  if(pc)pc.textContent=n.title;
 }
 /* итоговый цвет узла: приоритет — цвет персонажа-участника (кроме диалогов),
    затем собственная краска узла, затем цвет типа. depth — защита от циклов в данных */
@@ -3889,9 +4007,7 @@ function renderInspNode(){
     titleD.addEventListener('focus',editStart);
     titleD.addEventListener('input',function(){
       n.title=titleD.value;
-      if(el)el.querySelector('.n-title').textContent=n.title;
-      var card=document.querySelector('#palList .cv-card[data-node="'+n.id+'"] .pal-name');
-      if(card)card.textContent=n.title;
+      syncNodeTitleDom(n.id);
       markDirty();
     });
     titleD.addEventListener('change',editEnd);
@@ -4003,9 +4119,7 @@ function renderInspNode(){
   title.addEventListener('focus',editStart);
   title.addEventListener('input',function(){
     n.title=title.value;
-    if(el)el.querySelector('.n-title').textContent=n.title;
-    var card=document.querySelector('#palList .cv-card[data-node="'+n.id+'"] .pal-name');
-    if(card)card.textContent=n.title;
+    syncNodeTitleDom(n.id);
     if(n.type==='char')$all('.n-cast span[data-cid="'+n.id+'"]').forEach(function(ch){ch.textContent=n.title;});
     markDirty();
   });
@@ -6323,7 +6437,7 @@ function startInlineEdit(nodeEl){
     if(closed)return;closed=true;
     lockGive([n.id]);
     var v=inp.value.trim();
-    if(!cancel&&v&&v!==n.title){pushHistory(serialize(),'Переименование');n.title=v;markDirty();}
+    if(!cancel&&v&&v!==n.title){pushHistory(serialize(),'Переименование');n.title=v;markDirty();syncNodeTitleDom(n.id);}
     var sp=document.createElement('span');
     sp.className='n-title';sp.textContent=n.title;
     inp.replaceWith(sp);
@@ -7712,9 +7826,9 @@ canvas.addEventListener('contextmenu',function(e){
       var qiR=t.closest?t.closest('.q-item'):null;
       var qiNid=(qiR&&qiR.dataset.nid&&nodeById(qiR.dataset.nid))?qiR.dataset.nid:null;
       var itemsQ=[
-        {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}}
+        {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}},
+        {ico:'clock',label:'Журнал изменений',fn:(qiNid?function(){openNodeLog(qiNid);}:function(){openGroupLog(gid);})}
       ];
-      if(qiNid)itemsQ.push({ico:'clock',label:'Журнал изменений',fn:function(){openNodeLog(qiNid);}});
       itemsQ.push({ico:'expand',label:'Преобразовать в группу',fn:function(){stackToGroup(gid);}});
       if(g.parent){
         itemsQ.push({ico:'x',label:'Вынуть из родителя',fn:function(){discrete(function(){g.parent=null;});renderAll();}});
@@ -7728,6 +7842,7 @@ canvas.addEventListener('contextmenu',function(e){
     var itemsG=[
       {ico:'chev',label:nextName,fn:function(){cycleGroupFold(gid);}},
       {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}},
+      {ico:'clock',label:'Журнал изменений',fn:function(){openGroupLog(gid);}},
       {ico:g.badge?'eyeOff':'eye',label:g.badge?'Скрыть ярлык':'Показать ярлык',fn:function(){discrete(function(){g.badge=!g.badge;});updateGroupBadges();renderInspector();}},
       {ico:'expand',label:g.auto?'Авторазмер: выключить':'Авторазмер: включить',fn:function(){toggleAuto(g);}}
     ];
@@ -8104,9 +8219,11 @@ function normalize(p){
   var cmap={};p.customTypes.forEach(function(c){cmap[c.id]=c;});
   p.groups=(p.groups||[]).map(function(g){
     var fold=(g.fold===0||g.fold===1||g.fold===2)?g.fold:(g.collapsed?(g.listOpen===false?0:1):2);
+    var gnm=String(g.name||'Группа').slice(0,60);
+    if(g.stack&&gnm==='Очередь')gnm='Цепочка';/* старое имя цепочек → единое «Цепочка» (и в деталях, и в журнале) */
     return{
       id:g.id||uid(),
-      name:String(g.name||'Группа').slice(0,60),
+      name:gnm,
       fold:(!!g.stack)?1:fold,
       x:+g.x||0,y:+g.y||0,
       parent:(typeof g.parent==='string'&&g.parent!==g.id)?g.parent:null,
@@ -8413,7 +8530,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>кнопка «Журнал»</div><div>история действий: кто, когда и что менял; клик по записи — что именно изменилось и «показать на холсте»; ↑/↓ — переключение между записями; список последних редакторов — при наведении на «автосохранение»</div>'+
+      '<div>кнопка «Журнал»</div><div>история действий: кто, когда и что менял; клик по записи — что именно изменилось, со старыми и новыми значениями (название, текст, реплики, статус, цвет, участники и др.), и «показать на холсте»; ↑/↓ — переключение между записями; журнал по ноде или цепочке — в контекстном меню; список последних редакторов — при наведении на «автосохранение»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
@@ -8840,7 +8957,7 @@ function syncApplyRemote(doc,fit,keepPid){
     project.edges=doc.edges||[];
     project.customTypes=Array.isArray(doc.customTypes)?doc.customTypes:[];
     project.groups=Array.isArray(doc.groups)?doc.groups:[];
-    project.groups.forEach(function(g){if(g.stack&&g.fold!==1)g.fold=1;});/* цепочки всегда fold=1 */
+    project.groups.forEach(function(g){if(g.stack&&(g.fold!==1||g.name==='Очередь')){g.fold=1;if(g.name==='Очередь')g.name='Цепочка';}});/* цепочки всегда fold=1; старое «Очередь» → «Цепочка» */
     project.listHidden=Array.isArray(doc.listHidden)?doc.listHidden:[];
     project.vars=Array.isArray(doc.vars)?doc.vars:[];
     var ids=new Set(project.nodes.map(function(n){return n.id;}));
