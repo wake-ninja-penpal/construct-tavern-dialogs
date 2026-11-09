@@ -597,6 +597,14 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .log-foot-info{margin-right:auto;font:10.5px var(--mono);color:var(--tx3);align-self:center}
 .log-flash{animation:logFlash 1.6s ease-out 1}
 @keyframes logFlash{0%{box-shadow:0 0 0 0 rgba(226,165,78,.6)}70%{box-shadow:0 0 0 16px rgba(226,165,78,0)}100%{box-shadow:0 0 0 0 rgba(226,165,78,0)}}
+/* старый/новый текст в деталях записи журнала */
+.log-dtxt{margin-top:5px;padding-left:14px;display:flex;flex-direction:column;gap:2px}
+.ld-row{font:11px/1.5 var(--body);color:var(--tx3)}
+.ld-k{opacity:.85}
+.ld-old{text-decoration:line-through;opacity:.72}
+.ld-new{color:#d7dce4}
+.ld-arr{opacity:.6}
+.ld-more{opacity:.55}
 #toasts{position:fixed;right:16px;bottom:44px;display:flex;flex-direction:column;gap:8px;z-index:90}
 .toast{display:flex;align-items:center;gap:9px;background:#1d2027;border:1px solid #32363f;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--tx2);box-shadow:var(--sh);animation:tIn .3s cubic-bezier(.2,.9,.3,1.2) both;max-width:340px}
 .toast.out{animation:tOut .3s forwards}
@@ -970,7 +978,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <div id="logModal" class="dlg-modal"><div class="dlg-modal-card log-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Журнал действий</span><button class="dlg-modal-close" id="logModalClose" title="Закрыть">×</button></div>
   <div class="dlg-modal-body" id="logModalBody"></div>
-  <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
+  <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logAll" title="Показать все записи" style="display:none">Все записи</button><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
 </div></div>
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 <script src="/vendor/socket.io.min.js"></script>
@@ -1417,7 +1425,7 @@ function markSaved(){dirty=false;updateStatus();}
    переменные добавлены, удалены, изменены — до 8 позиций в каждом разделе).
    Записи переживают отмену (undo не трогает meta), автосохраняются и переносятся
    с документом комнаты; при получении чужого состояния журналы объединяются по id записи. */
-var pendingLog=null,logFlushT=null,logManT=null,logModalIdx=-1;
+var pendingLog=null,logFlushT=null,logManT=null,logModalIdx=-1,logFilterNode=null,logViewList=[];
 function scheduleLogFlush(){clearTimeout(logFlushT);logFlushT=setTimeout(flushPendingLog,700);}
 function logActionEntry(entry){
   try{
@@ -1473,6 +1481,44 @@ function logStable(o){
     return v;
   });
 }
+/* старый/новый текст для журнала: правки текста нод, описания и реплик диалогов */
+function logTxtOne(s){s=String(s==null?'':s).replace(/\s+/g,' ').trim();if(!s)return '';if(s.length>90)s=s.slice(0,90)+'…';return s;}
+function logNodeTextDiff(a,b){
+  var out=[];
+  function add(k,xa,xb){out.push({k:k,a:logTxtOne(xa),b:logTxtOne(xb)});}
+  if(typeof a.text==='string'&&typeof b.text==='string'&&a.text.trim()!==b.text.trim())add('текст',a.text,b.text);
+  if(a.dialog&&b.dialog){
+    var da=(a.dialog.description||'').trim(),db=(b.dialog.description||'').trim();
+    if(da!==db)add('описание',da,db);
+    var ra=Array.isArray(a.dialog.replies)?a.dialog.replies:[],rb=Array.isArray(b.dialog.replies)?b.dialog.replies:[];
+    var mb={},seen={};
+    rb.forEach(function(r){if(r&&r.id)mb[r.id]=r;});
+    ra.forEach(function(r){
+      if(!r||!r.id)return;
+      seen[r.id]=1;
+      var nb=mb[r.id],ta=(r.text||'').trim();
+      if(!nb){if(ta)add('реплика удалена',ta,'');return;}
+      var tb=(nb.text||'').trim();
+      if(ta!==tb)add('реплика',ta,tb);
+    });
+    rb.forEach(function(r){if(r&&r.id&&!seen[r.id]){var tb=(r.text||'').trim();if(tb)add('реплика добавлена','',tb);}});
+  }
+  if(!out.length)return null;
+  return{items:out.slice(0,6),more:out.length>6?out.length-6:0};
+}
+function logTxtDiffHtml(td){
+  if(!td||!Array.isArray(td.items)||!td.items.length)return '';
+  var h='<div class="log-dtxt">';
+  td.items.forEach(function(t){
+    h+='<div class="ld-row"><span class="ld-k">'+esc(t.k)+':</span> ';
+    if(t.a)h+='<span class="ld-old">«'+esc(t.a)+'»</span>';
+    if(t.a&&t.b)h+='<span class="ld-arr"> → </span>';
+    if(t.b)h+='<span class="ld-new">«'+esc(t.b)+'»</span>';
+    h+='</div>';
+  });
+  if(td.more)h+='<div class="ld-row ld-more">… ещё '+td.more+'</div>';
+  return h+'</div>';
+}
 function logDiffList(A,B){
   var ma={},mb={};
   (A||[]).forEach(function(o){ma[o.id]=o;});
@@ -1501,7 +1547,7 @@ function logDiff(preStr,curStr){
   }
   sec('nA',na.add,function(n){return[n.id,(n.title||'')];},8);
   sec('nD',na.del,function(n){return[n.id,(n.title||'')];},8);
-  sec('nC',na.chg,function(p){return[p.a.id,(p.a.title||''),logDiffKeys(p.a,p.b,LOG_F_N).join(', ')];},8);
+  sec('nC',na.chg,function(p){var td=logNodeTextDiff(p.a,p.b);return[p.a.id,(p.a.title||''),logDiffKeys(p.a,p.b,LOG_F_N).join(', ')].concat(td?[td]:[]);},8);
   sec('eA',ea.add,function(e){return[e.id,eDesc(e,na.mb)];},8);
   sec('eD',ea.del,function(e){return[e.id,eDesc(e,na.ma)];},8);
   sec('eC',ea.chg,function(p){return[p.a.id,eDesc(p.a,na.ma),logDiffKeys(p.a,p.b,LOG_F_E).join(', ')];},8);
@@ -1520,6 +1566,15 @@ function logDiff(preStr,curStr){
     if(fe){var nf=na.mb[fe.from]||na.ma[fe.from],nt=na.mb[fe.to]||na.ma[fe.to];if(nf&&ids.indexOf(nf.id)<0&&ids.length<12)ids.push(nf.id);if(nt&&ids.indexOf(nt.id)<0&&ids.length<12)ids.push(nt.id);}
   }
   d.ids=ids;
+  /* полный список затронутых нод (для журнала по конкретной ноде): изменённые/добавленные/удалённые
+     ноды + концы затронутых связей; до 60 id, сериализуется вместе с записью */
+  var nids=[];
+  function keepN(id){if(id&&nids.indexOf(id)<0&&nids.length<60)nids.push(id);}
+  na.add.concat(na.del).forEach(function(n){keepN(n.id);});
+  na.chg.forEach(function(p){keepN(p.a.id);});
+  ea.add.concat(ea.del).forEach(function(e){keepN(e.from);keepN(e.to);});
+  ea.chg.forEach(function(p){keepN(p.a.from);keepN(p.a.to);keepN(p.b.from);keepN(p.b.to);});
+  d.nodes=nids;
   return d;
 }
 function logDiffSummary(d){
@@ -1551,7 +1606,7 @@ function logDetailsHtml(d){
   var h='';
   h+=logDetSec('добавлены ноды',d.nA,d.nAN,function(x){return '<div class="log-item">+ <b>'+esc(x[1]||'без названия')+'</b></div>';});
   h+=logDetSec('удалены ноды',d.nD,d.nDN,function(x){return '<div class="log-item">− <b>'+esc(x[1]||'')+'</b></div>';});
-  h+=logDetSec('изменены ноды',d.nC,d.nCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  h+=logDetSec('изменены ноды',d.nC,d.nCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+logTxtDiffHtml(x[3])+'</div>';});
   h+=logDetSec('добавлены связи',d.eA,d.eAN,function(x){return '<div class="log-item">+ '+esc(x[1])+'</div>';});
   h+=logDetSec('удалены связи',d.eD,d.eDN,function(x){return '<div class="log-item">− '+esc(x[1])+'</div>';});
   h+=logDetSec('изменены связи',d.eC,d.eCN,function(x){return '<div class="log-item">'+esc(x[1])+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
@@ -1564,14 +1619,34 @@ function logDetailsHtml(d){
 function logFocus(e){
   var ids=(e&&e.diff&&e.diff.ids)||[];
   if(!ids.length){toast('Для этой записи нет объектов на холсте','warn');return;}
-  var flashed=false;
+  var flashed=false,centered=false;
   ids.forEach(function(id){
-    var el=nodeEls.get(id)||groupEls.get(id);
-    if(el&&el.style.display!=='none'){el.classList.add('log-flash');flashed=true;setTimeout(function(){el.classList.remove('log-flash');},1700);}
+    var n=nodeById(id),g=groupById(id);
+    if(n){
+      var sg=stackGroupOf(n);
+      if(sg){
+        /* нода внутри цепочки: подсветить карточку и её строку, центр — на карточке.
+           Саму цепочку не трогаем: разворачивать её нельзя (иначе ноды выпадут на холст) */
+        var card=groupEls.get(sg.id);
+        if(card&&card.style.display!=='none'){
+          card.classList.add('log-flash');setTimeout(function(){card.classList.remove('log-flash');},1700);
+          var row=card.querySelector('.q-item[data-nid="'+id+'"]');
+          if(row){row.classList.add('log-flash');setTimeout(function(){row.classList.remove('log-flash');},1700);}
+          flashed=true;
+          if(!centered){centerOnGroup(sg);centered=true;}
+        }
+      }else{
+        revealNode(n);
+        var el=nodeEls.get(id);
+        if(el&&el.style.display!=='none'){el.classList.add('log-flash');flashed=true;setTimeout(function(){el.classList.remove('log-flash');},1700);}
+        if(!centered){centerOn(n);centered=true;}
+      }
+    }else if(g){
+      var gel=groupEls.get(id);
+      if(gel&&gel.style.display!=='none'){gel.classList.add('log-flash');flashed=true;setTimeout(function(){gel.classList.remove('log-flash');},1700);}
+      if(!centered){centerOnGroup(g);centered=true;}
+    }
   });
-  var n0=nodeById(ids[0]),g0=groupById(ids[0]);
-  if(n0){revealNode(n0);centerOn(n0);}
-  else if(g0)centerOnGroup(g0);
   if(!flashed)toast('Объекты этой записи уже удалены или скрыты','warn');
 }
 function openLogModal(){
@@ -1579,12 +1654,42 @@ function openLogModal(){
   if(logModalIdx<0)logModalIdx=0;
   renderLogModal();
 }
-function closeLogModal(){$('#logModal').classList.remove('show');}
-function renderLogModal(){
+function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logModalIdx=-1;}
+/* журнал по конкретной ноде: совпадение записи с нодой (по diff.nodes новых записей,
+   по разделам нод/ids — для старых, по названию в тексте действия — как последний шанс) */
+function logEntryForNode(e,id){
+  if(!e)return false;
+  var d=e.diff;
+  if(d){
+    if(Array.isArray(d.nodes))return d.nodes.indexOf(id)>=0;
+    var hit=false;
+    ['nA','nD','nC'].forEach(function(k){if(hit)return;(d[k]||[]).forEach(function(x){if(x&&x[0]===id)hit=true;});});
+    if(hit)return true;
+    if(Array.isArray(d.ids)&&d.ids.indexOf(id)>=0)return true;
+  }
+  var n=nodeById(id);
+  return !!(n&&n.title&&e.act&&e.act.indexOf(n.title)>=0);
+}
+function logFiltered(){
   var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
-  $('#logNavInfo').textContent='записей: '+log.length;
+  if(logFilterNode)log=log.filter(function(e){return logEntryForNode(e,logFilterNode);});
+  return log;
+}
+function openNodeLog(id){
+  logFilterNode=id||null;
+  logModalIdx=0;
+  openLogModal();
+}
+function renderLogModal(){
+  var log=logFiltered();
+  logViewList=log;
+  var fn=logFilterNode?nodeById(logFilterNode):null;
+  var cap=$('#logModal .dlg-modal-title');
+  if(cap)cap.textContent=logFilterNode?('Журнал: «'+((fn&&fn.title)||'нода удалена')+'»'):'Журнал действий';
+  $('#logNavInfo').textContent=logFilterNode?('записей: '+log.length+(fn?'':' · нода удалена')):('записей: '+log.length);
+  var la=$('#logAll');if(la)la.style.display=logFilterNode?'':'none';
   var body=$('#logModalBody');
-  if(!log.length){body.innerHTML='<div class="log-empty">Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.</div>';return;}
+  if(!log.length){body.innerHTML='<div class="log-empty">'+(logFilterNode?'Для этой ноды пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.')+'</div>';return;}
   if(logModalIdx>=log.length)logModalIdx=0;
   var rows=log.map(function(e,i){
     var c=(e.by&&e.by.color)||'#8b929c',nm=(e.by&&e.by.name)||'—',open=i===logModalIdx;
@@ -1605,21 +1710,21 @@ function renderLogModal(){
   $all('#logModalBody .log-loc').forEach(function(bt){
     bt.addEventListener('click',function(ev){
       ev.stopPropagation();
-      var log2=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
-      logFocus(log2[+bt.parentNode.parentNode.dataset.i]);
+      logFocus(logViewList[+bt.parentNode.parentNode.dataset.i]);
     });
   });
   var open=body.querySelector('.log-row.open');
   if(open)open.scrollIntoView({block:'nearest'});
 }
 function logNavStep(dir){
-  var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
+  var log=logViewList.length?logViewList:logFiltered();
   if(!log.length)return;
   logModalIdx=((logModalIdx<0?0:logModalIdx)+dir+log.length)%log.length;
   renderLogModal();
 }
 $('#logModalClose').onclick=closeLogModal;
 $('#logDone').onclick=closeLogModal;
+$('#logAll').onclick=function(){logFilterNode=null;logModalIdx=0;renderLogModal();};
 $('#logPrev').onclick=function(){logNavStep(-1);};
 $('#logNext').onclick=function(){logNavStep(1);};
 $('#bLog').onclick=openLogModal;
@@ -1827,7 +1932,9 @@ function revealNode(n){
   var g=groupOfNode(n),guard=0;
   var chain=[];
   while(g&&guard++<40){
-    if(g.fold<2)chain.push(g);
+    /* цепочки (stack) не разворачиваем: у них нет «свёрнутого» состояния,
+       fold=1 — каноничное значение, иначе ноды цепочки выпадут на холст */
+    if(g.fold<2&&!g.stack)chain.push(g);
     g=g.parent?groupById(g.parent):null;
   }
   if(chain.length){
@@ -7546,7 +7653,8 @@ canvas.addEventListener('contextmenu',function(e){
     var items=[
       {ico:'play',label:'Играть отсюда',fn:function(){plStart(id);}},
       {ico:'copy',label:'Дублировать',fn:function(){var r=duplicateSel();if(r)startCarry(r.ids,r.pre);}},
-      {ico:'target',label:'Центрировать',fn:function(){centerOn(n);}}
+      {ico:'target',label:'Центрировать',fn:function(){centerOn(n);}},
+      {ico:'clock',label:'Журнал изменений',fn:function(){openNodeLog(id);}}
     ];
     if(n.type==='dialog'){
       ensureDialog(n);
@@ -7601,10 +7709,13 @@ canvas.addEventListener('contextmenu',function(e){
     selectGroup(gid);
     if(g.stack){
       /* цепочка: отдельное меню — без сворачивания/разворачивания; преобразование в группу и разборка */
+      var qiR=t.closest?t.closest('.q-item'):null;
+      var qiNid=(qiR&&qiR.dataset.nid&&nodeById(qiR.dataset.nid))?qiR.dataset.nid:null;
       var itemsQ=[
-        {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}},
-        {ico:'expand',label:'Преобразовать в группу',fn:function(){stackToGroup(gid);}}
+        {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}}
       ];
+      if(qiNid)itemsQ.push({ico:'clock',label:'Журнал изменений',fn:function(){openNodeLog(qiNid);}});
+      itemsQ.push({ico:'expand',label:'Преобразовать в группу',fn:function(){stackToGroup(gid);}});
       if(g.parent){
         itemsQ.push({ico:'x',label:'Вынуть из родителя',fn:function(){discrete(function(){g.parent=null;});renderAll();}});
       }
@@ -7996,7 +8107,7 @@ function normalize(p){
     return{
       id:g.id||uid(),
       name:String(g.name||'Группа').slice(0,60),
-      fold:fold,
+      fold:(!!g.stack)?1:fold,
       x:+g.x||0,y:+g.y||0,
       parent:(typeof g.parent==='string'&&g.parent!==g.id)?g.parent:null,
       color:(typeof g.color==='string'&&/^#([0-9a-f]{6})$/i.test(g.color))?g.color:null,
@@ -8729,6 +8840,7 @@ function syncApplyRemote(doc,fit,keepPid){
     project.edges=doc.edges||[];
     project.customTypes=Array.isArray(doc.customTypes)?doc.customTypes:[];
     project.groups=Array.isArray(doc.groups)?doc.groups:[];
+    project.groups.forEach(function(g){if(g.stack&&g.fold!==1)g.fold=1;});/* цепочки всегда fold=1 */
     project.listHidden=Array.isArray(doc.listHidden)?doc.listHidden:[];
     project.vars=Array.isArray(doc.vars)?doc.vars:[];
     var ids=new Set(project.nodes.map(function(n){return n.id;}));
