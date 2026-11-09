@@ -762,6 +762,22 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .ofl-cf-b .btn{padding:4px 12px;font-size:12px}
 .ofl-cf-b .btn.sel{background:var(--accd);border-color:var(--acc);color:var(--acc2)}
 .ofl-note{font-size:11.5px;color:var(--tx3);margin-top:10px}
+/* git-стиль diff в модалке слияния: построчные изменения «- старое / + новое» */
+.ofl-tgl{flex:none;margin-left:auto;font:600 10.5px var(--mono);padding:2px 9px;border-radius:6px;background:#20242b;border:1px solid #2b303a;color:var(--tx2);cursor:pointer}
+.ofl-tgl:hover{color:var(--tx);border-color:#3a4150}
+.ofl-diffbox{display:none;margin:7px 0 2px;border:1px solid var(--line2);border-radius:8px;background:#111318;max-height:250px;overflow-y:auto;padding:7px 10px}
+.ofl-diffbox.show{display:block}
+.ofl-dl{font:11px/1.6 var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--tx2)}
+.ofl-dl.add{color:var(--ok)}
+.ofl-dl.del{color:var(--bad)}
+.ofl-dl.mod{color:var(--tx);margin-top:5px}
+.ofl-dl.mod:first-child{margin-top:0}
+.ofl-dl.fld{padding-left:14px}
+.ofl-dl.more{padding-left:14px;color:var(--tx3)}
+.ofl-cfd{display:none;margin-top:9px;gap:8px;flex-wrap:wrap}
+.ofl-cfd.show{display:flex}
+.ofl-cfd-col{flex:1 1 230px;min-width:210px;border:1px solid var(--line2);border-radius:8px;background:#111318;padding:7px 9px;max-height:210px;overflow-y:auto}
+.ofl-cfd-col .ofl-tag{display:inline-block;margin-bottom:4px}
 .cpy-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--line2);border-radius:10px;margin-bottom:7px;background:#171a1f}
 .cpy-item.active{border-color:rgba(226,165,78,.55);background:var(--accd)}
 .cpy-name{flex:1;min-width:0}
@@ -10042,6 +10058,159 @@ function offSideDesc(kind,d,baseEnt){
     return ks.length?('изменено: '+ks.slice(0,5).join(', ')):'изменено';
   }catch(e){return 'изменено';}
 }
+/* ── git-стиль diff: что именно изменено (построчно, «- старое / + новое») ──
+   Полей может быть много, поэтому: короткие значения, ограничение числа строк
+   и «… ещё N». Цвета показываются точками (ld-dot), текст — «в кавычках». */
+function offOneVal(v){
+  if(v===undefined||v===null||v==='')return '—';
+  var s=String(v);
+  if(s.length>90)s=s.slice(0,90)+'…';
+  return s;
+}
+function offFieldRowHtml(sign,k,txt,hex){
+  var v=hex?'<span class="ld-dot" style="background:'+esc(hex)+'"></span>':esc(offOneVal(txt));
+  return '<div class="ofl-dl '+(sign==='-'?'del':'add')+' fld">'+sign+' '+esc(k)+': '+v+'</div>';
+}
+/* диффы полей одной сущности: base → ce (возвращает {items:[{k,a,b,da,db}],more}) */
+function offEntItems(kind,be,ce,maps,sideNodes){
+  var items=[],more=0;
+  try{
+    if(kind==='node'){
+      var td=null;
+      try{td=logNodeTextDiff(be||{},ce||{},(maps.n&&maps.n[0])||{},sideNodes||{});}catch(e){td=null;}
+      if(td&&td.items&&td.items.length){items=td.items;more=td.more||0;}
+    }else if(kind==='edge'){
+      if((be.label||'')!==(ce.label||''))items.push({k:'подпись',a:be.label||'',b:ce.label||''});
+      if(logStable(be.cond||null)!==logStable(ce.cond||null))items.push({k:'условие',a:condText(be.cond)||'—',b:condText(ce.cond)||'—'});
+      if(be.to!==ce.to)items.push({k:'перенаправление',a:offTitleOf(maps,'node',be.to),b:offTitleOf(maps,'node',ce.to)});
+      if(be.kind!==ce.kind)items.push({k:'тип линии',a:be.kind||'—',b:ce.kind||'—'});
+    }else if(kind==='group'){
+      if((be.name||'')!==(ce.name||''))items.push({k:'название',a:be.name||'',b:ce.name||''});
+    }else if(kind==='type'){
+      if((be.name||'')!==(ce.name||''))items.push({k:'название',a:be.name||'',b:ce.name||''});
+      if((be.color||null)!==(ce.color||null))items.push({k:'цвет',a:'',b:'',da:be.color||null,db:ce.color||null});
+    }else if(kind==='var'){
+      if((be.name||'')!==(ce.name||''))items.push({k:'название',a:be.name||'',b:ce.name||''});
+      if(logStable(be.expr||null)!==logStable(ce.expr||null))items.push({k:'выражение',a:be.expr||'',b:ce.expr||''});
+      if(logStable(be.val)!==logStable(ce.val))items.push({k:'значение',a:logVarValTxt(be.val),b:logVarValTxt(ce.val)});
+    }
+  }catch(e){}
+  /* запасной путь: нечёткие поля (позиция и пр.), не попавшие в текстовые диффы */
+  if(!items.length){
+    try{
+      var skip=(kind==='group')?{bbox:1,hh:1}:null;
+      var fmap=OFF_F_MAPS[kind]||{};
+      var ks=logDiffKeys(be||{},ce||{},{},skip);
+      ks.forEach(function(k){
+        if(k==='x'){items.push({k:'позиция',a:'('+(be.x||0)+', '+(be.y||0)+')',b:'('+(ce.x||0)+', '+(ce.y||0)+')'});return;}
+        var av=be?be[k]:undefined,bv=ce?ce[k]:undefined;
+        if(av&&typeof av==='object')av=JSON.stringify(av);
+        if(bv&&typeof bv==='object')bv=JSON.stringify(bv);
+        items.push({k:(fmap[k]||k),a:av,b:bv});
+      });
+    }catch(e2){}
+  }
+  if(!items.length)return null;
+  return{items:items.slice(0,8),more:more||(items.length>8?items.length-8:0)};
+}
+/* построчный html полей сущности (без заголовка) */
+function offEntRowsHtml(kind,be,ce,maps,sideNodes){
+  var td=offEntItems(kind,be,ce,maps,sideNodes);
+  if(!td)return '';
+  var h='';
+  td.items.forEach(function(t){
+    var hexA=t.da||null,hexB=t.db||null;
+    if(hexA||hexB){
+      if(hexA)h+=offFieldRowHtml('-',t.k,'',hexA);
+      if(hexB)h+=offFieldRowHtml('+',t.k,'',hexB);
+      if(!hexA||!hexB)h+='<div class="ofl-dl '+(hexA?'add':'del')+' fld">'+(hexA?'+':'-')+' '+esc(t.k)+': —</div>';
+    }else{
+      h+=offFieldRowHtml('-',t.k,t.a,null);
+      h+=offFieldRowHtml('+',t.k,t.b,null);
+    }
+  });
+  if(td.more)h+='<div class="ofl-dl more">… ещё '+td.more+'</div>';
+  return h;
+}
+/* дифф одной стороны: список построчных изменений doc относительно базы */
+function offSideDiff(base,doc){
+  var out=[];
+  if(!doc||!Array.isArray(doc.nodes)||!base)return out;
+  function walk(bArr,cArr,kind){
+    var bm={},cm={};(bArr||[]).forEach(function(x){if(x&&x.id)bm[x.id]=x;});
+    (cArr||[]).forEach(function(x){if(x&&x.id)cm[x.id]=x;});
+    (cArr||[]).forEach(function(x){
+      if(!x||!x.id)return;
+      var b=bm[x.id];
+      if(!b)out.push({kind:kind,id:x.id,st:'add',v:x});
+      else if(logStable(b)!==logStable(x))out.push({kind:kind,id:x.id,st:'mod',v:x});
+    });
+    Object.keys(bm).forEach(function(id){if(!cm[id])out.push({kind:kind,id:id,st:'del'});});
+  }
+  walk(base.nodes,doc.nodes,'node');
+  walk(base.edges,doc.edges,'edge');
+  walk(base.groups,doc.groups,'group');
+  walk(base.customTypes,doc.customTypes,'type');
+  if(offHasIds(base.vars)&&offHasIds(doc.vars))walk(base.vars,doc.vars,'var');
+  try{
+    var bn=(base.meta&&base.meta.name)||'',cn=(doc.meta&&doc.meta.name)||'';
+    if(bn!==cn)out.push({kind:'name',st:'mod',bv:bn,v:cn});
+    if((base.bend||null)!==(doc.bend||null))out.push({kind:'bend',st:'mod',bv:base.bend||null,v:doc.bend||null});
+    if(JSON.stringify(base.listHidden||[])!==JSON.stringify(doc.listHidden||[]))out.push({kind:'hidden',st:'mod',bv:(base.listHidden||[]).length,v:(doc.listHidden||[]).length});
+    if(!offHasIds(base.vars)&&JSON.stringify(base.vars||[])!==JSON.stringify(doc.vars||[]))out.push({kind:'vars',st:'mod',bv:(base.vars||[]).length,v:(doc.vars||[]).length});
+  }catch(e){}
+  var ord={node:0,edge:1,group:2,type:3,var:4,name:5,bend:6,hidden:7,vars:8},so={add:0,mod:1,del:2};
+  function rk(m,k){return (m[k]!==undefined)?m[k]:9;}
+  out.sort(function(a,b){return (rk(ord,a.kind)-rk(ord,b.kind))||(rk(so,a.st)-rk(so,b.st));});
+  return out;
+}
+var OFF_BN={ortho90:'прямые 90°',ortho45:'прямые 45°',smooth:'плавные'};
+function offEdgeTitle(maps,id){
+  try{
+    var ee=(maps.e[0]&&maps.e[0][id])||(maps.e[1]&&maps.e[1][id])||(maps.e[2]&&maps.e[2][id]);
+    var a=ee?offTitleOf(maps,'node',ee.from):'',b=ee?offTitleOf(maps,'node',ee.to):'';
+    var t=(ee&&ee.label)?ee.label+' · ':'';
+    return t+'«'+a+' → '+b+'»';
+  }catch(e){return id;}
+}
+function offSideDiffHtml(entries,maps,sideNodes){
+  var es=(entries||[]);
+  if(!es.length)return '<div class="ofl-dl">Правок относительно базы нет.</div>';
+  var h='',shown=0,MAX=300;
+  es.forEach(function(e){
+    if(shown>=MAX)return;
+    if(e.kind==='name'){h+=offFieldRowHtml('-','название проекта',e.bv,null);h+=offFieldRowHtml('+','название проекта',e.v,null);shown++;return;}
+    if(e.kind==='bend'){h+=offFieldRowHtml('-','изгибы',OFF_BN[e.bv]||e.bv||'—',null);h+=offFieldRowHtml('+','изгибы',OFF_BN[e.v]||e.v||'—',null);shown++;return;}
+    if(e.kind==='hidden'){h+=offFieldRowHtml('-','скрытых типов',String(e.bv),null);h+=offFieldRowHtml('+','скрытых типов',String(e.v),null);shown++;return;}
+    if(e.kind==='vars'){h+=offFieldRowHtml('-','переменных (список)',String(e.bv),null);h+=offFieldRowHtml('+','переменных (список)',String(e.v),null);shown++;return;}
+    var be=offBaseEnt(maps,e.kind,e.id),title=(e.kind==='edge')?offEdgeTitle(maps,e.id):offTitleOf(maps,e.kind,e.id);
+    if(e.st==='add'){h+='<div class="ofl-dl add">+ '+esc(offKindLabel(e.kind))+' «'+esc(title)+'»</div>';shown++;return;}
+    if(e.st==='del'){h+='<div class="ofl-dl del">− '+esc(offKindLabel(e.kind))+' «'+esc(title)+'»</div>';shown++;return;}
+    h+='<div class="ofl-dl mod">± '+esc(offKindLabel(e.kind))+' «'+esc(title)+'»</div>';
+    h+=offEntRowsHtml(e.kind,be||{},e.v||{},maps,sideNodes);
+    shown++;
+  });
+  if(es.length>MAX)h+='<div class="ofl-dl more">… ещё '+(es.length-MAX)+' изменений</div>';
+  return h;
+}
+/* дифф одного конфликта: две колонки «у вас» (base → моё) и «в комнате» (base → их) */
+function offConflictDiffHtml(c,maps){
+  function col(tag,cls,d,sideNodes){
+    var inner='';
+    if(c.kind==='name')inner=offFieldRowHtml('-','название проекта',c.base,null)+offFieldRowHtml('+','название проекта',d&&d.v,null);
+    else if(c.kind==='bend')inner=offFieldRowHtml('-','изгибы',OFF_BN[c.base]||c.base||'—',null)+offFieldRowHtml('+','изгибы',d?((OFF_BN[d.v]||d.v||'—')):'—',null);
+    else if(c.kind==='hidden')inner=offFieldRowHtml('-','скрытых типов',String(c.base?c.base.length:0),null)+offFieldRowHtml('+','скрытых типов',String((d&&d.v)?d.v.length:0),null);
+    else if(c.kind==='vars')inner=offFieldRowHtml('-','переменных (список)',String(c.base?c.base.length:0),null)+offFieldRowHtml('+','переменных (список)',String((d&&d.v)?d.v.length:0),null);
+    else{
+      var be=offBaseEnt(maps,c.kind,c.id);
+      if(d&&d.st==='del')inner='<div class="ofl-dl del">− удалено целиком</div>';
+      else if(d&&d.st==='add')inner='<div class="ofl-dl add">+ добавлено: «'+esc(offTitleOf(maps,c.kind,c.id))+'»</div>';
+      else inner=offEntRowsHtml(c.kind,be||{},(d&&d.v)||{},maps,sideNodes)||'<div class="ofl-dl">без изменений</div>';
+    }
+    return '<div class="ofl-cfd-col"><span class="ofl-tag '+cls+'">'+tag+'</span><div class="ofl-diffbox show" style="margin-top:6px;max-height:170px">'+inner+'</div></div>';
+  }
+  return col('у вас','you',c.a,(maps.n&&maps.n[1])||{})+col('в комнате','room',c.b,(maps.n&&maps.n[2])||{});
+}
 /* блокировка Esc и клика по фону: слияние нельзя закрыть, не решив конфликты */
 var offEscOn=false;
 function offModalBlock(on){
@@ -10210,14 +10379,17 @@ function offConflictRow(c,i,maps,base){
     youTxt=(c.a&&c.a.st==='del')?'удалено':offSideDesc(kind,c.a,be);
     roomTxt=(c.b&&c.b.st==='del')?'удалено':offSideDesc(kind,c.b,be);
   }
+  var det='';
+  try{det=offConflictDiffHtml(c,maps);}catch(e){det='';}
   return '<div class="ofl-cf" data-ci="'+i+'">'+
-    '<div class="ofl-cf-t">'+title+'<span class="ofl-cf-badge">конфликт</span></div>'+
+    '<div class="ofl-cf-t">'+title+'<span class="ofl-cf-badge">конфликт</span><button type="button" class="ofl-tgl ofl-cfd-t" data-ci="'+i+'">показать diff</button></div>'+
     '<div class="ofl-cf-s"><span class="ofl-tag you">у вас</span><span>'+youTxt+'</span></div>'+
     '<div class="ofl-cf-s"><span class="ofl-tag room">в комнате</span><span>'+roomTxt+'</span></div>'+
     '<div class="ofl-cf-b">'+
     '<button class="btn ofl-pick sel" data-ci="'+i+'" data-r="mine">Моё</button>'+
     '<button class="btn ofl-pick" data-ci="'+i+'" data-r="theirs">Из комнаты</button>'+
-    '</div></div>';
+    '</div>'+
+    '<div class="ofl-cfd" data-cfd="'+i+'">'+det+'</div></div>';
 }
 function offMergeModal(serverDoc,baseObj,rec,res){
   var maps=res.maps;
@@ -10232,14 +10404,24 @@ function offMergeModal(serverDoc,baseObj,rec,res){
   var statsM='',statsT='';
   try{statsM=offChips(mergeStats(baseObj,res.mine));}catch(e){}
   try{statsT=offChips(mergeStats(baseObj,serverDoc));}catch(e){}
+  /* git-стиль diff каждой стороны: построчно, что именно изменено относительно базы */
+  var mineEntries=[],theirEntries=[],diffM='',diffT='';
+  try{mineEntries=offSideDiff(baseObj,res.mine);}catch(e){}
+  try{theirEntries=offSideDiff(baseObj,serverDoc);}catch(e){}
+  try{diffM=offSideDiffHtml(mineEntries,maps,(maps.n&&maps.n[1])||{});}catch(e){diffM='';}
+  try{diffT=offSideDiffHtml(theirEntries,maps,(maps.n&&maps.n[2])||{});}catch(e){diffT='';}
   var a=res.auto;
   var autoTxt=(a.mine||a.theirs||a.same)?
     ('Автоматически слито без конфликтов: ваших правок — '+a.mine+', из комнаты — '+a.theirs+(a.same?', совпадающих — '+a.same:'')+'.'):
     'Автоматически слитых правок нет — все изменения конфликтуют.';
   var html='';
   html+='<p class="ofl-sum">Вы работали без связи'+(ago?' около '+ago:'')+', и в комнате за это время тоже есть правки. Разберите конфликты и отправьте результат в комнату.</p>'+editors;
-  html+='<div class="ofl-side-cap"><span class="ofl-tag you">у вас</span></div><div class="ofl-chips">'+(statsM||'<span class="mrg-chip">без правок</span>')+'</div>';
-  html+='<div class="ofl-side-cap"><span class="ofl-tag room">в комнате</span></div><div class="ofl-chips">'+(statsT||'<span class="mrg-chip">без правок</span>')+'</div>';
+  html+='<div class="ofl-side-cap"><span class="ofl-tag you">у вас</span><button type="button" class="ofl-tgl" data-side="Mine">'+(mineEntries.length?'показать diff ('+mineEntries.length+')':'показать diff')+'</button></div>'+
+    '<div class="ofl-chips">'+(statsM||'<span class="mrg-chip">без правок</span>')+'</div>'+
+    '<div class="ofl-diffbox" id="oflDiffMine">'+diffM+'</div>';
+  html+='<div class="ofl-side-cap"><span class="ofl-tag room">в комнате</span><button type="button" class="ofl-tgl" data-side="Theirs">'+(theirEntries.length?'показать diff ('+theirEntries.length+')':'показать diff')+'</button></div>'+
+    '<div class="ofl-chips">'+(statsT||'<span class="mrg-chip">без правок</span>')+'</div>'+
+    '<div class="ofl-diffbox" id="oflDiffTheirs">'+diffT+'</div>';
   html+='<p class="ofl-sum" style="margin-top:10px">'+esc(autoTxt)+'</p>';
   res.conflicts.forEach(function(c,i){html+=offConflictRow(c,i,maps,baseObj);});
   html+='<div class="ofl-note">Перед слиянием сохраняется локальный бэкап. «Оставить мою версию» публикует вашу копию целиком — правки комнаты будут перезаписаны.</div>';
@@ -10249,6 +10431,22 @@ function offMergeModal(serverDoc,baseObj,rec,res){
     {label:'Оставить мою версию',fn:function(){offPublishLocal(rec,baseObj,serverDoc);toast('Ваша версия опубликована в комнату — правки комнаты перезаписаны','warn');}},
     {label:'Взять версию комнаты',fn:function(){offTakeServer(serverDoc);}}
   ]});
+  $all('#mCard .ofl-tgl').forEach(function(b){
+    if(!b.dataset.label)b.dataset.label=b.textContent;
+    b.onclick=function(){
+      var on;
+      if(b.classList.contains('ofl-cfd-t')){
+        var box=$('#mCard .ofl-cfd[data-cfd="'+b.dataset.ci+'"]');
+        if(!box)return;
+        on=box.classList.toggle('show');
+      }else{
+        var db=$('#oflDiff'+b.dataset.side);
+        if(!db)return;
+        on=db.classList.toggle('show');
+      }
+      b.textContent=on?'скрыть diff':b.dataset.label;
+    };
+  });
   $all('#mCard .ofl-pick').forEach(function(b){
     b.onclick=function(){
       var i=+b.dataset.ci,r=b.dataset.r;
@@ -11154,6 +11352,10 @@ try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key
   console.error(err);
   toast('Ошибка запуска: '+err.message,'err');
 }
+/* самопроверка офлайн-слияния (?offsim=1): доступ к функциям слияния из консоли */
+try{
+  if(location.search.indexOf('offsim=1')>=0)window.__offSim={offBuildMerge:offBuildMerge,offMergeModal:offMergeModal,offSideDiff:offSideDiff,offSideDiffHtml:offSideDiffHtml,offConflictDiffHtml:offConflictDiffHtml,offResolveRejoin:offResolveRejoin};
+}catch(e){}
 })();
 </script>
 </body>
