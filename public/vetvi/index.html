@@ -284,6 +284,16 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .q-item.q-ins-above{box-shadow:inset 0 2px 0 0 var(--acc)}
 .q-item.q-ins-below{box-shadow:inset 0 -2px 0 0 var(--acc)}
 .q-empty{padding:10px 12px;font-size:10px;color:var(--tx3)}
+/* связи «кто за кем» между строками цепочки: стрелка + метка связи; клик по соединителю — выбрать связь */
+.q-link{display:flex;align-items:center;gap:7px;margin:1px 10px 1px 20px;min-height:16px}
+.q-link .q-ln{flex:none;width:12px;height:16px;position:relative}
+.q-link .q-ln::before{content:'';position:absolute;left:5px;top:1px;bottom:5px;width:2px;border-radius:1px;background:var(--qc,#9aa1ac);opacity:.45}
+.q-link .q-ln::after{content:'';position:absolute;left:2px;bottom:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--qc,#9aa1ac);opacity:.45}
+.q-link .q-tag{min-width:0;font-size:9px;font-weight:600;letter-spacing:.25px;line-height:1.7;color:var(--qc,#9aa1ac);background:var(--qcbg,rgba(160,168,180,.13));border:1px solid var(--qcb,rgba(160,168,180,.2));border-radius:6px;padding:0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
+.q-link.has-e:hover .q-tag{background:var(--qchov,rgba(160,168,180,.32));border-color:var(--qc,#9aa1ac);color:#e9ebef}
+.q-link.no-e{opacity:.5}
+.q-link.no-e .q-ln::before{background:repeating-linear-gradient(180deg,var(--qc,#9aa1ac) 0 3px,transparent 3px 6px)}
+.q-link.no-e .q-tag{cursor:default}
 .gm-snip{color:var(--tx3);font-size:10px}
 .node{position:absolute;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;box-shadow:0 6px 18px rgba(0,0,0,.38);cursor:grab;user-select:none;transition:transform .16s,box-shadow .16s,border-color .16s}
 .node:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.5);border-color:#404653}
@@ -1817,6 +1827,58 @@ function qRowCast(n){
   }).join('')+'</div>':'';
   return{ps:ps,color:cc,html:html};
 }
+/* соединители «кто за кем» между строками цепочки: стрелка + метка реальной связи.
+   Метка: условие → метка ребра → исходная реплика, иначе «далее». Клик — выбрать связь (инспектор связи) */
+function qLinkInfo(a,b){
+  var i,x;
+  for(i=0;i<project.edges.length;i++){x=project.edges[i];if(x.from===a.id&&x.to===b.id&&x.q)return x;}
+  for(i=0;i<project.edges.length;i++){x=project.edges[i];if(x.from===a.id&&x.to===b.id&&x.tin!=='var')return x;}
+  return null;
+}
+function qLinkTagText(e){
+  if(!e)return'далее';
+  if(e.cond)return'если: '+condText(condWithOverride(e.cond,nodeById(e.from)));
+  if(e.label)return e.label;
+  if(e.fromReply){var a=nodeById(e.from);if(a&&a.type==='dialog'){var r=findReply(a.dialog.replies,e.fromReply);if(r)return'после реплики: «'+(r.text||'').slice(0,32)+'»';}}
+  return'далее';
+}
+function qLinkTitle(a,b,e){
+  var t='Связь «кто за кем»: «'+(a.title||'?')+'» → «'+(b.title||'?')+'»';
+  if(!e)return t+' · авто-связь убрана — порядок строк сохраняется';
+  if(e.cond)t+='\nусловие: '+condText(condWithOverride(e.cond,nodeById(e.from)));
+  if(e.label)t+='\nметка: '+e.label;
+  if(e.fromReply&&a.type==='dialog'){var r=findReply(a.dialog.replies,e.fromReply);if(r)t+='\nпереход после реплики: «'+(r.text||'').slice(0,60)+'»';}
+  return t+' · клик — выбрать связь';
+}
+function qLinkHtml(a,b){
+  var e=qLinkInfo(a,b);
+  return '<div class="q-link'+(e?' has-e':' no-e')+'" data-a="'+esc(a.id)+'" data-b="'+esc(b.id)+'"'+(e?' data-eid="'+esc(e.id)+'"':'')+' title="'+esc(qLinkTitle(a,b,e))+'">'+
+    '<i class="q-ln"></i>'+
+    '<span class="q-tag">'+esc(qLinkTagText(e))+'</span>'+
+  '</div>';
+}
+function qRefreshLinkTags(g,nid){
+  var cardEl=groupEls.get(g.id);if(!cardEl)return;
+  Array.prototype.forEach.call(cardEl.querySelectorAll('.q-link[data-a][data-b]'),function(lk){
+    var aid=lk.getAttribute('data-a'),bid=lk.getAttribute('data-b');
+    if(nid&&aid!==nid&&bid!==nid)return;
+    var a=nodeById(aid),b=nodeById(bid);if(!a||!b)return;
+    var e=qLinkInfo(a,b);
+    var tag=lk.querySelector('.q-tag');if(tag)tag.textContent=qLinkTagText(e);
+    lk.setAttribute('title',qLinkTitle(a,b,e));
+    if(e){lk.setAttribute('data-eid',e.id);lk.classList.add('has-e');lk.classList.remove('no-e');}
+    else{lk.removeAttribute('data-eid');lk.classList.add('no-e');lk.classList.remove('has-e');}
+  });
+}
+/* точечное обновление соединителей при правке связи из инспектора (подпись/разворот/условие) и при правке переменных */
+function qRefreshLinkTagsForEdge(e){
+  var a=nodeById(e.from),b=nodeById(e.to);if(!a||!b)return;
+  var ga=stackGroupOf(a);if(ga)qRefreshLinkTags(ga,a.id);
+  var gb=stackGroupOf(b);if(gb)qRefreshLinkTags(gb,b.id);
+}
+function qRefreshAllLinkTags(){
+  project.groups.forEach(function(g){if(g.stack)qRefreshLinkTags(g,null);});
+}
 function renderGroups(){
   $all('#framesLayer .groupbox').forEach(function(el){el.remove();});
   $all('#world .gcard,#world .qcard').forEach(function(el){el.remove();});
@@ -1835,7 +1897,7 @@ function renderGroups(){
         var v=nodeVisual(n);
         var cast=qRowCast(n);
         var rowCol=cast.color||v.color;
-        return '<div class="q-item" data-nid="'+n.id+'"'+(cast.color?' style="border-color:'+esc(hexToRgba(cast.color,.6))+'"':'')+' title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
+        var row='<div class="q-item" data-nid="'+n.id+'"'+(cast.color?' style="border-color:'+esc(hexToRgba(cast.color,.6))+'"':'')+' title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
           '<i class="gc-pin in" style="border-color:'+esc(rowCol)+'" title="вход строки — сюда приходят стрелки к ноде"></i>'+
           '<span class="q-num">'+(i+1)+'</span>'+
           '<div class="q-body">'+
@@ -1846,6 +1908,8 @@ function renderGroups(){
           '<button class="q-x" data-nid="'+n.id+'" title="Вывести из цепочки">✕</button>'+
           '<i class="gc-pin out" style="border-color:'+esc(rowCol)+'" title="выход строки — отсюда уходят стрелки от ноды"></i>'+
         '</div>';
+        if(i<direct.length-1)row+=qLinkHtml(n,direct[i+1]);
+        return row;
       }).join('');
       el.innerHTML='<i class="qport in" title="вход цепочки (первая нода) — потяните, чтобы перенести входящие стрелки"></i>'+
         '<div class="q-head">'+ic('queue',14)+
@@ -1901,6 +1965,11 @@ function renderGroups(){
       Array.prototype.forEach.call(el.querySelectorAll('.q-x'),function(b){
         b.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
         b.addEventListener('click',function(ev){ev.stopPropagation();stackRowAction(g.id,'out',b.getAttribute('data-nid'));});
+      });
+      /* клик по соединителю «кто за кем» — выбрать эту связь (откроется инспектор связи) */
+      Array.prototype.forEach.call(el.querySelectorAll('.q-link[data-eid]'),function(lk){
+        lk.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+        lk.addEventListener('click',function(ev){ev.stopPropagation();selectEdgeOnly(lk.getAttribute('data-eid'));});
       });
       Array.prototype.forEach.call(el.querySelectorAll('.q-item[data-nid]'),function(row){
         row.addEventListener('pointerdown',function(ev){
@@ -2860,6 +2929,7 @@ function renderInspEdge(){
   lbl.addEventListener('input',function(){
     e.label=lbl.value;
     updateEdgeGeom(e);
+    qRefreshLinkTagsForEdge(e);
     markDirty();
   });
   lbl.addEventListener('change',editEnd);
@@ -2878,7 +2948,7 @@ $all('#iKind button').forEach(function(x){x.classList.toggle('on',x===b);});
 });
   $('#iSwap').onclick=function(){
     discrete(function(){var t=e.from;e.from=e.to;e.to=t;e.fromReply=null;e.fromOut=null;e.cond=null;});
-    updateEdgeGeom(e); renderInspector();
+    updateEdgeGeom(e); qRefreshLinkTagsForEdge(e); renderInspector();
   };
   $('#iDelE').onclick=removeSelected;
   if(A&&A.type==='branch')bindInspCond(e);
@@ -2931,7 +3001,7 @@ function renderInspGroup(){
       '<label class="i-lab">Цвет фона карточки</label><div class="swatches" id="iqSw">'+colSwQ+'</div>'+
       '<label class="i-lab">Яркость цвета: <span id="iqTintVal">'+(tQ>0?'+':'')+tQ+'%</span></label>'+
       '<input type="range" class="inp" id="iqTint" min="-60" max="60" value="'+tQ+'">'+
-      '<div class="i-meta">Развернуть в группу нельзя — цепочка только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически.</div>'+
+      '<div class="i-meta">Развернуть в группу нельзя — цепочка только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически; стрелки между строками показывают эти связи (метка/условие видны прямо в карточке, клик по стрелке — выбрать связь).</div>'+
       '<label class="i-lab">Порядок ('+idsQ.length+')</label>'+
       '<div class="gm-list">'+listQ+'</div>'+
       '<div class="i-actions">'+
@@ -3599,6 +3669,7 @@ function refreshAllBranchChips(){
   project.nodes.forEach(function(n){if(n.type==='varnode')refreshNodeVarsChip(n);});
   refreshBranchVinRows();
   project.edges.forEach(function(e){if(e.cond)updateEdgeGeom(e);});
+  qRefreshAllLinkTags();
 }
 /* строки «переменная ⟵ …» на всех развилках (после переименования/смены привязки ноды) */
 function refreshBranchVinRows(){
@@ -3905,11 +3976,12 @@ function bindInspCond(e){
         if(on){var v0=varsList()[0]||null;e.cond={vid:v0?v0.id:'',op:'==',val:(v0&&varType(v0)==='bool')?true:0};}
         else e.cond=null;
       });
-      updateEdgeGeom(e);renderInspector();
+      updateEdgeGeom(e);qRefreshLinkTagsForEdge(e);renderInspector();
     };
   });
   bindCondRow($('#iCondRow'),e.cond,function(live){
     updateEdgeGeom(e);
+    qRefreshLinkTagsForEdge(e);
     if(!live)renderInspector();
   });
 }
@@ -4995,6 +5067,7 @@ function refreshQueueRowContent(nid){
   body.innerHTML='<div class="q-title" style="color:'+esc(rowCol)+'">'+esc(n.title||'')+'</div>'+(cast.html||'')+qNodeContentHtml(n);
   row.style.borderColor=cast.color?hexToRgba(cast.color,.6):'';
   Array.prototype.forEach.call(row.querySelectorAll('.gc-pin'),function(p){p.style.borderColor=rowCol;});
+  qRefreshLinkTags(g,nid);
 }
 /* перетаскивание строк цепочки: подсветка места вставки */
 function qRowUnmark(){
@@ -7709,7 +7782,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ — вывести ноду, клик по строке — выбрать ноду, ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
+      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ — вывести ноду, клик по строке — выбрать ноду, стрелки между строками — связи «кто за кем» (на стрелке видна метка связи/условие/исходная реплика, клик по стрелке — выбрать связь), ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
