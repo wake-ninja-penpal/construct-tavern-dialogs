@@ -566,12 +566,37 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 #stAuto.flash{opacity:1}
 /* всплывашка «кто и когда менял проект» — наведение на «автосохранение» в статусной строке */
 #editTip{position:fixed;z-index:400;background:rgba(24,26,31,.97);border:1px solid #333a45;border-radius:11px;padding:10px 13px;font:11.5px var(--body);color:var(--tx2);box-shadow:0 12px 32px rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .16s;min-width:210px;max-width:340px;transform:translate(-50%,-100%)}
-#editTip.show{opacity:1}
+#editTip.show{opacity:1;pointer-events:auto}
 #editTip .et-cap{font:600 9.5px var(--mono);letter-spacing:1.2px;text-transform:uppercase;color:var(--tx3);margin-bottom:6px;white-space:nowrap}
 #editTip .et-row{display:flex;align-items:center;gap:8px;line-height:2;white-space:nowrap}
 #editTip .et-dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 6px currentColor}
 #editTip .et-who{color:var(--tx)}
 #editTip .et-when{color:var(--tx3)}
+#editTip .et-btn{margin-top:8px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid #333a45;background:#22262e;color:var(--tx2);border-radius:8px;padding:5px 8px;cursor:pointer;font:11px var(--body);transition:.14s}
+#editTip .et-btn:hover{background:#2a2f39;color:var(--tx)}
+/* ── журнал действий ── */
+.log-card{width:680px}
+.log-list{display:flex;flex-direction:column;gap:3px}
+.log-row{border:1px solid #262b34;border-radius:9px;padding:7px 10px;cursor:pointer;transition:.14s;background:#1e222a}
+.log-row:hover{background:#232834}
+.log-row.open{border-color:#3a4150;background:#232834}
+.log-line{display:flex;align-items:center;gap:8px;min-width:0}
+.log-when{font:10.5px var(--mono);color:var(--tx3);flex:none}
+.log-dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 6px currentColor}
+.log-who{color:var(--tx);flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-act{color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.log-row.open .log-act{white-space:normal}
+.log-det{margin-top:7px;padding:8px 10px 9px;border-top:1px dashed #2e3440;display:flex;flex-direction:column;gap:3px}
+.log-sec{font:600 9.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tx3);margin-top:3px}
+.log-item{font:12px var(--body);color:var(--tx2);padding-left:10px;line-height:1.55}
+.log-item b{color:var(--tx);font-weight:600}
+.log-fields{color:var(--tx3);font-style:italic}
+.log-loc{margin-top:7px;align-self:flex-start;display:flex;align-items:center;gap:6px;border:1px solid #333a45;background:#22262e;color:var(--tx2);border-radius:8px;padding:5px 10px;cursor:pointer;font:11.5px var(--body);transition:.14s}
+.log-loc:hover{background:#2a2f39;color:var(--tx)}
+.log-empty{color:var(--tx3);text-align:center;padding:26px 0;font:12.5px var(--body)}
+.log-foot-info{margin-right:auto;font:10.5px var(--mono);color:var(--tx3);align-self:center}
+.log-flash{animation:logFlash 1.6s ease-out 1}
+@keyframes logFlash{0%{box-shadow:0 0 0 0 rgba(226,165,78,.6)}70%{box-shadow:0 0 0 16px rgba(226,165,78,0)}100%{box-shadow:0 0 0 0 rgba(226,165,78,0)}}
 #toasts{position:fixed;right:16px;bottom:44px;display:flex;flex-direction:column;gap:8px;z-index:90}
 .toast{display:flex;align-items:center;gap:9px;background:#1d2027;border:1px solid #32363f;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--tx2);box-shadow:var(--sh);animation:tIn .3s cubic-bezier(.2,.9,.3,1.2) both;max-width:340px}
 .toast.out{animation:tOut .3s forwards}
@@ -816,6 +841,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <button class="btn collab-chip" id="bCollab" title="Совместный доступ: статус и участники"><span class="cc-dot" id="ccDot"></span><span id="ccTxt">офлайн</span></button>
   <button class="btn" id="bMerge" title="Merge-запросы копий" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="2.6"/><circle cx="6" cy="6" r="2.6"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg><span class="t">Merge</span><span class="m-badge" id="mergeBadge" style="display:none">0</span></button>
   <button class="btn" id="bCopies" title="Локальные копии проекта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span class="t">Копии</span></button>
+  <button class="btn" id="bLog" title="Журнал действий: кто и что менял в проекте"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 2"/></svg><span class="t">Журнал</span></button>
   <button class="btn primary" id="bShare" title="Поделиться ссылкой на проект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6"/></svg><span class="t">Поделиться</span></button>
 <div class="spacer"></div>
   <button class="btn ibtn" id="bHelp" title="Горячие клавиши">?</button>
@@ -940,6 +966,11 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <div id="noteViewModal" class="note-modal"><div class="note-modal-card">
 <div class="note-modal-head"><span class="note-modal-title" id="noteViewTitle">Заметка</span><button class="note-modal-close" id="noteViewClose" title="Закрыть">×</button></div>
 <div class="note-modal-body"><div class="note-view-body" id="noteViewBody"></div></div>
+</div></div>
+<div id="logModal" class="dlg-modal"><div class="dlg-modal-card log-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Журнал действий</span><button class="dlg-modal-close" id="logModalClose" title="Закрыть">×</button></div>
+  <div class="dlg-modal-body" id="logModalBody"></div>
+  <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
 </div></div>
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 <script src="/vendor/socket.io.min.js"></script>
@@ -1296,7 +1327,7 @@ function condWithOverride(c,fn){
 }
 /* ═══ история ═══ */
 function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,vars:varsList()});}
-function pushHistory(s){history.push(s);if(history.length>150)history.shift();future.length=0;updateHistUI();}
+function pushHistory(s,label){flushPendingLog();pendingLog={pre:s,by:editIdentity(),t:Date.now(),label:label||null};scheduleLogFlush();history.push(s);if(history.length>150)history.shift();future.length=0;updateHistUI();}
 function updateHistUI(){
   $('#bUndo').classList.toggle('disabled',history.length===0);
   $('#bRedo').classList.toggle('disabled',future.length===0);
@@ -1317,10 +1348,10 @@ function applySnap(s){
   if(selGroup&&!gids.has(selGroup))selGroup=null;
   renderAll(); markDirty();
 }
-function undo(){if(!history.length)return;future.push(serialize());applySnap(history.pop());updateHistUI();toast('Отменено','warn');}
-function redo(){if(!future.length)return;history.push(serialize());applySnap(future.pop());updateHistUI();toast('Повторено','ok');}
-function mutate(fn,spawn){pushHistory(serialize());fn();renderAll(spawn);markDirty();}
-function discrete(fn){pushHistory(serialize());fn();markDirty();}
+function undo(){if(!history.length)return;flushPendingLog();var pre=serialize();future.push(serialize());applySnap(history.pop());logUndoRedo(pre,'Отмена');updateHistUI();toast('Отменено','warn');}
+function redo(){if(!future.length)return;flushPendingLog();var pre=serialize();history.push(serialize());applySnap(future.pop());logUndoRedo(pre,'Повтор');updateHistUI();toast('Повторено','ok');}
+function mutate(fn,spawn,label){pushHistory(serialize(),label);fn();renderAll(spawn);markDirty();}
+function discrete(fn,label){pushHistory(serialize(),label);fn();markDirty();}
 var editLockIds=[];
 /* объект, блокировка которого взята на время набора текста в инспекторе/модалке */
 function editStartIds(){
@@ -1380,6 +1411,224 @@ function editEnd(){
 }
 function markDirty(){dirty=true;project.meta.modified=new Date().toISOString();noteEditor();updateStatus();scheduleAutosave();syncQueueState();}
 function markSaved(){dirty=false;updateStatus();}
+/* ── журнал действий: кто, когда и что менял ──
+   Каждое действие (проходит через pushHistory → markDirty) попадает в meta.actionLog:
+   время, автор, человекочитаемое описание и компактный diff (какие ноды/связи/группы/
+   переменные добавлены, удалены, изменены — до 8 позиций в каждом разделе).
+   Записи переживают отмену (undo не трогает meta), автосохраняются и переносятся
+   с документом комнаты; при получении чужого состояния журналы объединяются по id записи. */
+var pendingLog=null,logFlushT=null,logManT=null,logModalIdx=-1;
+function scheduleLogFlush(){clearTimeout(logFlushT);logFlushT=setTimeout(flushPendingLog,700);}
+function logActionEntry(entry){
+  try{
+    if(!Array.isArray(project.meta.actionLog))project.meta.actionLog=[];
+    project.meta.actionLog.unshift(entry);
+    if(project.meta.actionLog.length>60)project.meta.actionLog.length=60;
+    if($('#logModal').classList.contains('show'))renderLogModal();/* модалка открыта — показать новую запись сразу */
+    syncQueueState();
+  }catch(e){}
+}
+function logManual(act){logActionEntry({id:uid()+uid(),t:Date.now(),by:editIdentity(),act:act,diff:null});}
+function logManualD(act){clearTimeout(logManT);logManT=setTimeout(function(){logManual(act);},900);}
+function logUndoRedo(pre,word){
+  var cur='';
+  try{cur=serialize();}catch(e){return;}
+  if(cur===pre)return;
+  var d=logDiff(pre,cur);
+  logActionEntry({id:uid()+uid(),t:Date.now(),by:editIdentity(),act:word+(d?' — '+logDiffSummary(d):''),diff:d});
+}
+function flushPendingLog(){
+  clearTimeout(logFlushT);logFlushT=null;
+  var p=pendingLog;pendingLog=null;
+  if(!p)return;
+  var cur='';
+  try{cur=serialize();}catch(e){return;}
+  if(cur===p.pre)return;
+  var d=logDiff(p.pre,cur);
+  if(!d)return;
+  logActionEntry({id:uid()+uid(),t:p.t,by:p.by,act:p.label||logDiffSummary(d),diff:d});
+}
+var LOG_F_N={title:'название',text:'текст',status:'статус',color:'цвет',tint:'яркость',x:'позиция',y:'позиция',expand:'сворачивание',dlgWidth:'ширина',dialog:'реплики/участники',notes:'заметки',gid:'группа',outcomes:'исходы',outs:'исходы',type:'тип'};
+var LOG_F_E={label:'подпись',cond:'условие',pts:'изгибы',fromReply:'исход из реплики',fromOut:'исход',from:'перенаправление',to:'перенаправление',bd:'форма моста',kind:'тип линии',lt:'якорь подписи',lp:'якорь подписи'};
+var LOG_F_G={name:'название',color:'цвет',tint:'яркость',fold:'вид',stack:'тип',parent:'вложенность',alpha:'прозрачность',badge:'ярлык',auto:'авторазмер',fx:'рамка',fy:'рамка',fw:'рамка',fh:'рамка',order:'порядок'};
+function logDiffKeys(o,nb,map,skip){
+  var ks={},out=[],pos=false,nb2=nb||{};
+  Object.keys(o).forEach(function(k){ks[k]=1;});
+  Object.keys(nb2).forEach(function(k){ks[k]=1;});
+  Object.keys(ks).forEach(function(k){
+    if(skip&&skip[k])return;
+    if(k==='x'||k==='y'){if(o[k]!==nb2[k])pos=true;return;}
+    if(JSON.stringify(o[k])!==JSON.stringify(nb2[k]))out.push(k);
+  });
+  if(pos)out.push('x');
+  return out.map(function(k){var v=map[k];return (v===undefined)?k:v;}).filter(function(v,i,arr){return arr.indexOf(v)===i;});
+}
+/* стабильная сериализация (порядок ключей не влияет) — для сравнения объектов при diff */
+function logStable(o){
+  return JSON.stringify(o,function(k,v){
+    if(v&&typeof v==='object'&&!Array.isArray(v)){
+      var r={};Object.keys(v).sort().forEach(function(k2){r[k2]=v[k2];});
+      return r;
+    }
+    return v;
+  });
+}
+function logDiffList(A,B){
+  var ma={},mb={};
+  (A||[]).forEach(function(o){ma[o.id]=o;});
+  (B||[]).forEach(function(o){mb[o.id]=o;});
+  var add=[],del=[],chg=[];
+  (B||[]).forEach(function(o){if(!ma[o.id])add.push(o);});
+  (A||[]).forEach(function(o){var nb=mb[o.id];if(!nb)del.push(o);else if(logStable(o)!==logStable(nb))chg.push({a:o,b:nb});});
+  return{add:add,del:del,chg:chg,ma:ma,mb:mb};
+}
+function logDiff(preStr,curStr){
+  var a,b;
+  try{a=JSON.parse(preStr);}catch(e){return null;}
+  try{b=JSON.parse(curStr);}catch(e){return null;}
+  var na=logDiffList(a.nodes,b.nodes),ea=logDiffList(a.edges,b.edges),ga=logDiffList(a.groups,b.groups),va=logDiffList(a.vars,b.vars);
+  function eDesc(e,mp){
+    var f=mp[e.from],t2=mp[e.to];
+    var s='«'+((f&&f.title)||'?')+'» → «'+((t2&&t2.title)||'?')+'»';
+    if(e&&e.label)s+=' · «'+e.label+'»';
+    return s;
+  }
+  var d={};
+  function sec(key,items,fn,max){
+    var tot=0,list=[];
+    (items||[]).forEach(function(o){tot++;if(list.length<max)list.push(fn(o));});
+    if(tot){d[key]=list;d[key+'N']=tot;}
+  }
+  sec('nA',na.add,function(n){return[n.id,(n.title||'')];},8);
+  sec('nD',na.del,function(n){return[n.id,(n.title||'')];},8);
+  sec('nC',na.chg,function(p){return[p.a.id,(p.a.title||''),logDiffKeys(p.a,p.b,LOG_F_N).join(', ')];},8);
+  sec('eA',ea.add,function(e){return[e.id,eDesc(e,na.mb)];},8);
+  sec('eD',ea.del,function(e){return[e.id,eDesc(e,na.ma)];},8);
+  sec('eC',ea.chg,function(p){return[p.a.id,eDesc(p.a,na.ma),logDiffKeys(p.a,p.b,LOG_F_E).join(', ')];},8);
+  sec('gA',ga.add,function(g){return[g.id,(g.name||'')];},8);
+  sec('gD',ga.del,function(g){return[g.id,(g.name||'')];},8);
+  sec('gC',ga.chg,function(p){return[p.a.id,(p.a.name||''),logDiffKeys(p.a,p.b,LOG_F_G,{bbox:1,hh:1}).join(', ')];},8);
+  sec('vA',va.add,function(v){return[v.id,(v.name||'')];},8);
+  sec('vD',va.del,function(v){return[v.id,(v.name||'')];},8);
+  sec('vC',va.chg,function(p){var f=[];if((p.a.name||'')!==(p.b.name||''))f.push('название');if(p.a.type!==p.b.type)f.push('тип');if(JSON.stringify(p.a.val)!==JSON.stringify(p.b.val))f.push('значение');return[p.a.id,(p.a.name||''),f.join(', ')];},8);
+  if(!Object.keys(d).length)return null;
+  var ids=[];
+  na.add.concat(na.chg.map(function(p){return p.a;})).forEach(function(n){if(ids.indexOf(n.id)<0&&ids.length<12)ids.push(n.id);});
+  ga.add.concat(ga.chg.map(function(p){return p.a;})).forEach(function(g){if(ids.indexOf(g.id)<0&&ids.length<12)ids.push(g.id);});
+  if(!ids.length){
+    var fe=ea.add[0]||(ea.chg[0]&&ea.chg[0].a)||ea.del[0];
+    if(fe){var nf=na.mb[fe.from]||na.ma[fe.from],nt=na.mb[fe.to]||na.ma[fe.to];if(nf&&ids.indexOf(nf.id)<0&&ids.length<12)ids.push(nf.id);if(nt&&ids.indexOf(nt.id)<0&&ids.length<12)ids.push(nt.id);}
+  }
+  d.ids=ids;
+  return d;
+}
+function logDiffSummary(d){
+  var p=[];
+  if(d.nAN)p.push('+'+d.nAN+' нод');
+  if(d.nDN)p.push('−'+d.nDN+' нод');
+  if(d.nCN)p.push('правка нод: '+d.nCN);
+  if(d.eAN)p.push('+'+d.eAN+' '+(d.eAN===1?'связь':'связей'));
+  if(d.eDN)p.push('−'+d.eDN+' '+(d.eDN===1?'связь':'связей'));
+  if(d.eCN)p.push('правка связей: '+d.eCN);
+  if(d.gAN)p.push('+'+(d.gAN===1?'группа':'группы: '+d.gAN));
+  if(d.gDN)p.push('−'+(d.gDN===1?'группа':'группы: '+d.gDN));
+  if(d.gCN)p.push('правка '+(d.gCN===1?'группы':'групп')+': '+d.gCN);
+  if(d.vAN)p.push('+'+(d.vAN===1?'переменная':'переменные: '+d.vAN));
+  if(d.vDN)p.push('−'+d.vDN+' перем.');
+  if(d.vCN)p.push('правка переменных: '+d.vCN);
+  return p.length?p.join(', '):'Изменение проекта';
+}
+/* ── модалка «Журнал действий»: список записей, разворот деталей, показ на холсте ── */
+function logDetSec(cap,list,total,fmt){
+  if(!total)return'';
+  var h='<div class="log-sec">'+cap+'</div>';
+  (list||[]).forEach(function(x){h+=fmt(x);});
+  if(total>(list||[]).length)h+='<div class="log-item log-fields">… ещё '+(total-(list||[]).length)+'</div>';
+  return h;
+}
+function logDetailsHtml(d){
+  if(!d)return '<div class="log-item log-fields">Детали этой записи недоступны</div>';
+  var h='';
+  h+=logDetSec('добавлены ноды',d.nA,d.nAN,function(x){return '<div class="log-item">+ <b>'+esc(x[1]||'без названия')+'</b></div>';});
+  h+=logDetSec('удалены ноды',d.nD,d.nDN,function(x){return '<div class="log-item">− <b>'+esc(x[1]||'')+'</b></div>';});
+  h+=logDetSec('изменены ноды',d.nC,d.nCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  h+=logDetSec('добавлены связи',d.eA,d.eAN,function(x){return '<div class="log-item">+ '+esc(x[1])+'</div>';});
+  h+=logDetSec('удалены связи',d.eD,d.eDN,function(x){return '<div class="log-item">− '+esc(x[1])+'</div>';});
+  h+=logDetSec('изменены связи',d.eC,d.eCN,function(x){return '<div class="log-item">'+esc(x[1])+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  h+=logDetSec('добавлены группы',d.gA,d.gAN,function(x){return '<div class="log-item">+ <b>'+esc(x[1]||'')+'</b></div>';});
+  h+=logDetSec('удалены группы',d.gD,d.gDN,function(x){return '<div class="log-item">− <b>'+esc(x[1]||'')+'</b></div>';});
+  h+=logDetSec('изменены группы',d.gC,d.gCN,function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  h+=logDetSec('переменные',(d.vA||[]).concat(d.vD||[]).concat(d.vC||[]),(d.vAN||0)+(d.vDN||0)+(d.vCN||0),function(x){return '<div class="log-item"><b>'+esc(x[1]||'')+'</b>'+((x[2])?' <span class="log-fields">— '+esc(x[2])+'</span>':'')+'</div>';});
+  return (h||'<div class="log-item log-fields">Изменение без структурных правок</div>');
+}
+function logFocus(e){
+  var ids=(e&&e.diff&&e.diff.ids)||[];
+  if(!ids.length){toast('Для этой записи нет объектов на холсте','warn');return;}
+  var flashed=false;
+  ids.forEach(function(id){
+    var el=nodeEls.get(id)||groupEls.get(id);
+    if(el&&el.style.display!=='none'){el.classList.add('log-flash');flashed=true;setTimeout(function(){el.classList.remove('log-flash');},1700);}
+  });
+  var n0=nodeById(ids[0]),g0=groupById(ids[0]);
+  if(n0){revealNode(n0);centerOn(n0);}
+  else if(g0)centerOnGroup(g0);
+  if(!flashed)toast('Объекты этой записи уже удалены или скрыты','warn');
+}
+function openLogModal(){
+  $('#logModal').classList.add('show');
+  if(logModalIdx<0)logModalIdx=0;
+  renderLogModal();
+}
+function closeLogModal(){$('#logModal').classList.remove('show');}
+function renderLogModal(){
+  var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
+  $('#logNavInfo').textContent='записей: '+log.length;
+  var body=$('#logModalBody');
+  if(!log.length){body.innerHTML='<div class="log-empty">Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.</div>';return;}
+  if(logModalIdx>=log.length)logModalIdx=0;
+  var rows=log.map(function(e,i){
+    var c=(e.by&&e.by.color)||'#8b929c',nm=(e.by&&e.by.name)||'—',open=i===logModalIdx;
+    return '<div class="log-row'+(open?' open':'')+'" data-i="'+i+'">'+
+      '<div class="log-line"><span class="log-when">'+esc(fmtWhenShort(e.t))+'</span><span class="log-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="log-who">'+esc(nm)+'</span><span class="log-act">'+esc(e.act||'')+'</span></div>'+
+      (open?'<div class="log-det">'+logDetailsHtml(e.diff)+'<button class="log-loc">'+ic('target',12)+' Показать на холсте</button></div>':'')+
+    '</div>';
+  }).join('');
+  body.innerHTML='<div class="log-list">'+rows+'</div>';
+  $all('#logModalBody .log-row').forEach(function(r){
+    r.addEventListener('click',function(ev){
+      if(ev.target.closest&&ev.target.closest('.log-loc'))return;
+      var i=+r.dataset.i;
+      logModalIdx=(logModalIdx===i)?-1:i;
+      renderLogModal();
+    });
+  });
+  $all('#logModalBody .log-loc').forEach(function(bt){
+    bt.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var log2=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
+      logFocus(log2[+bt.parentNode.parentNode.dataset.i]);
+    });
+  });
+  var open=body.querySelector('.log-row.open');
+  if(open)open.scrollIntoView({block:'nearest'});
+}
+function logNavStep(dir){
+  var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
+  if(!log.length)return;
+  logModalIdx=((logModalIdx<0?0:logModalIdx)+dir+log.length)%log.length;
+  renderLogModal();
+}
+$('#logModalClose').onclick=closeLogModal;
+$('#logDone').onclick=closeLogModal;
+$('#logPrev').onclick=function(){logNavStep(-1);};
+$('#logNext').onclick=function(){logNavStep(1);};
+$('#bLog').onclick=openLogModal;
+window.addEventListener('keydown',function(e){
+  if(!$('#logModal').classList.contains('show'))return;
+  if(e.key==='Escape'){closeLogModal();return;}
+  if(e.key==='ArrowDown'){e.preventDefault();logNavStep(1);}
+  if(e.key==='ArrowUp'){e.preventDefault();logNavStep(-1);}
+},true);
 function scheduleAutosave(){
   clearTimeout(flashT);
   flashT=setTimeout(function(){
@@ -1414,36 +1663,56 @@ function noteEditor(){
   try{
     var me=editIdentity(),now=project.meta.modified;
     var log=Array.isArray(project.meta.editLog)?project.meta.editLog.slice():[];
-    if(log[0]&&log[0].id===me.id){log[0].name=me.name;log[0].color=me.color;log[0].at=now;}
-    else{log.unshift({id:me.id,name:me.name,color:me.color,at:now});if(log.length>5)log.length=5;}
-    project.meta.editLog=log;
+    /* тот же человек (по id или имени) — обновить верхнюю запись, а не добавлять новую;
+       подряд идущие записи одного человека схлопываются */
+    if(log[0]&&(log[0].id===me.id||(me.name&&log[0].name===me.name))){log[0].id=me.id;log[0].name=me.name;log[0].color=me.color;log[0].at=now;}
+    else log.unshift({id:me.id,name:me.name,color:me.color,at:now});
+    project.meta.editLog=collapseEditLog(log);
     project.meta.lastEditBy={id:me.id,name:me.name,color:me.color,at:now};
   }catch(e){}
 }
-/* всплывашка над «✓ автосохранение»: когда проект изменён последний раз и кто это делал */
-var editTipEl=null;
+/* схлопывание подряд идущих записей об одном редакторе (свежая остаётся, повторы убираются) */
+function collapseEditLog(log){
+  var out=[];
+  for(var i=0;i<(log||[]).length;i++){
+    var e=log[i],p=out[out.length-1];
+    if(p&&((p.id&&p.id===e.id)||(p.name&&p.name===e.name)))continue;
+    out.push(e);
+    if(out.length>=6)break;
+  }
+  return out;
+}
+/* всплывашка над «✓ автосохранение»: кто и когда менял проект (без подряд повторов одного
+   человека) + кнопка «Журнал действий». Всплывашка кликабельна: курсор можно перевести на неё */
+var editTipEl=null,editTipHover=false;
 function editTipShow(){
-  if(!editTipEl){editTipEl=document.createElement('div');editTipEl.id='editTip';editTipEl.setAttribute('role','tooltip');document.body.appendChild(editTipEl);}
-  var m=project.meta||{},log=Array.isArray(m.editLog)?m.editLog:[],rows='';
+  if(!editTipEl){
+    editTipEl=document.createElement('div');editTipEl.id='editTip';editTipEl.setAttribute('role','tooltip');document.body.appendChild(editTipEl);
+    editTipEl.addEventListener('mouseenter',function(){editTipHover=true;});
+    editTipEl.addEventListener('mouseleave',function(){editTipHover=false;editTipHide();});
+  }
+  var m=project.meta||{},log=collapseEditLog(Array.isArray(m.editLog)?m.editLog:[]),rows='';
   for(var i=0;i<log.length;i++){
     var e=log[i],c=e.color||'#8b929c';
     rows+='<div class="et-row"><span class="et-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="et-who">'+esc(e.name||'—')+'</span><span class="et-when">'+esc(fmtWhenLong(e.at))+'</span></div>';
   }
   if(!rows)rows='<div class="et-row"><span>'+(m.modified?'Изменён: '+esc(fmtWhenLong(m.modified)):'Изменений пока не было')+'</span></div>';
-  editTipEl.innerHTML='<div class="et-cap">Последнее изменение</div>'+rows;
+  editTipEl.innerHTML='<div class="et-cap">Последнее изменение</div>'+rows+'<button class="et-btn" id="etLogBtn">'+ic('queue',11)+'Журнал действий</button>';
+  var lb=$('#etLogBtn');
+  if(lb)lb.onclick=function(){editTipHide();openLogModal();};
   var a=$('#stAuto');if(!a)return;
   var r=a.getBoundingClientRect();
   editTipEl.style.left=Math.max(150,Math.min(innerWidth-150,r.left+r.width/2))+'px';
-  editTipEl.style.top=Math.max(70,r.top-10)+'px';
+  editTipEl.style.top=Math.max(70,r.top-8)+'px';
   editTipEl.classList.add('show');
 }
 function editTipHide(){if(editTipEl)editTipEl.classList.remove('show');}
 (function(){
   var a=$('#stAuto');if(!a)return;
   a.addEventListener('mouseenter',editTipShow);
-  a.addEventListener('mouseleave',editTipHide);
+  a.addEventListener('mouseleave',function(){setTimeout(function(){if(!editTipHover)editTipHide();},110);});
   a.addEventListener('focus',editTipShow);
-  a.addEventListener('blur',editTipHide);
+  a.addEventListener('blur',function(){setTimeout(function(){if(!editTipHover)editTipHide();},110);});
   window.addEventListener('blur',editTipHide);
 })();
 /* ═══ типы и группы ═══ */
@@ -3179,7 +3448,7 @@ function renderInspGroup(){
     b.onclick=function(){
       var nf=+b.dataset.f;
       if(nf===g.fold)return;
-      pushHistory(serialize());
+      pushHistory(serialize(),'Смена вида группы');
       var wasOpen=g.fold===2;
       g.fold=nf;
       if(g.fold<2&&wasOpen)prepareGroupCard(g);
@@ -4509,7 +4778,7 @@ function addNode(typeKey,x,y,select){
   var n={id:uid(),type:typeKey,gid:null,x:Math.round(x),y:Math.round(y),title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
   if(typeKey==='dialog'){ensureDialog(n);}
   if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
-  mutate(function(){project.nodes.push(n);},{nodes:[n.id]});
+  mutate(function(){project.nodes.push(n);},{nodes:[n.id]},'Создание ноды');
   if(select)selectOnly(n.id);
   return n;
 }
@@ -4606,7 +4875,7 @@ function startCarry(ids,pre){
 }
 function placeCarry(){
   if(!carryS)return;
-  pushHistory(carryS.pre);
+  pushHistory(carryS.pre,'Дублирование (перенос)');
   carryS.ids.forEach(function(id){
     var n=nodeById(id);if(!n)return;
     var el=nodeEls.get(id);
@@ -4649,7 +4918,7 @@ function alignSelH(){
     if(n&&!collapsedAncestorOf(n))ids.push(id);
   });
   if(ids.length<2){toast('Выделите минимум два узла','warn');return;}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Выравнивание нод');
   var sum=0;
   ids.forEach(function(id){
     var n=nodeById(id);
@@ -4715,7 +4984,7 @@ function bridgePairCandidate(){
   return null;
 }
 function createBridgeBetween(srcId,dstId){
-  pushHistory(serialize());
+  pushHistory(serialize(),'Создание моста');
   var ex=null;
   project.edges.forEach(function(e){if(e.from===srcId&&e.to===dstId)ex=e;});
   if(ex){ex.kind='bridge';if(!ex.bd)ex.bd={dl:0,dy:0,dr:0};}
@@ -4777,7 +5046,7 @@ function openDistributeModal(){
     return (na.y-nb2.y)||(na.x-nb2.x);
   });
   if(ids.length===2){
-    pushHistory(serialize());
+    pushHistory(serialize(),'Растягивание в строку');
     layoutRows(ids,1);
     renderAll();
     markDirty();
@@ -4786,7 +5055,7 @@ function openDistributeModal(){
   }
   dstState.ids=ids;
   dstState.k=dstClamp(4);
-  pushHistory(serialize());
+  pushHistory(serialize(),'Распределение по строкам');
   dstApply();
   $('#dstVal').value=dstState.k;
   $('#dstWin').classList.add('show');
@@ -4904,7 +5173,7 @@ function createGroupFromSel(name){
     });
     common=best;
   }
-  pushHistory(serialize());
+  pushHistory(serialize(),'Создание группы');
   var gidN=uid();
   var newG={id:gidN,name:(name&&name.trim())||'Группа',fold:2,x:0,y:0,parent:common||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null};
   project.groups.push(newG);
@@ -4926,7 +5195,7 @@ function createGroupFromSel(name){
   toast('Группа «'+((name&&name.trim())||'Группа')+'» создана'+(common?' (внутри «'+groupById(common).name+'»)':''));
 }
 function createDrawnGroup(rx,ry,rw,rh){
-  pushHistory(serialize());
+  pushHistory(serialize(),'Создание группы (рамкой)');
   var gid=uid();
   var g={id:gid,name:'Группа '+(project.groups.length+1),fold:2,x:0,y:0,parent:null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:rx,fy:ry,fw:rw,fh:rh};
   project.groups.push(g);
@@ -4946,7 +5215,7 @@ function ungroup(gid){
   var g=groupById(gid);if(!g)return;
   var lkUg=lockBlockedBy([gid].concat(membersOf(gid).map(function(n){return n.id;})));
   if(lkUg){showLockTip(lastPtr.x,lastPtr.y,lkUg);return;}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Разбор группы/цепочки');
   if(g.stack){
     var ids=stackOrderIds(g);
     ids.forEach(function(id,i){
@@ -4980,7 +5249,7 @@ function stackToGroup(gid){
   var ids=stackOrderIds(g);
   if(!ids.length){toast('Цепочка пуста','warn');return;}
   var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Цепочка → группа');
   g.stack=false;
   g.order=[];
   g.fold=2;
@@ -5024,7 +5293,7 @@ function groupToStack(gid){
   var ids=(x1-x0>=y1-y0)
     ?ms.slice().sort(function(a,b){return a.x-b.x||a.y-b.y;}).map(function(n){return n.id;})
     :ms.slice().sort(function(a,b){return a.y-b.y||a.x-b.x;}).map(function(n){return n.id;});
-  pushHistory(serialize());
+  pushHistory(serialize(),'Группа → цепочка');
   g.stack=true;
   g.fold=1;
   g.order=ids.slice();
@@ -5064,7 +5333,7 @@ function prepareGroupCard(g){
 function cycleGroupFold(gid){
   var g=groupById(gid);if(!g)return;
   if(g.stack){toast('У цепочки нет видов группы — «Преобразовать в группу» в меню ПКМ по карточке или в инспекторе','warn');return;}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Смена вида группы');
   var wasOpen=g.fold===2;
   g.fold=g.fold===2?1:(g.fold===1?0:2);
   if(wasOpen&&g.fold<2)prepareGroupCard(g);
@@ -5167,7 +5436,7 @@ function stackDropCreate(dragId,targetId,pre){
   var A=nodeById(dragId),T=nodeById(targetId);
   if(!A||!T)return false;
   var sg=stackGroupOf(T);
-  pushHistory(pre);
+  pushHistory(pre,'Сборка цепочки');
   if(sg){
     var ids=stackOrderIds(sg);
     /* нода попадает в цепочку: старые связи убираются, новая — по порядку цепочки */
@@ -5280,7 +5549,7 @@ function qRowApply(gid,nid,insIdx){
   if(insIdx>rest.length)insIdx=rest.length;
   var newOrder=rest.slice(0,insIdx).concat([nid],rest.slice(insIdx));
   if(newOrder.join('\u0001')===ids.join('\u0001'))return;
-  pushHistory(serialize());
+  pushHistory(serialize(),'Перестановка строк цепочки');
   g.order=newOrder;
   stackRebuildChains(g);
   stackSyncParks(g);
@@ -5296,7 +5565,7 @@ function qExtractRow(gid,nid,cx,cy){
   var lk=lockBlockedBy(order0);if(lk){showLockTip(cx,cy,lk);return;}
   var prev=idx>0?order0[idx-1]:null;
   var next=(idx>=0&&idx<order0.length-1)?order0[idx+1]:null;
-  pushHistory(serialize());
+  pushHistory(serialize(),'Вывод из цепочки');
   project.edges=project.edges.filter(function(ed){return !(ed.q&&(ed.from===nid||ed.to===nid));});
   n.gid=g.parent||null;
   g.order=order0.filter(function(x){return x!==nid;});
@@ -5355,7 +5624,7 @@ function stackFromSelection(){
   sel.forEach(function(id){var n=nodeById(id);if(n&&stackableType(n.type)&&!stackGroupOf(n))ids.push(id);});
   if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум две ноды вне цепочек','warn');return;}
   var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Сборка цепочки из выделения');
   var first=nodeById(ids[0]);
   var g={id:uid(),name:'Цепочка',fold:1,x:Math.round(first.x),y:Math.round(first.y),parent:first.gid||null,color:null,alpha:0.55,badge:false,bbox:null,hh:null,auto:false,fx:null,fy:null,fw:null,fh:null,stack:true,order:ids.slice()};
   project.groups.push(g);
@@ -5388,7 +5657,7 @@ function splitDialogNode(id){
   var lk=lockBlockedBy([n.id]);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
   var gS=stackGroupOf(n);
   var kS=gS?stackOrderIds(gS).indexOf(n.id):-1;
-  pushHistory(serialize());
+  pushHistory(serialize(),'Разбивка диалога на реплики');
   var elS=nodeEls.get(n.id);
   var hS=(elS&&elS.style.display!=='none')?elS.offsetHeight:150;
   var wS=(elS&&elS.style.display!=='none')?elS.offsetWidth:dlgNodeWidth(n);
@@ -5438,7 +5707,7 @@ function mergeDialogNodes(){
   if(selGroups.size||ids.length!==sel.size||ids.length<2){toast('Выделите минимум два диалога (только ноды «Диалог»)','warn');return;}
   for(var i=0;i<ids.length;i++){if(stackGroupOf(nodeById(ids[i]))){toast('Ноды внутри цепочки объединять нельзя — сначала выведите их (✕ на строке цепочки)','warn');return;}}
   var lk=lockBlockedBy(ids);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Объединение диалогов');
   var first=nodeById(ids[0]);
   ensureDialog(first);
   var reps=[],desc='',parts=[],gidSame=null,gidDiff=false;
@@ -5483,7 +5752,7 @@ function splitPtsAtHalf(e,g){
   return[a.length?a:null,b.length?b:null];
 }
 function performInsert(n,e,pre,isNew,pt){
-  pushHistory(pre);
+  pushHistory(pre,'Создание и подключение ноды');
   var g=edgeGeom(e);
   var sp=splitPtsAtHalf(e,g);
   var p=pt||edgePoint(e,0.5);
@@ -5907,7 +6176,7 @@ function finishConnect(){
       var dupV=project.edges.some(function(x){return x.from===from&&x.to===to&&x.tin==='var';});
       if(dupV){toast('Эта переменная уже подключена к развилке','warn');return;}
       var eidV=uid();
-      mutate(function(){project.edges.push({id:eidV,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:'var'});},{edge:eidV});
+      mutate(function(){project.edges.push({id:eidV,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:null,fromOut:null,tin:'var'});},{edge:eidV},'Связь переменной');
       toast('Переменная подключена ко входу развилки — перебьёт переменные в условиях исходов');
       return;
     }
@@ -5915,7 +6184,7 @@ function finishConnect(){
     if(dup)toast('Такая связь уже есть','warn');
     else{
       var eid=uid();
-      mutate(function(){project.edges.push({id:eid,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply,fromOut:fromOut});},{edge:eid});
+      mutate(function(){project.edges.push({id:eid,from:from,to:to,label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fromReply,fromOut:fromOut});},{edge:eid},'Соединение нод');
       selectEdgeOnly(eid);
     }
     return;
@@ -5947,7 +6216,7 @@ function startInlineEdit(nodeEl){
     if(closed)return;closed=true;
     lockGive([n.id]);
     var v=inp.value.trim();
-    if(!cancel&&v&&v!==n.title){pushHistory(serialize());n.title=v;markDirty();}
+    if(!cancel&&v&&v!==n.title){pushHistory(serialize(),'Переименование');n.title=v;markDirty();}
     var sp=document.createElement('span');
     sp.className='n-title';sp.textContent=n.title;
     inp.replaceWith(sp);
@@ -6561,7 +6830,7 @@ window.addEventListener('pointerup',function(e){if(mmResizeS){var mb0=$('#miniMa
   if(dlgResizeS){
     if(dlgResizeS.lk)lockGive(dlgResizeS.lk);
     if(dlgResizeS.moved&&dlgResizeS.pre!==serialize()){
-      pushHistory(dlgResizeS.pre);
+      pushHistory(dlgResizeS.pre,'Ширина диалога');
       markDirty();
       updateDlgRowStates();
     }
@@ -6593,7 +6862,7 @@ inDrag.previews.forEach(function(pr){if(pr.p&&pr.p.parentNode)pr.p.remove();});
 if(inDrag.hl)inDrag.hl.classList.remove('drop-hover');
 var tgt=inDrag.hl?nodeById(elemTargetNodeId(inDrag.hl)):null;
 if(tgt&&tgt.id!==inDrag.nid&&inDrag.moved){
-pushHistory(inDrag.pre);
+pushHistory(inDrag.pre,'Перенос входящих стрелок');
 var applied=0;
 inDrag.previews.forEach(function(pr){
 var ed=edgeById(pr.eid);if(!ed)return;
@@ -6613,7 +6882,7 @@ outDrag.previews.forEach(function(pr){if(pr.p&&pr.p.parentNode)pr.p.remove();});
 if(outDrag.hl)outDrag.hl.classList.remove('drop-hover');
 var tgtO=outDrag.hl?nodeById(elemTargetExitNodeId(outDrag.hl)):null;
 if(tgtO&&tgtO.id!==outDrag.nid&&outDrag.moved){
-pushHistory(outDrag.pre);
+pushHistory(outDrag.pre,'Перенос исходящих стрелок');
 var appliedO=0;
 outDrag.previews.forEach(function(pr){
 var ed=edgeById(pr.eid);if(!ed)return;
@@ -6642,7 +6911,7 @@ outDrag.previews.forEach(function(pr){var r=edgeEls.get(pr.eid);if(r)r.g.style.d
       tgtR=pinU.getAttribute('data-reply-id');
     }
     if(tgtN&&repOutDrag.moved&&!(tgtN===repOutDrag.nid&&tgtR===repOutDrag.replyId)){
-      pushHistory(repOutDrag.pre);
+      pushHistory(repOutDrag.pre,'Перенос исхода реплики');
       var appliedR=0;
       repOutDrag.previews.forEach(function(pr){
         var ed=edgeById(pr.eid);if(!ed)return;
@@ -6661,7 +6930,7 @@ if(knifeS.prev&&knifeS.prev.parentNode)knifeS.prev.remove();
 if(!knifeS.moved&&knifeS.startEdge&&!knifeS.removed.size){
 var edX=edgeById(knifeS.startEdge);
 if(edX){
-pushHistory(knifeS.pre);
+pushHistory(knifeS.pre,'Нож: разрез стрелок');
 project.edges=project.edges.filter(function(x){return x.id!==edX.id;});
 if(selEdge===edX.id)selEdge=null;
 selEdges.delete(edX.id);
@@ -6672,7 +6941,7 @@ toast('Связь удалена','warn');
 knifeS=null;return;
 }
 if(knifeS.removed.size){
-pushHistory(knifeS.pre);
+pushHistory(knifeS.pre,'Нож: разрез стрелок');
 if(selEdge&&knifeS.removed.has(selEdge))selEdge=null;
 var ne=new Set();selEdges.forEach(function(id){if(!knifeS.removed.has(id))ne.add(id);});selEdges=ne;
 markDirty();
@@ -6683,12 +6952,12 @@ knifeS=null;return;
 }
   if(brDrag){
     if(brDrag.lk)lockGive(brDrag.lk);
-    if(brDrag.moved&&brDrag.pre!==serialize()){pushHistory(brDrag.pre);markDirty();}
+    if(brDrag.moved&&brDrag.pre!==serialize()){pushHistory(brDrag.pre,'Правка моста');markDirty();}
     brDrag=null;return;
   }
   if(wpDrag){
     if(wpDrag.lk)lockGive(wpDrag.lk);
-    if(wpDrag.moved&&wpDrag.pre!==serialize()){pushHistory(wpDrag.pre);markDirty();}
+    if(wpDrag.moved&&wpDrag.pre!==serialize()){pushHistory(wpDrag.pre,'Изгиб стрелки');markDirty();}
     wpDrag=null;return;
   }
   if(rpDrag){
@@ -6698,7 +6967,7 @@ knifeS=null;return;
     var list=rpDrag.list,side=rpDrag.side;
     var tgt2=rpHover?nodeById(rpHover.dataset.id):null;
     if(tgt2){
-      pushHistory(rpDrag.pre);
+      pushHistory(rpDrag.pre,'Перенос точки выхода реплики');
       var applied2=0,skipped=0;
       list.forEach(function(ed){
         if(!ed)return;
@@ -6720,7 +6989,7 @@ knifeS=null;return;
   }
   if(lblDrag){
     if(lblDrag.lk)lockGive(lblDrag.lk);
-    if(lblDrag.moved&&lblDrag.pre!==serialize()){pushHistory(lblDrag.pre);markDirty();}
+    if(lblDrag.moved&&lblDrag.pre!==serialize()){pushHistory(lblDrag.pre,'Перенос подписи стрелки');markDirty();}
     lblDrag=null;return;
   }
   if(grestore){
@@ -6751,7 +7020,7 @@ knifeS=null;return;
         capG=captureGroupsInto(gr);
         capN=captureNodesInto(gr);
       }
-      if(grestore.pre!==serialize()){pushHistory(grestore.pre);markDirty();}
+      if(grestore.pre!==serialize()){pushHistory(grestore.pre,'Перемещение групп');markDirty();}
       if(exitedN||exitedGr.length||capG||capN){
         renderAll();
         var parts=[];
@@ -6777,7 +7046,7 @@ knifeS=null;return;
       var ggU=groupById(gdrag.gid);
       if(ggU){ch=reparentAfterMove(ggU);if(ggU.stack)stackSyncParks(ggU);}
     }
-    if(gdrag.moved&&gdrag.pre!==serialize()){pushHistory(gdrag.pre);markDirty();}
+    if(gdrag.moved&&gdrag.pre!==serialize()){pushHistory(gdrag.pre,'Перемещение групп');markDirty();}
     if(ch){
       renderAll();
       var ggT=groupById(gdrag.gid);
@@ -6837,7 +7106,7 @@ else if(n&&ed)toast('В мост нельзя вставить элемент','
           changedG=true;
         }
       });
-      if(dragS.pre!==serialize()){pushHistory(dragS.pre);markDirty();}
+      if(dragS.pre!==serialize()){pushHistory(dragS.pre,'Перемещение нод');markDirty();}
       if(changedG)renderAll();
     }else{
       renderInspector();
@@ -6882,7 +7151,7 @@ canvas.addEventListener('dblclick',function(e){
     var g=edgeGeom(ed);if(!g)return;
     if(!ed.pts)ed.pts=[];
     var idx=nearestSegIndex(g,wpt);
-    pushHistory(serialize());
+    pushHistory(serialize(),'Изгиб стрелки: новая точка');
     ed.pts.splice(idx,0,{x:wpt.x,y:wpt.y});
     selectEdgeOnly(eid);
     updateEdgeGeom(ed);
@@ -6991,7 +7260,7 @@ edgesSvg.addEventListener('dblclick',function(e){
     e.stopPropagation();e.preventDefault();
     var ed=edgeById(gW.dataset.id);
     if(ed&&ed.pts){
-      pushHistory(serialize());
+      pushHistory(serialize(),'Изгиб стрелки: убрать точку');
       ed.pts.splice(+tg.dataset.i,1);
       updateEdgeGeom(ed);
       markDirty();
@@ -7068,7 +7337,7 @@ canvas.addEventListener('drop',function(e){
       var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null,varMode:'set',varOp:'=',varVal:defValOf(vv),vid:vv.id};
       var tgV=deepestGroupAt(w.x,w.y);
       vn.gid=tgV?tgV.id:null;
-      mutate(function(){project.nodes.push(vn);},{nodes:[vn.id]});
+      mutate(function(){project.nodes.push(vn);},{nodes:[vn.id]},'Создание ноды переменной');
       resolveOverlaps(new Set([vn.id]));
       selectOnly(vn.id);
       toast('Нода переменной «'+vv.name+'» создана. Режим «изменение» можно переключить на «чтение» в инспекторе.');
@@ -7096,7 +7365,7 @@ else{
         var srcX=nodeById(cl);
         if(srcX){
           var cnX=cloneNode(srcX,w.x-NODE_W/2,w.y-20);
-          mutate(function(){project.nodes.push(cnX);},{nodes:[cnX.id]});
+          mutate(function(){project.nodes.push(cnX);},{nodes:[cnX.id]},'Создание и подключение');
           selectOnly(cnX.id);
         }
         return;
@@ -7115,7 +7384,7 @@ else{
   if(src){
     var cn2=cloneNode(src,w.x-NODE_W/2,w.y-20);
     if(ng)cn2.gid=ng.id;
-    mutate(function(){project.nodes.push(cn2);},{nodes:[cn2.id]});
+    mutate(function(){project.nodes.push(cn2);},{nodes:[cn2.id]},'Создание и подключение');
     selectOnly(cn2.id);
   }
 });
@@ -7294,7 +7563,7 @@ canvas.addEventListener('contextmenu',function(e){
       if(bp)items.push({ico:'swap',label:'Создать мост',fn:function(){createBridgeBetween(bp.a,bp.b);}});
     }
     items.push({ico:'chev',label:'Свернуть / развернуть',fn:function(){cycleExpand(id);}});
-    items.push({ico:'swap',label:'Выдернуть (как Alt+перенос)',fn:function(){pushHistory(serialize());detachNode(id);markDirty();}});
+    items.push({ico:'swap',label:'Выдернуть (как Alt+перенос)',fn:function(){pushHistory(serialize(),'Выдернуть ноду');detachNode(id);markDirty();}});
     if(n.gid){
       items.push('-');
       items.push({ico:'x',label:'Покинуть группу',fn:function(){leaveGroup(id);}});
@@ -7505,7 +7774,7 @@ function openTypeEditor(existing){
   buttons.push({label:'Отмена',fn:function(){}});
   buttons.push({label:isNew?'Создать':'Сохранить',primary:1,fn:function(){
     var name=($('#ctName').value||'').trim()||'Элемент';
-    pushHistory(serialize());
+    pushHistory(serialize(),'Правка своих типов');
     if(isNew){
       project.customTypes.push({id:uid(),name:name,color:curColor,icon:curIcon});
       toast('Тип «'+name+'» создан');
@@ -7533,7 +7802,7 @@ function openTypeEditor(existing){
 }
 function deleteCustomType(id){
   var c=customById(id); if(!c)return;
-  pushHistory(serialize());
+  pushHistory(serialize(),'Удаление своего типа');
   project.customTypes=project.customTypes.filter(function(x){return x.id!==id;});
   project.nodes.forEach(function(n){if(n.type===id)n.type='note';});
   var hi=project.listHidden.indexOf(id);
@@ -8033,6 +8302,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
+      '<div>кнопка «Журнал»</div><div>история действий: кто, когда и что менял; клик по записи — что именно изменилось и «показать на холсте»; ↑/↓ — переключение между записями; список последних редакторов — при наведении на «автосохранение»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
@@ -8045,6 +8315,7 @@ $('#bHelp').onclick=function(){
 $('#projName').addEventListener('input',function(e){
   project.meta.name=e.target.value||'Без названия';markDirty();
 });
+$('#projName').addEventListener('change',function(){logManualD('Переименование проекта');});
 $all('.ltab').forEach(function(b){
   b.onclick=function(){
     $all('.ltab').forEach(function(x){x.classList.toggle('active',x===b);});
@@ -8420,12 +8691,36 @@ function syncRenderMergeBadge(){
    сохраняем привязку к текущему проекту, чтобы не плодить дубли в списке. */
 function syncApplyRemote(doc,fit,keepPid){
   if(!doc||!Array.isArray(doc.nodes))return;
+  flushPendingLog();/* своё незаписанное действие фиксируем до применения чужого состояния */
   syncState.applyingRemote=true;
   try{
     if(doc.meta){
+      var localMeta=project.meta;
       var myPid=(project.meta&&project.meta.projectId)?project.meta.projectId:null;
       project.meta=doc.meta;
       if(keepPid&&!project.meta.projectId&&myPid)project.meta.projectId=myPid;
+      /* журнал действий и список редакторов: объединить локальные записи с пришедшими,
+         чтобы concurrent правки двух участников не теряли записи друг друга */
+      try{
+        var seen={},merged=[];
+        ((localMeta&&Array.isArray(localMeta.actionLog))?localMeta.actionLog:[]).concat(Array.isArray(project.meta.actionLog)?project.meta.actionLog:[]).forEach(function(en){
+          if(!en||!en.id||seen[en.id])return;
+          seen[en.id]=1;merged.push(en);
+        });
+        merged.sort(function(a,b){return (b.t||0)-(a.t||0);});
+        if(merged.length>60)merged.length=60;
+        if(merged.length)project.meta.actionLog=merged;
+        var seenE={},mE=[];
+        ((localMeta&&Array.isArray(localMeta.editLog))?localMeta.editLog:[]).concat(Array.isArray(project.meta.editLog)?project.meta.editLog:[]).forEach(function(en){
+          if(!en)return;
+          var k=((en.id||en.name)||'?')+'|'+(en.at||'');
+          if(seenE[k])return;
+          seenE[k]=1;mE.push(en);
+        });
+        mE.sort(function(a,b){return (new Date(b.at||0).getTime()||0)-(new Date(a.at||0).getTime()||0);});
+        if(mE.length)project.meta.editLog=collapseEditLog(mE);
+      }catch(e){}
+      if($('#logModal').classList.contains('show'))renderLogModal();/* журнал открыт — показать чужие записи сразу */
     }
     if(doc.bend==='ortho90'||doc.bend==='ortho45'||doc.bend==='smooth'){
       if(doc.bend!==bendMode){bendMode=doc.bend;syncBendButtons();}
@@ -9138,7 +9433,7 @@ function applyMergeRequest(req){
   backups.unshift({id:uid(),at:new Date().toISOString(),label:'Перед merge от '+(req.sender&&req.sender.name||'гостя'),doc:JSON.parse(JSON.stringify(syncDocObj()))});
   if(backups.length>10)backups.length=10;
   try{localStorage.setItem(LS_BACKUPS,JSON.stringify(backups));}catch(e){}
-  pushHistory(serialize());
+  pushHistory(serialize(),'Слияние копий');
   mergeDocInto(base,cur);
   markDirty();
   renderAll();
