@@ -248,7 +248,7 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .gc-pin.in{left:-5px}.gc-pin.out{right:-5px}
 /* цепочка — отдельный элемент (не группа): читаемое содержимое, перетаскивание строк, без разворачивания.
    Цвет карточки — как у обычных нод (тёмный нейтральный + возможность задать свой цвет в инспекторе) */
-.qcard{position:absolute;width:300px;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;cursor:grab;box-shadow:0 6px 18px rgba(0,0,0,.38);transition:transform .16s,box-shadow .16s,border-color .16s;user-select:none}
+.qcard{position:absolute;width:300px;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;cursor:grab;box-shadow:0 6px 18px rgba(0,0,0,.38);transition:transform .16s,box-shadow .16s,border-color .16s;user-select:none;isolation:isolate}
 .qcard:hover{transform:translateY(-2px);border-color:var(--qchov,#404653);box-shadow:0 12px 26px rgba(0,0,0,.5)}
 .qcard.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd),0 10px 26px rgba(0,0,0,.5)}
 .qcard.spawn{animation:nodeIn .5s cubic-bezier(.2,.9,.3,1.15) both}
@@ -264,12 +264,13 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .q-head .q-ico{width:14px;height:14px;flex:none;opacity:.9}
 .q-head .q-cnt{margin-left:auto;flex:none;font-size:10px;font-weight:600;background:var(--qcbg,rgba(160,168,180,.16));color:var(--qc,#9aa1ac);border-radius:8px;padding:1px 7px}
 .q-list{padding:5px 0 7px}
-.q-item{position:relative;display:flex;align-items:flex-start;gap:8px;margin:4px 9px;padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);cursor:grab}
+.q-item{position:relative;display:flex;align-items:flex-start;gap:8px;margin:4px 9px;padding:6px 9px;border-radius:8px;background:var(--qrow,#272b33);border:1px solid rgba(255,255,255,.05);cursor:grab}
+/* строки непрозрачные: связи (.q-svg под строками) скрываются за ними — как у нод на хосте */
 /* плашки закреплённых персонажей строки цепочки (как у нод) */
 .q-cast{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .q-cast:empty{display:none}
 .q-cast span{display:inline-flex;align-items:center;min-width:0;max-width:100%;padding:1px 6px;border-radius:5px;font-size:9px;font-weight:700;letter-spacing:.2px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#16181d}
-.q-item:hover{background:rgba(255,255,255,.06)}
+.q-item:hover{box-shadow:inset 0 0 0 999px rgba(255,255,255,.045)}
 .q-num{flex:none;min-width:16px;height:16px;margin-top:1px;padding:0 4px;border-radius:8px;background:var(--qcbg,rgba(160,168,180,.16));color:var(--qc,#9aa1ac);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
 .q-item .q-body{flex:1;min-width:0}
 .q-item .q-title{font-size:11px;font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -284,14 +285,15 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .q-item.q-ins-above{box-shadow:inset 0 2px 0 0 var(--acc)}
 .q-item.q-ins-below{box-shadow:inset 0 -2px 0 0 var(--acc)}
 .q-empty{padding:10px 12px;font-size:10px;color:var(--tx3)}
-/* связи «кто за кем» между строками цепочки: компактная вертикальная стрелка в узком зазоре —
-   выходит из нижней грани строки и входит в верхнюю грань следующей (перпендикулярно строкам);
-   клик по стрелке — выбрать связь; метка/условие — плашкой справа от стрелки */
+/* связи «кто за кем» между строками цепочки: линия рисуется на SVG-слое (.q-svg) ровно как на хосте —
+   кривая Безье из выхода строки (правый пин) во вход следующей (левый пин);
+   .q-link — узкий зазор-носитель плашки метки/условия рядом с серединой кривой;
+   клик по стрелке или плашке — выбрать связь */
 .q-link{position:relative;height:5px;margin:0 9px;cursor:default}
 .q-link .q-tag{position:absolute;left:calc(50% + 7px);top:50%;transform:translateY(-50%);z-index:3;max-width:calc(50% - 9px);font-size:8px;font-weight:600;letter-spacing:.25px;line-height:1.4;color:var(--qc,#9aa1ac);background:var(--qcbg,rgba(160,168,180,.13));border:1px solid var(--qcb,rgba(160,168,180,.2));border-radius:5px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
 .q-link.has-e:hover .q-tag{background:var(--qchov,rgba(160,168,180,.32));border-color:var(--qc,#9aa1ac);color:#e9ebef}
 .q-link.no-e .q-tag{cursor:default}
-.q-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:2}
+.q-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:-1}
 .q-conn .q-edge{fill:none;stroke:var(--qc,#9aa1ac);stroke-width:1.6;opacity:.62;pointer-events:none;transition:opacity .12s}
 .q-conn .q-arr{fill:var(--qc,#9aa1ac);opacity:.62;pointer-events:none;transition:opacity .12s}
 .q-conn.no-e .q-edge{stroke-dasharray:3 4;opacity:.42}
@@ -1826,6 +1828,9 @@ function applyQueueStyle(g){
   el.style.setProperty('--qcb',hexToRgba(acc,0.25));
   el.style.setProperty('--qcbg',hexToRgba(acc,0.16));
   el.style.setProperty('--qchov',hexToRgba(acc,0.6));
+  /* строки непрозрачные (связи проходят под ними, как на хосте): фон строк — тот же цвет, что карточка, но чуть светлее */
+  if(c)el.style.setProperty('--qrow','linear-gradient('+shadeHex(c,16)+','+shadeHex(c,2)+')');
+  else el.style.removeProperty('--qrow');
 }
 /* закреплённые персонажи строки цепочки: у диалогов — участники диалога, у остальных — участники ноды.
    color — цвет первого персонажа (им обводится строка), html — плашки с именами (как .n-cast у нод) */
@@ -1840,9 +1845,9 @@ function qRowCast(n){
   }).join('')+'</div>':'';
   return{ps:ps,color:cc,html:html};
 }
-/* стрелки «кто за кем» между строками цепочки: вертикальная стрелка из нижней грани строки
-   в верхнюю грань следующей (перпендикулярно строкам). Метка на линии — только
-   реальная информация связи (условие/подпись); клик по стрелке — выбрать связь (инспектор связи) */
+/* стрелки «кто за кем» между строками цепочки: рисуются на .q-svg как связи нод на хосте —
+   кривая Безье из выхода строки (правый пин) во вход следующей (левый пин).
+   Метка на линии — только реальная информация связи (условие/подпись); клик по стрелке — выбрать связь (инспектор связи) */
 function qLinkInfo(a,b){
   var i,x;
   for(i=0;i<project.edges.length;i++){x=project.edges[i];if(x.from===a.id&&x.to===b.id&&x.q)return x;}
@@ -1896,8 +1901,10 @@ function qRefreshLinkTagsForEdge(e){
 function qRefreshAllLinkTags(){
   project.groups.forEach(function(g){if(g.stack)qRefreshLinkTags(g,null);});
 }
-/* перерисовка стрелок между строками цепочки: вертикальный отрезок из нижней грани строки
-   в верхнюю грань следующей (перпендикулярно строкам), наконечник касается верхней грани;
+/* перерисовка стрелок между строками цепочки: ровно как связи между нодами на хосте —
+   кривая Безье выходит из ВЫХОДА строки (правый пин, центр) и заходит во ВХОД следующей строки
+   (левый пин, центр); касательные на концах горизонтальны (перпендикулярно граням строк),
+   формула контрольных точек — та же, что у edgePathD для двух точек;
    пунктир — если авто-связь убрана; выделение — цветом выбранной связи */
 function qRedrawConnectors(g){
   var cardEl=groupEls.get(g.id);
@@ -1909,14 +1916,19 @@ function qRedrawConnectors(g){
     if(!a||!b)return;
     var ra=cardEl.querySelector('.q-item[data-nid="'+a.id+'"]'),rb=cardEl.querySelector('.q-item[data-nid="'+b.id+'"]');
     if(!ra||!rb||ra.style.display==='none'||rb.style.display==='none')return;
-    var x=ra.offsetLeft+ra.offsetWidth/2,y1=ra.offsetTop+ra.offsetHeight,y2=rb.offsetTop;
-    var d='M'+x+' '+(y1+0.5)+' L'+x+' '+(y2-5);
+    /* порты как у нод на хосте: выход — центр правого пина строки A, вход — центр левого пина строки B */
+    var x1=ra.offsetLeft+ra.offsetWidth+0.5,y1=ra.offsetTop+ra.offsetHeight/2;
+    var x2=rb.offsetLeft-0.5,y2=rb.offsetTop+rb.offsetHeight/2;
+    /* та же кубическая кривая, что у связей на хосте (edgePathD, smooth) */
+    var dx=clamp((x1-x2)*0.5+60,70,240);
+    var d='M'+x1+' '+y1+' C '+(x1+dx)+' '+y1+', '+(x2-dx)+' '+y2+', '+x2+' '+y2;
     var e=lk.getAttribute('data-eid')?edgeById(lk.getAttribute('data-eid')):null;
     var selOn=e?selEdges.has(e.id):false;
     var gr=svgEl('g');gr.setAttribute('class','q-conn'+(e?'':' no-e')+(selOn?' sel':''));
     var ln=svgEl('path');ln.setAttribute('class','q-edge');ln.setAttribute('d',d);
-    var arr=svgEl('path');arr.setAttribute('class','q-arr');arr.setAttribute('d','M'+(x-3.2)+' '+(y2-5)+' L'+(x+3.2)+' '+(y2-5)+' L'+x+' '+y2+' Z');
-    var hit=svgEl('path');hit.setAttribute('class','q-edge-hit');hit.setAttribute('d','M'+x+' '+y1+' L'+x+' '+y2);
+    /* наконечник — как маркер на хосте: ориентирован по касательной у входа (горизонтально, внутрь строки) */
+    var arr=svgEl('path');arr.setAttribute('class','q-arr');arr.setAttribute('d','M'+x2+' '+y2+' L'+(x2-5)+' '+(y2-3.2)+' L'+(x2-5)+' '+(y2+3.2)+' Z');
+    var hit=svgEl('path');hit.setAttribute('class','q-edge-hit');hit.setAttribute('d',d);
     if(e){hit.dataset.eid=e.id;var tt=svgEl('title');tt.textContent=qLinkTitle(a,b,e);hit.appendChild(tt);}
     gr.appendChild(ln);gr.appendChild(arr);gr.appendChild(hit);
     frag.appendChild(gr);
@@ -1954,6 +1966,7 @@ function renderGroups(){
         var cast=qRowCast(n);
         var rowCol=cast.color||v.color;
         var row='<div class="q-item" data-nid="'+n.id+'"'+(cast.color?' style="border-color:'+esc(hexToRgba(cast.color,.6))+'"':'')+' title="Тяните строку — поменять порядок · тяните за пределы карточки — вывести из цепочки · клик — выбрать ноду">'+
+          '<i class="gc-pin in" style="border-color:'+esc(rowCol)+'" title="вход строки — сюда заходит стрелка от предыдущей ноды цепочки"></i>'+
           '<span class="q-num">'+(i+1)+'</span>'+
           '<div class="q-body">'+
             '<div class="q-title" style="color:'+esc(rowCol)+'">'+esc(n.title||'')+'</div>'+
@@ -7936,7 +7949,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ или перетаскивание строки за пределы карточки — вывести ноду, клик по строке — выбрать ноду, между строками — вертикальные стрелки «кто за кем» (из нижней грани строки в верхнюю грань следующей; рядом — метка/условие связи, клик по стрелке — выбрать связь), из выхода строки можно тянуть связь к любой ноде (Ctrl+тянуть — перенести исходящие), ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
+      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ или перетаскивание строки за пределы карточки — вывести ноду, клик по строке — выбрать ноду, между строками — стрелки «кто за кем» ровно как связи нод на хосте: кривая выходит из выхода строки (правый пин) и заходит во вход следующей строки (левый пин); рядом — метка/условие связи, клик по стрелке — выбрать связь, из выхода строки можно тянуть связь к любой ноде (Ctrl+тянуть — перенести исходящие), ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
