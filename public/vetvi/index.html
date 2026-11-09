@@ -747,6 +747,21 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .mrg-chip{font:500 11px var(--mono);background:#20242b;border:1px solid #2b303a;color:var(--tx2);border-radius:6px;padding:2px 7px}
 .mrg-acts{display:flex;gap:8px;margin-top:9px}
 .mrg-empty{color:var(--tx3);font-style:italic}
+/* ── офлайн-слияние ── */
+.ofl-sum{font-size:12.5px;color:var(--tx2);margin:0 0 8px}
+.ofl-chips{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 10px}
+.ofl-side-cap{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--tx2);margin:8px 0 0}
+.ofl-cf{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;margin:10px 0 0;background:#171a1f}
+.ofl-cf-t{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--tx);flex-wrap:wrap}
+.ofl-cf-badge{font:600 10px var(--mono);padding:2px 7px;border-radius:6px;background:rgba(207,107,90,.15);color:var(--bad);flex:none}
+.ofl-cf-s{display:flex;gap:7px;align-items:baseline;margin-top:6px;font-size:12px;color:var(--tx2)}
+.ofl-tag{flex:none;font:600 9.5px var(--mono);letter-spacing:.5px;padding:2px 7px;border-radius:6px;text-transform:uppercase}
+.ofl-tag.you{background:var(--accd);color:var(--acc)}
+.ofl-tag.room{background:rgba(156,184,120,.14);color:var(--ok)}
+.ofl-cf-b{display:flex;gap:6px;margin-top:8px}
+.ofl-cf-b .btn{padding:4px 12px;font-size:12px}
+.ofl-cf-b .btn.sel{background:var(--accd);border-color:var(--acc);color:var(--acc2)}
+.ofl-note{font-size:11.5px;color:var(--tx3);margin-top:10px}
 .cpy-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--line2);border-radius:10px;margin-bottom:7px;background:#171a1f}
 .cpy-item.active{border-color:rgba(226,165,78,.55);background:var(--accd)}
 .cpy-name{flex:1;min-width:0}
@@ -9023,9 +9038,9 @@ var syncState={
   status:'off',users:[],applyingRemote:false,pendingRemote:null,
   stateTimer:null,lastSent:'',liveT:0,liveDlgT:0,livePtsT:0,
   mode:'local',activeCopy:null,mergeCount:0,initDone:false,popFor:0,
-  rlocks:null,myLocks:{},lockHB:null
+  rlocks:null,myLocks:{},lockHB:null,offGuard:null
 };
-var LS_COPIES='vetvi-copies-v1',LS_BACKUPS='vetvi-backups-v1',LS_ME='vetvi-me-v1';
+var LS_COPIES='vetvi-copies-v1',LS_BACKUPS='vetvi-backups-v1',LS_ME='vetvi-me-v1',LS_OFFLINE='vetvi-offline-v1';
 function syncHashParams(){
   var h='';
   try{if(window.top&&window.top.location)h=window.top.location.hash||'';}catch(e){h=location.hash||'';}
@@ -9068,7 +9083,8 @@ function syncDocObj(){
 }
 function syncBusy(){
   return !!(dragS||gdrag||carryS||dlgResizeS||wpDrag||brDrag||lblDrag||inDrag||outDrag||repOutDrag||grestore||gcreateS||marS||knifeS||connS||isTyping()||
-    $('#dlgModal').classList.contains('show')||$('#noteModal').classList.contains('show')||$('#noteViewModal').classList.contains('show'));
+    $('#dlgModal').classList.contains('show')||$('#noteModal').classList.contains('show')||$('#noteViewModal').classList.contains('show')||
+    $('#modalWrap').classList.contains('show'));/* модалки (в т.ч. слияние офлайна) — чужие состояния ждут */
 }
 function syncSetStatus(s){
   syncState.status=s;
@@ -9165,6 +9181,7 @@ function syncApplyRemote(doc,fit,keepPid){
     }
     refreshGroupFrames();updateHistUI();
     dirty=false;updateStatus();scheduleAutosave();
+    try{offSetConsensusJson(JSON.stringify(syncDocObj()));}catch(e){}/* принятый снимок — новая база */
     if(fit)fitView(false);
   }finally{syncState.applyingRemote=false;}
 }
@@ -9189,6 +9206,7 @@ function syncFlushState(force){
   if(json===syncState.lastSent&&!force)return;
   syncState.lastSent=json;
   try{syncState.sock.emit('vetvi:state',{roomId:syncState.room,doc:doc});}catch(e){}
+  offSetConsensusJson(json);/* отправленный снимок — новая база для офлайн-слияния */
 }
 /* ── живые перетаскивания ── */
 function syncLiveDrag(src){
@@ -9406,16 +9424,27 @@ function syncConnect(roomId,pid,opts){
       var serverDoc=res.doc||null;
       var localJson='';try{localJson=JSON.stringify(syncDocObj());}catch(e){}
       var serverJson='';try{serverJson=serverDoc?JSON.stringify(serverDoc):'';}catch(e){}
+      /* офлайн-база: последний консенсус комнаты (если он есть и проект совпадает) */
+      var rec=(syncState.mode!=='copy')?offRecGet(roomId):null;
+      var baseObj=null;
+      if(rec&&rec.pid&&project.meta.projectId&&rec.pid===project.meta.projectId){
+        try{baseObj=JSON.parse(rec.doc);}catch(e){baseObj=null;}
+        if(baseObj&&!Array.isArray(baseObj.nodes))baseObj=null;
+      }
+      var roomPid=(serverDoc&&serverDoc.meta&&serverDoc.meta.projectId)?serverDoc.meta.projectId:null;
+      var useMerge=!!(baseObj&&(!roomPid||roomPid===project.meta.projectId));
       if(!serverDoc){
         syncFlushState(true);
         if(!opts.silent&&!opts.own)toast('Комната открыта — отправьте ссылку соавторам');
       }else if(localJson===serverJson){
-        /* уже совпадаем */
+        offSetConsensusJson(localJson);/* уже совпадаем */
       }else if(opts.pushLocal){
         syncFlushState(true);
+      }else if(useMerge){
+        /* офлайн-режим: разбор через 3-way-слияние вместо сравнения meta.modified */
+        offResolveRejoin(serverDoc,baseObj,rec,'join');
       }else{
         var localEmpty=project.nodes.length===0;
-        var roomPid=(serverDoc.meta&&serverDoc.meta.projectId)?serverDoc.meta.projectId:null;
         /* своя комната (открыли свой проект из списка) без projectId в документе —
            это устаревший снимок этого же проекта, модалка не нужна */
         var sameProject=!!(roomPid&&project.meta.projectId&&roomPid===project.meta.projectId)||(!roomPid&&opts.own===true);
@@ -9438,12 +9467,31 @@ function syncConnect(roomId,pid,opts){
       if(syncState.mergeCount>0)toast('Merge-запросов в очереди: '+syncState.mergeCount,'warn');
     });
   });
-  sock.on('disconnect',function(){if(syncState.enabled)syncSetStatus('conn');});
+  sock.on('disconnect',function(){
+    if(!syncState.enabled)return;
+    var wasOn=syncState.status==='on';
+    syncSetStatus('conn');
+    if(wasOn&&syncState.mode==='room')toast('Связь потеряна — можно работать офлайн, правки сохранятся','warn');
+  });
   sock.io.on('reconnect',function(){syncSetStatus('conn');});
-  sock.on('connect_error',function(){syncSetStatus('err');});
+  sock.on('connect_error',function(){
+    var wasErr=syncState.status==='err';
+    syncSetStatus('err');
+    if(!wasErr&&syncState.mode==='room')toast('Нет связи с комнатой — работает офлайн, правки сохраняются','warn');
+  });
   sock.on('vetvi:users',function(m){if(!m||m.roomId!==syncState.room)return;syncState.users=m.users||[];syncRenderChip();syncRenderPop();});
   sock.on('vetvi:locks',function(m){if(!m||m.roomId!==syncState.room)return;lockApplyServerList(m.locks);});
-  sock.on('vetvi:state',function(m){if(!m||m.roomId!==syncState.room)return;syncHandleRemoteDoc(m.doc);});
+  sock.on('vetvi:state',function(m){
+    if(!m||m.roomId!==syncState.room)return;
+    /* страховка гонки реконнекта: пока свежо опубликованное после офлайна состояние,
+       чужой снимок, отличающийся от нашего, — не «тихое» перекрытие, а конфликт */
+    if(syncState.offGuard&&Date.now()<syncState.offGuard.until){
+      var gc='';try{gc=offComparable(m.doc);}catch(e){}
+      var g=syncState.offGuard;syncState.offGuard=null;
+      if(gc&&gc!==g.sentCmp&&gc!==g.baseCmp){offResolveRejoin(m.doc,g.baseObj,g.rec,'guard');return;}
+    }
+    syncHandleRemoteDoc(m.doc);
+  });
   sock.on('vetvi:live',function(m){if(!m||m.roomId!==syncState.room)return;syncApplyLive(m);});
   sock.on('vetvi:merge-new',function(m){
     if(!m||m.roomId!==syncState.room)return;
@@ -9464,8 +9512,9 @@ function syncDisconnect(silent){
   lockGiveAll();
   if(syncState.lockHB){clearInterval(syncState.lockHB);syncState.lockHB=null;}
   if(syncState.sock){try{syncState.sock.disconnect();}catch(e){}}
+  offRecClear(syncState.room);/* вышли сами — офлайн-база этой комнаты больше не нужна */
   syncState.sock=null;syncState.enabled=false;syncState.room=null;syncState.users=[];
-  syncState.mergeCount=0;syncState.pendingRemote=null;syncState.rlocks=null;
+  syncState.mergeCount=0;syncState.pendingRemote=null;syncState.rlocks=null;syncState.offGuard=null;
   try{updateGroupBadges();applyInspectorLockState();}catch(e){}
   if(syncState.mode!=='copy')syncState.mode='local';
   syncSetHash(null);
@@ -9879,6 +9928,421 @@ function mergeDocInto(base,cur){
   if(Array.isArray(cur.listHidden))project.listHidden=cur.listHidden;
   if(cur.meta&&cur.meta.name&&!project.meta.projectId)project.meta.name=cur.meta.name;
 }
+/* ═══ офлайн-режим: работа без сети + слияние при переподключении ═══
+   Пока сокет лежит, правки автосохраняются в localStorage (как всегда).
+   Последний «консенсус» комнаты — последний снимок, который мы отправили,
+   будучи на связи, или получили от комнаты — хранится в LS_OFFLINE и служит
+   базой (общим предком) для 3-way-слияния. При переподключении:
+   - менялись только мы — публикуем нашу версию;
+   - только комната — забираем её состояние;
+   - оба — модалка: автоматически слитые правки + список конфликтов
+     («у вас / в комнате») с выбором на каждый конфликт. */
+function offRecAll(){
+  try{return JSON.parse(localStorage.getItem(LS_OFFLINE)||'{}')||{};}catch(e){return{};}
+}
+function offRecGet(room){
+  if(!room)return null;
+  return offRecAll()[room]||null;
+}
+var offPendRec=null,offPendT=null;
+function offRecPut(room,pid,docJson){
+  if(!room||!docJson)return;
+  offPendRec={room:room,pid:pid||null,doc:docJson};
+  clearTimeout(offPendT);
+  offPendT=setTimeout(offRecFlushPend,1200);/* лёгкий троттлинг: полный снимок пишем не на каждый флеш */
+}
+function offRecFlushPend(){
+  clearTimeout(offPendT);offPendT=null;
+  var r=offPendRec;offPendRec=null;
+  if(!r)return;
+  try{
+    var all=offRecAll();
+    all[r.room]={pid:r.pid,doc:r.doc,at:new Date().toISOString()};
+    var ks=Object.keys(all);
+    if(ks.length>3){/* не раздуваем хранилище: держим три свежие комнаты */
+      ks.sort(function(a,b){return (new Date(all[a].at||0).getTime()||0)-(new Date(all[b].at||0).getTime()||0);});
+      while(ks.length>3){delete all[ks.shift()];}
+    }
+    localStorage.setItem(LS_OFFLINE,JSON.stringify(all));
+  }catch(e){}
+}
+function offRecClear(room){
+  if(!room)return;
+  if(offPendRec&&offPendRec.room===room){offPendRec=null;clearTimeout(offPendT);offPendT=null;}
+  try{
+    var all=offRecAll();
+    if(all[room]){delete all[room];localStorage.setItem(LS_OFFLINE,JSON.stringify(all));}
+  }catch(e){}
+}
+/* консенсус: снимок, который мы отправили (будучи на связи) или получили */
+function offSetConsensusJson(docJson){
+  if(!syncState||!syncState.enabled||!syncState.room||syncState.mode==='copy')return;
+  offRecPut(syncState.room,(project.meta&&project.meta.projectId)||null,docJson);
+}
+/* структурное сравнение: содержимое документа без изменчивых метаданных
+   (метка времени правки, журналы) — чтобы «шум» не считался правкой */
+function offComparable(doc){
+  if(!doc||!Array.isArray(doc.nodes))return '';
+  var meta=doc.meta||{};
+  return logStable({
+    bend:doc.bend||null,
+    nodes:doc.nodes||[],edges:doc.edges||[],
+    customTypes:doc.customTypes||[],groups:doc.groups||[],
+    listHidden:doc.listHidden||[],vars:doc.vars||[],
+    name:meta.name||''
+  });
+}
+function offHasIds(a){
+  if(!Array.isArray(a)||!a.length)return false;
+  for(var i=0;i<a.length;i++)if(!a[i]||!a[i].id)return false;
+  return true;
+}
+/* diff по сущностям с id: add/mod/del относительно базы */
+function offDiffMap(baseArr,curArr){
+  var bm={},cm={},out={};
+  (baseArr||[]).forEach(function(x){if(x&&x.id)bm[x.id]=x;});
+  (curArr||[]).forEach(function(x){if(x&&x.id)cm[x.id]=x;});
+  Object.keys(cm).forEach(function(id){
+    if(!bm[id])out[id]={st:'add',v:cm[id]};
+    else if(logStable(bm[id])!==logStable(cm[id]))out[id]={st:'mod',v:cm[id]};
+  });
+  Object.keys(bm).forEach(function(id){if(!cm[id])out[id]={st:'del'};});
+  return out;
+}
+function offFmtDur(ms){
+  var m=Math.max(1,Math.round(ms/60000));
+  if(m<60)return m+' мин';
+  return 'более '+Math.floor(m/60)+' ч';
+}
+function offBackup(label){
+  try{
+    var backups=backupsAll();
+    backups.unshift({id:uid(),at:new Date().toISOString(),label:label,doc:JSON.parse(JSON.stringify(syncDocObj()))});
+    if(backups.length>10)backups.length=10;
+    localStorage.setItem(LS_BACKUPS,JSON.stringify(backups));
+  }catch(e){}
+}
+function offChips(st){
+  function chip(v,label){return v?'<span class="mrg-chip">'+label+': '+v+'</span>':'';}
+  return chip(st.addedNodes,'+ узлов')+chip(st.changedNodes,'~ узлов')+chip(st.removedNodes,'− узлов')+
+    chip(st.changedDialogs,'~ реплик')+chip(st.changedNotes,'~ заметок')+
+    chip(st.addedEdges,'+ связей')+chip(st.changedEdges,'~ связей')+chip(st.removedEdges,'− связей')+
+    chip(st.addedGroups,'+ групп')+chip(st.changedGroups,'~ групп')+chip(st.changedTypes,'~ типов');
+}
+var OFF_F_MAPS={node:LOG_F_N,edge:LOG_F_E,group:LOG_F_G,type:{name:'название',color:'цвет'},var:{name:'название',expr:'выражение',val:'значение'}};
+function offKindLabel(kind){
+  return {node:'Нода',edge:'Связь',group:'Группа',type:'Тип',var:'Переменная',name:'Название проекта',bend:'Форма связей',hidden:'Скрытые типы',vars:'Переменные'}[kind]||kind;
+}
+function offSideDesc(kind,d,baseEnt){
+  if(!d)return '';
+  if(d.st==='del')return 'удалено';
+  if(d.st==='add')return 'добавлено';
+  try{
+    var ks=logDiffKeys(baseEnt||{},d.v||{},OFF_F_MAPS[kind]||{});
+    return ks.length?('изменено: '+ks.slice(0,5).join(', ')):'изменено';
+  }catch(e){return 'изменено';}
+}
+/* блокировка Esc и клика по фону: слияние нельзя закрыть, не решив конфликты */
+var offEscOn=false;
+function offModalBlock(on){
+  if(on&&!offEscOn){
+    offEscOn=true;
+    document.addEventListener('keydown',offEscHandler,true);
+    document.addEventListener('mousedown',offBackdropHandler,true);
+  }else if(!on&&offEscOn){
+    offEscOn=false;
+    document.removeEventListener('keydown',offEscHandler,true);
+    document.removeEventListener('mousedown',offBackdropHandler,true);
+  }
+}
+function offEscHandler(e){
+  if(e.key==='Escape'){e.stopPropagation();e.preventDefault();}
+}
+function offBackdropHandler(e){
+  if(e.target&&e.target.id==='modalWrap'){e.stopPropagation();e.preventDefault();}
+}
+/* разбор реконнекта: что изменилось у нас, что в комнате, дальнейший маршрут */
+function offResolveRejoin(serverDoc,baseObj,rec,source){
+  if(!serverDoc||!Array.isArray(serverDoc.nodes))return;
+  var mine=syncDocObj();
+  var bc='',sc='',lc='';
+  try{bc=offComparable(baseObj);sc=offComparable(serverDoc);lc=offComparable(mine);}catch(e){return;}
+  if(!bc)return;
+  var mineChanged=lc!==bc,roomChanged=sc!==bc;
+  if(!mineChanged&&!roomChanged){
+    syncApplyRemote(serverDoc);/* содержимое совпало — сходимся в байтах комнаты */
+    return;
+  }
+  if(!mineChanged&&roomChanged){
+    syncApplyRemote(serverDoc,true);
+    toast('В комнате есть обновления — загружено состояние');
+    return;
+  }
+  if(mineChanged&&!roomChanged){
+    offPublishLocal(rec,baseObj,serverDoc);
+    toast('Офлайн-правки опубликованы в комнату','ok');
+    return;
+  }
+  /* меняли обе стороны — модалка слияния */
+  var res=offBuildMerge(baseObj,mine,serverDoc);
+  if(!res){toast('Не удалось разобрать изменения для слияния — загружена версия комнаты','err');syncApplyRemote(serverDoc,true);return;}
+  res.mine=mine;res.theirs=serverDoc;
+  offMergeModal(serverDoc,baseObj,rec,res);
+}
+function offPublishLocal(rec,baseObj,serverDoc){
+  offModalBlock(false);
+  syncState.pendingRemote=null;
+  syncState.lastSent='';
+  syncFlushState(true);
+  var bc='',sc='';
+  try{bc=offComparable(baseObj);}catch(e){}
+  try{sc=serverDoc?offComparable(serverDoc):'';}catch(e){}
+  /* страховка гонки реконнекта: 5 секунд ловим чужие снимки, не совпавшие ни с базой, ни с ours */
+  syncState.offGuard=rec?{until:Date.now()+5000,baseCmp:bc,sentCmp:sc||bc,rec:rec}:null;
+}
+function offTakeServer(serverDoc){
+  offModalBlock(false);
+  syncState.pendingRemote=null;
+  syncState.offGuard=null;
+  syncApplyRemote(serverDoc,true);
+  toast('Загружено состояние комнаты — офлайн-правки отброшены','warn');
+}
+/* планировщик слияния: на каждую сущность — чья версия берётся, список конфликтов */
+function offBuildMerge(base,mine,theirs){
+  try{
+    function mapsFor(){
+      function mk(arr){var m={};(arr||[]).forEach(function(x){if(x&&x.id)m[x.id]=x;});return m;}
+      return{n:[mk(base.nodes),mk(mine.nodes),mk(theirs.nodes)],
+             e:[mk(base.edges),mk(mine.edges),mk(theirs.edges)],
+             g:[mk(base.groups),mk(mine.groups),mk(theirs.groups)],
+             t:[mk(base.customTypes),mk(mine.customTypes),mk(theirs.customTypes)],
+             v:[mk(base.vars),mk(mine.vars),mk(theirs.vars)]};
+    }
+    var maps=mapsFor();
+    var varsById=offHasIds(base.vars)&&offHasIds(mine.vars)&&offHasIds(theirs.vars);
+    var res={maps:maps,varsById:varsById,n:{},e:{},g:{},t:{},v:{},
+      fN:null,fB:null,fH:null,fV:null,
+      conflicts:[],auto:{mine:0,theirs:0,same:0}};
+    function plan(kind,dM,dT,out){
+      var ids={};
+      Object.keys(dM).forEach(function(k){ids[k]=1;});
+      Object.keys(dT).forEach(function(k){ids[k]=1;});
+      Object.keys(ids).forEach(function(id){
+        var a=dM[id],b=dT[id];
+        if(a&&!b){out[id]={take:'mine',d:a};res.auto.mine++;}
+        else if(!a&&b){out[id]={take:'theirs',d:b};res.auto.theirs++;}
+        else if(a.st===b.st&&(a.st==='del'||logStable(a.v)===logStable(b.v))){
+          out[id]={take:(a.st==='del'?'none':'same'),d:a};res.auto.same++;
+        }else{
+          out[id]={take:'mine',d:a,cd:b};/* решение за пользователем, по умолчанию «моё» */
+          res.conflicts.push({kind:kind,id:id,a:a,b:b,plan:out[id]});
+        }
+      });
+    }
+    plan('node',offDiffMap(base.nodes,mine.nodes),offDiffMap(base.nodes,theirs.nodes),res.n);
+    plan('edge',offDiffMap(base.edges,mine.edges),offDiffMap(base.edges,theirs.edges),res.e);
+    plan('group',offDiffMap(base.groups,mine.groups),offDiffMap(base.groups,theirs.groups),res.g);
+    plan('type',offDiffMap(base.customTypes,mine.customTypes),offDiffMap(base.customTypes,theirs.customTypes),res.t);
+    if(varsById)plan('var',offDiffMap(base.vars,mine.vars),offDiffMap(base.vars,theirs.vars),res.v);
+    function fieldPlan(bv,mv,tv,kind){
+      var m=logStable(bv)!==logStable(mv),t=logStable(bv)!==logStable(tv);
+      if(m&&t){
+        if(logStable(mv)===logStable(tv)){res.auto.same++;return{take:'same'};}
+        var fp={take:'mine',conf:true};
+        res.conflicts.push({kind:kind,a:{st:'mod',v:mv},b:{st:'mod',v:tv},base:bv,plan:fp});
+        return fp;
+      }
+      if(m){res.auto.mine++;return{take:'mine'};}
+      if(t){res.auto.theirs++;return{take:'theirs'};}
+      return{take:'none'};
+    }
+    res.fN=fieldPlan((base.meta&&base.meta.name)||'',(mine.meta&&mine.meta.name)||'',(theirs.meta&&theirs.meta.name)||'','name');
+    res.fB=fieldPlan(base.bend||null,mine.bend||null,(theirs.bend||null),'bend');
+    res.fH=fieldPlan(base.listHidden||[],mine.listHidden||[],theirs.listHidden||[],'hidden');
+    if(!varsById)res.fV=fieldPlan(base.vars||[],mine.vars||[],theirs.vars||[],'vars');
+    return res;
+  }catch(e){return null;}
+}
+var OFF_K2S={node:'n',edge:'e',group:'g',type:'t',var:'v'};/* длинные виды → короткие ключи карт */
+function offBaseEnt(maps,kind,id){
+  var arr=maps[OFF_K2S[kind]||kind]&&maps[OFF_K2S[kind]||kind][0];
+  return arr?(arr[id]||null):null;
+}
+function offTitleOf(maps,kind,id){
+  var arrs=maps[OFF_K2S[kind]||kind]||[];
+  for(var i=0;i<arrs.length;i++){
+    var o=arrs[i][id];
+    if(o){if(typeof o.title==='string'&&o.title)return o.title;if(o.name)return String(o.name);}
+  }
+  return id;
+}
+function offConflictRow(c,i,maps,base){
+  var kind=c.kind,title='',youTxt='',roomTxt='';
+  if(kind==='name'){
+    title='Название проекта';
+    youTxt='«'+esc(String((c.a&&c.a.v)||''))+'»';
+    roomTxt='«'+esc(String((c.b&&c.b.v)||''))+'»';
+  }else if(kind==='bend'){
+    title='Форма связей (изгибы)';
+    var bn={ortho90:'прямые 90°',ortho45:'прямые 45°',smooth:'плавные'};
+    youTxt=bn[c.a&&c.a.v]||String((c.a&&c.a.v)||'—');
+    roomTxt=bn[c.b&&c.b.v]||String((c.b&&c.b.v)||'—');
+  }else if(kind==='hidden'){
+    title='Скрытые типы в палитре';
+    youTxt='скрыто '+((c.a&&c.a.v)?c.a.v.length:0);
+    roomTxt='скрыто '+((c.b&&c.b.v)?c.b.v.length:0);
+  }else if(kind==='vars'){
+    title='Переменные (список целиком)';
+    youTxt=((c.a&&c.a.v)?c.a.v.length:0)+' шт.';
+    roomTxt=((c.b&&c.b.v)?c.b.v.length:0)+' шт.';
+  }else{
+    if(kind==='edge'){
+      var et='?';
+      try{
+        var ee=maps.e[0][c.id]||(maps.e[1][c.id])||(maps.e[2][c.id]);
+        var a=ee?offTitleOf(maps,'node',ee.from):'',b=ee?offTitleOf(maps,'node',ee.to):'';
+        et=(ee&&ee.label)?ee.label+' · ':'';
+        et+='«'+a+' → '+b+'»';
+      }catch(e){}
+      title='Связь '+et;
+    }else title=offKindLabel(kind)+' «'+esc(offTitleOf(maps,kind,c.id))+'»';
+    var be=offBaseEnt(maps,kind,c.id);
+    youTxt=(c.a&&c.a.st==='del')?'удалено':offSideDesc(kind,c.a,be);
+    roomTxt=(c.b&&c.b.st==='del')?'удалено':offSideDesc(kind,c.b,be);
+  }
+  return '<div class="ofl-cf" data-ci="'+i+'">'+
+    '<div class="ofl-cf-t">'+title+'<span class="ofl-cf-badge">конфликт</span></div>'+
+    '<div class="ofl-cf-s"><span class="ofl-tag you">у вас</span><span>'+youTxt+'</span></div>'+
+    '<div class="ofl-cf-s"><span class="ofl-tag room">в комнате</span><span>'+roomTxt+'</span></div>'+
+    '<div class="ofl-cf-b">'+
+    '<button class="btn ofl-pick sel" data-ci="'+i+'" data-r="mine">Моё</button>'+
+    '<button class="btn ofl-pick" data-ci="'+i+'" data-r="theirs">Из комнаты</button>'+
+    '</div></div>';
+}
+function offMergeModal(serverDoc,baseObj,rec,res){
+  var maps=res.maps;
+  var ago=(rec&&rec.at)?offFmtDur(Date.now()-new Date(rec.at).getTime()):'';
+  var editors='';
+  try{
+    var el=(serverDoc.meta&&Array.isArray(serverDoc.meta.editLog))?serverDoc.meta.editLog:[];
+    var names=[];
+    el.forEach(function(e2){if(e2&&e2.name&&e2.id!==syncMe().id&&names.indexOf(e2.name)<0)names.push(e2.name);});
+    if(names.length)editors='<div class="ofl-note">В комнате правили: '+esc(names.slice(0,3).join(', '))+(names.length>3?' и др.':'')+'</div>';
+  }catch(e){}
+  var statsM='',statsT='';
+  try{statsM=offChips(mergeStats(baseObj,res.mine));}catch(e){}
+  try{statsT=offChips(mergeStats(baseObj,serverDoc));}catch(e){}
+  var a=res.auto;
+  var autoTxt=(a.mine||a.theirs||a.same)?
+    ('Автоматически слито без конфликтов: ваших правок — '+a.mine+', из комнаты — '+a.theirs+(a.same?', совпадающих — '+a.same:'')+'.'):
+    'Автоматически слитых правок нет — все изменения конфликтуют.';
+  var html='';
+  html+='<p class="ofl-sum">Вы работали без связи'+(ago?' около '+ago:'')+', и в комнате за это время тоже есть правки. Разберите конфликты и отправьте результат в комнату.</p>'+editors;
+  html+='<div class="ofl-side-cap"><span class="ofl-tag you">у вас</span></div><div class="ofl-chips">'+(statsM||'<span class="mrg-chip">без правок</span>')+'</div>';
+  html+='<div class="ofl-side-cap"><span class="ofl-tag room">в комнате</span></div><div class="ofl-chips">'+(statsT||'<span class="mrg-chip">без правок</span>')+'</div>';
+  html+='<p class="ofl-sum" style="margin-top:10px">'+esc(autoTxt)+'</p>';
+  res.conflicts.forEach(function(c,i){html+=offConflictRow(c,i,maps,baseObj);});
+  html+='<div class="ofl-note">Перед слиянием сохраняется локальный бэкап. «Оставить мою версию» публикует вашу копию целиком — правки комнаты будут перезаписаны.</div>';
+  offModalBlock(true);
+  showModal({title:'Слияние офлайн-правок — конфликтов: '+res.conflicts.length,wide:true,text:html,buttons:[
+    {label:'Слить и отправить',primary:1,fn:function(){offFinishMerge(baseObj,res);}},
+    {label:'Оставить мою версию',fn:function(){offPublishLocal(rec,baseObj,serverDoc);toast('Ваша версия опубликована в комнату — правки комнаты перезаписаны','warn');}},
+    {label:'Взять версию комнаты',fn:function(){offTakeServer(serverDoc);}}
+  ]});
+  $all('#mCard .ofl-pick').forEach(function(b){
+    b.onclick=function(){
+      var i=+b.dataset.ci,r=b.dataset.r;
+      var c=res.conflicts[i];if(!c)return;
+      c.r=r;
+      if(c.plan)c.plan.take=r;/* решение попадает в план сборки */
+      $all('#mCard .ofl-cf[data-ci="'+i+'"] .ofl-pick').forEach(function(x){x.classList.toggle('sel',x.dataset.r===r);});
+    };
+  });
+}
+/* сборка слитого документа по плану (учитывая решения конфликтов) */
+function offBuildFinalDoc(base,res){
+  var mine=res.mine,theirs=res.theirs;
+  function byId(a){var m={};(a||[]).forEach(function(x){if(x&&x.id)m[x.id]=x;});return m;}
+  var mN=byId(mine.nodes),tN=byId(theirs.nodes);
+  var mE=byId(mine.edges),tE=byId(theirs.edges);
+  var mG=byId(mine.groups),tG=byId(theirs.groups);
+  var mT=byId(mine.customTypes),tT=byId(theirs.customTypes);
+  var mV=byId(mine.vars),tV=byId(theirs.vars);
+  function collect(plan,bArr,mArr,tArr,mM,tM){
+    var out=[],seen={};
+    (bArr||[]).forEach(function(x){
+      if(!x||!x.id)return;
+      seen[x.id]=1;
+      var p=plan[x.id];
+      if(!p){out.push(x);return;}
+      if(p.take==='mine'){if(mM[x.id])out.push(mM[x.id]);}
+      else if(p.take==='theirs'){if(tM[x.id])out.push(tM[x.id]);}
+      else if(p.take==='same'){var v=mM[x.id]||tM[x.id];if(v)out.push(v);}
+      /* 'none' — удалено с обеих сторон: не включаем */
+    });
+    (mArr||[]).forEach(function(x){if(x&&x.id&&!seen[x.id]){var p=plan[x.id];if(!p||p.take!=='none'){out.push(x);seen[x.id]=1;}}});
+    (tArr||[]).forEach(function(x){if(x&&x.id&&!seen[x.id]){var p=plan[x.id];if(!p||p.take!=='none'){out.push(x);seen[x.id]=1;}}});
+    return out;
+  }
+  var nodes=collect(res.n,base.nodes,mine.nodes,theirs.nodes,mN,tN);
+  var edges=collect(res.e,base.edges,mine.edges,theirs.edges,mE,tE);
+  var groups=collect(res.g,base.groups,mine.groups,theirs.groups,mG,tG);
+  var types=collect(res.t,base.customTypes,mine.customTypes,theirs.customTypes,mT,tT);
+  var vars=res.varsById?collect(res.v,base.vars||[],mine.vars||[],theirs.vars||[],mV,tV):
+    ((res.fV&&res.fV.take==='theirs')?(theirs.vars||[]):(mine.vars||[]));
+  var nodeIds={};nodes.forEach(function(n){nodeIds[n.id]=1;});
+  edges=edges.filter(function(e){return e&&nodeIds[e.from]&&nodeIds[e.to]&&e.from!==e.to;});
+  var gIds={};groups.forEach(function(g){gIds[g.id]=1;});
+  nodes.forEach(function(n){if(n.gid&&!gIds[n.gid])n.gid=null;});
+  groups.forEach(function(g){if(g.parent&&!gIds[g.parent])g.parent=null;});
+  var meta=JSON.parse(JSON.stringify((mine.meta)||{}));
+  if(res.fN&&res.fN.take==='theirs'&&theirs.meta)meta.name=theirs.meta.name;
+  meta.modified=new Date().toISOString();
+  if(!meta.projectId&&theirs.meta&&theirs.meta.projectId)meta.projectId=theirs.meta.projectId;
+  try{
+    var seen={},al=[];
+    ((mine.meta&&mine.meta.actionLog)||[]).concat((theirs.meta&&theirs.meta.actionLog)||[]).forEach(function(en){
+      if(!en||!en.id||seen[en.id])return;seen[en.id]=1;al.push(en);
+    });
+    al.sort(function(a,b){return (b.t||0)-(a.t||0);});
+    if(al.length>60)al.length=60;
+    meta.actionLog=al;
+  }catch(e){}
+  try{
+    var seenE={},eL=[];
+    ((mine.meta&&mine.meta.editLog)||[]).concat((theirs.meta&&theirs.meta.editLog)||[]).forEach(function(en){
+      if(!en)return;
+      var k=((en.id||en.name)||'?')+'|'+(en.at||'');
+      if(seenE[k])return;seenE[k]=1;eL.push(en);
+    });
+    meta.editLog=collapseEditLog(eL);
+  }catch(e){}
+  return{app:'vetvi-room',version:1,meta:meta,
+    bend:((res.fB&&res.fB.take==='theirs')?theirs.bend:mine.bend)||null,
+    nodes:nodes,edges:edges,customTypes:types,groups:groups,
+    listHidden:(res.fH&&res.fH.take==='theirs')?(theirs.listHidden||[]):(mine.listHidden||[]),
+    vars:vars};
+}
+function offFinishMerge(baseObj,res){
+  offModalBlock(false);
+  var doc=null;
+  try{doc=offBuildFinalDoc(baseObj,res);}catch(e){doc=null;}
+  if(!doc||!Array.isArray(doc.nodes)){toast('Не удалось собрать слитый документ','err');return;}
+  var pre='';
+  try{pre=serialize();}catch(e){}
+  offBackup('Перед слиянием офлайн-правок');
+  syncState.pendingRemote=null;
+  syncState.offGuard=null;
+  syncApplyRemote(doc);
+  var a=res.auto||{mine:0,theirs:0};
+  try{
+    var d=(pre&&(function(){try{return logDiff(pre,serialize());}catch(e){return null;}})());
+    logActionEntry({id:uid()+uid(),t:Date.now(),by:editIdentity(),act:'Слияние после офлайна (ваших '+(a.mine||0)+' · из комнаты '+(a.theirs||0)+' · конфликтов '+((res.conflicts||[]).length)+')',diff:d});
+  }catch(e){}
+  markDirty();
+  syncFlushState(true);
+  toast('Офлайн-правки слиты и отправлены в комнату','ok');
+}
 /* ── привязка панели ── */
 function bindSyncUI(){
   var bs=$('#bShare');
@@ -9942,6 +10406,15 @@ function initSync(){
       syncApplyRemote(d);
     }
   },600);
+  /* сеть вернулась — форсируем попытку соединения, не дожидаясь бэкоффа socket.io */
+  window.addEventListener('online',function(){
+    if(syncState.enabled&&syncState.sock&&!syncState.sock.connected){try{syncState.sock.connect();}catch(e){}}
+  });
+  window.addEventListener('offline',function(){
+    if(syncState.enabled&&syncState.mode==='room'&&syncState.status==='on')toast('Сеть недоступна — работа продолжится офлайн, правки сохранятся','warn');
+  });
+  /* при закрытии страницы — доложить отложенный консенсус в хранилище */
+  window.addEventListener('beforeunload',offRecFlushPend);
 }
 /* ═══════════ режим новеллы: проигрывание сюжета ═══════════
    Только чтение: ничего не меняет в project, JSON-структура данных не затрагивается.
@@ -10669,6 +11142,7 @@ try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key
   $('#projName').value=project.meta.name;
   updateHistUI();updateStatus();
   initSync();
+  try{if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(function(){});}catch(e){}/* офлайн-загрузка страницы */
   setTimeout(function(){
     project.nodes.forEach(function(n){updateEdgesFor(n.id);});
     refreshGroupFrames();
