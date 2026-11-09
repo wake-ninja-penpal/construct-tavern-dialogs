@@ -331,6 +331,16 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .n-fold{width:20px;height:20px;flex:none;border:none;background:none;color:var(--tx3);border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.18s}
 .n-fold:hover{color:var(--acc);background:#2b303a;transform:scale(1.12)}
 .n-fold svg{width:12px;height:12px}
+/* переключатель «проигрывать подряд» на карточке диалога */
+.n-seq{position:relative;width:26px;height:14px;flex:none;margin-left:2px;border:1px solid #565c66;border-radius:8px;background:#2b303a;cursor:pointer;padding:0;transition:background .18s,border-color .18s,box-shadow .18s}
+.n-seq i{position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:50%;background:#79808c;transition:left .18s,background .18s,box-shadow .18s}
+.n-seq:hover{border-color:var(--acc2)}
+.n-seq:hover i{background:#a8b0bd}
+.n-seq.on{background:rgba(226,165,78,.28);border-color:var(--acc)}
+.n-seq.on i{left:13px;background:var(--acc2);box-shadow:0 0 6px rgba(226,165,78,.55)}
+.i-seqrow{display:flex;align-items:flex-start;gap:9px;margin-top:7px;padding:7px 9px;border-radius:8px;background:rgba(255,255,255,.03);box-shadow:inset 0 0 0 1px var(--line)}
+.i-seqrow .n-seq{margin-top:2px}
+.i-seqlab{font-size:10.5px;line-height:1.5;color:var(--tx2)}
 .n-body{padding:0 12px 11px 14px}
 .node.ex-0 .n-text{display:none}
 .node.ex-0 .dlg-tree{display:none}
@@ -1457,7 +1467,7 @@ function flushPendingLog(){
   if(!d)return;
   logActionEntry({id:uid()+uid(),t:p.t,by:p.by,act:p.label||logDiffSummary(d),diff:d});
 }
-var LOG_F_N={title:'название',text:'текст',status:'статус',color:'цвет',tint:'яркость',x:'позиция',y:'позиция',expand:'сворачивание',dlgWidth:'ширина',dialog:'реплики/участники',notes:'заметки',gid:'группа',outcomes:'исходы',outs:'исходы',type:'тип',vid:'переменная',varMode:'режим',varOp:'операция'};
+var LOG_F_N={title:'название',text:'текст',status:'статус',color:'цвет',tint:'яркость',x:'позиция',y:'позиция',expand:'сворачивание',dlgWidth:'ширина',dialog:'реплики/участники',notes:'заметки',gid:'группа',outcomes:'исходы',outs:'исходы',type:'тип',vid:'переменная',varMode:'режим',varOp:'операция',linear:'проигрывание подряд'};
 var LOG_F_E={label:'подпись',cond:'условие',pts:'изгибы',fromReply:'исход из реплики',fromOut:'исход',from:'перенаправление',to:'перенаправление',bd:'форма моста',kind:'тип линии',lt:'якорь подписи',lp:'якорь подписи'};
 var LOG_F_G={name:'название',color:'цвет',tint:'яркость',fold:'вид',stack:'тип',parent:'вложенность',alpha:'прозрачность',badge:'ярлык',auto:'авторазмер',fx:'рамка',fy:'рамка',fw:'рамка',fh:'рамка',order:'порядок'};
 function logDiffKeys(o,nb,map,skip){
@@ -1508,6 +1518,7 @@ function logNodeTextDiff(a,b,ma,mb){
   if(a.status!==b.status)add('статус',STATUS[a.status]||a.status||'',STATUS[b.status]||b.status||'');
   if((a.color||null)!==(b.color||null))out.push({k:'цвет',a:a.color?'':'обычный',b:b.color?'':'обычный',da:a.color||null,db:b.color||null});
   if(((typeof a.tint==='number')?a.tint:0)!==((typeof b.tint==='number')?b.tint:0))addRaw('яркость',((typeof a.tint==='number')?a.tint:0)+'%',((typeof b.tint==='number')?b.tint:0)+'%');
+  if(!!a.linear!==!!b.linear)addRaw('проигрывание подряд',a.linear?'вкл':'выкл',b.linear?'вкл':'выкл');
   /* участники: id → названия по снимкам состояния (до/после) */
   var pa=(a.dialog&&Array.isArray(a.dialog.participants))?a.dialog.participants:(Array.isArray(a.participants)?a.participants:[]);
   var pb=(b.dialog&&Array.isArray(b.dialog.participants))?b.dialog.participants:(Array.isArray(b.participants)?b.participants:[]);
@@ -2736,6 +2747,7 @@ function renderWorld(spawn,spawnEdge){
         '<span class="n-ico">'+ic(vis.icon)+'</span>'+
         '<span class="n-title"></span>'+
         (n.type==='dialog'?'<span class="n-reply-cnt"></span>':'')+
+        (n.type==='dialog'?'<button class="n-seq'+(n.linear?' on':'')+'" title="Проигрывать реплики подряд — все реплики одна за другой, без выбора ответа"><i></i></button>':'')+
         '<span class="n-st st-'+n.status+'" title="'+STATUS[n.status]+'"></span>'+
         '<button class="n-fold" title="'+FOLD_TITLES[ex]+'">'+ic(FOLD_ICONS[ex],12)+'</button>'+
       '</div>'+
@@ -3990,6 +4002,10 @@ function renderInspNode(){
       '<label class="i-lab">Название диалога</label>'+
       '<input class="inp" id="iTitle" value="'+esc(n.title)+'" maxlength="80">'+
       '<label class="i-lab">Статус</label><div class="seg" id="iSt">'+stBtnsD+'</div>'+
+      '<div class="i-seqrow" title="Режим проигрывания этой ноды в новелле">'+
+        '<button class="n-seq'+(n.linear?' on':'')+'" id="iSeq"><i></i></button>'+
+        '<span class="i-seqlab">Проигрывать подряд — все реплики диалога идут одна за другой, без выбора ответа</span>'+
+      '</div>'+
       '<label class="i-lab">Участники</label>'+
       '<div id="dlgParts">'+partHtml+'</div>'+
       '<select class="inp" id="dlgAddPart" style="margin-top:6px;height:28px;font-size:11.5px">'+addOpts+'</select>'+
@@ -4056,6 +4072,8 @@ function renderInspNode(){
     }
     var splitBtn=$('#dlgSplitBtn');
     if(splitBtn)splitBtn.onclick=function(){splitDialogNode(n.id);};
+    var seqSw=$('#iSeq');
+    if(seqSw)seqSw.onclick=function(){toggleNodeSeq(n.id);};
     $all('#iSt button').forEach(function(b){
       b.onclick=function(){
         discrete(function(){n.status=b.dataset.s;});
@@ -5009,6 +5027,7 @@ function cloneNode(src,x,y){
     color:src.color||null,tint:src.tint||0,dlgWidth:src.dlgWidth||null,notes:src.notes?JSON.parse(JSON.stringify(src.notes)):[]};
   if(src.type==='dialog'&&src.dialog){
     c.dialog=JSON.parse(JSON.stringify(src.dialog));
+    if(src.linear===true)c.linear=true; /* режим «проигрывать подряд» наследуется дублем */
   }
   if(src.type==='varnode'){
     c.vid=src.vid||null;c.varMode=(src.varMode==='get')?'get':'set';c.varOp=VARS_OPS[src.varOp]?src.varOp:'=';c.varVal=src.varVal;
@@ -5321,6 +5340,17 @@ $('#dstWinHead').addEventListener('pointerdown',function(e){
   window.addEventListener('pointermove',mv);
   window.addEventListener('pointerup',up);
 });
+/* переключатель «проигрывать подряд» на карточке диалога: в новелле все реплики идут по порядку, без выбора */
+function toggleNodeSeq(id){
+  var n=nodeById(id);
+  if(!n||n.type!=='dialog')return;
+  var was=!!n.linear;
+  discrete(function(){n.linear=!was;},was?'Проигрывание подряд: выключено':'Проигрывание подряд: включено');
+  var el=nodeEls.get(id);
+  if(el){var b=el.querySelector('.n-seq');if(b)b.classList.toggle('on',!!n.linear);}
+  if(sel.has(id))renderInspector();
+  toast(!!n.linear?'Реплики будут проигрываться подряд — без выбора ответа':'Реплики — выбор ответа (как раньше)');
+}
 function cycleExpand(id){
   var n=nodeById(id),el=nodeEls.get(id);
   if(!n||!el)return;
@@ -5887,7 +5917,7 @@ function splitDialogNode(id){
   var created=[];
   reps.forEach(function(r,i){
     var t=(i===0)?(n.title||'Диалог'):((r.text||('Реплика '+(i+1))).slice(0,42));
-    var c={id:uid(),type:'dialog',gid:null,x:baseX,y:baseY+i*175,title:t,text:'',status:n.status||'idea',tags:(n.tags||[]).slice(),expand:1,color:n.color||null,tint:n.tint||0,dlgWidth:n.dlgWidth||null,notes:i===0?(n.notes||[]):[],
+    var c={id:uid(),type:'dialog',gid:null,x:baseX,y:baseY+i*175,title:t,text:'',status:n.status||'idea',tags:(n.tags||[]).slice(),expand:1,color:n.color||null,tint:n.tint||0,dlgWidth:n.dlgWidth||null,notes:i===0?(n.notes||[]):[],linear:(i===0&&n.linear===true)?true:undefined,
       dialog:{participants:(n.dialog.participants||[]).slice(),description:(i===0)?(n.dialog.description||''):'',replies:[JSON.parse(JSON.stringify(r))]}};
     project.nodes.push(c);created.push(c);
   });
@@ -5940,7 +5970,7 @@ function mergeDialogNodes(){
     var gg=n.gid||null;
     if(gidSame===null)gidSame=gg;else if(gidSame!==gg)gidDiff=true;
   });
-  var m={id:uid(),type:'dialog',gid:gidDiff?null:gidSame,x:first.x,y:first.y,title:first.title,text:'',status:first.status||'idea',tags:(first.tags||[]).slice(),expand:(first.expand===0||first.expand===1||first.expand===2)?first.expand:1,color:first.color||null,tint:first.tint||0,dlgWidth:first.dlgWidth||null,notes:first.notes||[],dialog:{participants:parts,description:desc,replies:reps}};
+  var m={id:uid(),type:'dialog',gid:gidDiff?null:gidSame,x:first.x,y:first.y,title:first.title,text:'',status:first.status||'idea',tags:(first.tags||[]).slice(),expand:(first.expand===0||first.expand===1||first.expand===2)?first.expand:1,color:first.color||null,tint:first.tint||0,dlgWidth:first.dlgWidth||null,notes:first.notes||[],linear:(first.linear===true)?true:undefined,dialog:{participants:parts,description:desc,replies:reps}};
   var idset=new Set(ids);
   project.edges=project.edges.filter(function(e){return !(idset.has(e.from)&&idset.has(e.to));});
   project.edges.forEach(function(e){
@@ -6462,7 +6492,7 @@ canvas.addEventListener('pointerdown',function(e){
   var target=e.target;
   if(target.closest&&target.closest('.n-title-inp'))return;
   var modK=e.ctrlKey||e.metaKey;
-  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.qport')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.n-fold')))){
+  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.qport')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.n-seq')||target.closest('.n-fold')))){
     if(e.shiftKey){
       /* Ctrl+Shift+ЛКМ — нарисовать новую группу */
       gcreateS={sx:e.clientX,sy:e.clientY};
@@ -6512,6 +6542,8 @@ return;
 }
     if(port)return;
     if(fold&&nodeEl){cycleExpand(nodeEl.dataset.id);e.stopPropagation();return;}
+    var seqSw=target.closest?target.closest('.n-seq'):null;
+    if(seqSw&&nodeEl){toggleNodeSeq(nodeEl.dataset.id);e.stopPropagation();return;}
     if(nodeEl){
       if(spaceDown)return;
       var id=nodeEl.dataset.id;
@@ -7350,7 +7382,7 @@ canvas.addEventListener('wheel',function(e){
 canvas.addEventListener('dblclick',function(e){
   if(e.ctrlKey||e.metaKey)return;
   var t=e.target;
-  if(t.closest&&(t.closest('.n-fold')||t.closest('.port')||t.closest('.dlg-reply-pin')||t.closest('.n-title-inp')))return;
+  if(t.closest&&(t.closest('.n-fold')||t.closest('.n-seq')||t.closest('.port')||t.closest('.dlg-reply-pin')||t.closest('.n-title-inp')))return;
   var nodeEl=t.closest?t.closest('.node'):null;
   var edgeEl=t.closest?t.closest('.edge'):null;
   var gbD=t.closest?t.closest('.groupbox,.gcard,.qcard'):null;
@@ -8274,6 +8306,7 @@ dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes
       if(typeof n.vid==='string'&&n.vid)node.vid=n.vid.slice(0,40);
     }
     if(Array.isArray(n.participants))node.participants=n.participants.filter(function(p){return typeof p==='string';});
+    if(t==='dialog'&&n.linear===true)node.linear=true; /* режим «проигрывать подряд» — опциональное поле */
     if(t==='dialog'){
       node.dialog={
         participants:Array.isArray(n.dialog&&n.dialog.participants)?n.dialog.participants:[],
@@ -8536,7 +8569,7 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>F2</kbd> · <kbd>Delete</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход</div>'+
+      '<div><kbd>P</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
 };
@@ -9765,8 +9798,10 @@ function initSync(){
    выделения («visited»), и так до конца списка.
    Диалог: описание и кнопки с вариантами реплик на одном экране; выбор реплики
    ведёт по её ветке (дети реплики → стрелка от реплики → стрелка от блока).
+   Переключатель на карточке диалога («проигрывать подряд», поле linear) — все
+   реплики идут по порядку одна за другой, без выбора ответа.
    Ноды переменных срабатывают молча и не выводятся как слайды. */
-var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null};
+var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null,seqList:null,seqIdx:-1};
 function plIsOpen(){return PL.open;}
 function plPickStartNode(){
   if(sel&&sel.size===1){
@@ -9837,7 +9872,7 @@ function plStart(nodeId){
   PL.typing=false;PL.full='';PL.hist=[];PL.path=[];
   PL.vars={};
   varsList().forEach(function(v){PL.vars[v.id]=v.val;});
-  PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();PL.set=null;
+  PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();PL.set=null;PL.seqList=null;PL.seqIdx=-1;
   if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
   var start=null;
   if(list){
@@ -9867,7 +9902,7 @@ function plExit(){
 function plRestart(){
   var st=(PL.mode==='list')?nodeById(PL.list[0]):(PL.startId?nodeById(PL.startId):null);
   if(!st){plExit();return;}
-  PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;
+  PL.hist=[];PL.path=[];PL.replyId=null;PL.intro=false;PL.idx=0;PL.seqList=null;PL.seqIdx=-1;
   PL.vars={};
   varsList().forEach(function(v){PL.vars[v.id]=v.val;});
   PL.dead=new Set();PL.visited=new Set();PL.varChanged=new Set();
@@ -9877,7 +9912,7 @@ function plRestart(){
   plGoNode(st);
 }
 function plPushHist(){
-  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,vars:PL.vars?Object.assign({},PL.vars):null,varChanged:PL.varChanged?new Set(PL.varChanged):null,dead:PL.dead?new Set(PL.dead):null,visited:PL.visited?new Set(PL.visited):null});
+  PL.hist.push({nodeId:PL.nodeId,replyId:PL.replyId,intro:PL.intro,seqIdx:PL.seqIdx,vars:PL.vars?Object.assign({},PL.vars):null,varChanged:PL.varChanged?new Set(PL.varChanged):null,dead:PL.dead?new Set(PL.dead):null,visited:PL.visited?new Set(PL.visited):null});
   if(PL.hist.length>120)PL.hist.shift();
   plUpdateBackUI();
 }
@@ -9893,7 +9928,7 @@ function plBack(){
     var nn=nodeById(s.nodeId);
     if(!nn||nn.type!=='varnode')break;
     if(!PL.hist.length){
-      PL.nodeId=s.nodeId;PL.replyId=null;PL.intro=false;PL.typing=false;
+      PL.nodeId=s.nodeId;PL.replyId=null;PL.intro=false;PL.typing=false;PL.seqList=null;PL.seqIdx=-1;
       if(PL.timer){clearInterval(PL.timer);PL.timer=null;}
       if(s.vars)PL.vars=Object.assign({},s.vars);
       if(s.varChanged)PL.varChanged=s.varChanged;
@@ -9909,6 +9944,10 @@ function plBack(){
   PL.typing=false;
   $('#plEnd').classList.remove('show');
   PL.nodeId=s.nodeId;PL.replyId=s.replyId;PL.intro=s.intro;
+  PL.seqIdx=(typeof s.seqIdx==='number')?s.seqIdx:-1;
+  var bkN=nodeById(s.nodeId);
+  PL.seqList=(PL.seqIdx>=0&&bkN&&bkN.type==='dialog'&&bkN.linear)?plLinearIds(bkN):null;
+  if(!PL.seqList)PL.seqIdx=-1;
   if(s.vars)PL.vars=Object.assign({},s.vars);
   if(s.varChanged)PL.varChanged=s.varChanged;
   if(s.dead)PL.dead=s.dead;
@@ -9923,6 +9962,11 @@ function plShowCurrent(){
   if(!n){plShowEnd();return;}
   if(PL.path.length&&PL.path[PL.path.length-1]!==n.id)PL.path.pop();
   plRenderPath();
+  if(PL.seqIdx>=0&&n.type==='dialog'&&n.linear){
+    PL.replyId=null;PL.intro=false;
+    plLinearShow(n);
+    return;
+  }
   if(PL.intro&&n.type==='dialog'){
     ensureDialog(n);
     plShowSlide({name:null,color:nodeVisual(n).color,text:n.dialog.description||'…',chapter:n});
@@ -10091,8 +10135,28 @@ function plShowSlide(opts){
   void box.offsetWidth;
   box.classList.add('pl-anim');
 }
+/* «Проигрывать подряд»: плоский порядок всех реплик диалога — сверху вниз по дереву */
+function plLinearIds(n){
+  var out=[];
+  (function walk(list){(list||[]).forEach(function(r){if(r&&r.id){out.push(r.id);if(r.children&&r.children.length)walk(r.children);}});})((n.dialog&&n.dialog.replies)||[]);
+  return out;
+}
+function plLinearShow(n){
+  var ids=(PL.seqList&&PL.seqList.length)?PL.seqList:plLinearIds(n);
+  PL.seqList=ids;
+  while(PL.seqIdx>=0&&PL.seqIdx<ids.length&&!findReply(n.dialog.replies,ids[PL.seqIdx]))PL.seqIdx++;
+  if(PL.seqIdx<0||PL.seqIdx>=ids.length){PL.seqIdx=-1;PL.seqList=null;plAfterNodeFinal(n);return;}
+  var r=findReply(n.dialog.replies,ids[PL.seqIdx]);
+  plShowSlide({name:(r.speaker?charName(r.speaker):null),color:(r.speaker?charColor(r.speaker):'#8b929c'),text:r.text||'…',chapter:n});
+}
+function plLinearBegin(n){
+  PL.seqList=plLinearIds(n);
+  PL.seqIdx=PL.seqList.length?0:-1;
+  plLinearShow(n);
+}
 function plGoNode(n,keepPath){
   PL.nodeId=n.id;PL.replyId=null;PL.intro=false;
+  if(!(n.type==='dialog'&&n.linear)){PL.seqList=null;PL.seqIdx=-1;}
   if(PL.mode==='list'){
     if(PL.visited)PL.visited.add(n.id);
     var li=PL.list.indexOf(n.id);
@@ -10123,6 +10187,15 @@ function plGoNode(n,keepPath){
     ensureDialog(n);
     var desc=n.dialog.description||'';
     var rs=n.dialog.replies||[];
+    if(n.linear){
+      /* «проигрывать подряд»: описание — слайд-интро, затем все реплики по порядку дерева, без выбора */
+      var lf=plLinearIds(n);
+      if(desc){PL.seqList=lf;PL.seqIdx=-1;PL.intro=true;plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});return;}
+      if(lf.length){PL.seqList=lf;PL.seqIdx=0;plLinearShow(n);return;}
+      PL.seqList=null;PL.seqIdx=-1;
+      plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
+      return;
+    }
     if(desc){
       PL.intro=true;
       plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});
@@ -10301,12 +10374,15 @@ function plAfterType(){
   var mk=function(arr){
     plRenderChoices(arr.map(function(e){return{label:plEdgeLabel(e),targets:[e.to],fn:function(){plFollowEdge(e);}};}));
   };
-  /* описание диалога: после печати сразу показываем кнопки с вариантами реплик */
+  /* описание диалога: после печати сразу показываем кнопки с вариантами реплик (в режиме «подряд» — просто «далее») */
   if(PL.intro){
     var rs0=(n.type==='dialog'&&n.dialog&&n.dialog.replies)||[];
+    if(n.linear){$('#plHint').textContent='клик — далее ▸';return;}
     if(rs0.length>1){plShowDialogChoices(n,rs0);return;}
     $('#plHint').textContent='клик — далее ▸';return;
   }
+  /* режим «подряд»: после реплики — следующая, без выбора */
+  if(n.type==='dialog'&&n.linear&&PL.seqIdx>=0){$('#plHint').textContent='клик — далее ▸';return;}
   if(PL.replyId&&n.type==='dialog'){
     var r=findReply(n.dialog.replies,PL.replyId);
     if(r){
@@ -10352,10 +10428,17 @@ function plAdvance(){
   if(PL.intro){
     PL.intro=false;
     var rs=(n.dialog&&n.dialog.replies)||[];
+    if(n.linear){plPushHist();plLinearBegin(n);return;} /* подряд: после описания — первая реплика */
     if(rs.length===1){plPushHist();plShowReply(rs[0]);return;}
     if(rs.length>1){plShowDialogChoices(n,rs);return;} /* выбор реплики — ветка выбора (страховка) */
     plPushHist();
     plAfterNodeFinal(n);
+    return;
+  }
+  if(n.type==='dialog'&&n.linear&&PL.seqIdx>=0){
+    plPushHist();
+    PL.seqIdx++;
+    plLinearShow(n); /* после последней реплики — выход из ноды (стрелки/конец) */
     return;
   }
   if(PL.replyId&&n.type==='dialog'){
