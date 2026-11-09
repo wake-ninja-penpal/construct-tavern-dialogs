@@ -284,16 +284,28 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .q-item.q-ins-above{box-shadow:inset 0 2px 0 0 var(--acc)}
 .q-item.q-ins-below{box-shadow:inset 0 -2px 0 0 var(--acc)}
 .q-empty{padding:10px 12px;font-size:10px;color:var(--tx3)}
-/* связи «кто за кем» между строками цепочки: стрелка + метка связи; клик по соединителю — выбрать связь */
-.q-link{display:flex;align-items:center;gap:7px;margin:1px 10px 1px 20px;min-height:16px}
-.q-link .q-ln{flex:none;width:12px;height:16px;position:relative}
-.q-link .q-ln::before{content:'';position:absolute;left:5px;top:1px;bottom:5px;width:2px;border-radius:1px;background:var(--qc,#9aa1ac);opacity:.45}
-.q-link .q-ln::after{content:'';position:absolute;left:2px;bottom:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--qc,#9aa1ac);opacity:.45}
-.q-link .q-tag{min-width:0;font-size:9px;font-weight:600;letter-spacing:.25px;line-height:1.7;color:var(--qc,#9aa1ac);background:var(--qcbg,rgba(160,168,180,.13));border:1px solid var(--qcb,rgba(160,168,180,.2));border-radius:6px;padding:0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
+/* связи «кто за кем» между строками цепочки: компактные линии как у обычных нод —
+   выходят из выхода строки (справа) и входят во вход следующей (слева); клик по линии — выбрать связь */
+.q-link{display:flex;align-items:center;justify-content:center;gap:7px;margin:1px 10px;min-height:16px;cursor:default}
+.q-link .q-tag{min-width:0;max-width:100%;font-size:9px;font-weight:600;letter-spacing:.25px;line-height:1.7;color:var(--qc,#9aa1ac);background:var(--qcbg,rgba(160,168,180,.13));border:1px solid var(--qcb,rgba(160,168,180,.2));border-radius:6px;padding:0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
 .q-link.has-e:hover .q-tag{background:var(--qchov,rgba(160,168,180,.32));border-color:var(--qc,#9aa1ac);color:#e9ebef}
-.q-link.no-e{opacity:.5}
-.q-link.no-e .q-ln::before{background:repeating-linear-gradient(180deg,var(--qc,#9aa1ac) 0 3px,transparent 3px 6px)}
 .q-link.no-e .q-tag{cursor:default}
+.q-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:2}
+.q-conn .q-edge{fill:none;stroke:var(--qc,#9aa1ac);stroke-width:1.6;opacity:.62;pointer-events:none;transition:opacity .12s}
+.q-conn .q-arr{fill:var(--qc,#9aa1ac);opacity:.62;pointer-events:none;transition:opacity .12s}
+.q-conn.no-e .q-edge{stroke-dasharray:3 4;opacity:.42}
+.q-conn.no-e .q-arr{opacity:.42}
+.q-conn.sel .q-edge{stroke:var(--acc);opacity:1;stroke-width:2}
+.q-conn.sel .q-arr{fill:var(--acc);opacity:1}
+.q-conn:hover .q-edge,.q-conn:hover .q-arr{opacity:.95}
+.q-conn .q-edge-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
+/* у строк цепочки выход интерактивен: из него тянется связь, как из выхода обычной ноды */
+.q-item .gc-pin.out{pointer-events:auto;cursor:crosshair;transition:box-shadow .12s,background .12s}
+.q-item .gc-pin.out:hover{background:#2a2113!important;box-shadow:0 0 9px rgba(226,165,78,.55)}
+/* строка вытянута за пределы карточки при перетаскивании — режим вывода из цепочки */
+.q-item.q-out{opacity:.25;border-style:dashed}
+.q-ghost{position:fixed;z-index:99;display:none;pointer-events:none;padding:5px 11px;border-radius:8px;background:#20242b;border:1px solid #31363f;box-shadow:0 6px 18px rgba(0,0,0,.45);font-size:11px;font-weight:600;color:var(--tx);max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-ghost.show{display:block}
 .gm-snip{color:var(--tx3);font-size:10px}
 .node{position:absolute;background:linear-gradient(#20242b,#191c21);border:1px solid #31363f;border-radius:11px;box-shadow:0 6px 18px rgba(0,0,0,.38);cursor:grab;user-select:none;transition:transform .16s,box-shadow .16s,border-color .16s}
 .node:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.5);border-color:#404653}
@@ -837,7 +849,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       </div>
       <div id="labels"></div>
       <div id="emptyHint"><div class="ring"></div><p>Холст пуст — перетащите элемент с панели слева</p></div>
-      <div id="marquee"></div></div><div id="miniMap"><svg id="mmSvg" viewBox="0 0 260 180" preserveAspectRatio="none"><g id="mmContent"><g id="mmGroups"></g><g id="mmEdges"></g><g id="mmNodes"></g></g><rect id="mmView" x="0" y="0" width="0" height="0"/></svg><i class="mm-resize" id="mmResize" title="Потяни за угол, чтобы изменить размер карты"></i></div></section>
+      <div id="marquee"></div><div id="qGhost" class="q-ghost"></div></div><div id="miniMap"><svg id="mmSvg" viewBox="0 0 260 180" preserveAspectRatio="none"><g id="mmContent"><g id="mmGroups"></g><g id="mmEdges"></g><g id="mmNodes"></g></g><rect id="mmView" x="0" y="0" width="0" height="0"/></svg><i class="mm-resize" id="mmResize" title="Потяни за угол, чтобы изменить размер карты"></i></div></section>
   <aside id="right">
     <div class="i-cap">Инспектор элемента</div>
     <div id="insp"></div>
@@ -1827,8 +1839,9 @@ function qRowCast(n){
   }).join('')+'</div>':'';
   return{ps:ps,color:cc,html:html};
 }
-/* соединители «кто за кем» между строками цепочки: стрелка + метка реальной связи.
-   Метка: условие → метка ребра → исходная реплика, иначе «далее». Клик — выбрать связь (инспектор связи) */
+/* линии «кто за кем» между строками цепочки: компактные связи, как между обычными нодами —
+   выходят из выхода строки (справа) и входят во вход следующей (слева). Метка на линии — только
+   реальная информация связи (условие/подпись); клик по линии — выбрать связь (инспектор связи) */
 function qLinkInfo(a,b){
   var i,x;
   for(i=0;i<project.edges.length;i++){x=project.edges[i];if(x.from===a.id&&x.to===b.id&&x.q)return x;}
@@ -1836,11 +1849,10 @@ function qLinkInfo(a,b){
   return null;
 }
 function qLinkTagText(e){
-  if(!e)return'далее';
+  if(!e)return null;
   if(e.cond)return'если: '+condText(condWithOverride(e.cond,nodeById(e.from)));
   if(e.label)return e.label;
-  if(e.fromReply){var a=nodeById(e.from);if(a&&a.type==='dialog'){var r=findReply(a.dialog.replies,e.fromReply);if(r)return'после реплики: «'+(r.text||'').slice(0,32)+'»';}}
-  return'далее';
+  return null;
 }
 function qLinkTitle(a,b,e){
   var t='Связь «кто за кем»: «'+(a.title||'?')+'» → «'+(b.title||'?')+'»';
@@ -1852,9 +1864,9 @@ function qLinkTitle(a,b,e){
 }
 function qLinkHtml(a,b){
   var e=qLinkInfo(a,b);
+  var tag=qLinkTagText(e);
   return '<div class="q-link'+(e?' has-e':' no-e')+'" data-a="'+esc(a.id)+'" data-b="'+esc(b.id)+'"'+(e?' data-eid="'+esc(e.id)+'"':'')+' title="'+esc(qLinkTitle(a,b,e))+'">'+
-    '<i class="q-ln"></i>'+
-    '<span class="q-tag">'+esc(qLinkTagText(e))+'</span>'+
+    (tag?'<span class="q-tag">'+esc(tag)+'</span>':'')+
   '</div>';
 }
 function qRefreshLinkTags(g,nid){
@@ -1864,11 +1876,15 @@ function qRefreshLinkTags(g,nid){
     if(nid&&aid!==nid&&bid!==nid)return;
     var a=nodeById(aid),b=nodeById(bid);if(!a||!b)return;
     var e=qLinkInfo(a,b);
-    var tag=lk.querySelector('.q-tag');if(tag)tag.textContent=qLinkTagText(e);
+    var tagText=qLinkTagText(e);
+    var tag=lk.querySelector('.q-tag');
+    if(tagText){if(tag)tag.textContent=tagText;else lk.insertAdjacentHTML('afterbegin','<span class="q-tag">'+esc(tagText)+'</span>');}
+    else if(tag)tag.remove();
     lk.setAttribute('title',qLinkTitle(a,b,e));
     if(e){lk.setAttribute('data-eid',e.id);lk.classList.add('has-e');lk.classList.remove('no-e');}
     else{lk.removeAttribute('data-eid');lk.classList.add('no-e');lk.classList.remove('has-e');}
   });
+  qRedrawConnectors(g);
 }
 /* точечное обновление соединителей при правке связи из инспектора (подпись/разворот/условие) и при правке переменных */
 function qRefreshLinkTagsForEdge(e){
@@ -1878,6 +1894,47 @@ function qRefreshLinkTagsForEdge(e){
 }
 function qRefreshAllLinkTags(){
   project.groups.forEach(function(g){if(g.stack)qRefreshLinkTags(g,null);});
+}
+/* перерисовка компактных линий между строками цепочки: из выхода строки (справа, как у нод)
+   вниз по краю карточки, через зазор — во вход следующей строки (слева). Стрелка входит во вход строки;
+   пунктир — если авто-связь убрана; выделение — цветом выбранной связи */
+function qRedrawConnectors(g){
+  var cardEl=groupEls.get(g.id);
+  if(!cardEl||!cardEl.parentNode)return;
+  var svg=cardEl.querySelector('.q-svg');if(!svg)return;
+  var frag=document.createDocumentFragment();
+  Array.prototype.forEach.call(cardEl.querySelectorAll('.q-link[data-a][data-b]'),function(lk){
+    var a=nodeById(lk.getAttribute('data-a')),b=nodeById(lk.getAttribute('data-b'));
+    if(!a||!b)return;
+    var ra=cardEl.querySelector('.q-item[data-nid="'+a.id+'"]'),rb=cardEl.querySelector('.q-item[data-nid="'+b.id+'"]');
+    if(!ra||!rb||ra.style.display==='none'||rb.style.display==='none')return;
+    var x1=ra.offsetLeft+ra.offsetWidth+2,y1=ra.offsetTop+ra.offsetHeight/2;
+    var x2=rb.offsetLeft-2,y2=rb.offsetTop+rb.offsetHeight/2;
+    var ym=(y1+y2)/2,r=Math.max(3,Math.min(8,(x1-x2)/4,(y2-ym),(ym-y1)));
+    var d='M'+x1+' '+y1+' L'+x1+' '+(ym-r)+' Q'+x1+' '+ym+' '+(x1-r)+' '+ym+' L'+(x2+r)+' '+ym+' Q'+x2+' '+ym+' '+x2+' '+(ym+r)+' L'+x2+' '+(y2-9);
+    var e=lk.getAttribute('data-eid')?edgeById(lk.getAttribute('data-eid')):null;
+    var selOn=e?selEdges.has(e.id):false;
+    var gr=svgEl('g');gr.setAttribute('class','q-conn'+(e?'':' no-e')+(selOn?' sel':''));
+    var ln=svgEl('path');ln.setAttribute('class','q-edge');ln.setAttribute('d',d);
+    var arr=svgEl('path');arr.setAttribute('class','q-arr');arr.setAttribute('d','M'+(x2-3.5)+' '+(y2-9)+' L'+(x2+3.5)+' '+(y2-9)+' L'+x2+' '+(y2-3.5)+' Z');
+    var hit=svgEl('path');hit.setAttribute('class','q-edge-hit');hit.setAttribute('d',d+' L'+x2+' '+(y2-3.5));
+    if(e){hit.dataset.eid=e.id;var tt=svgEl('title');tt.textContent=qLinkTitle(a,b,e);hit.appendChild(tt);}
+    gr.appendChild(ln);gr.appendChild(arr);gr.appendChild(hit);
+    frag.appendChild(gr);
+  });
+  svg.innerHTML='';svg.appendChild(frag);
+}
+/* отметка выделенных линий (при смене выбора без перерисовки карточки) */
+function qMarkSelConnectors(g){
+  var cardEl=groupEls.get(g.id);if(!cardEl)return;
+  var svg=cardEl.querySelector('.q-svg');if(!svg)return;
+  Array.prototype.forEach.call(svg.querySelectorAll('g.q-conn'),function(gr){
+    var hit=gr.querySelector('.q-edge-hit');
+    gr.classList.toggle('sel',!!(hit&&hit.dataset.eid&&selEdges.has(hit.dataset.eid)));
+  });
+}
+function qMarkSelAllConnectors(){
+  project.groups.forEach(function(g){if(g.stack)qMarkSelConnectors(g);});
 }
 function renderGroups(){
   $all('#framesLayer .groupbox').forEach(function(el){el.remove();});
@@ -1897,8 +1954,8 @@ function renderGroups(){
         var v=nodeVisual(n);
         var cast=qRowCast(n);
         var rowCol=cast.color||v.color;
-        var row='<div class="q-item" data-nid="'+n.id+'"'+(cast.color?' style="border-color:'+esc(hexToRgba(cast.color,.6))+'"':'')+' title="Тяните строку — поменять порядок · клик — выбрать ноду">'+
-          '<i class="gc-pin in" style="border-color:'+esc(rowCol)+'" title="вход строки — сюда приходят стрелки к ноде"></i>'+
+        var row='<div class="q-item" data-nid="'+n.id+'"'+(cast.color?' style="border-color:'+esc(hexToRgba(cast.color,.6))+'"':'')+' title="Тяните строку — поменять порядок · тяните за пределы карточки — вывести из цепочки · клик — выбрать ноду">'+
+          '<i class="gc-pin in" style="border-color:'+esc(rowCol)+'" title="вход строки — сюда входят стрелки (как у нод)"></i>'+
           '<span class="q-num">'+(i+1)+'</span>'+
           '<div class="q-body">'+
             '<div class="q-title" style="color:'+esc(rowCol)+'">'+esc(n.title||'')+'</div>'+
@@ -1906,7 +1963,7 @@ function renderGroups(){
             qNodeContentHtml(n)+
           '</div>'+
           '<button class="q-x" data-nid="'+n.id+'" title="Вывести из цепочки">✕</button>'+
-          '<i class="gc-pin out" style="border-color:'+esc(rowCol)+'" title="выход строки — отсюда уходят стрелки от ноды"></i>'+
+          '<i class="gc-pin out" style="border-color:'+esc(rowCol)+'" title="выход строки — тяните отсюда связь, как у обычной ноды · Ctrl+тянуть — перенести исходящие"></i>'+
         '</div>';
         if(i<direct.length-1)row+=qLinkHtml(n,direct[i+1]);
         return row;
@@ -1916,6 +1973,7 @@ function renderGroups(){
         '<span class="q-name">'+esc(g.name==='Очередь'?'Цепочка':g.name)+'</span>'+
         '<span class="q-cnt">'+direct.length+'</span></div>'+
         '<div class="q-list">'+(rows||'<div class="q-empty">Цепочка пуста</div>')+'</div>'+
+        '<svg class="q-svg"></svg>'+
         '<i class="qport out" title="выход цепочки (последняя нода) — тяните к другому элементу · Ctrl+тянуть — перенести исходящие стрелки"></i>';
       if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
       worldEl.appendChild(el);
@@ -1966,19 +2024,34 @@ function renderGroups(){
         b.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
         b.addEventListener('click',function(ev){ev.stopPropagation();stackRowAction(g.id,'out',b.getAttribute('data-nid'));});
       });
-      /* клик по соединителю «кто за кем» — выбрать эту связь (откроется инспектор связи) */
+      /* клик по линии «кто за кем» (в зазоре между строками) — выбрать эту связь (откроется инспектор связи) */
       Array.prototype.forEach.call(el.querySelectorAll('.q-link[data-eid]'),function(lk){
         lk.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
         lk.addEventListener('click',function(ev){ev.stopPropagation();selectEdgeOnly(lk.getAttribute('data-eid'));});
+      });
+      /* клик по линии на SVG-слое — выбрать связь; pointerdown не двигает карточку */
+      var qsvg=el.querySelector('.q-svg');
+      if(qsvg){
+        qsvg.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+        qsvg.addEventListener('click',function(ev){
+          var hp=ev.target&&ev.target.closest?ev.target.closest('.q-edge-hit'):null;
+          var eid=hp&&hp.dataset?hp.dataset.eid:null;
+          if(eid){ev.stopPropagation();selectEdgeOnly(eid);}
+        });
+      }
+      /* из выхода строки (как у нод) тянется связь: ЛКМ — новая связь, Ctrl+ЛКМ — перенести исходящие */
+      Array.prototype.forEach.call(el.querySelectorAll('.q-item .gc-pin.out'),function(pin){
+        pin.addEventListener('pointerdown',function(ev){startRowConnect(ev,pin);});
       });
       Array.prototype.forEach.call(el.querySelectorAll('.q-item[data-nid]'),function(row){
         row.addEventListener('pointerdown',function(ev){
           ev.stopPropagation();
           if(ev.button!==0)return;
           qLastIns=null;
-          qRowDrag={gid:g.id,nid:row.getAttribute('data-nid'),row:row,sx:ev.clientX,sy:ev.clientY,moved:false};
+          qRowDrag={gid:g.id,nid:row.getAttribute('data-nid'),row:row,cardEl:el,sx:ev.clientX,sy:ev.clientY,moved:false,outMode:false};
         });
       });
+      qRedrawConnectors(g);
     }
   });
   refreshGroupFrames();
@@ -3001,7 +3074,7 @@ function renderInspGroup(){
       '<label class="i-lab">Цвет фона карточки</label><div class="swatches" id="iqSw">'+colSwQ+'</div>'+
       '<label class="i-lab">Яркость цвета: <span id="iqTintVal">'+(tQ>0?'+':'')+tQ+'%</span></label>'+
       '<input type="range" class="inp" id="iqTint" min="-60" max="60" value="'+tQ+'">'+
-      '<div class="i-meta">Развернуть в группу нельзя — цепочка только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически; стрелки между строками показывают эти связи (метка/условие видны прямо в карточке, клик по стрелке — выбрать связь).</div>'+
+      '<div class="i-meta">Развернуть в группу нельзя — цепочка только разбирается (ПКМ по карточке или кнопка ниже). Порядок строк меняется перетаскиванием, связи «кто за кем» перестраиваются автоматически. Линии между строками подключены к входам и выходам строк, как у обычных нод: из выхода строки можно тянуть связь к любой ноде, строку можно вытащить из цепочки перетаскиванием за пределы карточки (или ✕). Метка/условие связи видны прямо на линии, клик по линии — выбрать связь.</div>'+
       '<label class="i-lab">Порядок ('+idsQ.length+')</label>'+
       '<div class="gm-list">'+listQ+'</div>'+
       '<div class="i-actions">'+
@@ -4407,6 +4480,7 @@ function syncSel(){
   $all('#palList .cv-card').forEach(function(el){el.classList.toggle('sel',sel.has(el.dataset.node));});
   $all('#nodeList .nli[data-id]').forEach(function(el){el.classList.toggle('sel',sel.has(el.dataset.id));});
   $all('#nodeList .nli[data-gid]').forEach(function(el){el.classList.toggle('sel',selGroups.has(el.dataset.gid));});
+  qMarkSelAllConnectors();
 }
 function selectOnly(id){sel=new Set([id]);selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;syncSel();renderInspector();}
 function selectEdgeOnly(id){selEdge=id;selEdges=new Set([id]);sel.clear();selGroups.clear();selGroup=null;syncSel();renderInspector();}
@@ -5069,6 +5143,22 @@ function refreshQueueRowContent(nid){
   Array.prototype.forEach.call(row.querySelectorAll('.gc-pin'),function(p){p.style.borderColor=rowCol;});
   qRefreshLinkTags(g,nid);
 }
+/* ghost при вытягивании строки из цепочки: следует за курсором, показывая ноду, которая выйдет из цепочки */
+function qGhostShow(qd){
+  var gh=$('#qGhost');if(!gh)return;
+  var n=nodeById(qd.nid);
+  if(!n)return;
+  gh.textContent=(n.title||'Нода')+' — отпустите вне карточки, чтобы вывести из цепочки';
+  gh.classList.add('show');
+}
+function qGhostMove(cx,cy){
+  var gh=$('#qGhost');if(!gh)return;
+  gh.style.left=(cx+14)+'px';
+  gh.style.top=(cy+16)+'px';
+}
+function qGhostHide(){
+  var gh=$('#qGhost');if(gh)gh.classList.remove('show');
+}
 /* перетаскивание строк цепочки: подсветка места вставки */
 function qRowUnmark(){
   $all('.q-item.q-ins-above,.q-item.q-ins-below').forEach(function(r){r.classList.remove('q-ins-above','q-ins-below');});
@@ -5104,25 +5194,67 @@ function qRowApply(gid,nid,insIdx){
   renderAll();markDirty();
   toast('Порядок цепочки изменён — связи «кто за кем» перестроены');
 }
+/* вывод ноды из цепочки перетаскиванием: связь с соседями склеивается, нода ложится в точку отпускания */
+function qExtractRow(gid,nid,cx,cy){
+  var g=groupById(gid);if(!g||!g.stack)return;
+  var n=nodeById(nid);if(!n)return;
+  var order0=stackOrderIds(g);
+  var idx=order0.indexOf(nid);if(idx<0)return;
+  var lk=lockBlockedBy(order0);if(lk){showLockTip(cx,cy,lk);return;}
+  var prev=idx>0?order0[idx-1]:null;
+  var next=(idx>=0&&idx<order0.length-1)?order0[idx+1]:null;
+  pushHistory(serialize());
+  project.edges=project.edges.filter(function(ed){return !(ed.q&&(ed.from===nid||ed.to===nid));});
+  n.gid=g.parent||null;
+  g.order=order0.filter(function(x){return x!==nid;});
+  if(prev&&next&&!project.edges.some(function(ed){return ed.from===prev&&ed.to===next&&ed.tin!=='var';}))project.edges.push(stackChainEdgeObj(prev,next));
+  var w=toWorld(cx,cy);
+  var w0=(n.type==='dialog')?dlgNodeWidth(n):NODE_W;
+  n.x=Math.round(w.x-w0/2);
+  n.y=Math.round(w.y-24);
+  resolveOverlaps(new Set([nid]));
+  if(!g.order.length){
+    project.groups=project.groups.filter(function(x){return x.id!==gid;});
+    selGroups.delete(gid);
+    if(selGroup===gid)selGroup=null;
+  }
+  renderAll();markDirty();
+  toast('Нода выведена из цепочки — связи с соседями склеены');
+}
 window.addEventListener('pointermove',function(e){
   if(!qRowDrag)return;
   if(!qRowDrag.moved&&Math.abs(e.clientY-qRowDrag.sy)+Math.abs(e.clientX-qRowDrag.sx)>6){
     qRowDrag.moved=true;
     qRowDrag.row.classList.add('q-src');
   }
-  if(qRowDrag.moved)qRowMark(e.clientY);
+  if(!qRowDrag.moved)return;
+  /* за пределами карточки — режим «вытащить из цепочки»; внутри — перестановка строк */
+  var r=qRowDrag.cardEl?qRowDrag.cardEl.getBoundingClientRect():null;
+  var out=r?(e.clientX<r.left-8||e.clientX>r.right+8||e.clientY<r.top-8||e.clientY>r.bottom+8):false;
+  if(out!==qRowDrag.outMode){
+    qRowDrag.outMode=out;
+    if(out){qRowUnmark();qRowDrag.row.classList.add('q-out');qGhostShow(qRowDrag);}
+    else{qRowDrag.row.classList.remove('q-out');qGhostHide();qRowMark(e.clientY);}
+  }
+  if(qRowDrag.outMode)qGhostMove(e.clientX,e.clientY);
+  else qRowMark(e.clientY);
 });
 window.addEventListener('pointerup',function(e){
   if(!qRowDrag)return;
   var qd=qRowDrag;qRowDrag=null;
   qd.row.classList.remove('q-src');
+  qd.row.classList.remove('q-out');
+  qGhostHide();
   qRowUnmark();
-  if(qd.moved){qRowApply(qd.gid,qd.nid,qLastIns);qLastIns=null;}
+  if(qd.moved&&qd.outMode){qExtractRow(qd.gid,qd.nid,e.clientX,e.clientY);qLastIns=null;}
+  else if(qd.moved){qRowApply(qd.gid,qd.nid,qLastIns);qLastIns=null;}
   else if(e.button===0||e.button===undefined){var nn=nodeById(qd.nid);if(nn)selectOnly(qd.nid);}
 });
 window.addEventListener('pointercancel',function(){
   if(!qRowDrag)return;
   qRowDrag.row.classList.remove('q-src');
+  qRowDrag.row.classList.remove('q-out');
+  qGhostHide();
   qRowDrag=null;qLastIns=null;qRowUnmark();
 });
 function stackFromSelection(){
@@ -5463,9 +5595,10 @@ previews.push({eid:ed.id,p:p});
 });
 inDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
 }
-function startOutDrag(e,nodeEl){
+function startOutDrag(e,nodeEl,nidO){
 e.stopPropagation();e.preventDefault();
-var nid=nodeEl.dataset.id;
+var nid=nidO||(nodeEl?nodeEl.dataset.id:null);
+if(!nid)return;
 var outs=project.edges.filter(function(ed){return ed.from===nid&&!ed.fromReply&&!ed.fromOut;});
 if(!outs.length){toast('У узла нет исходящих стрелок','warn');return;}
 var lkOu=lockBlockedBy([nid]);
@@ -5563,6 +5696,29 @@ function startQueueOutDrag(e,g){
     previews.push({eid:ed.id,p:p});
   });
   outDrag={nid:nid,pre:serialize(),previews:previews,hl:null,moved:false,lk:[nid]};
+}
+/* связь из выхода строки цепочки — как из выхода обычной ноды:
+   ЛКМ — новая связь (меню на пустом месте / сброс на ноду), Ctrl+ЛКМ — перенести исходящие стрелки */
+function startRowConnect(e,pinEl){
+  e.stopPropagation();e.preventDefault();
+  if(e.button!==undefined&&e.button!==0)return;
+  var row=pinEl.closest?pinEl.closest('.q-item'):null;
+  if(!row)return;
+  var nid=row.getAttribute('data-nid'),n=nodeById(nid);
+  if(!n)return;
+  var g=stackGroupOf(n);if(!g)return;
+  var cardEl=groupEls.get(g.id);if(!cardEl)return;
+  var lkC=lockBlockedBy([nid]);
+  if(lkC){showLockTip(e.clientX,e.clientY,lkC);return;}
+  lockTake([nid]);
+  if(e.ctrlKey||e.metaKey){startOutDrag(e,null,nid);return;}
+  var x1=(g.x||0)+row.offsetLeft+row.offsetWidth+2;
+  var y1=(g.y||0)+row.offsetTop+row.offsetHeight/2;
+  selectOnly(nid);
+  var prev=svgEl('path');prev.setAttribute('class','preview');
+  edgesSvg.appendChild(prev);
+  connS={from:nid,fromReply:null,fromOut:null,fromPin:'main',x1:x1,y1:y1,prev:prev,hl:null,wx:null,wy:null,cx:e.clientX,cy:e.clientY,lk:[nid]};
+  document.body.classList.add('connecting');
 }
 function dlgResizeBandHit(n,el,wx,wy){
   if(!n||n.type!=='dialog'||!el)return false;
@@ -7782,7 +7938,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ — вывести ноду, клик по строке — выбрать ноду, стрелки между строками — связи «кто за кем» (на стрелке видна метка связи/условие/исходная реплика, клик по стрелке — выбрать связь), ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
+      '<div>цепочки нод</div><div>перетащите ноду на другую — объединятся в цепочку с авто-связями «кто за кем» (при помещении в цепочку старые связи ноды убираются); цепочка — отдельный элемент, объединяет несколько нод в заданном порядке: строки показывают содержимое диалогов, порядок меняется перетаскиванием строк, ✕ или перетаскивание строки за пределы карточки — вывести ноду, клик по строке — выбрать ноду, линии между строками — связи «кто за кем» (выходят из выхода строки и входят во вход следующей, как у обычных нод; на линии видны метка/условие связи, клик по линии — выбрать связь), из выхода строки можно тянуть связь к любой ноде (Ctrl+тянуть — перенести исходящие), ПКМ по карточке — только «Разобрать цепочку» (связи сохранятся), разворачивания в группу нет; сброс ноды на карточку цепочки — добавить в конец; у диалога — «Разбить на реплики», у мультивыделения диалогов — «Объединить в один диалог» и «Собрать в цепочку»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
