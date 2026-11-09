@@ -603,6 +603,10 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .log-fields{color:var(--tx3);font-style:italic}
 .log-loc{margin-top:7px;align-self:flex-start;display:flex;align-items:center;gap:6px;border:1px solid #333a45;background:#22262e;color:var(--tx2);border-radius:8px;padding:5px 10px;cursor:pointer;font:11.5px var(--body);transition:.14s}
 .log-loc:hover{background:#2a2f39;color:var(--tx)}
+.log-rb{margin-top:5px;align-self:flex-start;display:flex;align-items:center;gap:6px;border:1px solid #4a3d2b;background:#292417;color:#d9b98a;border-radius:8px;padding:5px 10px;cursor:pointer;font:11.5px var(--body);transition:.14s;text-align:left}
+.log-rb:hover{background:#332c1d;color:#efce9e}
+.log-rb.dis{opacity:.45;cursor:not-allowed}
+.log-rb.dis:hover{background:#292417;color:#d9b98a}
 .log-empty{color:var(--tx3);text-align:center;padding:26px 0;font:12.5px var(--body)}
 .log-foot-info{margin-right:auto;font:10.5px var(--mono);color:var(--tx3);align-self:center}
 .log-flash{animation:logFlash 1.6s ease-out 1}
@@ -1129,7 +1133,8 @@ var EXTRA_ICONS={
   bag:'<path d="M6 8h12l1.2 12H4.8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>',
   door:'<path d="M6.5 21V9.5a5.5 5.5 0 0 1 11 0V21"/><path d="M4 21h16"/><path d="M14.5 13h.01" stroke-width="2.4"/>',
   candle:'<path d="M9 11.5h6V20H9z"/><path d="M12 11.5V9"/><path d="M12 2.5c1 1.2 1.6 2.1 1.6 3.1A1.6 1.6 0 0 1 12 7.2a1.6 1.6 0 0 1-1.6-1.6c0-1 .6-1.9 1.6-3.1z"/><path d="M6.5 20h11"/>',
-  variable:'<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>'
+  variable:'<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>',
+  rback:'<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5v1"/><path d="M4 20h6"/>'
 };
 var ALLICONS={};
 Object.keys(ICONS).forEach(function(k){ALLICONS[k]=ICONS[k];});
@@ -1443,6 +1448,7 @@ function logActionEntry(entry){
     if(!Array.isArray(project.meta.actionLog))project.meta.actionLog=[];
     project.meta.actionLog.unshift(entry);
     if(project.meta.actionLog.length>60)project.meta.actionLog.length=60;
+    logTrimSnaps();
     if($('#logModal').classList.contains('show'))renderLogModal();/* модалка открыта — показать новую запись сразу */
     syncQueueState();
   }catch(e){}
@@ -1454,7 +1460,7 @@ function logUndoRedo(pre,word){
   try{cur=serialize();}catch(e){return;}
   if(cur===pre)return;
   var d=logDiff(pre,cur);
-  logActionEntry({id:uid()+uid(),t:Date.now(),by:editIdentity(),act:word+(d?' — '+logDiffSummary(d):''),diff:d});
+  logActionEntry({id:uid()+uid(),t:Date.now(),by:editIdentity(),act:word+(d?' — '+logDiffSummary(d):''),diff:d,snap:(pre&&pre.length<=800000)?pre:null});
 }
 function flushPendingLog(){
   clearTimeout(logFlushT);logFlushT=null;
@@ -1465,7 +1471,17 @@ function flushPendingLog(){
   if(cur===p.pre)return;
   var d=logDiff(p.pre,cur);
   if(!d)return;
-  logActionEntry({id:uid()+uid(),t:p.t,by:p.by,act:p.label||logDiffSummary(d),diff:d});
+  logActionEntry({id:uid()+uid(),t:p.t,by:p.by,act:p.label||logDiffSummary(d),diff:d,snap:(p.pre&&p.pre.length<=800000)?p.pre:null});
+}
+/* снимки для отката: у записи журнала может лежать snap — состояние проекта на момент
+   ДО этого действия (только для своих свежих записей и не гигантские проекты).
+   Суммарный объём снимков ограничен: у самых старых записей снимок вытесняется,
+   у таких записей кнопка отката неактивна */
+var LOG_SNAP_LIMIT=1200000;
+function logTrimSnaps(){
+  var l=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[],t=0,i;
+  for(i=0;i<l.length;i++)if(l[i]&&l[i].snap)t+=l[i].snap.length;
+  for(i=l.length-1;i>=0&&t>LOG_SNAP_LIMIT;i--){if(l[i]&&l[i].snap){t-=l[i].snap.length;delete l[i].snap;}}
 }
 var LOG_F_N={title:'название',text:'текст',status:'статус',color:'цвет',tint:'яркость',x:'позиция',y:'позиция',expand:'сворачивание',dlgWidth:'ширина',dialog:'реплики/участники',notes:'заметки',gid:'группа',outcomes:'исходы',outs:'исходы',type:'тип',vid:'переменная',varMode:'режим',varOp:'операция',linear:'проигрывание подряд'};
 var LOG_F_E={label:'подпись',cond:'условие',pts:'изгибы',fromReply:'исход из реплики',fromOut:'исход',from:'перенаправление',to:'перенаправление',bd:'форма моста',kind:'тип линии',lt:'якорь подписи',lp:'якорь подписи'};
@@ -1794,6 +1810,129 @@ function logEntryForGroup(e,gid){
   }
   return false;
 }
+/* ── откат к точке журнала ──
+   Для записей хранится снимок состояния проекта на момент ДО этого действия (snap).
+   Откат проекта возвращает всё (ноды, связи, группы, переменные) к этому снимку.
+   Откат ноды (в журнале по ноде) — только эту ноду и её внешние связи; внутренние
+   связи цепочки не трогаем (ими управляет порядок цепочки), в текущей группе/цепочке
+   нода остаётся; удалённую ноду можно восстановить из записи. Сам откат попадает в
+   историю: Ctrl+Z возвращает состояние до отката. */
+function logRollbackProject(entry){
+  if(!entry||!entry.snap)return;
+  var cur='';
+  try{cur=serialize();}catch(e){return;}
+  if(cur===entry.snap){toast('Проект уже в этом состоянии','ok');return;}
+  pushHistory(cur,'Откат проекта по журналу');
+  applySnap(entry.snap);
+  if(dlgModalNode){var nn=nodeById(dlgModalNode.id);if(nn){dlgModalNode=nn;dlgModalRender();}}
+  toast('Проект откачен к состоянию записи · Ctrl+Z вернёт обратно','ok');
+}
+/* общая часть отката ноды: заменить ноду версией из снимка (текущая группа/цепочка
+   сохраняются) и восстановить её внешние связи на момент снимка */
+function logRollbackNodeSnapped(snap,nid,label){
+  var curN=nodeById(nid);
+  var cg=(curN&&curN.gid)?groupById(curN.gid):null;
+  var inChain=!!(cg&&cg.stack);
+  var oldN=null;
+  for(var i=0;i<snap.nodes.length;i++)if(snap.nodes[i].id===nid){oldN=snap.nodes[i];break;}
+  if(!oldN)return false;
+  var nn=JSON.parse(JSON.stringify(oldN));
+  if(curN)nn.gid=curN.gid;/* не выкидываем из текущей группы/цепочки */
+  else if(nn.gid){var g2=groupById(nn.gid);if(!g2||g2.stack)nn.gid=null;}
+  pushHistory(serialize(),label);
+  if(curN){
+    var idx=project.nodes.indexOf(curN);
+    if(idx<0)return false;
+    project.nodes[idx]=nn;
+  }else{
+    project.nodes.push(nn);/* нода была удалена после этой записи — восстановить */
+  }
+  /* связи ноды — как на момент снимка; внутренние связи цепочки не трогаем */
+  function internal(e){
+    if(!inChain)return false;
+    var a=nodeById(e.from),b=nodeById(e.to);
+    return !!(a&&b&&a.gid===cg.id&&b.gid===cg.id);
+  }
+  var kept=project.edges.filter(function(e){
+    return !((e.from===nid||e.to===nid)&&!internal(e));
+  });
+  var have={};kept.forEach(function(e){have[e.id]=1;});
+  var se=snap.edges||[];
+  for(var k=0;k<se.length;k++){
+    var e=se[k];
+    if(e.from!==nid&&e.to!==nid)continue;
+    if(!nodeById(e.from)||!nodeById(e.to))continue;
+    if(internal(e))continue;
+    var copy=JSON.parse(JSON.stringify(e));
+    if(have[copy.id])kept=kept.filter(function(x){return x.id!==copy.id;});
+    have[copy.id]=1;kept.push(copy);
+  }
+  /* висячие ссылки на реплику/исход (нода теперь из снимка) — убрать */
+  kept=kept.filter(function(e){
+    if(e.from!==nid)return true;
+    var n2=nodeById(nid);
+    if(e.fromReply&&!(n2&&n2.dialog&&findReply(n2.dialog.replies||[],e.fromReply)))return false;
+    if(e.fromOut){var ok=false;if(n2&&Array.isArray(n2.outcomes))n2.outcomes.forEach(function(o){if(o&&o.id===e.fromOut)ok=true;});if(!ok)return false;}
+    return true;
+  });
+  project.edges=kept;
+  return true;
+}
+function logRollbackNode(entry,nid){
+  if(!entry||!entry.snap||!nid)return;
+  var snap;
+  try{snap=JSON.parse(entry.snap);}catch(e){toast('Снимок этой записи недоступен','warn');return;}
+  var has=false,sN=null;
+  for(var i=0;i<snap.nodes.length;i++)if(snap.nodes[i].id===nid){sN=snap.nodes[i];has=true;break;}
+  if(!has){toast('На тот момент этой ноды ещё не было','warn');return;}
+  var curN=nodeById(nid);
+  var nm=curN?(curN.title||'без названия'):(sN.title||'без названия');
+  var lbl=curN?('Откат ноды «'+nm+'»'):'Возврат ноды «'+nm+'» по журналу';
+  var ok=false;
+  try{ok=logRollbackNodeSnapped(snap,nid,lbl);}catch(e){ok=false;}
+  if(!ok){toast('Не удалось откатить ноду','warn');return;}
+  renderAll();
+  if(dlgModalNode&&dlgModalNode.id===nid){dlgModalNode=nodeById(nid)||dlgModalNode;dlgModalRender();}
+  markDirty();
+  toast(curN?('Нода откачена к состоянию записи · Ctrl+Z вернёт обратно'):('Нода восстановлена из журнала · Ctrl+Z вернёт обратно'),'ok');
+}
+/* кнопки отката в развёрнутой записи: проект (всегда) и нода (в журнале по ноде) */
+function logRbBtn(cls,label,title,dis,nid){
+  return '<button class="log-rb'+(dis?' dis':'')+' '+cls+'"'+(nid?' data-nid="'+esc(nid)+'"':'')+(title?' title="'+esc(title)+'"':'')+(dis?' disabled':'')+'>'+ic('rback',12)+' '+esc(label)+'</button>';
+}
+var LOG_RB_NO_SNAP='Снимок состояния для этой записи недоступен: запись старая, от другого участника, или снимок вытеснен более новыми.';
+function logRowDetHtml(e){
+  var h='<div class="log-det">'+logDetailsHtml(e.diff);
+  h+=logRbBtn('log-rb-proj','Откатить проект к этому моменту',e.snap?'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (Ctrl+Z).':LOG_RB_NO_SNAP,!e.snap);
+  if(logFilterNode){
+    var st='nosnap';
+    if(e.snap){
+      try{
+        var snp=JSON.parse(e.snap);st='absent';
+        for(var i=0;i<snp.nodes.length;i++)if(snp.nodes[i].id===logFilterNode){st='ok';break;}
+      }catch(_){st='nosnap';}
+    }
+    var fn2=nodeById(logFilterNode);
+    h+=logRbBtn('log-rb-node',fn2?'Откатить ноду к этому моменту':'Восстановить ноду из записи',
+      st==='ok'?(fn2?'Эта нода и её внешние связи вернутся к состоянию до этого изменения (в текущей группе/цепочке нода останется). Сам откат можно отменить (Ctrl+Z).':'Нода будет создана заново в состоянии из этой записи, вместе со связями того времени. Отменить — Ctrl+Z.'):(st==='absent'?'На момент этой записи этой ноды ещё не существовало.':LOG_RB_NO_SNAP),
+      st!=='ok');
+  }else if(e.diff&&Array.isArray(e.diff.nD)&&e.diff.nD.length){
+    /* в общем журнале: у записей об удалении нод — кнопка «Восстановить ноду»,
+       чтобы вернуть удалённое без отката всего проекта */
+    e.diff.nD.slice(0,3).forEach(function(x){
+      var nid=x&&x[0],nt=x&&x[1],can=false;
+      if(e.snap&&nid){
+        try{
+          var snp2=JSON.parse(e.snap);
+          for(var i=0;i<snp2.nodes.length;i++)if(snp2.nodes[i].id===nid){can=true;break;}
+        }catch(_){}
+      }
+      h+=logRbBtn('log-rb-node','Восстановить ноду «'+(nt||'без названия')+'»',can?'Нода будет создана заново в состоянии из этой записи, вместе со связями того времени. Отменить — Ctrl+Z.':(e.snap?'На момент этой записи этой ноды ещё не существовало.':LOG_RB_NO_SNAP),!can,nid);
+    });
+  }
+  h+='<button class="log-loc">'+ic('target',12)+' Показать на холсте</button></div>';
+  return h;
+}
 function renderLogModal(){
   var log=logFiltered();
   logViewList=log;
@@ -1811,13 +1950,13 @@ function renderLogModal(){
     var c=(e.by&&e.by.color)||'#8b929c',nm=(e.by&&e.by.name)||'—',open=i===logModalIdx;
     return '<div class="log-row'+(open?' open':'')+'" data-i="'+i+'">'+
       '<div class="log-line"><span class="log-when">'+esc(fmtWhenShort(e.t))+'</span><span class="log-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="log-who">'+esc(nm)+'</span><span class="log-act">'+esc(e.act||'')+'</span></div>'+
-      (open?'<div class="log-det">'+logDetailsHtml(e.diff)+'<button class="log-loc">'+ic('target',12)+' Показать на холсте</button></div>':'')+
+      (open?logRowDetHtml(e):'')+
     '</div>';
   }).join('');
   body.innerHTML='<div class="log-list">'+rows+'</div>';
   $all('#logModalBody .log-row').forEach(function(r){
     r.addEventListener('click',function(ev){
-      if(ev.target.closest&&ev.target.closest('.log-loc'))return;
+      if(ev.target.closest&&ev.target.closest('.log-loc,.log-rb'))return;
       var i=+r.dataset.i;
       logModalIdx=(logModalIdx===i)?-1:i;
       renderLogModal();
@@ -1827,6 +1966,20 @@ function renderLogModal(){
     bt.addEventListener('click',function(ev){
       ev.stopPropagation();
       logFocus(logViewList[+bt.parentNode.parentNode.dataset.i]);
+    });
+  });
+  $all('#logModalBody .log-rb-proj').forEach(function(bt){
+    bt.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      logRollbackProject(logViewList[+bt.parentNode.parentNode.dataset.i]);
+    });
+  });
+  $all('#logModalBody .log-rb-node').forEach(function(bt){
+    bt.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var nid=bt.dataset.nid||logFilterNode;
+      if(!nid)return;
+      logRollbackNode(logViewList[+bt.parentNode.parentNode.dataset.i],nid);
     });
   });
   var open=body.querySelector('.log-row.open');
@@ -8563,7 +8716,7 @@ $('#bHelp').onclick=function(){
       '<div>диалог: правый край</div><div>тянуть — изменить ширину блока</div>'+
       '<div>диалог: точки реплик</div><div>стрелки исходов из конкретных реплик; точка внизу правой грани — исход диалога</div>'+
       '<div>перенос / размер группы</div><div>накрываемая группа становится дочерней; выход за рамку родителя — разгруппировка</div>'+
-      '<div>кнопка «Журнал»</div><div>история действий: кто, когда и что менял; клик по записи — что именно изменилось, со старыми и новыми значениями (название, текст, реплики, статус, цвет, участники и др.), и «показать на холсте»; ↑/↓ — переключение между записями; журнал по ноде или цепочке — в контекстном меню; список последних редакторов — при наведении на «автосохранение»</div>'+
+      '<div>кнопка «Журнал»</div><div>история действий: кто, когда и что менял; клик по записи — что именно изменилось, со старыми и новыми значениями (название, текст, реплики, статус, цвет, участники и др.), «показать на холсте» и откат: «Откатить проект к этому моменту», а в журнале конкретной ноды — откат/восстановление именно этой ноды; снимки хранятся у свежих записей, сам откат отменяется Ctrl+Z; ↑/↓ — переключение между записями; журнал по ноде или цепочке — в контекстном меню; список последних редакторов — при наведении на «автосохранение»</div>'+
       '<div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></div><div>выровнять выделенные блоки по горизонтали</div>'+
       '<div><kbd>Alt</kbd> + провести по стрелкам</div><div>нож — разрезать стрелки</div>'+
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
@@ -8971,6 +9124,7 @@ function syncApplyRemote(doc,fit,keepPid){
         merged.sort(function(a,b){return (b.t||0)-(a.t||0);});
         if(merged.length>60)merged.length=60;
         if(merged.length)project.meta.actionLog=merged;
+        logTrimSnaps();
         var seenE={},mE=[];
         ((localMeta&&Array.isArray(localMeta.editLog))?localMeta.editLog:[]).concat(Array.isArray(project.meta.editLog)?project.meta.editLog:[]).forEach(function(en){
           if(!en)return;
