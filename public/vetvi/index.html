@@ -8498,26 +8498,26 @@ function textsRepliesOut(arr){
 }
 function exportTextsJson(){
   var texts=[],nodes=[],links=[],nRep=0;
-  function put(s){texts.push(s);return texts.length-1;}
-  function repsOut(arr){
+  function put(id,s){texts.push({id:id,text:s});}
+  function repsOut(nid,arr){
     var out=[];
     (Array.isArray(arr)?arr:[]).forEach(function(r){
       if(!r||typeof r!=='object')return;
-      var o={};
-      if(typeof r.text==='string'&&r.text)o.i=put(r.text);
-      if(typeof r.id==='string'&&r.id)o.id=r.id;
+      var rid=(typeof r.id==='string'&&r.id)?r.id:uid();
+      var o={id:rid};
+      if(typeof r.text==='string'&&r.text)put(nid+':'+rid,r.text);
       if(typeof r.speaker==='string'&&r.speaker)o.speaker=r.speaker;
-      var ch=repsOut(r.children);if(ch.length)o.children=ch;
+      var ch=repsOut(nid,r.children);if(ch.length)o.children=ch;
       out.push(o);nRep++;
     });
     return out;
   }
   project.nodes.forEach(function(n){
     var o={id:n.id},tx=textsNodeText(n);
-    if(tx)o.i=put(tx);
+    if(tx)put(n.id,tx);
     if(n.title)o.title=n.title;
     if(TYPES[n.type])o.type=n.type;
-    if(n.type==='dialog'){ensureDialog(n);var rp=repsOut(n.dialog.replies);if(rp.length)o.replies=rp;}
+    if(n.type==='dialog'){ensureDialog(n);var rp=repsOut(n.id,n.dialog.replies);if(rp.length)o.replies=rp;}
     if(n.type==='branch'&&Array.isArray(n.outcomes)&&n.outcomes.length){
       var oc=n.outcomes.filter(function(x){return x&&typeof x.id==='string';}).map(function(x){return{id:x.id,label:String(x.label||'')};});
       if(oc.length)o.outcomes=oc;
@@ -8531,21 +8531,10 @@ function exportTextsJson(){
     if(e.fromOut)o.fromOut=e.fromOut;
     links.push(o);
   });
-  var out={texts:texts,service:{format:'vetvi-texts-v2',app:'vetvi',project:project.meta.name||'',exported:new Date().toISOString(),
+  var out={texts:texts,service:{format:'vetvi-texts-v3',app:'vetvi',project:project.meta.name||'',exported:new Date().toISOString(),
     nodes:nodes,links:links}};
   download(JSON.stringify(out,null,2),slug(project.meta.name)+'-teksty.json','application/json;charset=utf-8');
   toast('Экспортировано: текстов '+texts.length+', нод '+nodes.length+(nRep?', реплик '+nRep:'')+' — связи в блоке service');
-}
-function textsV2Replies(texts,arr){
-  var out=[];
-  (Array.isArray(arr)?arr:[]).forEach(function(r){
-    if(!r||typeof r!=='object')return;
-    var t=(typeof r.i==='number'&&r.i>=0&&r.i<texts.length&&typeof texts[r.i]==='string')?texts[r.i]:'';
-    out.push({id:(typeof r.id==='string'&&r.id)?r.id:uid(),
-      speaker:(typeof r.speaker==='string'&&r.speaker)?r.speaker:null,
-      text:t,children:textsV2Replies(texts,r.children)});
-  });
-  return out;
 }
 function textsImpParse(str){
   var p;
@@ -8566,16 +8555,35 @@ function textsImpParse(str){
     });
     return links;
   }
-  /* Новый формат: массив «texts» + служебный блок «service» */
+  /* Форматы «texts» + «service»: v3 — texts:[{id,text}] (сопоставление по id), v2 — texts:["…"] (по индексу) */
   if(p.service&&typeof p.service==='object'&&!Array.isArray(p.service)){
-    var sv=p.service,texts=Array.isArray(p.texts)?p.texts:[],nodes=[],skip=0;
+    var sv=p.service,texts=Array.isArray(p.texts)?p.texts:[],nodes=[],skip=0,tmap={},tcount=0,hasObj=false;
+    texts.forEach(function(t){
+      if(t&&typeof t==='object'&&!Array.isArray(t)){
+        hasObj=true;
+        if(typeof t.id==='string'&&t.id&&typeof t.text==='string'&&!(t.id in tmap)){tmap[t.id]=t.text;tcount++;}
+      }
+    });
     var pick=function(i){return(typeof i==='number'&&i>=0&&i<texts.length&&typeof texts[i]==='string')?texts[i]:null;};
+    var pickId=function(id){return(id&&Object.prototype.hasOwnProperty.call(tmap,id))?tmap[id]:null;};
+    function repliesV3(nid,arr){
+      var out=[];
+      (Array.isArray(arr)?arr:[]).forEach(function(r){
+        if(!r||typeof r!=='object')return;
+        var rid=(typeof r.id==='string'&&r.id)?r.id:uid();
+        var t=pickId(nid+':'+rid);if(t===null)t=pick(r.i);
+        out.push({id:rid,speaker:(typeof r.speaker==='string'&&r.speaker)?r.speaker:null,
+          text:(t!==null)?t:'',children:repliesV3(nid,r.children)});
+      });
+      return out;
+    }
     (Array.isArray(sv.nodes)?sv.nodes:[]).forEach(function(x){
       if(!x||typeof x!=='object')return;
       if(typeof x.id!=='string'||!x.id){skip++;return;}
-      var en={id:x.id,title:(typeof x.title==='string')?x.title:null,text:pick(x.i),
+      var tx=pickId(x.id);if(tx===null)tx=pick(x.i);
+      var en={id:x.id,title:(typeof x.title==='string')?x.title:null,text:tx,
         type:(x.type&&TYPES[x.type])?x.type:null,replies:null,outcomes:null};
-      var rp=textsV2Replies(texts,x.replies);if(rp.length)en.replies=rp;
+      var rp=repliesV3(x.id,x.replies);if(rp.length)en.replies=rp;
       if(Array.isArray(x.outcomes)){
         var oc=x.outcomes.filter(function(o){return o&&typeof o==='object'&&typeof o.id==='string'&&o.id;})
           .map(function(o){return{id:o.id.slice(0,40),label:(typeof o.label==='string')?o.label:''};});
@@ -8583,7 +8591,7 @@ function textsImpParse(str){
       }
       nodes.push(en);
     });
-    return finish(nodes,parseLinks(sv.links),skip,(typeof sv.project==='string')?sv.project:'',(typeof sv.format==='string')?sv.format:'',texts.length);
+    return finish(nodes,parseLinks(sv.links),skip,(typeof sv.project==='string')?sv.project:'',(typeof sv.format==='string')?sv.format:'',hasObj?tcount:texts.length);
   }
   /* Старый формат v1 (nodes + links на верхнем уровне) — для совместимости */
   if(!Array.isArray(p.nodes))return{err:'Это не JSON текстов «Ветвей» — нужен массив «texts» и служебный блок «service»'};
@@ -8605,7 +8613,7 @@ function textsImpParse(str){
 }
 function openTextsImport(keep){
   showModal({title:'Импорт текстов из JSON',
-    text:'<p style="margin:2px 0 9px;font-size:12.5px;color:var(--tx2)">Вставьте JSON с текстами нод: массив <b style="color:var(--acc2)">texts</b> + служебный блок <b style="color:var(--acc2)">service</b> (id, привязки, связи). Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.</p>'+
+    text:'<p style="margin:2px 0 9px;font-size:12.5px;color:var(--tx2)">Вставьте JSON с текстами нод: массив <b style="color:var(--acc2)">texts</b> — пары <b style="color:var(--acc2)">{id, text}</b> (каждая строка встаёт по своему id, порядок не важен) — и служебный блок <b style="color:var(--acc2)">service</b>. Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.</p>'+
       '<textarea id="txImpTa" class="tx-imp-ta" spellcheck="false"></textarea>'+
       '<div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="txImpFile">Выбрать файл…</button><span style="font-size:11px;color:var(--tx3)">файл можно получить в меню «Сохранить» → «Тексты (JSON)»</span></div>',
     buttons:[{label:'Проверить',primary:1,fn:function(){
@@ -8614,7 +8622,7 @@ function openTextsImport(keep){
         textsImpStep2(r.data);
       }},{label:'Отмена'}]});
   var ta=$('#txImpTa');
-  if(ta){ta.placeholder='{ "texts": ["Текст ноды…", "Реплика…"], "service": { "format": "vetvi-texts-v2", "nodes": [ … ], "links": [ … ] } }';if(keep)ta.value=keep;}
+  if(ta){ta.placeholder='{ "texts": [ { "id": "…", "text": "…" } ], "service": { "format": "vetvi-texts-v3", "nodes": [ … ], "links": [ … ] } }';if(keep)ta.value=keep;}
   $('#txImpFile').onclick=function(){$('#txtFileInput').value='';$('#txtFileInput').click();};
   setTimeout(function(){if(ta&&!ta.value)ta.focus();},60);
 }
