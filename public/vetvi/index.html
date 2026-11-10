@@ -226,8 +226,8 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .groupbox.sel .gb-head,.gcard.sel .gb-head{border-color:var(--acc)}
 .gb-name{font-size:11.5px;font-weight:600;color:var(--tx);white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .gb-cnt{font:600 9px var(--mono);color:var(--tx3);background:#262a31;padding:1px 6px;border-radius:5px;flex:none}
-.gb-fold{width:16px;height:16px;flex:none;border:none;background:none;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:5px;transition:.15s}
-.gb-fold:hover{color:var(--acc);background:#2b303a;transform:scale(1.15)}
+.gb-fold,.gb-salla{width:16px;height:16px;flex:none;border:none;background:none;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:5px;transition:.15s}
+.gb-fold:hover,.gb-salla:hover{color:var(--acc);background:#2b303a;transform:scale(1.15)}
 .gb-grip{position:absolute;width:14px;height:14px;border-radius:3px;background:#2b303a;border:1px solid #454b57;opacity:0;transition:.15s;z-index:5}
 .groupbox:hover .gb-grip,.groupbox.sel .gb-grip{opacity:1}
 .gb-grip:hover{background:var(--acc);border-color:#a97a2e}
@@ -2222,7 +2222,7 @@ function revealNode(n){
     g=g.parent?groupById(g.parent):null;
   }
   if(chain.length){
-    discrete(function(){chain.forEach(function(cg){cg.fold=2;});});
+    discrete(function(){chain.forEach(function(cg){expandGroupFromCard(cg);cg.fold=2;});});
     renderAll();
   }
 }
@@ -2651,7 +2651,7 @@ function renderGroups(){
     }else if(g.fold===2){
       el.className='groupbox';
       el.dataset.gid=g.id;
-      el.innerHTML='<div class="gb-head"><span class="gb-name">'+esc(g.name)+'</span><span class="gb-cnt">'+ms.length+'</span><button class="gb-fold" title="Свернуть группу">'+ic('chevUp',11)+'</button></div>'+
+      el.innerHTML='<div class="gb-head"><span class="gb-name">'+esc(g.name)+'</span><span class="gb-cnt">'+ms.length+'</span><button class="gb-salla" title="Выделить все ноды группы">'+ic('target',11)+'</button><button class="gb-fold" title="Свернуть группу">'+ic('chevUp',11)+'</button></div>'+
         '<i class="gb-grip gr-r" data-gr="r" title="Изменить ширину"></i>'+
         '<i class="gb-grip gr-b" data-gr="b" title="Изменить высоту"></i>'+
         '<i class="gb-grip gr-br" data-gr="br" title="Изменить размер"></i>';
@@ -2683,6 +2683,7 @@ function renderGroups(){
       el.innerHTML='<div class="gb-head">'+
         '<span class="gb-name">'+esc(g.name)+'</span>'+
         '<span class="gb-cnt">'+ms.length+'</span>'+
+        '<button class="gb-salla" title="Выделить все ноды группы">'+ic('target',11)+'</button>'+
         '<button class="gb-fold" title="'+btnTitle+'">'+btnIco+'</button>'+
       '</div>'+(g.fold===1?'<div class="gb-list">'+rows+'</div>':'');
       if(!ms.length||groupInsideCollapsed(g))el.style.display='none';
@@ -3821,6 +3822,7 @@ function renderInspGroup(){
     '<label class="i-lab">Состав ('+ms.length+')</label>'+
     '<div class="gm-list">'+list+'</div>'+
     '<div class="i-actions">'+
+      '<button class="btn" id="igSelAll">'+ic('target')+'Выделить все ноды</button>'+
       (canQ?'<button class="btn" id="igToQ">'+ic('queue')+'Преобразовать в цепочку</button>':'')+
       '<button class="btn danger" id="igUng">'+ic('x')+'Распустить</button>'+
     '</div>'+
@@ -3844,6 +3846,7 @@ function renderInspGroup(){
       var wasOpen=g.fold===2;
       g.fold=nf;
       if(g.fold<2&&wasOpen)prepareGroupCard(g);
+      if(g.fold===2&&!wasOpen)expandGroupFromCard(g);
       renderAll();markDirty();
     };
   });
@@ -3878,6 +3881,7 @@ function renderInspGroup(){
     toggleAuto(g);
   };
   $('#igUng').onclick=function(){ungroup(g.id);};
+  var bSA=$('#igSelAll');if(bSA)bSA.onclick=function(){selectGroupNodes(g.id);};
   var bToQ=$('#igToQ');if(bToQ)bToQ.onclick=function(){groupToStack(g.id);};
 }
 /* ═══ диалог: модалка реплик ═══ */
@@ -5542,6 +5546,30 @@ function centerOnGroup(g){
   animateView(canvas.clientWidth/2-cx*vp.z,canvas.clientHeight/2-cy*vp.z,vp.z);
 }
 /* ═══ группы ═══ */
+/* развёртывание группы: содержимое раскладывается из левой верхней точки карточки
+   (а не возвращается на старые места): ноды, их точки связей и вложенные группы
+   сдвигаются так, чтобы левый верхний угол их области совпал с точкой карточки */
+function expandGroupFromCard(g){
+  var ms=allDescNodes(g.id);
+  if(!ms.length)return;
+  var x0=1e9,y0=1e9;
+  ms.forEach(function(n){x0=Math.min(x0,n.x);y0=Math.min(y0,n.y);});
+  var dx=Math.round((g.x||0)-x0),dy=Math.round((g.y||0)-y0);
+  /* ручная рамка следует за содержимым: после развёртывания якорим её к точке карточки
+     стандартными отступами (как у авторазмера в frameRectOf: 14 и 14+26), размер сохраняется */
+  if(!g.auto&&g.fx!=null){g.fx=Math.round((g.x||0)-14);g.fy=Math.round((g.y||0)-40);}
+  if(!dx&&!dy)return;
+  var inset=new Set(ms.map(function(n){return n.id;}));
+  ms.forEach(function(n){n.x+=dx;n.y+=dy;});
+  project.edges.forEach(function(e){
+    if(e.pts&&e.pts.length&&inset.has(e.from)&&inset.has(e.to))e.pts.forEach(function(p){p.x+=dx;p.y+=dy;});
+  });
+  descGroupIds(g.id).forEach(function(cgid){
+    var cg=groupById(cgid);if(!cg)return;
+    if(cg.fold<2){cg.x=(cg.x||0)+dx;cg.y=(cg.y||0)+dy;}
+    else if(cg.fx!=null){cg.fx=(cg.fx||0)+dx;cg.fy=(cg.fy||0)+dy;}
+  });
+}
 function createGroupFromSel(name){
   var nodeIds=[];sel.forEach(function(id){if(nodeById(id))nodeIds.push(id);});
   var groupIds=[];selGroups.forEach(function(gid){if(groupById(gid))groupIds.push(gid);});
@@ -5704,6 +5732,8 @@ function groupToStack(gid){
   g.fold=1;
   g.order=ids.slice();
   g.bbox=null;g.hh=null;
+  /* карточка цепочки — в левый верхний угол области группы (не на старую точку) */
+  g.x=Math.round(x0);g.y=Math.round(y0);
   ids.forEach(function(id,i){
     var n=nodeById(id);if(!n)return;
     if(i>0)stackDetachEdges(id);
@@ -5724,17 +5754,19 @@ function groupToStack(gid){
   toast('Группа «'+g.name+'» преобразована в цепочку ('+ids.length+'): порядок — по раскладке, у нод кроме первой старые связи убраны');
 }
 function prepareGroupCard(g){
-  var ms=allDescNodes(g.id),cx=0,cy=0,y0=1e9,y1=-1e9,hh={};
+  var ms=allDescNodes(g.id),cx=0,cy=0,x0=1e9,y0=1e9,y1=-1e9,hh={};
   ms.forEach(function(n){
     var el=nodeEls.get(n.id),h=(el&&el.style.display!=='none')?el.offsetHeight:90;
     hh[n.id]=h;
-    y0=Math.min(y0,n.y);y1=Math.max(y1,n.y+h);
+    x0=Math.min(x0,n.x);y0=Math.min(y0,n.y);y1=Math.max(y1,n.y+h);
     cx+=n.x+(el?el.offsetWidth:NODE_W)/2;cy+=n.y+h/2;
   });
   if(ms.length){cx/=ms.length;cy/=ms.length;}
   else{cx=0;cy=0;y0=0;y1=90;}
   g.hh=hh;g.bbox=[y0,y1];
-  g.x=Math.round(cx-GCARD_W/2);g.y=Math.round(cy-40);
+  /* карточка ставится в левый верхний угол области, которую занимали ноды (не в центр) */
+  if(ms.length){g.x=Math.round(x0);g.y=Math.round(y0);}
+  else{g.x=Math.round(cx-GCARD_W/2);g.y=Math.round(cy-40);}
 }
 function cycleGroupFold(gid){
   var g=groupById(gid);if(!g)return;
@@ -5743,9 +5775,31 @@ function cycleGroupFold(gid){
   var wasOpen=g.fold===2;
   g.fold=g.fold===2?1:(g.fold===1?0:2);
   if(wasOpen&&g.fold<2)prepareGroupCard(g);
+  if(!wasOpen&&g.fold===2)expandGroupFromCard(g);
   renderAll();markDirty();
   var cel=groupEls.get(gid);
   if(cel&&g.fold<2){cel.classList.add('spawn');setTimeout(function(){cel.classList.remove('spawn');},550);}
+}
+/* быстрое выделение всех нод группы; свёрнутая группа при этом разворачивается
+   из точки карточки, чтобы все блоки стали видны и их можно было тянуть */
+function selectGroupNodes(gid){
+  var g=groupById(gid);if(!g||g.stack)return;
+  var raw=allDescNodes(gid);
+  if(!raw.length){toast('В группе нет нод','warn');return;}
+  var opened=false;
+  if(g.fold<2){
+    pushHistory(serialize(),'Развёртывание группы');
+    expandGroupFromCard(g);
+    g.fold=2;
+    opened=true;
+    renderAll();markDirty();
+  }
+  /* выбираем видимые ноды (у вложенных свёрнутых подгрупп ноды остаются скрытыми) */
+  var ids=raw.filter(function(n){return !collapsedAncestorOf(n);}).map(function(n){return n.id;});
+  if(!ids.length){toast('В группе нет видимых нод','warn');return;}
+  sel=new Set(ids);selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;
+  syncSel();renderInspector();
+  toast('Выделено нод: '+ids.length+(opened?' — группа развёрнута':''));
 }
 function leaveGroup(nodeId){
   var n=nodeById(nodeId);if(!n||!n.gid)return;
@@ -6647,7 +6701,7 @@ canvas.addEventListener('pointerdown',function(e){
   var target=e.target;
   if(target.closest&&target.closest('.n-title-inp'))return;
   var modK=e.ctrlKey||e.metaKey;
-  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.qport')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.n-seq')||target.closest('.n-fold')))){
+  if(e.button===0&&modK&&!e.altKey&&!spaceDown&&!(target.closest&&(target.closest('.port')||target.closest('.qport')||target.closest('.dlg-reply-pin')||target.closest('.gb-grip')||target.closest('.gb-fold')||target.closest('.gb-salla')||target.closest('.n-seq')||target.closest('.n-fold')))){
     if(e.shiftKey){
       /* Ctrl+Shift+ЛКМ — нарисовать новую группу */
       gcreateS={sx:e.clientX,sy:e.clientY};
@@ -6762,6 +6816,12 @@ return;
     if(gfold){
       var cont=gfold.closest('.gcard,.groupbox');
       if(cont)cycleGroupFold(cont.dataset.gid);
+      e.stopPropagation();return;
+    }
+    var gsalla=target.closest?target.closest('.gb-salla'):null;
+    if(gsalla){
+      var contSA=gsalla.closest('.gcard,.groupbox');
+      if(contSA)selectGroupNodes(contSA.dataset.gid);
       e.stopPropagation();return;
     }
   }
@@ -8028,6 +8088,7 @@ canvas.addEventListener('contextmenu',function(e){
     var nextName=g.fold===2?'Свернуть в список':(g.fold===1?'Сжать в компакта':'Развернуть группу');
     var itemsG=[
       {ico:'chev',label:nextName,fn:function(){cycleGroupFold(gid);}},
+      {ico:'target',label:'Выделить все ноды группы',fn:function(){selectGroupNodes(gid);}},
       {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}},
       {ico:'clock',label:'Журнал изменений',fn:function(){openGroupLog(gid);}},
       {ico:g.badge?'eyeOff':'eye',label:g.badge?'Скрыть ярлык':'Показать ярлык',fn:function(){discrete(function(){g.badge=!g.badge;});updateGroupBadges();renderInspector();}},
