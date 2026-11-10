@@ -864,7 +864,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="sm-i" data-a="json"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Сохранить (JSON)<kbd>Ctrl+S</kbd></div>
       <div class="sm-i" data-a="jsonas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M8 3v5h7V3"/></svg>Сохранить как… (JSON)<kbd>Ctrl+Shift+S</kbd></div>
       <div class="sm-i" data-a="txt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/></svg>Текстовый файл (.txt)</div>
-      <div class="sm-i" data-a="txjson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h6M9 16h6M9 9h2"/></svg>Тексты и связи (JSON)</div>
+      <div class="sm-i" data-a="txjson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h6M9 16h6M9 9h2"/></svg>Тексты (JSON)</div>
       <div class="sm-i" data-a="tximp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10.5"/><path d="m7.5 9.5 4.5 4.5 4.5-4.5"/><path d="M4.5 20.5h15"/></svg>Импорт текстов (JSON)…</div>
     </div>
   </div>
@@ -8497,11 +8497,27 @@ function textsRepliesOut(arr){
   return out;
 }
 function exportTextsJson(){
-  var nodes=[],links=[],nRep=0;
+  var texts=[],nodes=[],links=[],nRep=0;
+  function put(s){texts.push(s);return texts.length-1;}
+  function repsOut(arr){
+    var out=[];
+    (Array.isArray(arr)?arr:[]).forEach(function(r){
+      if(!r||typeof r!=='object')return;
+      var o={};
+      if(typeof r.text==='string'&&r.text)o.i=put(r.text);
+      if(typeof r.id==='string'&&r.id)o.id=r.id;
+      if(typeof r.speaker==='string'&&r.speaker)o.speaker=r.speaker;
+      var ch=repsOut(r.children);if(ch.length)o.children=ch;
+      out.push(o);nRep++;
+    });
+    return out;
+  }
   project.nodes.forEach(function(n){
-    var o={id:n.id,title:n.title||'',text:textsNodeText(n)};
+    var o={id:n.id},tx=textsNodeText(n);
+    if(tx)o.i=put(tx);
+    if(n.title)o.title=n.title;
     if(TYPES[n.type])o.type=n.type;
-    if(n.type==='dialog'){ensureDialog(n);var rp=textsRepliesOut(n.dialog.replies);if(rp.length){o.replies=rp;nRep+=rp.length;}}
+    if(n.type==='dialog'){ensureDialog(n);var rp=repsOut(n.dialog.replies);if(rp.length)o.replies=rp;}
     if(n.type==='branch'&&Array.isArray(n.outcomes)&&n.outcomes.length){
       var oc=n.outcomes.filter(function(x){return x&&typeof x.id==='string';}).map(function(x){return{id:x.id,label:String(x.label||'')};});
       if(oc.length)o.outcomes=oc;
@@ -8515,15 +8531,62 @@ function exportTextsJson(){
     if(e.fromOut)o.fromOut=e.fromOut;
     links.push(o);
   });
-  var out={format:'vetvi-texts-v1',app:'vetvi',project:project.meta.name||'',exported:new Date().toISOString(),
-    counts:{nodes:nodes.length,links:links.length,replies:nRep},nodes:nodes,links:links};
+  var out={texts:texts,service:{format:'vetvi-texts-v2',app:'vetvi',project:project.meta.name||'',exported:new Date().toISOString(),
+    nodes:nodes,links:links}};
   download(JSON.stringify(out,null,2),slug(project.meta.name)+'-teksty.json','application/json;charset=utf-8');
-  toast('Экспортировано: нод '+nodes.length+', связей '+links.length+(nRep?', реплик '+nRep:''));
+  toast('Экспортировано: текстов '+texts.length+', нод '+nodes.length+(nRep?', реплик '+nRep:'')+' — связи в блоке service');
+}
+function textsV2Replies(texts,arr){
+  var out=[];
+  (Array.isArray(arr)?arr:[]).forEach(function(r){
+    if(!r||typeof r!=='object')return;
+    var t=(typeof r.i==='number'&&r.i>=0&&r.i<texts.length&&typeof texts[r.i]==='string')?texts[r.i]:'';
+    out.push({id:(typeof r.id==='string'&&r.id)?r.id:uid(),
+      speaker:(typeof r.speaker==='string'&&r.speaker)?r.speaker:null,
+      text:t,children:textsV2Replies(texts,r.children)});
+  });
+  return out;
 }
 function textsImpParse(str){
   var p;
   try{p=JSON.parse(str);}catch(_){return{err:'Не удалось разобрать JSON — проверьте синтаксис'};}
-  if(!p||typeof p!=='object'||Array.isArray(p)||!Array.isArray(p.nodes))return{err:'В файле нет массива «nodes» — это не JSON текстов «Ветвей»'};
+  if(!p||typeof p!=='object'||Array.isArray(p))return{err:'Не удалось разобрать JSON — это не объект'};
+  function finish(nodes,links,skip,srcName,fmt,tx){
+    if(!nodes.length)return{err:'В файле нет ни одной ноды с id'+(skip?' — записей без id пропущено: '+skip:'')};
+    return{data:{nodes:nodes,links:links,skip:skip,tx:tx,srcName:srcName,fmt:fmt}};
+  }
+  function parseLinks(src){
+    var links=[];
+    (Array.isArray(src)?src:[]).forEach(function(l){
+      if(!l||typeof l!=='object')return;
+      if(typeof l.from!=='string'||!l.from||typeof l.to!=='string'||!l.to)return;
+      links.push({from:l.from,to:l.to,label:(typeof l.label==='string')?l.label:null,
+        fromReply:(typeof l.fromReply==='string'&&l.fromReply)?l.fromReply:null,
+        fromOut:(typeof l.fromOut==='string'&&l.fromOut)?l.fromOut:null});
+    });
+    return links;
+  }
+  /* Новый формат: массив «texts» + служебный блок «service» */
+  if(p.service&&typeof p.service==='object'&&!Array.isArray(p.service)){
+    var sv=p.service,texts=Array.isArray(p.texts)?p.texts:[],nodes=[],skip=0;
+    var pick=function(i){return(typeof i==='number'&&i>=0&&i<texts.length&&typeof texts[i]==='string')?texts[i]:null;};
+    (Array.isArray(sv.nodes)?sv.nodes:[]).forEach(function(x){
+      if(!x||typeof x!=='object')return;
+      if(typeof x.id!=='string'||!x.id){skip++;return;}
+      var en={id:x.id,title:(typeof x.title==='string')?x.title:null,text:pick(x.i),
+        type:(x.type&&TYPES[x.type])?x.type:null,replies:null,outcomes:null};
+      var rp=textsV2Replies(texts,x.replies);if(rp.length)en.replies=rp;
+      if(Array.isArray(x.outcomes)){
+        var oc=x.outcomes.filter(function(o){return o&&typeof o==='object'&&typeof o.id==='string'&&o.id;})
+          .map(function(o){return{id:o.id.slice(0,40),label:(typeof o.label==='string')?o.label:''};});
+        if(oc.length)en.outcomes=oc;
+      }
+      nodes.push(en);
+    });
+    return finish(nodes,parseLinks(sv.links),skip,(typeof sv.project==='string')?sv.project:'',(typeof sv.format==='string')?sv.format:'',texts.length);
+  }
+  /* Старый формат v1 (nodes + links на верхнем уровне) — для совместимости */
+  if(!Array.isArray(p.nodes))return{err:'Это не JSON текстов «Ветвей» — нужен массив «texts» и служебный блок «service»'};
   var nodes=[],skip=0;
   p.nodes.forEach(function(x){
     if(!x||typeof x!=='object')return;
@@ -8538,30 +8601,20 @@ function textsImpParse(str){
     }
     nodes.push(en);
   });
-  var links=[];
-  if(Array.isArray(p.links))p.links.forEach(function(l){
-    if(!l||typeof l!=='object')return;
-    if(typeof l.from!=='string'||!l.from||typeof l.to!=='string'||!l.to)return;
-    links.push({from:l.from,to:l.to,label:(typeof l.label==='string')?l.label:null,
-      fromReply:(typeof l.fromReply==='string'&&l.fromReply)?l.fromReply:null,
-      fromOut:(typeof l.fromOut==='string'&&l.fromOut)?l.fromOut:null});
-  });
-  if(!nodes.length)return{err:'В файле нет ни одной ноды с id'+(skip?' — записей без id пропущено: '+skip:'')};
-  return{data:{nodes:nodes,links:links,skip:skip,
-    srcName:(typeof p.project==='string')?p.project:'',fmt:(typeof p.format==='string')?p.format:''}};
+  return finish(nodes,parseLinks(p.links),skip,(typeof p.project==='string')?p.project:'',(typeof p.format==='string')?p.format:'',null);
 }
 function openTextsImport(keep){
   showModal({title:'Импорт текстов из JSON',
-    text:'<p style="margin:2px 0 9px;font-size:12.5px;color:var(--tx2)">Вставьте JSON с текстами нод и связями (формат <b style="color:var(--acc2)">vetvi-texts</b>) или выберите файл. Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.</p>'+
+    text:'<p style="margin:2px 0 9px;font-size:12.5px;color:var(--tx2)">Вставьте JSON с текстами нод: массив <b style="color:var(--acc2)">texts</b> + служебный блок <b style="color:var(--acc2)">service</b> (id, привязки, связи). Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.</p>'+
       '<textarea id="txImpTa" class="tx-imp-ta" spellcheck="false"></textarea>'+
-      '<div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="txImpFile">Выбрать файл…</button><span style="font-size:11px;color:var(--tx3)">файл можно получить в меню «Сохранить» → «Тексты и связи (JSON)»</span></div>',
+      '<div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="txImpFile">Выбрать файл…</button><span style="font-size:11px;color:var(--tx3)">файл можно получить в меню «Сохранить» → «Тексты (JSON)»</span></div>',
     buttons:[{label:'Проверить',primary:1,fn:function(){
         var ta=$('#txImpTa');var r=textsImpParse(ta?ta.value:'');
         if(r.err){toast(r.err,'err');openTextsImport(ta?ta.value:'');return;}
         textsImpStep2(r.data);
       }},{label:'Отмена'}]});
   var ta=$('#txImpTa');
-  if(ta){ta.placeholder='{ "format": "vetvi-texts-v1", "nodes": [ { "id": "…", "title": "…", "text": "…" } ], "links": [ { "from": "…", "to": "…" } ] }';if(keep)ta.value=keep;}
+  if(ta){ta.placeholder='{ "texts": ["Текст ноды…", "Реплика…"], "service": { "format": "vetvi-texts-v2", "nodes": [ … ], "links": [ … ] } }';if(keep)ta.value=keep;}
   $('#txImpFile').onclick=function(){$('#txtFileInput').value='';$('#txtFileInput').click();};
   setTimeout(function(){if(ta&&!ta.value)ta.focus();},60);
 }
@@ -8588,7 +8641,7 @@ function textsImpStep2(d,fname){
     rows+='<div class="tx-imp-row new"><span class="mk">＋</span><span class="tt">'+esc(en.title||'(без названия)')+'</span><span class="sub">'+esc(en.id)+'</span></div>';});
   if(d.nodes.length-shown>0)rows+='<div class="tx-imp-row"><span class="sub">и ещё '+(d.nodes.length-shown)+'…</span></div>';
   var sum='<div class="tx-imp-sum">'+(d.fmt?'<b>'+esc(d.fmt)+'</b> · ':'')+(d.srcName?'«'+esc(d.srcName)+'» · ':'')+(fname?esc(fname)+' · ':'')+
-    'в файле: нод — <b>'+d.nodes.length+'</b>, связей — <b>'+d.links.length+'</b>'+(d.skip?', без id пропущено — '+d.skip:'')+
+    'в файле: текстов — <b>'+(typeof d.tx==='number'?d.tx:'—')+'</b>, нод — <b>'+d.nodes.length+'</b>, связей — <b>'+d.links.length+'</b>'+(d.skip?', без id пропущено — '+d.skip:'')+
     '<br>в проекте совпадают по id: <b>'+matched.length+'</b>, новых: <b>'+fresh.length+'</b></div>';
   var chk='<div class="tx-imp-chk">'+
     '<label><input type="checkbox" id="txChkUpd"'+(matched.length?' checked':' disabled')+'><span>Обновить тексты и заголовки совпавших нод<span class="hint">совпадений по id: '+matched.length+'</span></span></label>'+
