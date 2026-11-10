@@ -1099,6 +1099,7 @@ var ICONS={
   eye:'<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
   eyeOff:'<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>',
   alignH:'<path d="M2 12h20"/><rect x="4" y="8" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="8" rx="1"/><rect x="16" y="8" width="4" height="8" rx="1"/>',
+  alignV:'<path d="M12 2v20"/><rect x="8" y="4" width="8" height="4" rx="1"/><rect x="8" y="10" width="8" height="4" rx="1"/><rect x="8" y="16" width="8" height="4" rx="1"/>',
   grip:'<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>',
   corner:'<path d="M5 5v4.6a3.9 3.9 0 0 0 3.9 3.9H19"/><path d="m15.5 9.5 3.5 3.5-3.5 3.5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>'
@@ -4399,13 +4400,15 @@ function renderInspMulti(){
     (sel.size>=2&&selAllDialogs()?'<button class="btn primary" id="mgMerge" style="width:100%;margin-top:8px">'+ic('dialog',14)+'Объединить в один диалог</button>':'')+
     (sel.size>=2&&selAllStackable()?'<button class="btn" id="mgQueue" style="width:100%;margin-top:8px">'+ic('queue',14)+'Собрать в цепочку (по порядку выделения)</button>':'')+
     '<div class="i-actions">'+
-      '<button class="btn" id="gAlign" title="Ctrl+Shift+A">'+ic('alignH')+'Выровнять</button>'+
+      '<button class="btn" id="gAlign" title="Ctrl+Shift+A">'+ic('alignH')+'В ряд</button>'+
+      '<button class="btn" id="gAlignV" title="Ctrl+Shift+V">'+ic('alignV')+'В столбец</button>'+
       '<button class="btn" id="gDup">'+ic('copy')+'Дубль</button>'+
       '<button class="btn danger" id="gDel">'+ic('trash')+'Удалить</button>'+
     '</div>';
   $('#gDup').onclick=function(){var r=duplicateSel();if(r)startCarry(r.ids,r.pre);};
   $('#gDel').onclick=removeSelected;
   $('#gAlign').onclick=alignSelH;
+  $('#gAlignV').onclick=alignSelV;
   $('#mgGo').onclick=function(){createGroupFromSel(($('#mgName').value||'').trim());};
   var mgM=$('#mgMerge');if(mgM)mgM.onclick=mergeDialogNodes;
   var mgQ=$('#mgQueue');if(mgQ)mgQ.onclick=stackFromSelection;
@@ -5330,33 +5333,57 @@ function detachNode(id){
   renderAll();
   toast('Узел выдернут, цепочка сохранена');
 }
-function alignSelH(){
+function alignSelH(){alignSelAxis(false);}
+function alignSelV(){alignSelAxis(true);}
+function alignSelAxis(vert){
   var ids=[];
   sel.forEach(function(id){
     var n=nodeById(id);
     if(n&&!collapsedAncestorOf(n))ids.push(id);
   });
   if(ids.length<2){toast('Выделите минимум два узла','warn');return;}
-  pushHistory(serialize(),'Выравнивание нод');
-  var sum=0;
+  pushHistory(serialize(),vert?'Выравнивание нод по вертикали':'Выравнивание нод по горизонтали');
+  function dims(id){
+    var n=nodeById(id),el=nodeEls.get(id);
+    return{w:(el&&el.style.display!=='none'&&el.offsetWidth>0)?el.offsetWidth:dlgNodeWidth(n),
+      h:(el&&el.style.display!=='none'&&el.offsetHeight>0)?el.offsetHeight:90};
+  }
+  var GAP=70;
+  var bnx=1e9,bny=1e9,bxx=-1e9,bxy=-1e9,scx=0,scy=0;
   ids.forEach(function(id){
-    var n=nodeById(id);
-    var el=nodeEls.get(id);
-    var h=(el&&el.style.display!=='none')?el.offsetHeight:90;
-    sum+=n.y+h/2;
+    var n=nodeById(id),d=dims(id);
+    bnx=Math.min(bnx,n.x);bny=Math.min(bny,n.y);
+    bxx=Math.max(bxx,n.x+d.w);bxy=Math.max(bxy,n.y+d.h);
+    scx+=n.x+d.w/2;scy+=n.y+d.h/2;
   });
-  var avg=sum/ids.length;
-  ids.forEach(function(id){
-    var n=nodeById(id);
-    var el=nodeEls.get(id);
-    var h=(el&&el.style.display!=='none')?el.offsetHeight:90;
-    n.y=Math.round(avg-h/2);
-    if(el)el.style.top=n.y+'px';
+  var ccx=scx/ids.length,ccy=scy/ids.length;
+  var vertSpread=(bxy-bny)>=(bxx-bnx);/* стояли вертикально → порядок сверху вниз (и наоборот) */
+  var order=ids.slice().sort(function(p,q){
+    var a=nodeById(p),b=nodeById(q),da=dims(p),db=dims(q),d;
+    if(vertSpread){
+      d=(a.y+da.h/2)-(b.y+db.h/2);
+      if(d)return d;
+      return (a.x+da.w/2)-(b.x+db.w/2);
+    }
+    d=(a.x+da.w/2)-(b.x+db.w/2);
+    if(d)return d;
+    return (a.y+da.h/2)-(b.y+db.h/2);
   });
-  ids.forEach(function(id){updateEdgesFor(id);});
+  var total=0;
+  order.forEach(function(id){total+=dims(id)[vert?'h':'w'];});
+  total+=GAP*(order.length-1);
+  var cursor=vert?((bny+bxy)/2-total/2):((bnx+bxx)/2-total/2);
+  order.forEach(function(id){
+    var n=nodeById(id),d=dims(id),el=nodeEls.get(id);
+    if(vert){n.x=Math.round(ccx-d.w/2);n.y=Math.round(cursor);cursor+=d.h+GAP;}
+    else{n.x=Math.round(cursor);n.y=Math.round(ccy-d.h/2);cursor+=d.w+GAP;}
+    if(snapOn){n.x=Math.round(n.x/GRID)*GRID;n.y=Math.round(n.y/GRID)*GRID;}
+    if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';}
+    updateEdgesFor(id);
+  });
   refreshGroupFrames();
   markDirty();
-  toast('Выровнено по горизонтали');
+  toast(vert?'Выровнено по вертикали — столбец с отступами':'Выровнено по горизонтали — ряд с отступами');
 }
 /* ═══ распределение выделения в строки с мостами ═══ */
 function layoutRows(ids,k){
@@ -6138,11 +6165,8 @@ function splitDialogNode(id){
   var gS=stackGroupOf(n);
   var kS=gS?stackOrderIds(gS).indexOf(n.id):-1;
   pushHistory(serialize(),'Разбивка диалога на реплики');
-  var elS=nodeEls.get(n.id);
-  var hS=(elS&&elS.style.display!=='none')?elS.offsetHeight:150;
-  var wS=(elS&&elS.style.display!=='none')?elS.offsetWidth:dlgNodeWidth(n);
-  var baseX=Math.max(20,Math.round(n.x-(wS+64))),baseY=n.y;
-  if(gS){var pk0=stackParkPos(gS,Math.max(0,kS));baseX=pk0.x;baseY=pk0.y;}
+  /* созданные ноды якорятся в левый верхний угол исходной ноды (как разворот группы) */
+  var baseX=Math.round(n.x),baseY=Math.round(n.y);
   var created=[];
   reps.forEach(function(r,i){
     var t=(i===0)?(n.title||'Диалог'):((r.text||('Реплика '+(i+1))).slice(0,42));
@@ -6177,6 +6201,22 @@ function splitDialogNode(id){
   }
   sel=new Set([created[0].id]);selEdges.clear();selEdge=null;selGroups.clear();selGroup=null;
   renderAll({nodes:created.map(function(c){return c.id;})});
+  /* плотная колонка реальными высотами от точки исходной ноды */
+  (function(){
+    var rx=baseX,ry=baseY;
+    if(snapOn){rx=Math.round(rx/GRID)*GRID;ry=Math.round(ry/GRID)*GRID;}
+    created.forEach(function(c){
+      var el=nodeEls.get(c.id);
+      var h=(el&&el.style.display!=='none'&&el.offsetHeight>0)?el.offsetHeight:150;
+      c.x=rx;c.y=Math.round(ry);ry+=h+56;
+    });
+    created.forEach(function(c){
+      var el=nodeEls.get(c.id);
+      if(el){el.style.left=c.x+'px';el.style.top=c.y+'px';}
+      updateEdgesFor(c.id);
+    });
+    refreshGroupFrames();
+  })();
   if(!gS)resolveOverlaps(new Set(created.map(function(c){return c.id;})));
   markDirty();
   toast('Диалог разбит на '+created.length+' нод — стрелки реплик сохранены'+(gS?' (внутри цепочки)':''));
@@ -8044,6 +8084,8 @@ canvas.addEventListener('contextmenu',function(e){
     if(sel.size>=2&&selAllDialogs())items.push({ico:'dialog',label:'Объединить в один диалог',fn:mergeDialogNodes});
     if(sel.size>=2&&selAllStackable())items.push({ico:'queue',label:'Собрать в цепочку',fn:stackFromSelection});
     if(sel.size+selGroups.size>1){
+      items.push({ico:'alignH',label:'Выровнять в ряд (Ctrl+Shift+A)',fn:function(){alignSelH();}});
+      items.push({ico:'alignV',label:'Выровнять в столбец (Ctrl+Shift+V)',fn:function(){alignSelV();}});
       items.push({ico:'alignH',label:'Распределить по строкам…',fn:function(){openDistributeModal();}});
       items.push({ico:'expand',label:'Растянуть в строку по связям',fn:function(){stretchSelected();}});
     }
@@ -8164,6 +8206,7 @@ window.addEventListener('keydown',function(e){
   if(mod&&e.altKey&&code==='KeyN'){e.preventDefault();projCreate();return;}
   if(mod&&code==='KeyD'){e.preventDefault();var r=duplicateSel();if(r)startCarry(r.ids,r.pre);return;}
   if(mod&&e.shiftKey&&code==='KeyA'){e.preventDefault();alignSelH();return;}
+  if(mod&&e.shiftKey&&code==='KeyV'){e.preventDefault();alignSelV();return;}
   if(mod&&!e.shiftKey&&code==='KeyG'){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+Shift+ЛКМ)','warn');return;}
   if(mod&&e.shiftKey&&code==='KeyG'){
     e.preventDefault();
