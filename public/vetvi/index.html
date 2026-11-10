@@ -164,6 +164,23 @@ body.panning #canvas,body.panning .groupbox,body.panning .gcard,body.panning .qc
 .pj-ib.danger:hover{color:#e08a7a;background:rgba(207,107,90,.12)}
 .pj-empty{font-size:12px;color:var(--tx3);text-align:center;padding:18px 10px}
 .pj-foot{display:flex;gap:8px;margin-top:10px}
+/* импорт/экспорт текстов JSON */
+.tx-imp-ta{width:100%;min-height:150px;max-height:260px;resize:vertical;background:#111318;border:1px solid #262a31;border-radius:10px;color:var(--tx);font:12px/1.55 var(--mono);padding:10px;outline:none;transition:border-color .15s}
+.tx-imp-ta:focus{border-color:#3a404b}
+.tx-imp-sum{font:500 12px/1.55 var(--body);color:var(--tx2);background:#191c21;border:1px solid #262a31;border-radius:10px;padding:9px 11px;margin:10px 0 0}
+.tx-imp-sum b{color:var(--tx)}
+.tx-imp-list{max-height:200px;overflow-y:auto;margin:10px 0 0;display:flex;flex-direction:column;gap:4px}
+.tx-imp-row{display:flex;align-items:baseline;gap:8px;padding:6px 9px;border:1px solid #262a31;border-radius:8px;background:#191c21;font:500 12px var(--body);color:var(--tx)}
+.tx-imp-row .mk{flex:none;font:700 11px var(--mono)}
+.tx-imp-row.up .mk{color:#8fbf7f}
+.tx-imp-row.new .mk{color:var(--acc)}
+.tx-imp-row .tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.tx-imp-row .sub{color:var(--tx3);font:11px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-left:auto;flex:0 1 40%}
+.tx-imp-chk{display:flex;flex-direction:column;gap:8px;margin:12px 0 2px}
+.tx-imp-chk label{display:flex;align-items:flex-start;gap:9px;font:500 12.5px var(--body);color:var(--tx);cursor:pointer}
+.tx-imp-chk label:hover{color:var(--acc2)}
+.tx-imp-chk input{margin-top:2px;accent-color:var(--acc);flex:none;width:15px;height:15px}
+.tx-imp-chk .hint{display:block;color:var(--tx3);font-size:11px;margin-top:1px}
 body.knife #canvas{cursor:crosshair}
 body.carry #canvas{cursor:copy}
 #canvas::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(900px 560px at 55% 38%,rgba(226,165,78,.045),transparent 65%),radial-gradient(140% 120% at 50% 120%,rgba(0,0,0,.5),transparent 55%)}
@@ -847,6 +864,8 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="sm-i" data-a="json"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Сохранить (JSON)<kbd>Ctrl+S</kbd></div>
       <div class="sm-i" data-a="jsonas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M8 3v5h7V3"/></svg>Сохранить как… (JSON)<kbd>Ctrl+Shift+S</kbd></div>
       <div class="sm-i" data-a="txt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/></svg>Текстовый файл (.txt)</div>
+      <div class="sm-i" data-a="txjson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h6M9 16h6M9 9h2"/></svg>Тексты и связи (JSON)</div>
+      <div class="sm-i" data-a="tximp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10.5"/><path d="m7.5 9.5 4.5 4.5 4.5-4.5"/><path d="M4.5 20.5h15"/></svg>Импорт текстов (JSON)…</div>
     </div>
   </div>
   <div class="vsep"></div>
@@ -998,6 +1017,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logAll" title="Показать все записи" style="display:none">Все записи</button><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
 </div></div>
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
+<input type="file" id="txtFileInput" accept=".json,.txt,application/json,text/plain" hidden>
 <script src="/vendor/socket.io.min.js"></script>
 <script>
 'use strict';
@@ -8460,6 +8480,204 @@ function exportTXT(){
   download(L.join('\r\n'),slug(project.meta.name)+'.txt','text/plain;charset=utf-8');
   toast('Экспортировано в текстовый файл');
 }
+/* ═══ Лёгкий JSON текстов: экспорт/импорт (тексты нод + связи) ═══ */
+function textsNodeText(n){
+  if(n.type==='dialog'){ensureDialog(n);return (n.dialog&&typeof n.dialog.description==='string')?n.dialog.description:(n.text||'');}
+  return n.text||'';
+}
+function textsRepliesOut(arr){
+  var out=[];
+  (Array.isArray(arr)?arr:[]).forEach(function(r){
+    if(!r||typeof r!=='object')return;
+    out.push({id:(typeof r.id==='string'&&r.id)?r.id:uid(),
+      speaker:(typeof r.speaker==='string'&&r.speaker)?r.speaker:null,
+      text:(typeof r.text==='string')?r.text:'',
+      children:textsRepliesOut(r.children)});
+  });
+  return out;
+}
+function exportTextsJson(){
+  var nodes=[],links=[],nRep=0;
+  project.nodes.forEach(function(n){
+    var o={id:n.id,title:n.title||'',text:textsNodeText(n)};
+    if(TYPES[n.type])o.type=n.type;
+    if(n.type==='dialog'){ensureDialog(n);var rp=textsRepliesOut(n.dialog.replies);if(rp.length){o.replies=rp;nRep+=rp.length;}}
+    if(n.type==='branch'&&Array.isArray(n.outcomes)&&n.outcomes.length){
+      var oc=n.outcomes.filter(function(x){return x&&typeof x.id==='string';}).map(function(x){return{id:x.id,label:String(x.label||'')};});
+      if(oc.length)o.outcomes=oc;
+    }
+    nodes.push(o);
+  });
+  project.edges.forEach(function(e){
+    var o={from:e.from,to:e.to};
+    if(e.label)o.label=e.label;
+    if(e.fromReply)o.fromReply=e.fromReply;
+    if(e.fromOut)o.fromOut=e.fromOut;
+    links.push(o);
+  });
+  var out={format:'vetvi-texts-v1',app:'vetvi',project:project.meta.name||'',exported:new Date().toISOString(),
+    counts:{nodes:nodes.length,links:links.length,replies:nRep},nodes:nodes,links:links};
+  download(JSON.stringify(out,null,2),slug(project.meta.name)+'-teksty.json','application/json;charset=utf-8');
+  toast('Экспортировано: нод '+nodes.length+', связей '+links.length+(nRep?', реплик '+nRep:''));
+}
+function textsImpParse(str){
+  var p;
+  try{p=JSON.parse(str);}catch(_){return{err:'Не удалось разобрать JSON — проверьте синтаксис'};}
+  if(!p||typeof p!=='object'||Array.isArray(p)||!Array.isArray(p.nodes))return{err:'В файле нет массива «nodes» — это не JSON текстов «Ветвей»'};
+  var nodes=[],skip=0;
+  p.nodes.forEach(function(x){
+    if(!x||typeof x!=='object')return;
+    if(typeof x.id!=='string'||!x.id){skip++;return;}
+    var en={id:x.id,title:(typeof x.title==='string')?x.title:null,text:(typeof x.text==='string')?x.text:null,
+      type:(x.type&&TYPES[x.type])?x.type:null,replies:null,outcomes:null};
+    if(Array.isArray(x.replies)){var rp=textsRepliesOut(x.replies);if(rp.length)en.replies=rp;}
+    if(Array.isArray(x.outcomes)){
+      var oc=x.outcomes.filter(function(o){return o&&typeof o==='object'&&typeof o.id==='string'&&o.id;})
+        .map(function(o){return{id:o.id.slice(0,40),label:(typeof o.label==='string')?o.label:''};});
+      if(oc.length)en.outcomes=oc;
+    }
+    nodes.push(en);
+  });
+  var links=[];
+  if(Array.isArray(p.links))p.links.forEach(function(l){
+    if(!l||typeof l!=='object')return;
+    if(typeof l.from!=='string'||!l.from||typeof l.to!=='string'||!l.to)return;
+    links.push({from:l.from,to:l.to,label:(typeof l.label==='string')?l.label:null,
+      fromReply:(typeof l.fromReply==='string'&&l.fromReply)?l.fromReply:null,
+      fromOut:(typeof l.fromOut==='string'&&l.fromOut)?l.fromOut:null});
+  });
+  if(!nodes.length)return{err:'В файле нет ни одной ноды с id'+(skip?' — записей без id пропущено: '+skip:'')};
+  return{data:{nodes:nodes,links:links,skip:skip,
+    srcName:(typeof p.project==='string')?p.project:'',fmt:(typeof p.format==='string')?p.format:''}};
+}
+function openTextsImport(keep){
+  showModal({title:'Импорт текстов из JSON',
+    text:'<p style="margin:2px 0 9px;font-size:12.5px;color:var(--tx2)">Вставьте JSON с текстами нод и связями (формат <b style="color:var(--acc2)">vetvi-texts</b>) или выберите файл. Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.</p>'+
+      '<textarea id="txImpTa" class="tx-imp-ta" spellcheck="false"></textarea>'+
+      '<div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="txImpFile">Выбрать файл…</button><span style="font-size:11px;color:var(--tx3)">файл можно получить в меню «Сохранить» → «Тексты и связи (JSON)»</span></div>',
+    buttons:[{label:'Проверить',primary:1,fn:function(){
+        var ta=$('#txImpTa');var r=textsImpParse(ta?ta.value:'');
+        if(r.err){toast(r.err,'err');openTextsImport(ta?ta.value:'');return;}
+        textsImpStep2(r.data);
+      }},{label:'Отмена'}]});
+  var ta=$('#txImpTa');
+  if(ta){ta.placeholder='{ "format": "vetvi-texts-v1", "nodes": [ { "id": "…", "title": "…", "text": "…" } ], "links": [ { "from": "…", "to": "…" } ] }';if(keep)ta.value=keep;}
+  $('#txImpFile').onclick=function(){$('#txtFileInput').value='';$('#txtFileInput').click();};
+  setTimeout(function(){if(ta&&!ta.value)ta.focus();},60);
+}
+$('#txtFileInput').addEventListener('change',function(e){
+  var f=e.target.files[0];if(!f)return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var r=textsImpParse(String(rd.result));
+    if(r.err){toast(r.err,'err');openTextsImport(String(rd.result));return;}
+    textsImpStep2(r.data,f.name);
+  };
+  rd.readAsText(f);
+});
+function textsImpStep2(d,fname){
+  var have={};project.nodes.forEach(function(n){have[n.id]=true;});
+  var matched=[],fresh=[];
+  d.nodes.forEach(function(en){(have[en.id]?matched:fresh).push(en);});
+  var hasRep=d.nodes.some(function(en){return !!en.replies;});
+  var hasOut=d.nodes.some(function(en){return !!en.outcomes;});
+  var rows='',shown=0;
+  matched.slice(0,24).forEach(function(en){shown++;
+    rows+='<div class="tx-imp-row up"><span class="mk">✎</span><span class="tt">'+esc(en.title||'(без названия)')+'</span><span class="sub">'+esc(en.id)+'</span></div>';});
+  fresh.slice(0,24).forEach(function(en){shown++;
+    rows+='<div class="tx-imp-row new"><span class="mk">＋</span><span class="tt">'+esc(en.title||'(без названия)')+'</span><span class="sub">'+esc(en.id)+'</span></div>';});
+  if(d.nodes.length-shown>0)rows+='<div class="tx-imp-row"><span class="sub">и ещё '+(d.nodes.length-shown)+'…</span></div>';
+  var sum='<div class="tx-imp-sum">'+(d.fmt?'<b>'+esc(d.fmt)+'</b> · ':'')+(d.srcName?'«'+esc(d.srcName)+'» · ':'')+(fname?esc(fname)+' · ':'')+
+    'в файле: нод — <b>'+d.nodes.length+'</b>, связей — <b>'+d.links.length+'</b>'+(d.skip?', без id пропущено — '+d.skip:'')+
+    '<br>в проекте совпадают по id: <b>'+matched.length+'</b>, новых: <b>'+fresh.length+'</b></div>';
+  var chk='<div class="tx-imp-chk">'+
+    '<label><input type="checkbox" id="txChkUpd"'+(matched.length?' checked':' disabled')+'><span>Обновить тексты и заголовки совпавших нод<span class="hint">совпадений по id: '+matched.length+'</span></span></label>'+
+    '<label><input type="checkbox" id="txChkNew"'+(fresh.length?' checked':' disabled')+'><span>Создать ноды, которых нет в проекте<span class="hint">новых: '+fresh.length+' — разместятся сеткой на свободном месте</span></span></label>'+
+    ((hasRep||hasOut)?'<label><input type="checkbox" id="txChkMed" checked><span>Обновить реплики диалогов'+(hasOut?' и подписи вариантов развилок':'')+'<span class="hint">реплики заменяются списком из файла целиком</span></span></label>':'')+
+    '<label><input type="checkbox" id="txChkLnk" checked><span>Синхронизировать связи<span class="hint">подписи существующих связей обновятся, недостающие — добавятся</span></span></label>'+
+    '</div>';
+  showModal({title:'Импорт текстов — проверка',
+    text:sum+'<div class="tx-imp-list">'+rows+'</div>'+chk,
+    buttons:[{label:'Импортировать',primary:1,fn:function(){
+        textsImpApply(d,{
+          upd:!!($('#txChkUpd')&&$('#txChkUpd').checked),
+          cre:!!($('#txChkNew')&&$('#txChkNew').checked),
+          med:!!($('#txChkMed')&&$('#txChkMed').checked),
+          lnk:!!($('#txChkLnk')&&$('#txChkLnk').checked)
+        });
+      }},{label:'Отмена'}]});
+}
+function textsImpApply(d,opt){
+  var pre=serialize();
+  var stat={upd:0,cre:0,rep:0,out:0,lnkUp:0,lnkNew:0,lnkSkip:0};
+  var newIds=[];
+  mutate(function(){
+    var byId={},have={};
+    project.nodes.forEach(function(n){byId[n.id]=n;have[n.id]=true;});
+    var bx=1e9,by=1e9;
+    project.nodes.forEach(function(n){if(n.x<bx)bx=n.x;if(n.y<by)by=n.y;});
+    if(bx>1e8){bx=100;by=100;}
+    var col=0,row=0;
+    d.nodes.forEach(function(en){
+      var n=byId[en.id];
+      if(n){
+        if(opt.upd){
+          var ch=false;
+          if(en.title!==null&&n.title!==en.title){n.title=en.title;ch=true;}
+          if(en.text!==null){
+            if(n.type==='dialog'){ensureDialog(n);if(n.dialog.description!==en.text||n.text!==en.text){n.dialog.description=en.text;n.text=en.text;ch=true;}}
+            else if(n.text!==en.text){n.text=en.text;ch=true;}
+          }
+          if(opt.med){
+            if(en.replies&&n.type==='dialog'){ensureDialog(n);n.dialog.replies=en.replies;stat.rep++;ch=true;}
+            if(en.outcomes&&n.type==='branch'&&Array.isArray(n.outcomes)){
+              en.outcomes.forEach(function(oo){
+                var hit=null;n.outcomes.forEach(function(x){if(x&&x.id===oo.id)hit=x;});
+                if(hit){if(hit.label!==oo.label){hit.label=oo.label;ch=true;}}
+                else{n.outcomes.push({id:(typeof oo.id==='string'&&oo.id)?oo.id.slice(0,40):uid(),label:oo.label,cond:null});if(n.outcomes.length>24)n.outcomes.length=24;ch=true;}
+              });
+              stat.out++;
+            }
+          }
+          if(ch)stat.upd++;
+        }
+        return;
+      }
+      if(!opt.cre)return;
+      var t=(en.type&&TYPES[en.type])?en.type:'note';
+      var nn={id:en.id,type:t,gid:null,x:Math.round(bx+col*300+(row%2)*60),y:Math.round(by+170+row*210),
+        title:(en.title!==null)?en.title:TYPES[t].name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
+      if(t==='dialog'){ensureDialog(nn);if(en.text!==null){nn.dialog.description=en.text;nn.text=en.text;}if(opt.med&&en.replies)nn.dialog.replies=en.replies;}
+      else if(en.text!==null)nn.text=en.text;
+      if(t==='branch'&&opt.med&&en.outcomes)nn.outcomes=en.outcomes.map(function(oo){return{id:oo.id,label:oo.label,cond:null};});
+      project.nodes.push(nn);byId[nn.id]=nn;have[nn.id]=true;newIds.push(nn.id);
+      col++;if(col>=4){col=0;row++;}
+      stat.cre++;
+    });
+    if(opt.lnk){
+      d.links.forEach(function(l){
+        if(!have[l.from]||!have[l.to]||l.from===l.to){stat.lnkSkip++;return;}
+        var fr=l.fromReply,fo=l.fromOut,fnode=byId[l.from];
+        if(fo&&!(fnode&&fnode.type==='branch'&&Array.isArray(fnode.outcomes)&&fnode.outcomes.some(function(o){return o&&o.id===fo;})))fo=null;
+        if(fr&&!(fnode&&fnode.type==='dialog'&&findReply((fnode.dialog&&fnode.dialog.replies)||[],fr)))fr=null;
+        var hit=null;
+        project.edges.forEach(function(e){if(e.from===l.from&&e.to===l.to&&(e.fromReply||null)===fr&&(e.fromOut||null)===fo)hit=e;});
+        if(hit){if(l.label!==null&&hit.label!==l.label){hit.label=l.label;stat.lnkUp++;}}
+        else{project.edges.push({id:uid(),from:l.from,to:l.to,label:(l.label!==null)?l.label:'',kind:'flow',pts:[],lt:0.5,lp:0,fromReply:fr,fromOut:fo,tin:null,bd:{dl:0,dy:0,dr:0},cond:null,q:1});stat.lnkNew++;}
+      });
+    }
+  },{nodes:newIds},'Импорт текстов из JSON');
+  logUndoRedo(pre,'Импорт текстов из JSON');
+  var parts=[];
+  if(stat.upd)parts.push('обновлено нод: '+stat.upd);
+  if(stat.cre)parts.push('создано нод: '+stat.cre);
+  if(stat.rep)parts.push('реплики обновлены: '+stat.rep);
+  if(stat.out)parts.push('развилки обновлены: '+stat.out);
+  if(stat.lnkUp)parts.push('связей исправлено: '+stat.lnkUp);
+  if(stat.lnkNew)parts.push('связей добавлено: '+stat.lnkNew);
+  if(stat.lnkSkip)parts.push('связей пропущено: '+stat.lnkSkip);
+  toast(parts.length?'Импорт завершён — '+parts.join(', '):'Импорт: тексты уже совпадают');
+}
 function normalize(p){
   p.customTypes=(p.customTypes||[]).map(function(c){
     return{id:c.id||uid(),name:String(c.name||'Элемент').slice(0,40),color:String(c.color||'#e2a54e'),icon:ALLICONS[c.icon]?c.icon:'star'};
@@ -8738,6 +8956,8 @@ $all('#saveMenu .sm-i').forEach(function(el){
     if(a==='json')save();
     else if(a==='jsonas')saveAs();
     else if(a==='txt')exportTXT();
+    else if(a==='txjson')exportTextsJson();
+    else if(a==='tximp')openTextsImport();
   };
 });
 $('#bUndo').onclick=undo;
