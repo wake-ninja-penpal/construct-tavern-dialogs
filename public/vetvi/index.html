@@ -757,9 +757,11 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .share-link input{flex:1;min-width:0;background:#14161a;border:1px solid #2b2f37;border-radius:9px;color:var(--tx);font:12px var(--mono);padding:8px 10px;outline:none}
 .share-link input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
 /* ── адаптив топбара ──
-   ≤1500: у «Копии»/«Поделиться»/«Merge» остаётся только иконка (кнопка никогда не пустая),
-   прячем второстепенное и уплотняем отступы — все кнопки полноразмерные. */
-@media(max-width:1500px){
+   ≤2050: у «Копии»/«Поделиться»/«Merge» остаётся только иконка (кнопка никогда не пустая),
+   прячем второстепенное и уплотняем отступы — все кнопки полноразмерные.
+   Порог поднят с 1500: полный тулбар с подписями требует ~1700px, и на полноэкранных
+   окнах 1512–1920 последняя кнопка уходила за край экрана. */
+@media(max-width:2050px){
   #bCopies .t,#bShare .t,#bMerge .t{display:none}
   #bCopies,#bShare,#bMerge{padding:0 10px;justify-content:center}
   #topbar .btn{padding-left:10px;padding-right:10px}
