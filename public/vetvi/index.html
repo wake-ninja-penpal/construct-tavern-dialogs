@@ -1203,6 +1203,31 @@ var canvas=$('#canvas'), worldEl=$('#world'), framesLayer=$('#framesLayer'), edg
     marquee=$('#marquee'), ctxEl=$('#ctx'), insp=$('#insp');
 var dlgModalNode=null;
 var dlgDragRid=null;
+/* автоскролл списка реплик при перетаскивании к верхнему/нижнему краю модалки:
+   без него дотащить реплику до конца длинного списка нельзя — браузер сам не листает */
+var dlgScrollEl=null,dlgScrollDir=0,dlgScrollRaf=0,dlgScrollLast=0;
+function dlgAutoScrollStop(){dlgScrollDir=0;dlgScrollLast=0;dlgScrollEl=null;if(dlgScrollRaf){cancelAnimationFrame(dlgScrollRaf);dlgScrollRaf=0;}}
+function dlgAutoScrollStep(ts){
+  if(!dlgScrollEl||!dlgScrollDir){dlgScrollRaf=0;dlgScrollLast=0;return;}
+  if(!dlgScrollLast)dlgScrollLast=ts;
+  var dt=Math.min(50,ts-dlgScrollLast);dlgScrollLast=ts;
+  dlgScrollEl.scrollTop+=dlgScrollDir*dt*0.75; /* ~750px/с независимо от герцовки */
+  dlgScrollRaf=requestAnimationFrame(dlgAutoScrollStep);
+}
+function dlgAutoScrollUpdate(ev){
+  if(!dlgDragRid){dlgAutoScrollStop();return;}
+  var sc=$('#dlgModalBody');if(!sc){dlgAutoScrollStop();return;}
+  var r=sc.getBoundingClientRect();
+  var Z=46,y=ev.clientY;
+  var dir=(y<r.top+Z)?-1:((y>r.bottom-Z)?1:0);
+  if(dir!==dlgScrollDir){dlgScrollDir=dir;dlgScrollLast=0;}
+  if(dlgScrollDir){
+    dlgScrollEl=sc;
+    if(!dlgScrollRaf)dlgScrollRaf=requestAnimationFrame(dlgAutoScrollStep);
+  }else{
+    dlgAutoScrollStop();
+  }
+}
 function toast(msg,kind){
   var t=document.createElement('div');
   t.className='toast '+(kind||'ok');
@@ -4063,6 +4088,7 @@ function dlgModalBind(chars){
       ed.classList.remove('dragging');
       $all('#dlgModalBody .dlg-reply-ed').forEach(function(x){x.classList.remove('drop-above','drop-below');});
       dlgDragRid=null;
+      dlgAutoScrollStop();
     });
     ed.addEventListener('dragover',function(ev){
       if(!dlgDragRid||dlgDragRid===rid)return;
@@ -4084,6 +4110,7 @@ function dlgModalBind(chars){
     ed.addEventListener('drop',function(ev){
       ev.preventDefault();
       ev.stopPropagation();
+      dlgAutoScrollStop();
       var srcRid=dlgDragRid;
       var rect=ed.getBoundingClientRect();
       var below=(ev.clientY-rect.top)>(rect.height/2);
@@ -4112,6 +4139,13 @@ $('#dlgModalDone').onclick=closeDlgEditor;
 $('#dlgModal').addEventListener('pointerdown',function(e){
   if(e.target.id==='dlgModal')closeDlgEditor();
 });
+/* автоскролл списка реплик: ведёте реплику к верхнему/нижнему краю модалки — список едет сам,
+   можно дотащить до любого места длинного списка; слушатели делегированные — модалка не пересоздаётся */
+(function(){
+  var dBody=$('#dlgModalBody');
+  dBody.addEventListener('dragover',function(ev){dlgAutoScrollUpdate(ev);});
+  dBody.addEventListener('dragleave',function(ev){var rt=ev.relatedTarget;if(!(rt&&dBody.contains(rt)))dlgAutoScrollStop();});
+})();
 /* ═══ участники узла (для не-диалоговых типов: «Мысли», «Повествование» и т.д.) ═══ */
 function nodeParts(n){
   if(!Array.isArray(n.participants))n.participants=[];
@@ -4204,7 +4238,8 @@ function renderInspNode(){
       '<textarea class="inp" id="dlgDesc" placeholder="Кратко о чём диалог, контекст…" style="min-height:60px">'+esc(d.description)+'</textarea>'+
       '<label class="i-lab">Реплики ('+countReplies(d.replies)+')</label>'+
       '<div style="margin-top:6px"><button class="btn primary" id="dlgEditReplies" style="width:100%">'+ic('pencil',14)+'Редактировать реплики</button></div>'+
-      (d.replies.length>=2?'<div style="margin-top:6px"><button class="btn" id="dlgSplitBtn" style="width:100%" title="Разбить диалог на отдельные ноды — по одной на реплику">'+ic('expand',14)+'Разбить на реплики ('+d.replies.length+')</button></div>':'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+      (d.replies.length>=2?'<div style="margin-top:6px"><button class="btn" id="dlgSplitBtn" style="width:100%" title="Разбить диалог на отдельные ноды — по одной на реплику">'+ic('expand',14)+'Разбить на реплики ('+d.replies.length+')</button></div>':'')+
+      ((countReplies(d.replies)>d.replies.length&&countReplies(d.replies)>=2)?'<div style="margin-top:6px"><button class="btn" id="dlgSplitAllBtn" style="width:100%" title="Разбить на отдельные ноды — по одной на каждую реплику, включая вложенные (ответ-ветки); порядок — сверху вниз">'+ic('corner',14)+'Разбить на все реплики ('+countReplies(d.replies)+')</button></div>':'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
       '<div class="i-actions">'+
         '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
         '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -4263,6 +4298,8 @@ function renderInspNode(){
     }
     var splitBtn=$('#dlgSplitBtn');
     if(splitBtn)splitBtn.onclick=function(){splitDialogNode(n.id);};
+    var splitAllBtn=$('#dlgSplitAllBtn');
+    if(splitAllBtn)splitAllBtn.onclick=function(){splitDialogNode(n.id,true);};
     var seqSw=$('#iSeq');
     if(seqSw)seqSw.onclick=function(){toggleNodeSeq(n.id);};
     $all('#iSt button').forEach(function(b){
@@ -6167,23 +6204,35 @@ function selAllOfType(fn){
 function selAllDialogs(){return selAllOfType(function(n){return n.type==='dialog';});}
 function selAllStackable(){return selAllOfType(function(n){return stackableType(n.type)&&!stackGroupOf(n);});}
 /* ═══ разбивка диалога на реплики и обратное объединение ═══ */
-function splitDialogNode(id){
+function flattenRepliesDFS(reps,out){
+  out=out||[];
+  reps.forEach(function(r){
+    out.push(r);
+    if(r.children&&r.children.length)flattenRepliesDFS(r.children,out);
+  });
+  return out;
+}
+function splitDialogNode(id,all){
   var n=nodeById(id);
   if(!n||n.type!=='dialog')return;
   ensureDialog(n);
-  var reps=n.dialog.replies;
-  if(reps.length<2){toast('Нужен диалог минимум с двумя репликами верхнего уровня','warn');return;}
+  /* all=false — только корневые реплики (вложенные остаются внутри своих корней);
+     all=true — нода на КАЖДУЮ реплику: дерево разворачивается в цепочку в порядке обхода сверху вниз */
+  var reps=all?flattenRepliesDFS(n.dialog.replies):n.dialog.replies;
+  if(reps.length<2){toast(all?'Нужен диалог минимум с двумя репликами':'Нужен диалог минимум с двумя репликами верхнего уровня','warn');return;}
   var lk=lockBlockedBy([n.id]);if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
   var gS=stackGroupOf(n);
   var kS=gS?stackOrderIds(gS).indexOf(n.id):-1;
-  pushHistory(serialize(),'Разбивка диалога на реплики');
+  pushHistory(serialize(),all?'Разбивка диалога на все реплики':'Разбивка диалога на реплики');
   /* созданные ноды якорятся в левый верхний угол исходной ноды (как разворот группы) */
   var baseX=Math.round(n.x),baseY=Math.round(n.y);
   var created=[];
   reps.forEach(function(r,i){
     var t=(i===0)?(n.title||'Диалог'):((r.text||('Реплика '+(i+1))).slice(0,42));
+    var rc=JSON.parse(JSON.stringify(r));
+    if(all)rc.children=[]; /* при разбивке на все реплики дети уходят в свои ноды */
     var c={id:uid(),type:'dialog',gid:null,x:baseX,y:baseY+i*175,title:t,text:'',status:n.status||'idea',tags:(n.tags||[]).slice(),expand:1,color:n.color||null,tint:n.tint||0,dlgWidth:n.dlgWidth||null,notes:i===0?(n.notes||[]):[],linear:(i===0&&n.linear===true)?true:undefined,
-      dialog:{participants:(n.dialog.participants||[]).slice(),description:(i===0)?(n.dialog.description||''):'',replies:[JSON.parse(JSON.stringify(r))]}};
+      dialog:{participants:(n.dialog.participants||[]).slice(),description:(i===0)?(n.dialog.description||''):'',replies:[rc]}};
     project.nodes.push(c);created.push(c);
   });
   project.edges.forEach(function(e){
@@ -6192,7 +6241,7 @@ function splitDialogNode(id){
   project.edges.forEach(function(e){
     if(e.from===n.id&&e.fromReply){
       var idx=-1;
-      for(var i=0;i<reps.length;i++){if(findReply([reps[i]],e.fromReply)){idx=i;break;}}
+      for(var i=0;i<reps.length;i++){if(all?(reps[i].id===e.fromReply):findReply([reps[i]],e.fromReply)){idx=i;break;}}
       if(idx>=0)e.from=created[idx].id;
     }else if(e.from===n.id&&e.tin!=='var'){
       /* обычный выход диалога (и его общий исход) уходит последней ноде */
@@ -6231,7 +6280,7 @@ function splitDialogNode(id){
   })();
   if(!gS)resolveOverlaps(new Set(created.map(function(c){return c.id;})));
   markDirty();
-  toast('Диалог разбит на '+created.length+' нод — стрелки реплик сохранены'+(gS?' (внутри цепочки)':''));
+  toast('Диалог разбит на '+created.length+' нод'+(all?' — по одной на каждую реплику':' — стрелки реплик сохранены')+(gS?' (внутри цепочки)':''));
 }
 function mergeDialogNodes(){
   var ids=[];
@@ -7678,6 +7727,8 @@ canvas.addEventListener('dblclick',function(e){
     var lkDb=lockBlockedBy([idd]);
     if(lkDb){showLockTip(e.clientX,e.clientY,lkDb);return;}
     if(!sel.has(idd)){sel=new Set([idd]);selEdges.clear();selEdge=null;selGroups.clear();selGroup=null;}
+    var nnD=nodeById(idd);
+    if(nnD&&nnD.type==='dialog'){openDlgEditor(nnD);return;} /* двойной клик по диалогу — открыть редактор реплик */
     removeSelected();
     return;
   }
@@ -8092,6 +8143,8 @@ canvas.addEventListener('contextmenu',function(e){
     if(n.type==='dialog'){
       ensureDialog(n);
       if(n.dialog.replies.length>=2)items.push({ico:'expand',label:'Разбить на реплики ('+n.dialog.replies.length+')',fn:function(){splitDialogNode(n.id);}});
+      var cntAll=countReplies(n.dialog.replies);
+      if(cntAll>n.dialog.replies.length&&cntAll>=2)items.push({ico:'corner',label:'Разбить на все реплики ('+cntAll+')',fn:function(){splitDialogNode(n.id,true);}});
     }
     if(sel.size>=2&&selAllDialogs())items.push({ico:'dialog',label:'Объединить в один диалог',fn:mergeDialogNodes});
     if(sel.size>=2&&selAllStackable())items.push({ico:'queue',label:'Собрать в цепочку',fn:stackFromSelection});
