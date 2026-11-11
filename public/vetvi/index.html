@@ -809,7 +809,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-path .sep{color:#3d434f}
 .pl-path .pl-cnt{flex:none;padding:3px 9px;border-radius:999px;background:rgba(226,165,78,.14);border:1px solid rgba(226,165,78,.4);color:#e2a54e;font-weight:600;letter-spacing:1px;white-space:nowrap}
 .pl-top .spacer{flex:1}
-.pl-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--line2);background:rgba(21,23,27,.82);color:var(--tx2);font:500 12px var(--body);cursor:pointer;transition:all .16s;backdrop-filter:blur(4px)}
+.pl-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--line2);background:rgba(21,23,27,.82);color:var(--tx2);font:500 12px var(--body);cursor:pointer;transition:all .16s;backdrop-filter:blur(4px);white-space:nowrap}
 .pl-btn:hover{background:#262b33;color:var(--tx);border-color:#3d434f}
 .pl-btn svg{width:13px;height:13px}
 .pl-btn.accent{border-color:rgba(226,165,78,.45);color:var(--acc)}
@@ -941,6 +941,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     <div class="spacer"></div>
     <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
     <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+    <button class="pl-btn" id="plShowBtn" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
     <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
   </div>
   <div class="pl-chapter" id="plChapter"></div>
@@ -962,6 +963,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     <div class="pl-btns">
       <button class="pl-btn" id="plEndBack" title="Вернуться на шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
       <button class="pl-btn" id="plEndRestart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+      <button class="pl-btn" id="plEndShow" title="Показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
       <button class="pl-btn accent" id="plEndExit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>В редактор</button>
     </div>
   </div>
@@ -1266,6 +1268,23 @@ function findReplyParent(replies,id,parent){
     }
   }
   return null;
+}
+function lastReplyDeep(replies){
+  if(!replies||!replies.length)return null;
+  var r=replies[replies.length-1];
+  while(r.children&&r.children.length)r=r.children[r.children.length-1];
+  return r;
+}
+/* спикер новой реплики: при 2+ участниках — «второй персонаж», т.е. не тот,
+   кто говорил в предыдущей реплике (prev); иначе — как раньше (первый участник) */
+function nextReplySpeaker(parts,chars,prev){
+  if(Array.isArray(parts)&&parts.length>=2){
+    if(prev&&prev.speaker&&parts.indexOf(prev.speaker)>=0){
+      for(var i=0;i<parts.length;i++){if(parts[i]!==prev.speaker)return parts[i];}
+    }
+    return parts[0];
+  }
+  return (chars&&chars[0])?chars[0].id:null;
 }
 function countReplies(replies){
   var c=0;
@@ -4000,7 +4019,7 @@ function dlgModalBind(chars){
   if(addRoot){
     addRoot.onclick=function(){
       discrete(function(){
-        d.replies.push({id:uid(),speaker:chars[0]?chars[0].id:null,text:'',children:[]});
+        d.replies.push({id:uid(),speaker:nextReplySpeaker(d.participants,chars,lastReplyDeep(d.replies)),text:'',children:[]});
       });
       dlgModalRender();
       renderAll();
@@ -4054,14 +4073,14 @@ function dlgModalBind(chars){
             /* новая реплика сразу под этой (соседняя, тот же уровень) */
             discrete(function(){
               var loc=findReplyParent(d.replies,rid,null);
-              if(loc)loc.arr.splice(loc.idx+1,0,{id:uid(),speaker:(r.speaker!=null?r.speaker:(chars[0]?chars[0].id:null)),text:'',children:[]});
+              if(loc)loc.arr.splice(loc.idx+1,0,{id:uid(),speaker:nextReplySpeaker(d.participants,chars,r),text:'',children:[]});
             });
             dlgModalRender();
             renderAll();
           }else if(act==='add-child'){
             discrete(function(){
               if(!r.children)r.children=[];
-              r.children.push({id:uid(),speaker:chars[0]?chars[0].id:null,text:'',children:[]});
+              r.children.push({id:uid(),speaker:nextReplySpeaker(d.participants,chars,r),text:'',children:[]});
             });
             dlgModalRender();
             renderAll();
@@ -6262,14 +6281,14 @@ function splitDialogNode(id,all){
   }
   sel=new Set([created[0].id]);selEdges.clear();selEdge=null;selGroups.clear();selGroup=null;
   renderAll({nodes:created.map(function(c){return c.id;})});
-  /* плотная колонка реальными высотами от точки исходной ноды */
+  /* горизонтальный ряд реальными ширинами от точки исходной ноды */
   (function(){
     var rx=baseX,ry=baseY;
     if(snapOn){rx=Math.round(rx/GRID)*GRID;ry=Math.round(ry/GRID)*GRID;}
     created.forEach(function(c){
       var el=nodeEls.get(c.id);
-      var h=(el&&el.style.display!=='none'&&el.offsetHeight>0)?el.offsetHeight:150;
-      c.x=rx;c.y=Math.round(ry);ry+=h+56;
+      var w=(el&&el.style.display!=='none'&&el.offsetWidth>0)?el.offsetWidth:NODE_W;
+      c.x=Math.round(rx);c.y=Math.round(ry);rx+=w+56;
     });
     created.forEach(function(c){
       var el=nodeEls.get(c.id);
@@ -6278,7 +6297,38 @@ function splitDialogNode(id,all){
     });
     refreshGroupFrames();
   })();
-  if(!gS)resolveOverlaps(new Set(created.map(function(c){return c.id;})));
+  /* новые ноды не накладываются на соседей: сначала вытесняем всё из полосы ряда,
+     затем общий resolveOverlaps дочищает остальное (созданные фиксированы) */
+  var anyCreatedVisible=created.some(function(c){var el=nodeEls.get(c.id);return el&&el.style.display!=='none';});
+  if(anyCreatedVisible){
+    (function(){
+      var pad=18,minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+      created.forEach(function(c){
+        var el=nodeEls.get(c.id);
+        var w=(el&&el.style.display!=='none'&&el.offsetWidth>0)?el.offsetWidth:NODE_W;
+        var h=(el&&el.style.display!=='none'&&el.offsetHeight>0)?el.offsetHeight:150;
+        minX=Math.min(minX,c.x);maxX=Math.max(maxX,c.x+w);
+        minY=Math.min(minY,c.y);maxY=Math.max(maxY,c.y+h);
+      });
+      minX-=pad;maxX+=pad;minY-=pad;maxY+=pad;
+      project.nodes.forEach(function(m){
+        if(created.indexOf(m)>=0)return;
+        if(collapsedAncestorOf(m))return;
+        var el=nodeEls.get(m.id);
+        if(!el||el.style.display==='none')return;
+        var w=el.offsetWidth,h=el.offsetHeight;
+        if(m.x+w>minX&&m.x<maxX&&m.y+h>minY&&m.y<maxY){
+          /* минимальный сдвиг по вертикали из полосы: вверх или вниз — что ближе */
+          var up=m.y+h-minY,down=maxY-m.y;
+          m.y=Math.round(m.y+((up<down)?-up:down));
+          el.style.top=m.y+'px';
+          updateEdgesFor(m.id);
+        }
+      });
+      refreshGroupFrames();
+    })();
+    resolveOverlaps(new Set(created.map(function(c){return c.id;})));
+  }
   markDirty();
   toast('Диалог разбит на '+created.length+' нод'+(all?' — по одной на каждую реплику':' — стрелки реплик сохранены')+(gS?' (внутри цепочки)':''));
 }
@@ -6366,7 +6416,7 @@ function resolveOverlaps(fixedIds){
   var oldPos=new Map();
   nodes.forEach(function(n){oldPos.set(n.id,{x:n.x,y:n.y});});
   var changed=false;
-  for(var it=0;it<30;it++){
+  for(var it=0;it<60;it++){
     var moved=false;
     for(var i=0;i<nodes.length;i++){
       if(collapsedAncestorOf(nodes[i]))continue;
@@ -7726,10 +7776,9 @@ canvas.addEventListener('dblclick',function(e){
     var idd=nodeEl.dataset.id;
     var lkDb=lockBlockedBy([idd]);
     if(lkDb){showLockTip(e.clientX,e.clientY,lkDb);return;}
-    if(!sel.has(idd)){sel=new Set([idd]);selEdges.clear();selEdge=null;selGroups.clear();selGroup=null;}
+    selectOnly(idd); /* двойной клик — только выделение: удаление ноды по dblclick убрано */
     var nnD=nodeById(idd);
-    if(nnD&&nnD.type==='dialog'){openDlgEditor(nnD);return;} /* двойной клик по диалогу — открыть редактор реплик */
-    removeSelected();
+    if(nnD&&nnD.type==='dialog')openDlgEditor(nnD); /* диалог — открыть редактор реплик */
     return;
   }
   if(edgeEl){
@@ -11103,7 +11152,17 @@ $('#player').addEventListener('click',function(e){
   if(e.target.closest&&e.target.closest('button'))return;
   plAdvance();
 });
+/* выйти из проигрывания и показать на холсте ноду текущего текста */
+function plShowNodeOnCanvas(){
+  var n=PL.nodeId?nodeById(PL.nodeId):null;
+  plExit();
+  if(!n){toast('Нода не найдена','warn');return;}
+  selectOnly(n.id);
+  centerOn(n);
+}
 $('#plExitBtn').onclick=function(e){e.stopPropagation();plExit();};
+$('#plShowBtn').onclick=function(e){e.stopPropagation();plShowNodeOnCanvas();};
+$('#plEndShow').onclick=function(e){e.stopPropagation();plShowNodeOnCanvas();};
 $('#plRestartBtn').onclick=function(e){e.stopPropagation();plRestart();};
 $('#plBackBtn').onclick=function(e){e.stopPropagation();plBack();};
 $('#plEndExit').onclick=function(e){e.stopPropagation();plExit();};
