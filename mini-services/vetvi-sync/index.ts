@@ -108,7 +108,18 @@ interface RoomState {
   name: string
   members: Map<string, RoomMember>
   locks: Map<string, ObjLock>
+  focus: Map<string, SocketFocus>
   gcTimer: ReturnType<typeof setTimeout> | null
+}
+
+/* ── «где сейчас работает участник» ──
+   Клиент сообщает id ноды, с которой работает (открыл редактор, тянет, выбрал);
+   сервер держит по одному фокусу на сокет и раздаёт список по комнате.
+   Эфемерно: не персистится, чистится при disconnect. */
+interface SocketFocus {
+  userId: string
+  nodeId: string
+  ts: number
 }
 
 /* ─── блокировки объектов (soft-lock) ───
@@ -132,7 +143,7 @@ const rooms = new Map<string, RoomState>()
 function getRoom(name: string): RoomState {
   let room = rooms.get(name)
   if (!room) {
-    room = { name, members: new Map(), locks: new Map(), gcTimer: null }
+    room = { name, members: new Map(), locks: new Map(), focus: new Map(), gcTimer: null }
     rooms.set(name, room)
   }
   if (room.gcTimer) {
@@ -198,6 +209,28 @@ function lockList(room: RoomState) {
 
 function broadcastLocks(io: Server, room: RoomState) {
   io.to(room.name).emit('vetvi:locks', { roomId: room.name, locks: lockList(room) })
+}
+
+/* ── фокус участников (id ноды, с которой работает) ── */
+
+const MAX_FOCUS_NODE_LEN = 80
+
+function focusList(room: RoomState) {
+  const byUser = new Map<string, { userId: string; nodeId: string; ts: number }>()
+  for (const f of room.focus.values()) {
+    if (!f.userId || !f.nodeId) continue
+    const prev = byUser.get(f.userId)
+    if (!prev || prev.ts < f.ts) byUser.set(f.userId, { userId: f.userId, nodeId: f.nodeId, ts: f.ts })
+  }
+  return Array.from(byUser.values()).map((f) => ({ userId: f.userId, nodeId: f.nodeId }))
+}
+
+function broadcastFocus(io: Server, room: RoomState) {
+  io.to(room.name).emit('vetvi:focus', { roomId: room.name, focus: focusList(room) })
+}
+
+function releaseSocketFocus(io: Server, room: RoomState, sid: string) {
+  if (room.focus.delete(sid)) broadcastFocus(io, room)
 }
 
 function releaseSocketLocks(io: Server, room: RoomState, sid: string) {
@@ -286,6 +319,7 @@ io.on('connection', (socket: Socket) => {
           users: userList(room),
           pendingMerges: pendingCount(roomName),
           locks: lockList(room),
+          focus: focusList(room),
         })
 
         broadcastUsers(io, room)
@@ -554,6 +588,28 @@ io.on('connection', (socket: Socket) => {
     },
   )
 
+  /* ── фокус: на какой ноде участник работает прямо сейчас ── */
+  socket.on('vetvi:focus', (payload: { roomId?: string; nodeId?: string | null }) => {
+    try {
+      if (!isSafeRoom(payload?.roomId) || payload.roomId !== joinedRoom) return
+      const room = rooms.get(payload.roomId)
+      const me = room?.members.get(socket.id)
+      if (!room || !me) return
+      const nodeId =
+        typeof payload.nodeId === 'string' && payload.nodeId
+          ? payload.nodeId.slice(0, MAX_FOCUS_NODE_LEN)
+          : null
+      if (!nodeId) {
+        releaseSocketFocus(io, room, socket.id)
+        return
+      }
+      room.focus.set(socket.id, { userId: me.user.id, nodeId, ts: Date.now() })
+      broadcastFocus(io, room)
+    } catch {
+      // ignore
+    }
+  })
+
   socket.on('disconnect', () => {
     try {
       if (!joinedRoom) return
@@ -561,6 +617,7 @@ io.on('connection', (socket: Socket) => {
       if (!room) return
       room.members.delete(socket.id)
       releaseSocketLocks(io, room, socket.id)
+      releaseSocketFocus(io, room, socket.id)
       broadcastUsers(io, room)
       console.log(`[vetvi-sync] leave "${room.name}", peers: ${userList(room).length}`)
       if (room.members.size === 0) scheduleRoomGc(room)
