@@ -751,6 +751,9 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .cp-acts{display:flex;flex-direction:column;gap:2px;margin-top:6px;border-top:1px solid var(--line);padding-top:7px}
 .cp-act{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;font-size:12.5px;color:var(--tx2);cursor:pointer;transition:.12s;background:none;border:none;text-align:left}
 .cp-act:hover{background:#262b33;color:var(--tx)}
+.cp-go{display:flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;flex:none;border-radius:7px;background:none;border:1px solid transparent;color:var(--tx3);cursor:pointer;transition:.12s}
+.cp-go:hover{background:#262b33;color:var(--acc);border-color:var(--line)}
+.cp-node{display:block;font:500 10.5px var(--mono);color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
 .m-badge{min-width:16px;height:16px;border-radius:8px;background:#cf6b5a;color:#fff;font:700 10px/16px var(--mono);text-align:center;padding:0 4px;margin-left:6px}
 .mrg-item{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;margin:0 0 8px;background:#171a1f}
 .mrg-top{display:flex;align-items:center;gap:8px;font-size:12.5px;flex-wrap:wrap}
@@ -3965,6 +3968,7 @@ function openDlgEditor(n){
   if(lkD){showLockTip(lastPtr.x,lastPtr.y,lkD);return;}
   lockTake([n.id]);
   dlgModalNode=n;
+  syncFocusTrack(n.id);
   ensureDialog(n);
   $('#dlgModalTitle').textContent='Реплики: '+n.title;
   dlgModalRender();
@@ -5156,6 +5160,7 @@ if(isNew&&n.notes.length>=NOTE_MAX){toast('Максимум '+NOTE_MAX+' зам�
 lockTake([n.id]);
 var note=isNew?{title:'',html:'',hidden:false}:n.notes[idx];
 noteEditorState={n:n,idx:idx,isNew:isNew};
+syncFocusTrack(n.id);
 $('#noteTitle').value=note.title||'';
 $('#noteBody').innerHTML=sanitizeNoteHtml(note.html||'');
 $('#noteModalTitle').textContent=isNew?'Новая заметка':'Редактирование заметки';
@@ -5182,6 +5187,7 @@ toast('Заметка сохранена');
 }
 function openNoteView(n,note){
 noteViewState={n:n,note:note};
+syncFocusTrack(n.id);
 $('#noteViewTitle').textContent=note.title||'Заметка';
 var c=$('#noteViewBody');
 c.innerHTML=sanitizeNoteHtml(note.html||'<div class="note-empty">Пусто</div>');
@@ -5256,7 +5262,7 @@ function syncSel(){
   $all('#nodeList .nli[data-gid]').forEach(function(el){el.classList.toggle('sel',selGroups.has(el.dataset.gid));});
   qMarkSelAllConnectors();
 }
-function selectOnly(id){sel=new Set([id]);selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;syncSel();renderInspector();}
+function selectOnly(id){sel=new Set([id]);selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;syncSel();renderInspector();syncFocusTrack(id);}
 function selectEdgeOnly(id){selEdge=id;selEdges=new Set([id]);sel.clear();selGroups.clear();selGroup=null;syncSel();renderInspector();}
 function selectGroup(gid){selGroup=gid;selGroups=new Set([gid]);sel.clear();selEdges.clear();selEdge=null;syncSel();renderInspector();}
 function clearSel(){sel.clear();selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;syncSel();renderInspector();}
@@ -6936,7 +6942,7 @@ return;
           e.preventDefault();
           if(!sel.has(id))selectOnly(id);
           dlgResizeS={nid:id,sx:e.clientX,origWidth:nN.dlgWidth||NODE_W,pre:serialize(),moved:false,lk:[id]};
-          lockTake([id]);
+          lockTake([id]);syncFocusTrack(id);
           return;
         }
       }
@@ -6948,7 +6954,7 @@ return;
         detachNode(id);
         var nn=nodeById(id);
         if(nn)dragS.start.set(id,{x:nn.x,y:nn.y});
-        dragS.lk=[id];lockTake([id]);
+        dragS.lk=[id];lockTake([id]);syncFocusTrack(id);
         return;
       }
       if(e.shiftKey){
@@ -6960,7 +6966,7 @@ return;
         var n=nodeById(sid);
         if(n)dragS.start.set(sid,{x:n.x,y:n.y});
       });
-      dragS.lk=Array.from(dragS.start.keys());lockTake(dragS.lk);
+      dragS.lk=Array.from(dragS.start.keys());lockTake(dragS.lk);syncFocusTrack(id);
       return;
     }
     var grip=target.closest?target.closest('.gb-grip'):null;
@@ -9524,7 +9530,8 @@ var syncState={
   status:'off',users:[],applyingRemote:false,pendingRemote:null,
   stateTimer:null,lastSent:'',liveT:0,liveDlgT:0,livePtsT:0,
   mode:'local',activeCopy:null,mergeCount:0,initDone:false,popFor:0,
-  rlocks:null,myLocks:{},lockHB:null
+  rlocks:null,myLocks:{},lockHB:null,
+  focus:{},myFocus:null,focusSent:null
 };
 var LS_COPIES='vetvi-copies-v1',LS_BACKUPS='vetvi-backups-v1',LS_ME='vetvi-me-v1';
 function syncHashParams(){
@@ -9600,6 +9607,40 @@ function syncRenderMergeBadge(){
   var n=syncState.mergeCount||0;
   badge.textContent=String(n);
   badge.style.display=n?'':'none';
+}
+/* ── фокус участников: на какой ноде каждый работает прямо сейчас ──
+   Клиент сообщает id ноды (выбор, открытие редактора, перетаскивание),
+   сервер раздаёт список; в списке участников у каждой строки — кнопка
+   «перейти», центрирующая холст на этой ноде. */
+function syncFocusTrack(id){
+  if(!id||!syncState)return;
+  syncState.myFocus=id;
+  syncFocusEmit();
+}
+function syncFocusEmit(){
+  var id=syncState.myFocus;
+  if(!syncState.enabled||!syncState.sock||!syncState.sock.connected||!id)return;
+  if(syncState.focusSent===id)return;
+  syncState.focusSent=id;
+  try{syncState.sock.emit('vetvi:focus',{roomId:syncState.room,nodeId:id});}catch(e){}
+}
+function syncFocusApply(list){
+  var map={};
+  (list||[]).forEach(function(f){if(f&&f.userId&&f.nodeId)map[f.userId]=f.nodeId;});
+  syncState.focus=map;
+  var pop=$('#collabPop');
+  if(pop&&pop.classList.contains('show'))syncRenderPop();
+}
+function syncFocusGo(userId){
+  var nid=syncState.focus?syncState.focus[userId]:null;
+  var n=nid?nodeById(nid):null;
+  if(!n){toast('Нода участника недоступна — возможно, она удалена','warn');return;}
+  var uname='';
+  (syncState.users||[]).forEach(function(u){if(u.id===userId)uname=u.name;});
+  revealNode(n);
+  selectOnly(n.id);
+  centerOn(n);
+  toast('Переход к ноде «'+n.title+'»'+(uname?' — '+uname:''));
 }
 /* ── применение удалённого состояния ──
    keepPid: документ комнаты без meta.projectId (старый снимок этого же проекта) —
@@ -9902,6 +9943,8 @@ function syncConnect(roomId,pid,opts){
       syncSetStatus('on');
       syncState.users=res.users||[];
       lockApplyServerList(res.locks);
+      syncFocusApply(res.focus);
+      syncState.focusSent=null;syncFocusEmit();/* сообщить, где я сейчас */
       if(!syncState.lockHB)syncState.lockHB=setInterval(lockHeartbeat,45000);
       syncState.mergeCount=syncState.mode==='copy'?0:(res.pendingMerges||0);
       renderSyncUI();syncRenderPop();
@@ -9945,6 +9988,7 @@ function syncConnect(roomId,pid,opts){
   sock.on('connect_error',function(){syncSetStatus('err');});
   sock.on('vetvi:users',function(m){if(!m||m.roomId!==syncState.room)return;syncState.users=m.users||[];syncRenderChip();syncRenderPop();});
   sock.on('vetvi:locks',function(m){if(!m||m.roomId!==syncState.room)return;lockApplyServerList(m.locks);});
+  sock.on('vetvi:focus',function(m){if(!m||m.roomId!==syncState.room)return;syncFocusApply(m.focus);});
   sock.on('vetvi:state',function(m){if(!m||m.roomId!==syncState.room)return;syncHandleRemoteDoc(m.doc);});
   sock.on('vetvi:live',function(m){if(!m||m.roomId!==syncState.room)return;syncApplyLive(m);});
   sock.on('vetvi:merge-new',function(m){
@@ -9968,6 +10012,7 @@ function syncDisconnect(silent){
   if(syncState.sock){try{syncState.sock.disconnect();}catch(e){}}
   syncState.sock=null;syncState.enabled=false;syncState.room=null;syncState.users=[];
   syncState.mergeCount=0;syncState.pendingRemote=null;syncState.rlocks=null;
+  syncState.focus={};syncState.myFocus=null;syncState.focusSent=null;
   try{updateGroupBadges();applyInspectorLockState();}catch(e){}
   if(syncState.mode!=='copy')syncState.mode='local';
   syncSetHash(null);
@@ -9985,7 +10030,14 @@ function syncRenderPop(){
   if(!syncState.enabled){pop.classList.remove('show');return;}
   var me=syncMe();
   var rows=(syncState.users||[]).map(function(u){
-    return '<div class="cp-row'+(u.id===me.id?' me':'')+'"><span class="cp-dot" style="background:'+esc(u.color||'#8b929c')+'"></span><span class="cp-name">'+esc(u.name)+(u.id===me.id?' (вы)':'')+'</span></div>';
+    var fn=syncState.focus?syncState.focus[u.id]:null;
+    var fnNode=fn?nodeById(fn):null;
+    var rowTtl=fnNode?'Сейчас у «'+u.name+'»: нода «'+fnNode.title+'»':'';
+    return '<div class="cp-row'+(u.id===me.id?' me':'')+'"'+(rowTtl?' title="'+esc(rowTtl)+'"':'')+'>'+
+      '<span class="cp-dot" style="background:'+esc(u.color||'#8b929c')+'"></span>'+
+      '<span class="cp-name">'+esc(u.name)+(u.id===me.id?' (вы)':'')+'</span>'+
+      (fnNode?'<span class="cp-node">'+esc(fnNode.title)+'</span><button class="cp-go" data-go="'+esc(u.id)+'" title="Перейти к ноде «'+esc(fnNode.title)+'»">'+ic('target',13)+'</button>':'')+
+      '</div>';
   }).join('');
   pop.innerHTML='<div class="cp-cap">Участники комнаты</div>'+rows+
     '<div class="cp-acts">'+
@@ -10003,6 +10055,13 @@ function syncRenderPop(){
         if(syncState.mode==='copy'){syncState.mode='local';syncState.activeCopy=null;renderSyncUI();toast('Панель копии закрыта');}
         else syncDisconnect();
       }
+    };
+  });
+  $all('#collabPop .cp-go').forEach(function(b){
+    b.onclick=function(e){
+      e.stopPropagation();
+      pop.classList.remove('show');
+      syncFocusGo(b.dataset.go);
     };
   });
 }
