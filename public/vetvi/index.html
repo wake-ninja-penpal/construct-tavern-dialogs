@@ -508,6 +508,28 @@ body.connecting .vpinn{cursor:copy}
 #paneVars .v-row{cursor:grab}
 #paneChars .v-row{cursor:default}
 .c-dot{width:16px;height:16px;border-radius:5px;flex:none;border:1px solid rgba(255,255,255,.28);box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+/* аватар персонажа: строка списка, развёрнутый редактор и плашка плеера */
+.c-av{width:24px;height:24px;flex:none;overflow:hidden;background:#1a1d23;border:2px solid #9cb878;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+.c-av img{width:100%;height:100%;object-fit:cover;display:block}
+.c-av.circle{border-radius:50%}
+.c-av.square{border-radius:8px}
+.c-av.big{width:56px;height:56px}
+.c-av.empty{display:flex;align-items:center;justify-content:center;font:700 20px var(--body);color:var(--tx3)}
+.c-av.empty.big{font-size:24px}
+.ce-avrow{display:flex;align-items:center;gap:12px}
+.ce-avctl{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ce-avbtns{display:flex;gap:6px;flex-wrap:wrap}
+.ce-av-up,.ce-av-rm{display:inline-flex;align-items:center;height:26px;padding:0 10px;background:#262b33;border:1px solid #363b45;border-radius:7px;color:var(--tx2);font:600 11px var(--body);cursor:pointer;transition:.15s}
+.ce-av-up:hover{color:var(--tx);border-color:#4a515d}
+.ce-av-rm:hover{color:#cf6d4f;border-color:#5a3a33;background:#33272a}
+.ce-av-shape{display:inline-flex;border:1px solid #2e333c;border-radius:8px;overflow:hidden;width:max-content}
+.shp{display:inline-flex;align-items:center;gap:6px;border:none;background:#1a1d23;color:var(--tx3);font:600 11px var(--body);padding:5px 10px;cursor:pointer;transition:.15s}
+.shp+.shp{border-left:1px solid #2e333c}
+.shp:hover{color:var(--tx)}
+.shp.on{background:#242a33;color:var(--acc)}
+.shp-ic{width:10px;height:10px;flex:none;border:1.5px solid currentColor}
+.shp-ic.circle{border-radius:50%}
+.shp-ic.square{border-radius:3px}
 #paneVars .v-row.dragging{opacity:.45}
 #paneVars .v-row .v-del{margin-right:2px}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
@@ -845,8 +867,13 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-choice .lbl{flex:1}
 .pl-box{position:relative;width:100%;background:rgba(15,17,22,.94);border:1px solid #2c313b;border-radius:16px;padding:24px 28px 30px;min-height:118px;box-shadow:0 26px 70px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
 .pl-box::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:16px 16px 0 0;background:var(--plc,#e2a54e);opacity:.85}
-.pl-name{position:absolute;top:-16px;left:24px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-name{position:absolute;top:-16px;left:24px;display:flex;align-items:center;gap:8px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;white-space:nowrap}
 .pl-name.hidden{display:none}
+.pl-name .pl-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pl-av{width:22px;height:22px;flex:none;overflow:hidden;background:#20242b;border:1px solid rgba(255,255,255,.45);box-shadow:0 0 0 1px rgba(0,0,0,.3);margin-left:-9px}
+.pl-av img{width:100%;height:100%;object-fit:cover;display:block}
+.pl-av.circle{border-radius:50%}
+.pl-av.square{border-radius:6px}
 .pl-text{font:400 16.5px/1.65 var(--body);color:var(--tx);min-height:56px;white-space:pre-wrap;word-break:break-word}
 .pl-text .caret{display:inline-block;width:9px;height:1.05em;margin-left:2px;vertical-align:text-bottom;background:var(--plc,#e2a54e);animation:plCaret .8s steps(1) infinite}
 @keyframes plCaret{50%{opacity:0}}
@@ -1340,6 +1367,48 @@ function charColor(id){
   var n=nodeById(id); /* устаревшие данные: ещё не мигрировавшая нода персонажа */
   if(n&&n.type==='char')return n.color?nodePaint(n):nodeVisual(n).color;
   return '#8b929c';
+}
+/* ═══ аватар персонажа: dataURL-картинка + форма (круг / квадрат с углами) ═══
+   показывается в списке (свёрнуто/развёрнуто) и в плеере у имени говорящего */
+function charAvShape(c){return (c&&c.avShape==='square')?'square':'circle';}
+function charInitial(c){var nm=String((c&&c.name)||'').trim();return nm?nm[0].toUpperCase():'?';}
+function charAvatarHtml(c,extra,title){
+  if(!c||!c.av)return '';
+  return '<span class="c-av '+charAvShape(c)+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'"'+(title?' title="'+title+'"':'')+'><img src="'+esc(c.av)+'" alt=""></span>';
+}
+/* файл → аватар: читаем картинку, центр-кроп в квадрат, ужимаем (192px, дальше 128px)
+   до ≤60К символов dataURL, чтобы не раздувать localStorage/журнал правок */
+var AV_MAXLEN=60000;
+function fileToAvatar(file,cb){
+  if(!file||!/^image\//.test(file.type||'')){toast('Нужен файл изображения','warn');return;}
+  var fr=new FileReader();
+  fr.onload=function(){
+    var img=new Image();
+    img.onload=function(){
+      try{
+        var w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
+        if(!w||!h){toast('Не удалось прочитать изображение','warn');return;}
+        var side=Math.min(w,h),sx=(w-side)/2,sy=(h-side)/2;
+        var build=function(S,q){
+          var cv=document.createElement('canvas');cv.width=S;cv.height=S;
+          var ctx=cv.getContext('2d');
+          ctx.fillStyle='#20242b';ctx.fillRect(0,0,S,S);
+          ctx.drawImage(img,sx,sy,side,side,0,0,S,S);
+          var url=cv.toDataURL('image/webp',q);
+          if(url.length>AV_MAXLEN)url=cv.toDataURL('image/jpeg',q);
+          return url;
+        };
+        var url=build(192,0.85);
+        if(url.length>AV_MAXLEN)url=build(128,0.8);
+        if(!/^data:image\//.test(url)||url.length>AV_MAXLEN){toast('Картинка слишком велика для аватара','warn');return;}
+        cb(url);
+      }catch(e){toast('Не удалось обработать изображение','warn');}
+    };
+    img.onerror=function(){toast('Не удалось прочитать изображение','warn');};
+    img.src=String(fr.result);
+  };
+  fr.onerror=function(){toast('Не удалось прочитать файл','warn');};
+  fr.readAsDataURL(file);
 }
 /* конвертация старых нод «Персонаж» в записи списка (для снимков из комнаты) */
 function migrateCharNodesInPlace(){
@@ -4888,7 +4957,9 @@ function renderCharsPane(){
     var open=!!charsOpen[c.id];
     html+='<div class="v-item'+(open?' open':'')+'" data-cid="'+esc(c.id)+'">'+
       '<div class="v-row">'+
-        '<span class="c-dot" style="background:'+esc(c.color||'#9cb878')+'" title="Цвет персонажа"></span>'+
+        (c.av
+          ?charAvatarHtml(c,'','Аватар персонажа')
+          :'<span class="c-dot" style="background:'+esc(c.color||'#9cb878')+'" title="Цвет персонажа"></span>')+
         '<input class="inp v-name c-name" value="'+esc(c.name)+'" maxlength="60" title="Имя персонажа" placeholder="имя персонажа">'+
         '<button class="v-del" title="Удалить персонажа">'+ic('x',12)+'</button>'+
         '<button class="v-fold" title="'+(open?'Свернуть':'Развернуть для редактирования')+'">'+ic('chev',12)+'</button>'+
@@ -4916,6 +4987,21 @@ function charEditHtml(c){
     return '<button class="swatch'+(c.color===col?' on':'')+'" data-cc="'+col+'" style="background:'+col+'" title="'+col+'"></button>';
   }).join('');
   return '<div class="v-edit">'+
+    '<div class="ce-avrow">'+
+      (c.av
+        ?charAvatarHtml(c,'big','Аватар персонажа')
+        :'<span class="c-av empty big '+charAvShape(c)+'" style="border-color:'+esc(c.color||'#9cb878')+'" title="Аватар не задан">'+esc(charInitial(c))+'</span>')+
+      '<div class="ce-avctl">'+
+        '<div class="ce-avbtns">'+
+          '<label class="ce-av-up" title="Загрузить картинку — по центру обрежется в квадрат">Загрузить…<input type="file" class="ce-av-file" accept="image/*" hidden></label>'+
+          (c.av?'<button class="ce-av-rm" title="Убрать аватар">Убрать</button>':'')+
+        '</div>'+
+        '<div class="ce-av-shape">'+
+          '<button class="shp'+(charAvShape(c)==='circle'?' on':'')+'" data-sh="circle" title="Аватар-круг"><i class="shp-ic circle"></i>круг</button>'+
+          '<button class="shp'+(charAvShape(c)==='square'?' on':'')+'" data-sh="square" title="Аватар-квадрат со скруглёнными углами"><i class="shp-ic square"></i>квадрат</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
     '<div><label>Имя</label><input class="inp ce-name" value="'+esc(c.name)+'" maxlength="60" placeholder="имя персонажа"></div>'+
     '<div><label>Цвет</label><div class="swatches">'+sw+'</div></div>'+
     '<div><label>Описание</label><textarea class="inp ce-desc" placeholder="Кто это, какова его роль в истории…" style="min-height:52px">'+esc(c.text||'')+'</textarea></div>'+
@@ -5001,6 +5087,31 @@ function bindCharsRows(){
       edesc.addEventListener('input',function(){c.text=edesc.value;markDirty();});
       edesc.addEventListener('change',editEnd);edesc.addEventListener('blur',editEnd);
     }
+    /* аватар: загрузка файла, удаление, форма (круг/квадрат) */
+    var fInp=item.querySelector('.ce-av-file');
+    if(fInp)fInp.addEventListener('change',function(){
+      var f=fInp.files&&fInp.files[0];fInp.value='';
+      if(!f)return;
+      fileToAvatar(f,function(url){
+        discrete(function(){c.av=url;if(c.avShape!=='square')c.avShape='circle';},'Аватар персонажа');
+        renderCharsPane();
+        toast('Аватар обновлён');
+      });
+    });
+    var avRm=item.querySelector('.ce-av-rm');
+    if(avRm)avRm.onclick=function(){
+      discrete(function(){c.av=null;},'Аватар персонажа');
+      renderCharsPane();
+      toast('Аватар убран');
+    };
+    Array.prototype.forEach.call(item.querySelectorAll('.shp'),function(sb){
+      sb.onclick=function(){
+        var sh=(sb.dataset.sh==='square')?'square':'circle';
+        if(charAvShape(c)===sh)return;
+        discrete(function(){c.avShape=sh;},'Форма аватара персонажа');
+        renderCharsPane();
+      };
+    });
   });
 }
 function ensureBranch(n){if(n.type==='branch'&&!Array.isArray(n.outcomes))n.outcomes=[];}
@@ -9155,7 +9266,9 @@ function normalize(p){
     return{id:(typeof c.id==='string'&&c.id)?c.id.slice(0,40):uid(),
       name:String(c.name||'Персонаж').slice(0,60),
       color:(typeof c.color==='string'&&/^#([0-9a-f]{6})$/i.test(c.color))?c.color:'#9cb878',
-      text:String(c.text==null?'':c.text).slice(0,500)};
+      text:String(c.text==null?'':c.text).slice(0,500),
+      av:(typeof c.av==='string'&&c.av.slice(0,11)==='data:image/'&&c.av.length<=120000)?c.av:null,
+      avShape:(c.avShape==='square')?'square':'circle'};
   });
   var legacyCharNodes=[];
   (p.nodes||[]).forEach(function(n){if(n&&n.type==='char')legacyCharNodes.push(n);});
@@ -10993,6 +11106,13 @@ function plCastName(n){
   if(ps.length>1)nm+=' +'+(ps.length-1);
   return nm;
 }
+/* аватар для плашки ноды: только если участник ровно один и у него есть аватар */
+function plCastAv(n){
+  var ps=(n.type==='dialog')?((n.dialog&&n.dialog.participants)||[]):(Array.isArray(n.participants)?n.participants:[]);
+  if(ps.length!==1)return null;
+  var c=charById(ps[0]);
+  return (c&&c.av)?c.id:null;
+}
 function plChapterHtml(n){
   var vis=nodeVisual(n);
   return '<span class="pl-chip"><i class="dot" style="background:'+esc(vis.color)+'"></i>'+esc(vis.name||'')+'<span class="ttl">· '+esc(n.title||'')+'</span></span>';
@@ -11115,8 +11235,11 @@ function plShowSlide(opts){
   var box=$('#plBox');
   $('#plChapter').innerHTML=opts.chapter?plChapterHtml(opts.chapter):'';
   var nameEl=$('#plName');
-  if(opts.name){nameEl.textContent=opts.name;nameEl.classList.remove('hidden');}
-  else nameEl.classList.add('hidden');
+  if(opts.name){
+    nameEl.innerHTML=(opts.avCid?plSlideAvatar(opts.avCid):'')+'<span class="pl-t">'+esc(opts.name)+'</span>';
+    nameEl.classList.remove('hidden');
+  }
+  else{nameEl.classList.add('hidden');nameEl.innerHTML='';}
   box.style.setProperty('--plc',opts.color||'#e2a54e');
   plClearChoices();
   $('#plHint').style.display='';
@@ -11138,7 +11261,7 @@ function plLinearShow(n){
   while(PL.seqIdx>=0&&PL.seqIdx<ids.length&&!findReply(n.dialog.replies,ids[PL.seqIdx]))PL.seqIdx++;
   if(PL.seqIdx<0||PL.seqIdx>=ids.length){PL.seqIdx=-1;PL.seqList=null;plAfterNodeFinal(n);return;}
   var r=findReply(n.dialog.replies,ids[PL.seqIdx]);
-  plShowSlide({name:(r.speaker?charName(r.speaker):null),color:(r.speaker?charColor(r.speaker):'#8b929c'),text:r.text||'…',chapter:n});
+  plShowSlide({name:(r.speaker?charName(r.speaker):null),color:(r.speaker?charColor(r.speaker):'#8b929c'),avCid:(r.speaker||null),text:r.text||'…',chapter:n});
 }
 function plLinearBegin(n){
   PL.seqList=plLinearIds(n);
@@ -11184,7 +11307,7 @@ function plGoNode(n,keepPath){
       if(desc){PL.seqList=lf;PL.seqIdx=-1;PL.intro=true;plShowSlide({name:null,color:nodeVisual(n).color,text:desc,chapter:n});return;}
       if(lf.length){PL.seqList=lf;PL.seqIdx=0;plLinearShow(n);return;}
       PL.seqList=null;PL.seqIdx=-1;
-      plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
+      plShowSlide({name:plCastName(n),color:nodeVisual(n).color,avCid:plCastAv(n),text:'…',chapter:n});
       return;
     }
     if(desc){
@@ -11197,16 +11320,17 @@ function plGoNode(n,keepPath){
       var bx=$('#plBox');
       bx.style.setProperty('--plc',nodeVisual(n).color);
       var chEl=$('#plChapter');if(chEl)chEl.innerHTML=plChapterHtml(n);
-      var nmEl=$('#plName'),nm2=plCastName(n);
-      if(nm2){nmEl.textContent=nm2;nmEl.classList.remove('hidden');}else nmEl.classList.add('hidden');
+      var nmEl=$('#plName'),nm2=plCastName(n),av2=plCastAv(n);
+      if(nm2){nmEl.innerHTML=(av2?plSlideAvatar(av2):'')+'<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
+      else{nmEl.classList.add('hidden');nmEl.innerHTML='';}
       var txEl=$('#plText');if(txEl)txEl.innerHTML='';
       plShowDialogChoices(n,rs);return;
     }
     if(rs.length===1){plShowReply(rs[0]);return;}
-    plShowSlide({name:plCastName(n),color:nodeVisual(n).color,text:'…',chapter:n});
+    plShowSlide({name:plCastName(n),color:nodeVisual(n).color,avCid:plCastAv(n),text:'…',chapter:n});
     return;
   }
-  plShowSlide({name:plCastName(n),color:resolvedNodeColor(n,0),text:n.text||'…',chapter:n});
+  plShowSlide({name:plCastName(n),color:resolvedNodeColor(n,0),avCid:plCastAv(n),text:n.text||'…',chapter:n});
 }
 /* нода переменной: без слайда — сработала и ведёт дальше (по стрелке, в списке — следующий блок) */
 function plAfterVarnode(n,keepPath){
@@ -11227,12 +11351,18 @@ function plAfterVarnode(n,keepPath){
   if(PL.mode==='list'){plListJumpNext();return;}
   plShowEnd();
 }
+/* аватар говорящего в плашке имени плеера */
+function plSlideAvatar(cid){
+  var c=charById(cid);
+  if(!c||!c.av)return '';
+  return '<span class="pl-av '+charAvShape(c)+'"><img src="'+esc(c.av)+'" alt=""></span>';
+}
 function plShowReply(r,noHist){
   PL.replyId=r.id;PL.intro=false;
   var name=r.speaker?charName(r.speaker):null;
   var color=r.speaker?charColor(r.speaker):'#8b929c';
   var n=nodeById(PL.nodeId);
-  plShowSlide({name:name,color:color,text:r.text||'…',chapter:n});
+  plShowSlide({name:name,color:color,avCid:(r.speaker||null),text:r.text||'…',chapter:n});
 }
 /* в режиме списка играем только внутри выделения: связь за его пределами — тупик */
 function plEdgePlayable(e){
