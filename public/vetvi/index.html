@@ -525,6 +525,15 @@ body.connecting .vpinn{cursor:copy}
 .c-av.big{width:56px;height:56px}
 .c-av.empty{display:flex;align-items:center;justify-content:center;font:700 20px var(--body);color:var(--tx3)}
 .c-av.empty.big{font-size:24px}
+/* мини-аватары персонажей в чипах участников (chip — инспектор/модалка, mini — нода на холсте) */
+.c-av.chip{width:16px;height:16px;border-width:1.5px}
+.c-av.chip.empty{font:700 8px var(--body)}
+.c-av.chip.circle{border-radius:50%}
+.c-av.chip.square{border-radius:5px}
+.c-av.mini{width:14px;height:14px;border-width:1px}
+.c-av.mini.empty{font:700 7px var(--body)}
+.c-av.mini.circle{border-radius:50%}
+.c-av.mini.square{border-radius:4px}
 .ce-avrow{display:flex;align-items:center;gap:12px}
 .ce-avctl{display:flex;flex-direction:column;gap:8px;min-width:0}
 .ce-avbtns{display:flex;gap:6px;flex-wrap:wrap}
@@ -545,6 +554,7 @@ body.connecting .vpinn{cursor:copy}
 /* аватар в реплике диалоговой ноды: рамка цвета персонажа */
 .dlg-av{width:18px;height:18px;flex:none;overflow:hidden;background:#1a1d23;border:1.5px solid currentColor;box-shadow:0 0 0 1px rgba(0,0,0,.35);align-self:center}
 .dlg-av img{width:100%;height:100%;object-fit:cover;display:block}
+.dlg-av.empty{display:flex;align-items:center;justify-content:center;font:700 9px var(--body);color:var(--tx3)}
 .dlg-av.circle{border-radius:50%}
 .dlg-av.square{border-radius:5px}
 .node.ex-2 .dlg-reply-row .dlg-av{margin-top:-1.5px}
@@ -562,16 +572,9 @@ body.connecting .vpinn{cursor:copy}
 .lock-ico{display:flex;justify-content:center;color:var(--acc)}
 .lock-card .inp{text-align:center}
 .lock-err{min-height:14px;font:600 11px var(--body);color:#cf6b5a}
-/* аватар в вариантах выбора реплик плеера */
-.pl-av.sm{width:18px;height:18px;margin-left:0}
-/* аватар говорящего слева от текста реплики в плеере */
-.pl-slideav{display:none;flex:none;width:52px;height:52px;margin-top:2px}
-.pl-slideav .pl-av{width:100%;height:100%;margin-left:0;border-width:1.5px}
-.pl-slideav .pl-av.circle{border-radius:50%}
-.pl-slideav .pl-av.square{border-radius:9px}
-.pl-box.has-av{display:flex;align-items:flex-start;gap:14px}
-.pl-box.has-av .pl-slideav{display:block}
-.pl-box.has-av .pl-text{flex:1;min-width:0}
+/* аватар говорящего в плеере: в рамке рядом с именем (np) и в вариантах выбора реплик (sm) */
+.pl-av.sm{width:18px;height:18px;margin-left:0;border-width:1.5px}
+.pl-av.sm.empty{font-size:9px}
 /* пароль проекта в модалке «Поделиться» */
 .share-pass{margin-top:12px;background:rgba(255,255,255,.03);border:1px solid #2e333c;border-radius:10px;padding:10px 12px}
 .sp-cap{font:600 9.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tx3);margin-bottom:5px}
@@ -917,8 +920,9 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-name{position:absolute;top:-16px;left:24px;display:flex;align-items:center;gap:8px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;white-space:nowrap}
 .pl-name.hidden{display:none}
 .pl-name .pl-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.pl-av{width:22px;height:22px;flex:none;overflow:hidden;background:#20242b;border:1px solid rgba(255,255,255,.45);box-shadow:0 0 0 1px rgba(0,0,0,.3);margin-left:-9px}
+.pl-av{width:24px;height:24px;flex:none;overflow:hidden;background:#20242b;border:2px solid rgba(12,14,17,.5);box-shadow:0 0 0 1px rgba(255,255,255,.28);margin-left:-7px}
 .pl-av img{width:100%;height:100%;object-fit:cover;display:block}
+.pl-av.empty{display:flex;align-items:center;justify-content:center;font:700 11px var(--body);letter-spacing:.5px;color:#e9ebee}
 .pl-av.circle{border-radius:50%}
 .pl-av.square{border-radius:6px}
 .pl-text{font:400 16.5px/1.65 var(--body);color:var(--tx);min-height:56px;white-space:pre-wrap;word-break:break-word}
@@ -1045,7 +1049,6 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="pl-choices" id="plChoices"></div>
       <div class="pl-box" id="plBox">
         <div class="pl-name hidden" id="plName"></div>
-        <div class="pl-slideav" id="plAv"></div>
         <div class="pl-text" id="plText"></div>
         <div class="pl-hint" id="plHint">клик — далее ▸</div>
       </div>
@@ -1429,12 +1432,12 @@ function charColor(id){
   return '#8b929c';
 }
 /* ═══ аватар персонажа: dataURL-картинка + форма (круг / квадрат с углами) ═══
-   показывается в списке (свёрнуто/развёрнуто) и в плеере у имени говорящего */
+   выводится везде, где есть персонажи; без аватара — рамка с первой буквой имени */
 function charAvShape(c){return (c&&c.avShape==='square')?'square':'circle';}
 function charInitial(c){var nm=String((c&&c.name)||'').trim();return nm?nm[0].toUpperCase():'?';}
 function charAvatarHtml(c,extra,title){
-  if(!c||!c.av)return '';
-  return '<span class="c-av '+charAvShape(c)+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'"'+(title?' title="'+title+'"':'')+'><img src="'+esc(c.av)+'" alt=""></span>';
+  if(!c)return '';
+  return '<span class="c-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'"'+(title?' title="'+title+'"':'')+'>'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
 /* файл → аватар: читаем картинку, центр-кроп в квадрат, ужимаем (192px, дальше 128px)
    до ≤60К символов dataURL, чтобы не раздувать localStorage/журнал правок */
@@ -2692,7 +2695,7 @@ function dlgTreeInner(n,ex){
     d.participants.forEach(function(pid){
       var name=charName(pid);
       var color=charColor(pid);
-      html+='<span class="dlg-participant" style="background:'+hexToRgba(color,0.18)+';color:'+color+'">'+esc(name)+'</span>';
+      html+='<span class="dlg-participant" style="background:'+hexToRgba(color,0.18)+';color:'+color+'">'+charAvatarHtml(charById(pid),'mini')+esc(name)+'</span>';
     });
     html+='</div>';
   }
@@ -2703,11 +2706,11 @@ function dlgTreeInner(n,ex){
   }
   return html;
 }
-/* аватар говорящего в реплике ноды: рамка — цвет персонажа; без аватара — цветная точка */
+/* аватар говорящего в реплике ноды: рамка — цвет персонажа; без аватара — рамка с первой буквой имени */
 function dlgNodeAvatar(cid,color){
   var c=charById(cid);
-  if(!c||!c.av)return '';
-  return '<span class="dlg-av '+charAvShape(c)+'" style="border-color:'+esc(color)+'" title="'+esc(c.name||'')+'"><img src="'+esc(c.av)+'" alt=""></span>';
+  if(!c)return '';
+  return '<span class="dlg-av '+charAvShape(c)+(c.av?'':' empty')+'" style="border-color:'+esc(color)+'" title="'+esc(c.name||'')+'">'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
 function dlgRenderReplies(replies,depth,nodeId){
 if(depth>=MAX_DLG_DEPTH||!replies.length)return '';
@@ -2718,7 +2721,7 @@ var speakerColor=r.speaker?charColor(r.speaker):'#8b929c';
 var speakerAv=r.speaker?dlgNodeAvatar(r.speaker,speakerColor):'';
 html+='<div class="dlg-item">';
 html+='<div class="dlg-reply-row" data-reply-id="'+esc(r.id)+'">';
-html+=speakerAv||'<span class="dot" style="background:'+esc(speakerColor)+';color:'+esc(speakerColor)+'"></span>';
+html+=speakerAv;
 html+='<span class="t"><span class="speaker" style="color:'+esc(speakerColor)+'">'+esc(speakerName)+':</span>'+esc(r.text||'')+'</span>';
 html+='<i class="dlg-reply-pin out" data-reply-id="'+esc(r.id)+'" title="Выход из реплики — тяните к элементу"></i>';
 html+='</div>';
@@ -4469,7 +4472,7 @@ function inspPartsHtml(n){
   var chips=ids.map(function(pid){
     var color=charColor(pid);
     return '<span class="dlg-chip" style="background:'+hexToRgba(color,0.15)+';color:'+color+';border-color:'+hexToRgba(color,0.55)+'">'+
-      '<span>'+esc(charName(pid))+'</span><span class="x" data-rm-p="'+esc(pid)+'" title="Убрать">'+ic('x',10)+'</span></span>';
+      charAvatarHtml(charById(pid),'chip')+'<span>'+esc(charName(pid))+'</span><span class="x" data-rm-p="'+esc(pid)+'" title="Убрать">'+ic('x',10)+'</span></span>';
   }).join('');
   var avail=charsList().filter(function(c){return ids.indexOf(c.id)<0;});
   var addOpts='<option value="">+ добавить участника…</option>';
@@ -4524,7 +4527,7 @@ function renderInspNode(){
       var name=charName(pid);
       var color=charColor(pid);
       partHtml+='<span class="dlg-chip" style="background:'+hexToRgba(color,0.15)+';color:'+color+';border-color:'+hexToRgba(color,0.55)+'">'+
-        '<span>'+esc(name)+'</span><span class="x" data-rm-p="'+esc(pid)+'" title="Убрать">'+ic('x',10)+'</span></span>';
+        charAvatarHtml(charById(pid),'chip')+'<span>'+esc(name)+'</span><span class="x" data-rm-p="'+esc(pid)+'" title="Убрать">'+ic('x',10)+'</span></span>';
     });
     var availChars=charsList().filter(function(c){return d.participants.indexOf(c.id)<0;});
     var addOpts='<option value="">+ добавить участника…</option>';
@@ -5141,9 +5144,7 @@ function renderCharsPane(){
     html+='<div class="v-item'+(open?' open':'')+'" data-cid="'+esc(c.id)+'">'+
       '<div class="v-row">'+
         '<label class="c-avpick" title="'+(c.av?'Сменить аватар':'Задать аватар — загрузить картинку')+'">'+
-          (c.av
-            ?charAvatarHtml(c,'row','Аватар персонажа')
-            :'<span class="c-dot" style="background:'+esc(c.color||'#9cb878')+'"></span>')+
+          charAvatarHtml(c,'row','Аватар персонажа')+
           '<input type="file" class="c-av-pick" accept="image/*" hidden>'+
         '</label>'+
         '<input class="inp v-name c-name" value="'+esc(c.name)+'" maxlength="60" title="Имя персонажа" placeholder="имя персонажа">'+
@@ -5174,9 +5175,7 @@ function charEditHtml(c){
   }).join('');
   return '<div class="v-edit">'+
     '<div class="ce-avrow">'+
-      (c.av
-        ?charAvatarHtml(c,'big','Аватар персонажа')
-        :'<span class="c-av empty big '+charAvShape(c)+'" style="border-color:'+esc(c.color||'#9cb878')+'" title="Аватар не задан">'+esc(charInitial(c))+'</span>')+
+      charAvatarHtml(c,'big','Аватар персонажа')+
       '<div class="ce-avctl">'+
         '<div class="ce-avbtns">'+
           '<label class="ce-av-up" title="Загрузить картинку — по центру обрежется в квадрат">Загрузить…<input type="file" class="ce-av-file" accept="image/*" hidden></label>'+
@@ -11457,12 +11456,10 @@ function plCastName(n){
   if(ps.length>1)nm+=' +'+(ps.length-1);
   return nm;
 }
-/* аватар для плашки ноды: только если участник ровно один и у него есть аватар */
+/* аватар для плашки ноды: первый участник — как и в имени; без аватара покажется заглушка с буквой */
 function plCastAv(n){
   var ps=(n.type==='dialog')?((n.dialog&&n.dialog.participants)||[]):(Array.isArray(n.participants)?n.participants:[]);
-  if(ps.length!==1)return null;
-  var c=charById(ps[0]);
-  return (c&&c.av)?c.id:null;
+  return ps.length?ps[0]:null;
 }
 function plChapterHtml(n){
   var vis=nodeVisual(n);
@@ -11585,13 +11582,10 @@ function plShowSlide(opts){
   plHideEnd();
   var box=$('#plBox');
   $('#plChapter').innerHTML=opts.chapter?plChapterHtml(opts.chapter):'';
-  /* аватар говорящего — крупно слева от текста реплики */
-  var avBig=opts.avCid?plSlideAvatar(opts.avCid):'';
-  var avBox=$('#plAv');
-  if(avBox){avBox.innerHTML=avBig;box.classList.toggle('has-av',!!avBig);}
+  /* аватар говорящего — в рамке рядом с именем персонажа (не в облаке реплики) */
   var nameEl=$('#plName');
   if(opts.name){
-    nameEl.innerHTML='<span class="pl-t">'+esc(opts.name)+'</span>';
+    nameEl.innerHTML=(opts.avCid?plSlideAvatar(opts.avCid,'np'):'')+'<span class="pl-t">'+esc(opts.name)+'</span>';
     nameEl.classList.remove('hidden');
   }
   else{nameEl.classList.add('hidden');nameEl.innerHTML='';}
@@ -11674,10 +11668,9 @@ function plGoNode(n,keepPath){
     if(rs.length>1){
       var bx=$('#plBox');
       bx.style.setProperty('--plc',nodeVisual(n).color);
-      var avClear=$('#plAv');if(avClear){avClear.innerHTML='';bx.classList.remove('has-av');}
       var chEl=$('#plChapter');if(chEl)chEl.innerHTML=plChapterHtml(n);
-      var nmEl=$('#plName'),nm2=plCastName(n);
-      if(nm2){nmEl.innerHTML='<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
+      var nmEl=$('#plName'),nm2=plCastName(n),avC0=plCastAv(n);
+      if(nm2){nmEl.innerHTML=(avC0?plSlideAvatar(avC0,'np'):'')+'<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
       else{nmEl.classList.add('hidden');nmEl.innerHTML='';}
       var txEl=$('#plText');if(txEl)txEl.innerHTML='';
       plShowDialogChoices(n,rs);return;
@@ -11707,11 +11700,13 @@ function plAfterVarnode(n,keepPath){
   if(PL.mode==='list'){plListJumpNext();return;}
   plShowEnd();
 }
-/* аватар говорящего в плашке имени плеера (и, с extra='sm', в списке выбора реплик) */
+/* аватар говорящего в плеере: np — плашка имени (тёмная рамка на цветном фоне), sm — варианты выбора реплик.
+   Выводится всегда: без аватара — заглушка с первой буквой имени */
 function plSlideAvatar(cid,extra){
   var c=charById(cid);
-  if(!c||!c.av)return '';
-  return '<span class="pl-av '+charAvShape(c)+(extra?' '+extra:'')+'"><img src="'+esc(c.av)+'" alt=""></span>';
+  if(!c)return '';
+  var st=(extra==='np')?'':' style="border-color:'+esc(c.color||'#9cb878')+'"';
+  return '<span class="pl-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'"'+st+'>'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
 function plShowReply(r,noHist){
   PL.replyId=r.id;PL.intro=false;
