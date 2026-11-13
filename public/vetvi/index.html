@@ -72,12 +72,13 @@ body.left-resizing{cursor:col-resize;user-select:none}
 @keyframes slideL{from{transform:translateX(-24px);opacity:0}}
 #right{width:302px;border-left:1px solid var(--line);animation:slideR .55s .08s cubic-bezier(.2,.8,.3,1) both;overflow-y:auto;padding:16px 16px 30px}
 @keyframes slideR{from{transform:translateX(24px);opacity:0}}
-.ltabs{display:flex;gap:4px;padding:10px 10px 0;border-bottom:1px solid var(--line);align-items:center}
-.ltab{flex:1;height:34px;background:none;border:none;border-bottom:2px solid transparent;color:var(--tx3);font:600 12.5px var(--body);letter-spacing:.4px;cursor:pointer;transition:.18s;border-radius:8px 8px 0 0}
+.ltabs{display:flex;gap:4px;padding:10px 10px 0;border-bottom:1px solid var(--line);align-items:center;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#2e333c transparent;flex:none}
+.ltabs::-webkit-scrollbar{height:4px}
+.ltabs::-webkit-scrollbar-thumb{background:#2e333c;border-radius:2px}
+.ltabs::-webkit-scrollbar-track{background:transparent}
+.ltab{flex:1;height:34px;min-width:max-content;padding:0 10px;background:none;border:none;border-bottom:2px solid transparent;color:var(--tx3);font:600 12.5px var(--body);letter-spacing:.4px;cursor:pointer;transition:.18s;border-radius:8px 8px 0 0}
 .ltab:hover{color:var(--tx2);background:rgba(255,255,255,.03)}
 .ltab.active{color:var(--tx);border-bottom-color:var(--acc);background:linear-gradient(rgba(226,165,78,.07),transparent)}
-.add-type{width:28px;height:28px;flex:none;margin:0 2px 5px 6px;border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--tx2);font:600 16px/1 var(--body);cursor:pointer;transition:all .25s;display:flex;align-items:center;justify-content:center}
-.add-type:hover{color:#221604;background:linear-gradient(180deg,#eab264,#d69637);border-color:#a97a2e;transform:translateY(-1px) rotate(90deg)}
 .tabpane{display:none;flex:1;overflow-y:auto;flex-direction:column}
 .tabpane.active{display:flex}
 .pal-hint{font-size:11px;color:var(--tx3);line-height:1.5;padding:12px 14px 2px}
@@ -372,6 +373,14 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .n-tags span{font:600 9.5px var(--mono);letter-spacing:.4px;color:var(--tx3);background:#232730;border:1px solid #303540;border-radius:6px;padding:2px 7px}
 /* ── переменные ── */
 #paneVars{padding:12px}
+#paneChars{padding:12px}
+/* свёрнутая карточка персонажа: крупнее, с аватаром */
+#paneChars .v-row{background:#14161a;border:1px solid #2b2f37;border-radius:11px;padding:7px 9px;min-height:50px;gap:9px}
+#paneChars .v-row .c-name{flex:1;min-width:0;background:transparent;border-color:transparent;height:36px;padding:0 6px}
+#paneChars .v-row .c-name:hover{border-color:#2b2f37}
+#paneChars .v-row .c-dot{width:24px;height:24px;border-radius:8px}
+.c-av.row{width:36px;height:36px}
+.c-av.row.empty{font-size:15px}
 .v-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
 .v-head span{font:600 12.5px var(--body);color:var(--tx2);letter-spacing:.3px}
 .v-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
@@ -533,6 +542,12 @@ body.connecting .vpinn{cursor:copy}
 /* аватар: выбор файла прямо из строки списка и по ссылке из редактора */
 .c-avpick{display:inline-flex;flex:none;cursor:pointer;position:relative}
 .c-avpick:hover .c-av,.c-avpick:hover .c-dot{box-shadow:0 0 0 2px rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.35)}
+/* аватар в реплике диалоговой ноды: рамка цвета персонажа */
+.dlg-av{width:18px;height:18px;flex:none;overflow:hidden;background:#1a1d23;border:1.5px solid currentColor;box-shadow:0 0 0 1px rgba(0,0,0,.35);align-self:center}
+.dlg-av img{width:100%;height:100%;object-fit:cover;display:block}
+.dlg-av.circle{border-radius:50%}
+.dlg-av.square{border-radius:5px}
+.node.ex-2 .dlg-reply-row .dlg-av{margin-top:-1.5px}
 .ce-avurl{display:flex;gap:6px}
 .ce-avurl .inp{flex:1;min-width:0;font-size:11.5px;height:26px;padding:2px 8px}
 .ce-av-apply{flex:none;height:26px;padding:0 10px;background:#262b33;border:1px solid #363b45;border-radius:7px;color:var(--tx2);font:600 11px var(--body);cursor:pointer;transition:.15s}
@@ -549,6 +564,14 @@ body.connecting .vpinn{cursor:copy}
 .lock-err{min-height:14px;font:600 11px var(--body);color:#cf6b5a}
 /* аватар в вариантах выбора реплик плеера */
 .pl-av.sm{width:18px;height:18px;margin-left:0}
+/* аватар говорящего слева от текста реплики в плеере */
+.pl-slideav{display:none;flex:none;width:52px;height:52px;margin-top:2px}
+.pl-slideav .pl-av{width:100%;height:100%;margin-left:0;border-width:1.5px}
+.pl-slideav .pl-av.circle{border-radius:50%}
+.pl-slideav .pl-av.square{border-radius:9px}
+.pl-box.has-av{display:flex;align-items:flex-start;gap:14px}
+.pl-box.has-av .pl-slideav{display:block}
+.pl-box.has-av .pl-text{flex:1;min-width:0}
 /* пароль проекта в модалке «Поделиться» */
 .share-pass{margin-top:12px;background:rgba(255,255,255,.03);border:1px solid #2e333c;border-radius:10px;padding:10px 12px}
 .sp-cap{font:600 9.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tx3);margin-bottom:5px}
@@ -963,9 +986,11 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <button class="ltab" data-t="list">Обзор</button>
       <button class="ltab" data-t="vars">Переменные</button>
       <button class="ltab" data-t="chars">Персонажи</button>
-      <button class="add-type" id="bAddType" title="Создать свой тип элемента">+</button>
     </nav>
-    <div class="tabpane active" id="panePal"><div id="palList"></div></div>
+    <div class="tabpane active" id="panePal">
+      <div class="v-head" style="margin:2px 10px 8px"><span>Элементы</span><button class="btn primary" id="bAddType" title="Создать свой тип элемента">+ Свой тип</button></div>
+      <div id="palList"></div>
+    </div>
     <div class="tabpane" id="paneList">
       <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sQ" placeholder="Поиск по узлам и группам…"></div>
       <div id="nodeList"></div>
@@ -1020,6 +1045,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="pl-choices" id="plChoices"></div>
       <div class="pl-box" id="plBox">
         <div class="pl-name hidden" id="plName"></div>
+        <div class="pl-slideav" id="plAv"></div>
         <div class="pl-text" id="plText"></div>
         <div class="pl-hint" id="plHint">клик — далее ▸</div>
       </div>
@@ -2677,15 +2703,22 @@ function dlgTreeInner(n,ex){
   }
   return html;
 }
+/* аватар говорящего в реплике ноды: рамка — цвет персонажа; без аватара — цветная точка */
+function dlgNodeAvatar(cid,color){
+  var c=charById(cid);
+  if(!c||!c.av)return '';
+  return '<span class="dlg-av '+charAvShape(c)+'" style="border-color:'+esc(color)+'" title="'+esc(c.name||'')+'"><img src="'+esc(c.av)+'" alt=""></span>';
+}
 function dlgRenderReplies(replies,depth,nodeId){
 if(depth>=MAX_DLG_DEPTH||!replies.length)return '';
 var html='';
 replies.forEach(function(r){
 var speakerName=r.speaker?charName(r.speaker):'?';
 var speakerColor=r.speaker?charColor(r.speaker):'#8b929c';
+var speakerAv=r.speaker?dlgNodeAvatar(r.speaker,speakerColor):'';
 html+='<div class="dlg-item">';
 html+='<div class="dlg-reply-row" data-reply-id="'+esc(r.id)+'">';
-html+='<span class="dot" style="background:'+esc(speakerColor)+';color:'+esc(speakerColor)+'"></span>';
+html+=speakerAv||'<span class="dot" style="background:'+esc(speakerColor)+';color:'+esc(speakerColor)+'"></span>';
 html+='<span class="t"><span class="speaker" style="color:'+esc(speakerColor)+'">'+esc(speakerName)+':</span>'+esc(r.text||'')+'</span>';
 html+='<i class="dlg-reply-pin out" data-reply-id="'+esc(r.id)+'" title="Выход из реплики — тяните к элементу"></i>';
 html+='</div>';
@@ -5109,7 +5142,7 @@ function renderCharsPane(){
       '<div class="v-row">'+
         '<label class="c-avpick" title="'+(c.av?'Сменить аватар':'Задать аватар — загрузить картинку')+'">'+
           (c.av
-            ?charAvatarHtml(c)
+            ?charAvatarHtml(c,'row','Аватар персонажа')
             :'<span class="c-dot" style="background:'+esc(c.color||'#9cb878')+'"></span>')+
           '<input type="file" class="c-av-pick" accept="image/*" hidden>'+
         '</label>'+
@@ -5266,7 +5299,7 @@ function bindCharsRows(){
         probe.onload=function(){
           uap.disabled=false;
           discrete(function(){c.av=u;if(c.avShape!=='square')c.avShape='circle';},'Аватар персонажа');
-          renderCharsPane();
+          charAvatarRerender();
           toast('Аватар по ссылке установлен');
         };
         probe.onerror=function(){uap.disabled=false;toast('По этой ссылке картинка не открылась','err');};
@@ -5279,7 +5312,7 @@ function bindCharsRows(){
     var avRm=item.querySelector('.ce-av-rm');
     if(avRm)avRm.onclick=function(){
       discrete(function(){c.av=null;},'Аватар персонажа');
-      renderCharsPane();
+      charAvatarRerender();
       toast('Аватар убран');
     };
     Array.prototype.forEach.call(item.querySelectorAll('.shp'),function(sb){
@@ -5287,16 +5320,22 @@ function bindCharsRows(){
         var sh=(sb.dataset.sh==='square')?'square':'circle';
         if(charAvShape(c)===sh)return;
         discrete(function(){c.avShape=sh;},'Форма аватара персонажа');
-        renderCharsPane();
+        charAvatarRerender();
       };
     });
   });
+}
+/* аватар или его форма изменились: перерисовать список персонажей и холст
+   (аватары говорящих теперь показываются в репликах диалоговых нод) */
+function charAvatarRerender(){
+  renderCharsPane();
+  renderAll();
 }
 /* файл → аватар (общая для строки списка и редактора) */
 function charApplyFile(f,c){
   fileToAvatar(f,function(url){
     discrete(function(){c.av=url;if(c.avShape!=='square')c.avShape='circle';},'Аватар персонажа');
-    renderCharsPane();
+    charAvatarRerender();
     toast('Аватар обновлён');
   });
 }
@@ -11546,9 +11585,13 @@ function plShowSlide(opts){
   plHideEnd();
   var box=$('#plBox');
   $('#plChapter').innerHTML=opts.chapter?plChapterHtml(opts.chapter):'';
+  /* аватар говорящего — крупно слева от текста реплики */
+  var avBig=opts.avCid?plSlideAvatar(opts.avCid):'';
+  var avBox=$('#plAv');
+  if(avBox){avBox.innerHTML=avBig;box.classList.toggle('has-av',!!avBig);}
   var nameEl=$('#plName');
   if(opts.name){
-    nameEl.innerHTML=(opts.avCid?plSlideAvatar(opts.avCid):'')+'<span class="pl-t">'+esc(opts.name)+'</span>';
+    nameEl.innerHTML='<span class="pl-t">'+esc(opts.name)+'</span>';
     nameEl.classList.remove('hidden');
   }
   else{nameEl.classList.add('hidden');nameEl.innerHTML='';}
@@ -11631,9 +11674,10 @@ function plGoNode(n,keepPath){
     if(rs.length>1){
       var bx=$('#plBox');
       bx.style.setProperty('--plc',nodeVisual(n).color);
+      var avClear=$('#plAv');if(avClear){avClear.innerHTML='';bx.classList.remove('has-av');}
       var chEl=$('#plChapter');if(chEl)chEl.innerHTML=plChapterHtml(n);
-      var nmEl=$('#plName'),nm2=plCastName(n),av2=plCastAv(n);
-      if(nm2){nmEl.innerHTML=(av2?plSlideAvatar(av2):'')+'<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
+      var nmEl=$('#plName'),nm2=plCastName(n);
+      if(nm2){nmEl.innerHTML='<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
       else{nmEl.classList.add('hidden');nmEl.innerHTML='';}
       var txEl=$('#plText');if(txEl)txEl.innerHTML='';
       plShowDialogChoices(n,rs);return;
