@@ -76,7 +76,8 @@ body.left-resizing{cursor:col-resize;user-select:none}
 .ltabs::-webkit-scrollbar{height:4px}
 .ltabs::-webkit-scrollbar-thumb{background:#2e333c;border-radius:2px}
 .ltabs::-webkit-scrollbar-track{background:transparent}
-.ltab{flex:1;height:34px;min-width:max-content;padding:0 10px;background:none;border:none;border-bottom:2px solid transparent;color:var(--tx3);font:600 12.5px var(--body);letter-spacing:.4px;cursor:pointer;transition:.18s;border-radius:8px 8px 0 0}
+.ltab{flex:1;height:34px;min-width:max-content;padding:0 10px;background:none;border:none;border-bottom:2px solid transparent;color:var(--tx3);font:600 12.5px var(--body);letter-spacing:.4px;cursor:pointer;transition:.18s;border-radius:8px 8px 0 0;display:flex;align-items:center;justify-content:center}
+.ltab .lt-ic{display:inline-flex}
 .ltab:hover{color:var(--tx2);background:rgba(255,255,255,.03)}
 .ltab.active{color:var(--tx);border-bottom-color:var(--acc);background:linear-gradient(rgba(226,165,78,.07),transparent)}
 .tabpane{display:none;flex:1;overflow-y:auto;flex-direction:column}
@@ -108,6 +109,8 @@ body.left-resizing{cursor:col-resize;user-select:none}
 .mini-btn.eye{background:none}
 .mini-btn.eye:hover{color:var(--acc2);background:#262b33}
 .mini-btn.eye.off{color:#5a5f69}
+.mini-btn.dlg-loop-tog.on{color:var(--acc);background:rgba(226,165,78,.16);box-shadow:inset 0 0 0 1px rgba(226,165,78,.45)}
+.mini-btn.dlg-loop-tog.on:hover{color:var(--acc2)}
 .pal-sep{display:flex;align-items:center;gap:8px;margin:20px 12px 2px;color:var(--tx3);font:600 9.5px var(--mono);letter-spacing:1.8px;text-transform:uppercase}
 .pal-sep::before,.pal-sep::after{content:'';height:1px;background:var(--line);flex:1}
 .pal-group{display:flex;align-items:center;gap:7px;font:600 10px var(--mono);color:var(--tx3);letter-spacing:1px;margin:14px 14px 0;text-transform:uppercase}
@@ -467,6 +470,11 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .dlg-reply-pin.out{right:-5px;cursor:grab}
 .dlg-reply-pin.out.live{opacity:1;border-color:var(--acc);background:#2a2113;box-shadow:0 0 6px rgba(226,165,78,.5)}
 .dlg-reply-pin.out:hover{border-color:var(--acc2);background:#2a2113;transform:scale(1.3);box-shadow:0 0 10px rgba(226,165,78,.6)}
+/* переключатель «повтор реплики» на ноде */
+.dlg-loop{flex:none;width:17px;height:17px;border:none;border-radius:5px;background:transparent;color:#5a6069;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:.15s}
+.dlg-loop:hover{color:var(--tx);background:rgba(255,255,255,.08)}
+.dlg-loop.on{color:var(--acc);background:rgba(226,165,78,.16);box-shadow:inset 0 0 0 1px rgba(226,165,78,.45)}
+.node.ex-2 .dlg-reply-row .dlg-loop{margin-top:4px}
 /* ── исходы развилки (пины на узле) ── */
 .n-outs{display:flex;flex-direction:column;gap:3px;margin-top:7px}
 .node.ex-0 .n-outs{display:none}
@@ -537,7 +545,7 @@ body.connecting .vpinn{cursor:copy}
 .ce-avrow{display:flex;align-items:center;gap:12px}
 .ce-avctl{display:flex;flex-direction:column;gap:8px;min-width:0}
 .ce-avbtns{display:flex;gap:6px;flex-wrap:wrap}
-.ce-av-up,.ce-av-rm{display:inline-flex;align-items:center;height:26px;padding:0 10px;background:#262b33;border:1px solid #363b45;border-radius:7px;color:var(--tx2);font:600 11px var(--body);cursor:pointer;transition:.15s}
+.ce-av-up,.ce-av-rm,.ce-av-crop{display:inline-flex;align-items:center;height:26px;padding:0 10px;background:#262b33;border:1px solid #363b45;border-radius:7px;color:var(--tx2);font:600 11px var(--body);cursor:pointer;transition:.15s}
 .ce-av-up:hover{color:var(--tx);border-color:#4a515d}
 .ce-av-rm:hover{color:#cf6d4f;border-color:#5a3a33;background:#33272a}
 .ce-av-shape{display:inline-flex;border:1px solid #2e333c;border-radius:8px;overflow:hidden;width:max-content}
@@ -572,7 +580,7 @@ body.connecting .vpinn{cursor:copy}
 .lock-ico{display:flex;justify-content:center;color:var(--acc)}
 .lock-card .inp{text-align:center}
 .lock-err{min-height:14px;font:600 11px var(--body);color:#cf6b5a}
-/* аватар говорящего в плеере: в рамке рядом с именем (np) и в вариантах выбора реплик (sm) */
+/* аватар говорящего в плеере: слева от блока реплики (side) и в вариантах выбора реплик (sm) */
 .pl-av.sm{width:18px;height:18px;margin-left:0;border-width:1.5px}
 .pl-av.sm.empty{font-size:9px}
 /* пароль проекта в модалке «Поделиться» */
@@ -615,6 +623,19 @@ body.connecting .vpinn{cursor:copy}
 .dlg-reply-row-ed textarea{flex:1;min-height:32px;max-height:120px;resize:vertical;font-size:11.5px;line-height:1.45;padding:5px 8px;background:#1a1d22;border:1px solid var(--line2);border-radius:5px;color:var(--tx);font-family:var(--body)}
 .dlg-reply-row-ed textarea:focus{outline:none;border-color:var(--acc)}
 .dlg-reply-acts{display:flex;gap:4px;justify-content:flex-end;margin-top:3px}
+/* ═══ кадрирование аватара ═══ */
+.crop-wrap{position:fixed;inset:0;z-index:140;display:none;align-items:center;justify-content:center;background:rgba(6,7,9,.72)}
+.crop-wrap.show{display:flex}
+.crop-card{width:min(480px,94vw);background:#1b1e24;border:1px solid #303540;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.crop-cap{font:700 14px var(--body);color:var(--tx)}
+.crop-stage{position:relative;width:100%;height:300px;background:#121419;border:1px solid #2e333c;border-radius:10px;overflow:hidden;cursor:grab;touch-action:none}
+.crop-stage:active{cursor:grabbing}
+.crop-stage img{position:absolute;max-width:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
+.crop-frame{position:absolute;border:2px solid var(--acc);border-radius:10px;box-shadow:0 0 0 9999px rgba(6,7,9,.62);pointer-events:none}
+.crop-zoom{display:flex;align-items:center;gap:10px;font:600 10px var(--mono);color:var(--tx3);letter-spacing:1px;text-transform:uppercase}
+.crop-zoom input{flex:1;accent-color:var(--acc)}
+.crop-hint{font:400 11px var(--body);color:var(--tx3);line-height:1.45}
+.crop-acts{display:flex;gap:8px;justify-content:flex-end}
 .dlg-reply-acts .mini-btn{width:20px;height:20px}
 .dlg-children-ed{margin-left:12px;padding-left:6px;border-left:1px dashed var(--line)}
 .dlg-drag{cursor:grab;margin-right:auto}
@@ -890,7 +911,8 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 #player.show{display:flex;animation:plIn .4s ease}
 @keyframes plIn{from{opacity:0}}
 #player .pl-vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(85% 70% at 50% 42%,transparent 40%,rgba(0,0,0,.42) 100%)}
-.pl-top{position:absolute;top:14px;left:0;right:0;display:flex;align-items:center;gap:10px;padding:0 18px;z-index:6}
+.pl-top{position:absolute;top:14px;left:0;right:0;display:flex;align-items:center;gap:10px;padding:0 18px;z-index:6;pointer-events:none}
+.pl-top>*{pointer-events:auto}
 .pl-path{display:flex;align-items:center;gap:7px;font:500 11px var(--mono);color:var(--tx3);white-space:nowrap;overflow:hidden;max-width:52vw}
 .pl-path b{color:var(--tx2);font-weight:600}
 .pl-path .sep{color:#3d434f}
@@ -901,12 +923,20 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-btn svg{width:13px;height:13px}
 .pl-btn.accent{border-color:rgba(226,165,78,.45);color:var(--acc)}
 .pl-btn.accent:hover{background:rgba(226,165,78,.12)}
-.pl-chapter{position:absolute;top:58px;left:0;right:0;display:flex;justify-content:center;z-index:4;pointer-events:none}
+.pl-chapter{display:flex;justify-content:center;z-index:4;pointer-events:none}
 .pl-chip{display:inline-flex;align-items:center;gap:8px;max-width:80vw;padding:6px 15px;border-radius:999px;background:rgba(13,15,19,.78);border:1px solid #2c313b;font:600 10.5px var(--mono);letter-spacing:1.6px;text-transform:uppercase;color:var(--tx2);backdrop-filter:blur(4px)}
 .pl-chip .dot{width:8px;height:8px;border-radius:50%;flex:none}
 .pl-chip .ttl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:1px}
 .pl-body{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;z-index:3}
-.pl-wrap{width:min(940px,94vw);display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 0 44px}
+.pl-wrap{width:min(940px,94vw);display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 0 34px}
+.pl-row{display:flex;align-items:center;gap:16px;width:100%}
+.pl-side{width:64px;height:64px;flex:none;display:none;align-self:flex-end;margin-bottom:14px}
+.pl-row.has-av .pl-side{display:block}
+.pl-side .pl-av{width:100%;height:100%;margin-left:0;border-width:2px}
+.pl-side .pl-av.circle{border-radius:50%}
+.pl-side .pl-av.square{border-radius:12px}
+.pl-side .pl-av.empty{font-size:26px}
+.pl-actions{display:flex;justify-content:center;align-items:center;gap:10px}
 .pl-choices{display:none;flex-direction:column;gap:9px;width:min(620px,92vw);margin-bottom:4px}
 .pl-choice{display:flex;align-items:center;gap:12px;padding:12px 18px;border-radius:12px;border:1px solid #343b47;background:rgba(20,23,29,.92);color:var(--tx);font:500 14.5px var(--body);text-align:left;cursor:pointer;transition:all .16s;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
 .pl-choice:nth-child(2){animation-delay:.05s}.pl-choice:nth-child(3){animation-delay:.1s}.pl-choice:nth-child(4){animation-delay:.15s}.pl-choice:nth-child(5){animation-delay:.2s}
@@ -915,12 +945,12 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-choice .num{font:600 10px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-radius:5px;padding:2px 6px;flex:none}
 .pl-choice:hover .num{color:var(--plc,#e2a54e);border-color:var(--plc,#e2a54e)}
 .pl-choice .lbl{flex:1}
-.pl-box{position:relative;width:100%;background:rgba(15,17,22,.94);border:1px solid #2c313b;border-radius:16px;padding:24px 28px 30px;min-height:118px;box-shadow:0 26px 70px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+.pl-box{position:relative;flex:1;min-width:0;background:rgba(15,17,22,.94);border:1px solid #2c313b;border-radius:16px;padding:24px 28px 30px;min-height:118px;box-shadow:0 26px 70px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
 .pl-box::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:16px 16px 0 0;background:var(--plc,#e2a54e);opacity:.85}
 .pl-name{position:absolute;top:-16px;left:24px;display:flex;align-items:center;gap:8px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;white-space:nowrap}
 .pl-name.hidden{display:none}
 .pl-name .pl-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.pl-av{width:24px;height:24px;flex:none;overflow:hidden;background:#20242b;border:2px solid rgba(12,14,17,.5);box-shadow:0 0 0 1px rgba(255,255,255,.28);margin-left:-7px}
+.pl-av{display:inline-block;vertical-align:middle;width:24px;height:24px;flex:none;overflow:hidden;background:#20242b;border:2px solid rgba(12,14,17,.5);box-shadow:0 0 0 1px rgba(255,255,255,.28);margin-left:-7px}
 .pl-av img{width:100%;height:100%;object-fit:cover;display:block}
 .pl-av.empty{display:flex;align-items:center;justify-content:center;font:700 11px var(--body);letter-spacing:.5px;color:#e9ebee}
 .pl-av.circle{border-radius:50%}
@@ -986,10 +1016,10 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <div id="layout">
   <aside id="left">
     <nav class="ltabs">
-      <button class="ltab active" data-t="pal">Элементы</button>
-      <button class="ltab" data-t="list">Обзор</button>
-      <button class="ltab" data-t="vars">Переменные</button>
-      <button class="ltab" data-t="chars">Персонажи</button>
+      <button class="ltab active" data-t="pal" title="Элементы"><span class="lt-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span></button>
+      <button class="ltab" data-t="list" title="Обзор"><span class="lt-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.1"/><circle cx="3.7" cy="12" r="1.1"/><circle cx="3.7" cy="18" r="1.1"/></svg></span></button>
+      <button class="ltab" data-t="vars" title="Переменные"><span class="lt-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/></svg></span></button>
+      <button class="ltab" data-t="chars" title="Персонажи"><span class="lt-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c1.1-3.4 3.9-5.2 7.2-5.2s6.1 1.8 7.2 5.2"/></svg></span></button>
     </nav>
     <div class="tabpane active" id="panePal">
       <div class="v-head" style="margin:2px 10px 8px"><span>Элементы</span><button class="btn primary" id="bAddType" title="Создать свой тип элемента">+ Свой тип</button></div>
@@ -1035,22 +1065,26 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <div class="pl-vig"></div>
   <div class="pl-top">
     <div class="pl-path" id="plPath"></div>
-    <div class="spacer"></div>
-    <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
-    <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
-    <button class="pl-btn" id="plShowBtn" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
-    <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
   </div>
-  <div class="pl-chapter" id="plChapter"></div>
   <div class="pl-vars" id="plVars"></div>
   <div class="pl-varflash" id="plVarFlash"></div>
   <div class="pl-body">
     <div class="pl-wrap">
       <div class="pl-choices" id="plChoices"></div>
-      <div class="pl-box" id="plBox">
-        <div class="pl-name hidden" id="plName"></div>
-        <div class="pl-text" id="plText"></div>
-        <div class="pl-hint" id="plHint">клик — далее ▸</div>
+      <div class="pl-chapter" id="plChapter"></div>
+      <div class="pl-row" id="plRow">
+        <div class="pl-side" id="plAv"></div>
+        <div class="pl-box" id="plBox">
+          <div class="pl-name hidden" id="plName"></div>
+          <div class="pl-text" id="plText"></div>
+          <div class="pl-hint" id="plHint">клик — далее ▸</div>
+        </div>
+      </div>
+      <div class="pl-actions">
+        <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
+        <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+        <button class="pl-btn" id="plShowBtn" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
+        <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
       </div>
     </div>
   </div>
@@ -1085,6 +1119,18 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     </div>
     <div class="dlg-modal-body" id="dlgModalBody"></div>
     <div class="dlg-modal-foot"><button class="btn" id="dlgModalDone">Готово</button></div>
+  </div>
+</div>
+<div id="cropWrap" class="crop-wrap">
+  <div class="crop-card">
+    <div class="crop-cap">Кадрирование аватара</div>
+    <div class="crop-stage" id="cropStage">
+      <img id="cropImg" alt="исходник аватара">
+      <div class="crop-frame" id="cropFrame"></div>
+    </div>
+    <div class="crop-zoom"><span>масштаб</span><input type="range" id="cropZoom" min="100" max="400" step="10" value="100"><button class="btn" id="cropFit" title="Вернуть исходный вид">Сброс</button></div>
+    <div class="crop-hint">Тяните картинку, чтобы выбрать область в рамке. В рамку попадёт квадратная область — она станет аватаром.</div>
+    <div class="crop-acts"><button class="btn" id="cropCancel">Отмена</button><button class="btn primary" id="cropApply">Применить</button></div>
   </div>
 </div>
 <div id="dstWin" class="dst-win">
@@ -1211,7 +1257,9 @@ var ICONS={
   alignV:'<path d="M12 2v20"/><rect x="8" y="4" width="8" height="4" rx="1"/><rect x="8" y="10" width="8" height="4" rx="1"/><rect x="8" y="16" width="8" height="4" rx="1"/>',
   grip:'<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>',
   corner:'<path d="M5 5v4.6a3.9 3.9 0 0 0 3.9 3.9H19"/><path d="m15.5 9.5 3.5 3.5-3.5 3.5"/>',
-  plus:'<path d="M12 5v14M5 12h14"/>'
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  repeat:'<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 12V9a3 3 0 0 1 3-3h14"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 12v3a3 3 0 0 1-3 3h-14"/>',
+  action:'<path d="M9 11V5.2a1.4 1.4 0 0 1 2.8 0V11"/><path d="M11.8 10V8.6a1.3 1.3 0 0 1 2.6 0V11"/><path d="M14.4 10.6V9.8a1.3 1.3 0 0 1 2.6 0v4.7c0 3.6-2.2 5.5-5.5 5.5-2.6 0-3.9-.9-5-2.8L4.6 13.6a1.3 1.3 0 0 1 2-1.6L9 14"/>'
 };
 var EXTRA_ICONS={
   play:'<path d="M7.5 5.5v13l11-6.5z"/><path d="M4.5 5.5v13"/>',
@@ -1281,6 +1329,7 @@ var TYPES={
   quest:{name:'Квест',color:'#cf6d4f',icon:'quest'},
   dialog:{name:'Диалог',color:'#cbbd92',icon:'dialog'},
   skill:{name:'Навык',color:'#7fb5a2',icon:'skill'},
+  action:{name:'Действие',color:'#c9857a',icon:'action'},
   branch:{name:'Развилка',color:'#d6c96a',icon:'branch'},
   varnode:{name:'Переменная',color:'#b7b26a',icon:'variable'},
   event:{name:'Событие',color:'#aab1bb',icon:'event'},
@@ -1439,11 +1488,34 @@ function charAvatarHtml(c,extra,title){
   if(!c)return '';
   return '<span class="c-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'"'+(title?' title="'+title+'"':'')+'>'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
-/* файл → аватар: читаем картинку, центр-кроп в квадрат, ужимаем (192px, дальше 128px)
+/* файл → аватар: читаем картинку, кадрируем в модалке (рамка-квадрат), ужимаем (192px, дальше 128px)
    до ≤60К символов dataURL, чтобы не раздувать localStorage/журнал правок */
 var AV_MAXLEN=60000;
-function fileToAvatar(file,cb){
+/* квадрат из исходника → сжатый dataURL аватара (общий для загрузки и перекадрирования) */
+function avCompressCrop(img,sx,sy,side,cb){
+  try{
+    var w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
+    if(!w||!h){toast('Не удалось прочитать изображение','warn');return;}
+    sx=clamp(sx,0,w-8);sy=clamp(sy,0,h-8);
+    side=clamp(side,8,Math.min(w-sx,h-sy));
+    var build=function(S,q){
+      var cv=document.createElement('canvas');cv.width=S;cv.height=S;
+      var ctx=cv.getContext('2d');
+      ctx.fillStyle='#20242b';ctx.fillRect(0,0,S,S);
+      ctx.drawImage(img,sx,sy,side,side,0,0,S,S);
+      var url=cv.toDataURL('image/webp',q);
+      if(url.length>AV_MAXLEN)url=cv.toDataURL('image/jpeg',q);
+      return url;
+    };
+    var url=build(192,0.85);
+    if(url.length>AV_MAXLEN)url=build(128,0.8);
+    if(!/^data:image\//.test(url)||url.length>AV_MAXLEN){toast('Картинка слишком велика для аватара','warn');return;}
+    cb(url);
+  }catch(e){toast('Не удалось обработать изображение (возможно, запрет CORS по ссылке)','warn');}
+}
+function fileToAvatar(file,cb,opts){
   if(!file||!/^image\//.test(file.type||'')){toast('Нужен файл изображения','warn');return;}
+  var useCrop=!(opts&&opts.noCrop);
   var fr=new FileReader();
   fr.onload=function(){
     var img=new Image();
@@ -1451,20 +1523,9 @@ function fileToAvatar(file,cb){
       try{
         var w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
         if(!w||!h){toast('Не удалось прочитать изображение','warn');return;}
+        if(useCrop){openAvatarCrop(String(fr.result),cb);return;}
         var side=Math.min(w,h),sx=(w-side)/2,sy=(h-side)/2;
-        var build=function(S,q){
-          var cv=document.createElement('canvas');cv.width=S;cv.height=S;
-          var ctx=cv.getContext('2d');
-          ctx.fillStyle='#20242b';ctx.fillRect(0,0,S,S);
-          ctx.drawImage(img,sx,sy,side,side,0,0,S,S);
-          var url=cv.toDataURL('image/webp',q);
-          if(url.length>AV_MAXLEN)url=cv.toDataURL('image/jpeg',q);
-          return url;
-        };
-        var url=build(192,0.85);
-        if(url.length>AV_MAXLEN)url=build(128,0.8);
-        if(!/^data:image\//.test(url)||url.length>AV_MAXLEN){toast('Картинка слишком велика для аватара','warn');return;}
-        cb(url);
+        avCompressCrop(img,sx,sy,side,cb);
       }catch(e){toast('Не удалось обработать изображение','warn');}
     };
     img.onerror=function(){toast('Не удалось прочитать изображение','warn');};
@@ -1473,6 +1534,121 @@ function fileToAvatar(file,cb){
   fr.onerror=function(){toast('Не удалось прочитать файл','warn');};
   fr.readAsDataURL(file);
 }
+/* ═══ кадрирование аватара: модалка с квадратной рамкой (тянуть картинку, слайдер масштаба) ═══ */
+var cropS=null;
+function openAvatarCrop(src,cb){
+  var wrap=$('#cropWrap');if(!wrap)return;
+  var img=new Image(),done=false;
+  if(/^https?:\/\//i.test(src))img.crossOrigin='anonymous';
+  img.onload=function(){
+    if(done)return;done=true;
+    var iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;
+    if(!iw||!ih){toast('Не удалось прочитать изображение','warn');return;}
+    var stage=$('#cropStage'),imgEl=$('#cropImg'),fr=$('#cropFrame'),sl=$('#cropZoom');
+    if(!stage||!imgEl||!fr)return;
+    imgEl.src=src;
+    wrap.classList.add('show');
+    var stW=stage.clientWidth||stage.offsetWidth,stH=stage.clientHeight||stage.offsetHeight;
+    var side=Math.max(80,Math.floor(Math.min(stW,stH))-56);
+    var fx=Math.floor((stW-side)/2),fy=Math.floor((stH-side)/2);
+    fr.style.left=fx+'px';fr.style.top=fy+'px';fr.style.width=side+'px';fr.style.height=side+'px';
+    /* начальный масштаб: картинка целиком покрывает рамку (центр-кроп по умолчанию) */
+    var base=Math.max(side/iw,side/ih);
+    cropS={img:img,iw:iw,ih:ih,src:src,cb:cb,fx:fx,fy:fy,side:side,base:base,zoom:1,drag:null,
+      dx:fx+(side-iw*base)/2,dy:fy+(side-ih*base)/2};
+    if(sl)sl.value=100;
+    cropApplyView();
+  };
+  img.onerror=function(){done=true;toast('Картинка не открылась — кадрирование недоступно','warn');};
+  img.src=src;
+}
+function cropApplyView(){
+  if(!cropS)return;
+  var imgEl=$('#cropImg');
+  if(!imgEl)return;
+  var scale=cropS.base*cropS.zoom;
+  var dw=cropS.iw*scale,dh=cropS.ih*scale;
+  /* рамка всегда внутри картинки */
+  var loX=cropS.fx+cropS.side-dw,loY=cropS.fy+cropS.side-dh;
+  cropS.dx=clamp(cropS.dx,Math.min(loX,cropS.fx),cropS.fx);
+  cropS.dy=clamp(cropS.dy,Math.min(loY,cropS.fy),cropS.fy);
+  imgEl.style.width=dw+'px';imgEl.style.height=dh+'px';
+  imgEl.style.left=cropS.dx+'px';imgEl.style.top=cropS.dy+'px';
+}
+function cropSetZoom(z){
+  if(!cropS)return;
+  z=clamp(z,1,4);
+  var s0=cropS.base*cropS.zoom,s1=cropS.base*z;
+  if(s0<=0){cropS.zoom=z;cropApplyView();return;}
+  var cx=cropS.fx+cropS.side/2,cy=cropS.fy+cropS.side/2;
+  /* точка картинки под центром рамки сохраняется при зуме */
+  var px=(cx-cropS.dx)/s0,py=(cy-cropS.dy)/s0;
+  cropS.zoom=z;
+  cropS.dx=cx-px*s1;cropS.dy=cy-py*s1;
+  cropApplyView();
+}
+function closeAvatarCrop(){
+  var wrap=$('#cropWrap');
+  if(wrap)wrap.classList.remove('show');
+  var im=$('#cropImg');
+  if(im)im.removeAttribute('src');
+  cropS=null;
+}
+function cropApply(){
+  if(!cropS)return;
+  var scale=cropS.base*cropS.zoom;
+  var sx=(cropS.fx-cropS.dx)/scale,sy=(cropS.fy-cropS.dy)/scale,side=cropS.side/scale;
+  var img=cropS.img,cb=cropS.cb;
+  avCompressCrop(img,sx,sy,side,function(url){closeAvatarCrop();cb(url);});
+}
+(function(){
+  var stage=$('#cropStage');
+  if(stage){
+    stage.addEventListener('pointerdown',function(e){
+      if(!cropS)return;
+      e.preventDefault();
+      try{stage.setPointerCapture(e.pointerId);}catch(_){}
+      cropS.drag={x:e.clientX,y:e.clientY,dx:cropS.dx,dy:cropS.dy};
+    });
+    stage.addEventListener('pointermove',function(e){
+      if(!cropS||!cropS.drag)return;
+      cropS.dx=cropS.drag.dx+(e.clientX-cropS.drag.x);
+      cropS.dy=cropS.drag.dy+(e.clientY-cropS.drag.y);
+      cropApplyView();
+    });
+    var cropUp=function(){if(cropS)cropS.drag=null;};
+    stage.addEventListener('pointerup',cropUp);
+    stage.addEventListener('pointercancel',cropUp);
+    stage.addEventListener('wheel',function(e){
+      if(!cropS)return;
+      e.preventDefault();
+      var sl=$('#cropZoom');
+      var nz=clamp(cropS.zoom*(e.deltaY<0?1.1:0.9),1,4);
+      cropSetZoom(nz);
+      if(sl)sl.value=Math.round(nz*100);
+    },{passive:false});
+  }
+  var sl=$('#cropZoom');
+  if(sl)sl.addEventListener('input',function(){cropSetZoom(+sl.value/100);});
+  var fit=$('#cropFit');
+  if(fit)fit.onclick=function(){
+    if(!cropS)return;
+    cropS.zoom=1;
+    cropS.dx=cropS.fx+(cropS.side-cropS.iw*cropS.base)/2;
+    cropS.dy=cropS.fy+(cropS.side-cropS.ih*cropS.base)/2;
+    if(sl)sl.value=100;
+    cropApplyView();
+  };
+  var ap=$('#cropApply');
+  if(ap)ap.onclick=function(e){e.stopPropagation();cropApply();};
+  var cn=$('#cropCancel');
+  if(cn)cn.onclick=function(e){e.stopPropagation();closeAvatarCrop();};
+  var wrap=$('#cropWrap');
+  if(wrap)wrap.addEventListener('pointerdown',function(e){if(e.target===wrap)closeAvatarCrop();});
+  document.addEventListener('keydown',function(e){
+    if(cropS&&e.key==='Escape'){e.preventDefault();closeAvatarCrop();}
+  });
+})();
 /* ═══ пароль проекта: sha256 (чистый JS — работает и по http, без Web Crypto) ═══
    Хранится только соль+хэш (meta.passSalt/meta.passHash); сам пароль держим в памяти сессии. */
 function utf8str(s){try{return unescape(encodeURIComponent(String(s)));}catch(e){return String(s);}}
@@ -2723,7 +2899,8 @@ html+='<div class="dlg-item">';
 html+='<div class="dlg-reply-row" data-reply-id="'+esc(r.id)+'">';
 html+=speakerAv;
 html+='<span class="t"><span class="speaker" style="color:'+esc(speakerColor)+'">'+esc(speakerName)+':</span>'+esc(r.text||'')+'</span>';
-html+='<i class="dlg-reply-pin out" data-reply-id="'+esc(r.id)+'" title="Выход из реплики — тяните к элементу"></i>';
+html+='<button class="dlg-loop'+(r.loop?' on':'')+'" data-loop="'+esc(r.id)+'" title="Повтор: после этой реплики диалог начнётся заново — клик включит или выключит зацикливание">'+ic('repeat',10)+'</button>';
+html+='<i class="dlg-reply-pin out" data-reply-id="'+esc(r.id)+'" title="Выход из реплики — тяните к элементу (можно и на саму ноду — диалог начнётся заново)"></i>';
 html+='</div>';
 if(r.children&&r.children.length){
 html+='<div class="dlg-children">'+dlgRenderReplies(r.children,depth+1,nodeId)+'</div>';
@@ -3306,6 +3483,14 @@ function renderWorld(spawn,spawnEdge){
       el.querySelector('.n-body').appendChild(ob);
       bindBranchOuts(el,n);
     }
+    if(n.type==='action'){
+      ensureActions(n);
+      var obA=document.createElement('div');
+      obA.className='n-outs';
+      obA.innerHTML=actionOutsHtml(n);
+      el.querySelector('.n-body').appendChild(obA);
+      bindActionOuts(el,n);
+    }
     if(n.type==='varnode'){
       ensureVarnode(n);
       var vwc=el.querySelector('.n-vars');
@@ -3434,7 +3619,7 @@ function edgeAnchors(e){
     }
     if(rp){x1=rp.x;y1=rp.y;}
     else{var ma=dlgMainAnchor(na,nodeElA);x1=ma.x;y1=ma.y;}
-  }else if(e.fromOut&&na.type==='branch'){
+  }else if(e.fromOut&&(na.type==='branch'||na.type==='action')){
     var outElA=nodeEls.get(na.id);
     var rpO=outElA?branchOutPortPos(outElA,e.fromOut):null;
     if(rpO){x1=rpO.x;y1=rpO.y;}
@@ -3483,6 +3668,14 @@ if(!a)return null;
 if(isBridge(e)){
 a.pts=null;
 a.corners=bridgeCorners(e,a);
+}else if(e.from===e.to){
+/* самозацикливание: стрелка от реплики в свою же ноду — петля под узлом */
+var elS=nodeEls.get(e.from);
+var hS=elS?elS.offsetHeight:90;
+var nS=nodeById(e.from);
+var bot=(nS?nS.y:0)+hS+26;
+a.corners=[{x:a.x1+34,y:a.y1},{x:a.x1+34,y:bot},{x:a.x2-34,y:bot},{x:a.x2-34,y:a.y2}];
+a.pts=null;
 }else{
 a.pts=(e.pts&&e.pts.length)?e.pts:null;
 a.bend=bendMode;
@@ -4297,6 +4490,7 @@ function dlgModalRenderReplies(replies,depth,chars){
         '<textarea data-f="text" placeholder="Текст реплики…">'+esc(r.text||'')+'</textarea>'+
       '</div>'+
       '<div class="dlg-reply-acts">'+
+        '<button class="mini-btn dlg-loop-tog'+(r.loop?' on':'')+'" data-act="loop" title="Повтор: после этой реплики диалог начнётся заново. Включите, чтобы зациклить проигрывание после вывода реплики">'+ic('repeat',11)+'</button>'+
         '<button class="mini-btn dlg-drag" data-act="drag" title="Перетащить — изменить порядок">'+ic('grip',11)+'</button>'+
         '<button class="mini-btn" data-act="add-below" title="Новая реплика ниже">'+ic('plus',11)+'</button>'+
         '<button class="mini-btn" data-act="add-child" title="Ответ-ветка (вложенная)">'+ic('corner',11)+'</button>'+
@@ -4379,6 +4573,10 @@ function dlgModalBind(chars){
               if(!r.children)r.children=[];
               r.children.push({id:uid(),speaker:nextReplySpeaker(d.participants,chars,r),text:'',children:[]});
             });
+            dlgModalRender();
+            renderAll();
+          }else if(act==='loop'){
+            discrete(function(){r.loop=!r.loop;},'Повтор реплики');
             dlgModalRender();
             renderAll();
           }
@@ -4671,7 +4869,7 @@ function renderInspNode(){
     '<label class="i-lab">Описание</label>'+
     '<textarea class="inp" id="iText" placeholder="Что здесь происходит?">'+esc(n.text)+'</textarea>'+
     '<label class="i-lab">Теги, через запятую</label>'+
-    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?inspOutsHtml(n):'')+(n.type==='varnode'?inspVarHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
+    '<input class="inp" id="iTags" value="'+esc((n.tags||[]).join(', '))+'" placeholder="акт 1, хаб…">'+(n.type==='branch'?inspOutsHtml(n):'')+(n.type==='action'?inspActionsHtml(n):'')+(n.type==='varnode'?inspVarHtml(n):'')+notesSectionHtml(n)+'<div class="i-meta">тип: '+esc(vis.name)+(gr?'<br>группа: '+esc(gr.name):'')+'<br>ID: '+n.id+' · входов: '+inn+' · выходов: '+out+'</div>'+
     '<div class="i-actions">'+
       '<button class="btn" id="iDup">'+ic('copy')+'Дубль</button>'+
       '<button class="btn" id="iCtr">'+ic('target')+'Центр</button>'+
@@ -4705,6 +4903,7 @@ function renderInspNode(){
   tags.addEventListener('blur',editEnd);
   bindInspParts(n);
   if(n.type==='branch'){bindInspOuts(n);}
+  if(n.type==='action'){bindInspActions(n);}
   if(n.type==='varnode')bindInspVar(n);
   $all('#inSw .swatch').forEach(function(s){
     s.onclick=function(){
@@ -5178,7 +5377,8 @@ function charEditHtml(c){
       charAvatarHtml(c,'big','Аватар персонажа')+
       '<div class="ce-avctl">'+
         '<div class="ce-avbtns">'+
-          '<label class="ce-av-up" title="Загрузить картинку — по центру обрежется в квадрат">Загрузить…<input type="file" class="ce-av-file" accept="image/*" hidden></label>'+
+          '<label class="ce-av-up" title="Загрузить картинку — откроется кадрирование">Загрузить…<input type="file" class="ce-av-file" accept="image/*" hidden></label>'+
+          (c.av?'<button class="ce-av-crop" title="Открыть текущий аватар и кадрировать заново">Кадрировать</button>':'')+
           (c.av?'<button class="ce-av-rm" title="Убрать аватар">Убрать</button>':'')+
         '</div>'+
         '<div class="ce-av-shape">'+
@@ -5314,6 +5514,15 @@ function bindCharsRows(){
       charAvatarRerender();
       toast('Аватар убран');
     };
+    var avCrop=item.querySelector('.ce-av-crop');
+    if(avCrop)avCrop.onclick=function(){
+      if(!c.av){toast('Аватар ещё не задан','warn');return;}
+      openAvatarCrop(c.av,function(url){
+        discrete(function(){c.av=url;},'Аватар персонажа');
+        charAvatarRerender();
+        toast('Аватар перекадрирован');
+      });
+    };
     Array.prototype.forEach.call(item.querySelectorAll('.shp'),function(sb){
       sb.onclick=function(){
         var sh=(sb.dataset.sh==='square')?'square':'circle';
@@ -5339,6 +5548,7 @@ function charApplyFile(f,c){
   });
 }
 function ensureBranch(n){if(n.type==='branch'&&!Array.isArray(n.outcomes))n.outcomes=[];}
+function ensureActions(n){if(n.type==='action'&&!Array.isArray(n.actions))n.actions=[];}
 /* перестановка исходов развилки (перетаскивание): src ставится до/после tgt.
    Возвращает true, если порядок изменился; discrete/pushHistory — на вызывающем */
 function branchMoveOutcome(n,srcOid,tgtOid,below){
@@ -5486,6 +5696,56 @@ function bindInspOuts(n){
     });
   });
 }
+/* ═══ действие: инспектор — список кнопок ═══ */
+function inspActionsHtml(n){
+  ensureActions(n);
+  var h='<label class="i-lab">Кнопки действия ('+n.actions.length+')</label><div id="iActs">';
+  if(!n.actions.length)h+='<div class="v-empty">Добавьте кнопки с коротким текстом — у каждой свой пин на узле. В проигрывании игрок нажимает кнопку: исход задаётся стрелкой от её пина.</div>';
+  n.actions.forEach(function(a,i){
+    h+='<div class="out-ed" data-i="'+i+'"><div class="out-ed-row">'+
+      '<span class="out-grip" title="Перетащите — изменить порядок кнопок">'+ic('grip',10)+'</span>'+
+      '<input class="inp out-lbl" value="'+esc(a.label||'')+'" placeholder="Текст кнопки…" maxlength="60">'+
+      '<button class="v-del out-del" title="Удалить кнопку">'+ic('x',12)+'</button>'+
+    '</div></div>';
+  });
+  h+='</div><div style="margin:6px 0 10px"><button class="btn" id="iActAdd" style="width:100%">'+ic('plus',14)+'Добавить кнопку</button></div>';
+  return h;
+}
+function bindInspActions(n){
+  $all('#iActs .out-ed').forEach(function(box){
+    var i=+box.dataset.i,a=(n.actions||[])[i];if(!a)return;
+    var lbl=box.querySelector('.out-lbl');
+    lbl.addEventListener('focus',editStart);
+    lbl.addEventListener('input',function(){
+      a.label=lbl.value;
+      var el=nodeEls.get(n.id);
+      if(el)refreshActionOutsBox(el,n);
+      updateEdgesFor(n.id);
+      markDirty();
+    });
+    lbl.addEventListener('change',editEnd);lbl.addEventListener('blur',editEnd);
+    box.querySelector('.out-del').onclick=function(){
+      discrete(function(){
+        n.actions.splice(i,1);
+        if(!n.actions.length)delete n.actions;
+        project.edges=project.edges.filter(function(e){return !(e.from===n.id&&e.fromOut===a.id);});
+      },'Удаление кнопки действия');
+      renderAll();
+    };
+    Array.prototype.forEach.call(box.querySelectorAll('.out-grip'),function(gr){
+      bindOutcomeDrag(box,function(){return a.id;},function(srcOid,tgtOid,below){
+        var changed=false;
+        discrete(function(){changed=actionMoveAction(n,srcOid,tgtOid,below);},'Изменение порядка кнопок');
+        if(changed){renderAll();renderInspector();}
+      });
+    });
+  });
+  var add=$('#iActAdd');
+  if(add)add.onclick=function(){
+    discrete(function(){ensureActions(n);n.actions.push({id:uid(),label:''});},'Новая кнопка действия');
+    renderAll();renderInspector();
+  };
+}
 /* ═══ нода переменной: инспектор ═══ */
 function ensureVarnode(n){
   if(n.type!=='varnode')return;
@@ -5622,6 +5882,81 @@ function branchOutPortPos(nodeEl,oid){
     x:(pr.left+pr.width/2-nr.left)/vp.z+parseFloat(nodeEl.style.left||0),
     y:(pr.top+pr.height/2-nr.top)/vp.z+parseFloat(nodeEl.style.top||0)
   };
+}
+/* ═══ действие: кнопки-триггеры на узле, у каждой свой пин-исход ═══ */
+function actionOutsHtml(n){
+  ensureActions(n);
+  var h='';
+  n.actions.forEach(function(a,i){
+    var nm=a.label||('Кнопка '+(i+1));
+    h+='<div class="br-out ac-out" data-oid="'+esc(a.id)+'">'+
+      '<span class="br-grip" title="Перетащите — изменить порядок кнопок">'+ic('grip',10)+'</span>'+
+      '<span class="lbl">'+esc(nm)+'</span>'+
+      '<button class="br-x" data-oid="'+esc(a.id)+'" title="Убрать кнопку">'+ic('x',10)+'</button>'+
+      '<i class="opin" data-out="'+esc(a.id)+'" title="Кнопка «'+esc(nm)+'» — тяните к другому узлу"></i>'+
+    '</div>';
+  });
+  h+='<button class="br-add" title="Добавить кнопку — у неё будет свой пин-исход на узле">+ кнопка</button>';
+  return h;
+}
+function refreshActionOutsBox(el,n){
+  var box=el.querySelector('.n-outs');
+  if(!box)return;
+  box.innerHTML=actionOutsHtml(n);
+  bindActionOuts(el,n);
+}
+function actionMoveAction(n,srcOid,tgtOid,below){
+  var arr=n.actions;if(!Array.isArray(arr))return false;
+  var s=-1,t=-1,i;
+  for(i=0;i<arr.length;i++){if(arr[i].id===srcOid)s=i;if(arr[i].id===tgtOid)t=i;}
+  if(s<0||t<0||s===t)return false;
+  var moved=arr.splice(s,1)[0];
+  var insAt=(s<t)?(t-1):t;
+  if(below)insAt+=1;
+  arr.splice(insAt,0,moved);
+  return true;
+}
+function bindActionOuts(el,n){
+  ensureActions(n);
+  var add=el.querySelector('.br-add');
+  if(add){
+    add.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+    add.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      discrete(function(){ensureActions(n);n.actions.push({id:uid(),label:''});},'Новая кнопка действия');
+      renderAll();
+    });
+  }
+  Array.prototype.forEach.call(el.querySelectorAll('.ac-out .br-x'),function(x){
+    x.addEventListener('pointerdown',function(ev){ev.stopPropagation();});
+    x.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var oid=x.getAttribute('data-oid');
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      discrete(function(){
+        n.actions=n.actions.filter(function(a){return a.id!==oid;});
+        if(!n.actions.length)delete n.actions;
+        project.edges=project.edges.filter(function(e){return !(e.from===n.id&&e.fromOut===oid);});
+      },'Удаление кнопки действия');
+      renderAll();
+    });
+  });
+  Array.prototype.forEach.call(el.querySelectorAll('.ac-out .opin'),function(pin){
+    pin.addEventListener('pointerdown',function(ev){startConnectOut(ev,pin);});
+  });
+  /* перетаскивание кнопок: менять порядок */
+  Array.prototype.forEach.call(el.querySelectorAll('.ac-out'),function(row){
+    bindOutcomeDrag(row,function(){return row.getAttribute('data-oid');},function(srcOid,tgtOid,below){
+      var lk=lockBlockedBy([n.id]);
+      if(lk){showLockTip(lastPtr.x,lastPtr.y,lk);return;}
+      var changed=false;
+      discrete(function(){changed=actionMoveAction(n,srcOid,tgtOid,below);},'Изменение порядка кнопок');
+      if(changed)renderAll();
+    });
+  });
 }
 function branchVarInPos(nodeEl){
   if(!nodeEl)return null;
@@ -6208,6 +6543,20 @@ function toggleNodeSeq(id){
   if(el){var b=el.querySelector('.n-seq');if(b)b.classList.toggle('on',!!n.linear);}
   if(sel.has(id))renderInspector();
   toast(!!n.linear?'Реплики будут проигрываться подряд — без выбора ответа':'Реплики — выбор ответа (как раньше)');
+}
+/* переключатель «повтор» на реплике (на ноде на холсте): после реплики диалог начнётся заново */
+function toggleReplyLoop(nid,rid,px,py){
+  var n=nodeById(nid);
+  if(!n||n.type!=='dialog')return;
+  var r=findReply(n.dialog.replies,rid);
+  if(!r)return;
+  var lk=lockBlockedBy([nid]);
+  if(lk){showLockTip(px||lastPtr.x,py||lastPtr.y,lk);return;}
+  discrete(function(){r.loop=!r.loop;},'Повтор реплики');
+  var el=nodeEls.get(nid);
+  if(el){var b=el.querySelector('.dlg-loop[data-loop="'+rid+'"]');if(b)b.classList.toggle('on',!!r.loop);}
+  markDirty();
+  toast(!!r.loop?'Повтор включён: после этой реплики диалог начнётся заново':'Повтор выключен');
 }
 function cycleExpand(id){
   var n=nodeById(id),el=nodeEls.get(id);
@@ -7380,7 +7729,7 @@ function finishConnect(){
   var pt=(connS.wx!=null)?{x:connS.wx,y:connS.wy}:null;
   var cx=connS.cx,cy=connS.cy;
   connS=null;
-  if(to&&to!==from){
+  if(to&&(to!==from||fromReply)){
     var hlQ=(hlEl&&hlEl.classList&&hlEl.classList.contains('qcard'))?groupById(hlEl.dataset.gid):null;
     var srcQ=nodeById(from)?stackGroupOf(nodeById(from)):null;
     if(hlQ&&srcQ&&hlQ.id===srcQ.id){toast('Цепочка не может подключаться к самой себе','warn');return;}
@@ -7508,6 +7857,8 @@ return;
     if(fold&&nodeEl){cycleExpand(nodeEl.dataset.id);e.stopPropagation();return;}
     var seqSw=target.closest?target.closest('.n-seq'):null;
     if(seqSw&&nodeEl){toggleNodeSeq(nodeEl.dataset.id);e.stopPropagation();return;}
+    var loopB=target.closest?target.closest('.dlg-loop'):null;
+    if(loopB&&nodeEl){toggleReplyLoop(nodeEl.dataset.id,loopB.getAttribute('data-loop'),e.clientX,e.clientY);e.stopPropagation();return;}
     if(nodeEl){
       if(spaceDown)return;
       var id=nodeEl.dataset.id;
@@ -7725,7 +8076,8 @@ window.addEventListener('pointermove',function(e){lastPtr.x=e.clientX;lastPtr.y=
     }
     else if(under){
       var tC=elemTargetNodeId(under);
-      var okC=!!tC&&tC!==connS.from;
+      /* на саму ноду можно бросать стрелку только от выхода реплики — замыкание диалога на себя */
+      var okC=!!tC&&(tC!==connS.from||!!connS.fromReply);
       if(okC&&under.classList&&under.classList.contains('qcard')){
         var gqC=groupById(under.dataset.gid);
         var srcC=nodeById(connS.from);
@@ -8352,7 +8704,7 @@ canvas.addEventListener('wheel',function(e){
 canvas.addEventListener('dblclick',function(e){
   if(e.ctrlKey||e.metaKey)return;
   var t=e.target;
-  if(t.closest&&(t.closest('.n-fold')||t.closest('.n-seq')||t.closest('.port')||t.closest('.dlg-reply-pin')||t.closest('.n-title-inp')))return;
+  if(t.closest&&(t.closest('.n-fold')||t.closest('.n-seq')||t.closest('.dlg-loop')||t.closest('.port')||t.closest('.dlg-reply-pin')||t.closest('.n-title-inp')))return;
   var nodeEl=t.closest?t.closest('.node'):null;
   var edgeEl=t.closest?t.closest('.edge'):null;
   var gbD=t.closest?t.closest('.groupbox,.gcard,.qcard'):null;
@@ -9562,6 +9914,12 @@ dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes
       });
       if(oc.length)node.outcomes=oc;
     }
+    if(t==='action'&&Array.isArray(n.actions)){
+      var acn=n.actions.filter(function(a){return a&&typeof a.id==='string';}).slice(0,12).map(function(a){
+        return{id:a.id.slice(0,40),label:String(a.label||'').slice(0,60)};
+      });
+      if(acn.length)node.actions=acn;
+    }
     if(t==='varnode'){
       node.varMode=(n.varMode==='get')?'get':'set';
       node.varOp=VARS_OPS[n.varOp]?n.varOp:'=';
@@ -9581,7 +9939,8 @@ dlgWidth:(typeof n.dlgWidth==='number')?clamp(n.dlgWidth,NODE_W,1200):null,notes
   });
   var ids=new Set(p.nodes.map(function(n){return n.id;}));
   p.edges=(p.edges||[]).filter(function(e){
-    return ids.has(e.from)&&ids.has(e.to)&&e.from!==e.to;
+    /* самозацикливание разрешено только стрелкой от реплики (fromReply) — замыкание диалога на себя */
+    return ids.has(e.from)&&ids.has(e.to)&&(e.from!==e.to||(typeof e.fromReply==='string'&&e.fromReply));
   }).map(function(e){
 var kk=KINDS[e.kind]?e.kind:'flow';
 if(e.bridge)kk='bridge';
@@ -9596,11 +9955,11 @@ tin:(e.tin==='var')?'var':null,
 q:(e.q===1)?1:null,
 bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:0,dy:0,dr:0},cond:econd};
 });
-  /* исход, к которому привязана стрелка, должен существовать на развилке */
+  /* исход, к которому привязана стрелка, должен существовать на развилке / ноде действия */
   var outIds={};
   p.nodes.forEach(function(nn){
-    if(nn.type==='branch'&&Array.isArray(nn.outcomes)){
-      var s={};nn.outcomes.forEach(function(o){s[o.id]=true;});outIds[nn.id]=s;
+    if((nn.type==='branch'&&Array.isArray(nn.outcomes))||(nn.type==='action'&&Array.isArray(nn.actions))){
+      var s={};(nn.outcomes||nn.actions).forEach(function(o){s[o.id]=true;});outIds[nn.id]=s;
     }
   });
   p.edges.forEach(function(e){
@@ -9640,6 +9999,8 @@ function loadProject(p,name){
       if(!nf||nf.type!=='dialog'||!nf.dialog||!findReply(nf.dialog.replies,e.fromReply))e.fromReply=null;
     }
   });
+  /* самозацикливание без реплики недопустимо (fromReply мог сброситься выше) */
+  project.edges=project.edges.filter(function(e){return e.from!==e.to||e.fromReply;});
   if(p.viewport&&p.viewport.z)vp={x:+p.viewport.x||0,y:+p.viewport.y||0,z:+p.viewport.z||1};
 if(p.bend==='ortho90'||p.bend==='ortho45'||p.bend==='smooth')bendMode=p.bend;
 syncBendButtons();
@@ -11522,6 +11883,18 @@ function plBranchChoices(n){
   });
   return items;
 }
+/* «Действие»: выбор в плеере — одна из кнопок ноды; исход каждой — стрелка от её пина */
+function plActionChoices(n){
+  ensureActions(n);
+  if(!n.actions.length)return null;
+  var all=plNodeEdgeList(n);
+  return n.actions.map(function(a,i){
+    var eds=all.filter(function(e){return e.fromOut===a.id;});
+    var nm=a.label||('Кнопка '+(i+1));
+    if(!eds.length)return{label:nm,targets:[],ok:false,why:'исход не подключён стрелкой',fn:function(){}};
+    return{label:nm,targets:eds.map(function(e){return e.to;}),ok:true,fn:function(){plFollowEdge(eds[0]);}};
+  });
+}
 function plRenderBranchChoices(items){
   var c=$('#plChoices');
   c.innerHTML='';
@@ -11582,10 +11955,14 @@ function plShowSlide(opts){
   plHideEnd();
   var box=$('#plBox');
   $('#plChapter').innerHTML=opts.chapter?plChapterHtml(opts.chapter):'';
-  /* аватар говорящего — в рамке рядом с именем персонажа (не в облаке реплики) */
+  /* аватар говорящего — слева от блока реплики, в рамке цвета персонажа */
+  var avBig=opts.avCid?plSlideAvatar(opts.avCid,'side'):'';
+  var avBox=$('#plAv');
+  if(avBox)avBox.innerHTML=avBig;
+  var rowEl=$('#plRow');if(rowEl)rowEl.classList.toggle('has-av',!!avBig);
   var nameEl=$('#plName');
   if(opts.name){
-    nameEl.innerHTML=(opts.avCid?plSlideAvatar(opts.avCid,'np'):'')+'<span class="pl-t">'+esc(opts.name)+'</span>';
+    nameEl.innerHTML='<span class="pl-t">'+esc(opts.name)+'</span>';
     nameEl.classList.remove('hidden');
   }
   else{nameEl.classList.add('hidden');nameEl.innerHTML='';}
@@ -11668,9 +12045,11 @@ function plGoNode(n,keepPath){
     if(rs.length>1){
       var bx=$('#plBox');
       bx.style.setProperty('--plc',nodeVisual(n).color);
+      var avX=$('#plAv');if(avX)avX.innerHTML='';
+      var rowX=$('#plRow');if(rowX)rowX.classList.remove('has-av');
       var chEl=$('#plChapter');if(chEl)chEl.innerHTML=plChapterHtml(n);
-      var nmEl=$('#plName'),nm2=plCastName(n),avC0=plCastAv(n);
-      if(nm2){nmEl.innerHTML=(avC0?plSlideAvatar(avC0,'np'):'')+'<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
+      var nmEl=$('#plName'),nm2=plCastName(n);
+      if(nm2){nmEl.innerHTML='<span class="pl-t">'+esc(nm2)+'</span>';nmEl.classList.remove('hidden');}
       else{nmEl.classList.add('hidden');nmEl.innerHTML='';}
       var txEl=$('#plText');if(txEl)txEl.innerHTML='';
       plShowDialogChoices(n,rs);return;
@@ -11700,13 +12079,12 @@ function plAfterVarnode(n,keepPath){
   if(PL.mode==='list'){plListJumpNext();return;}
   plShowEnd();
 }
-/* аватар говорящего в плеере: np — плашка имени (тёмная рамка на цветном фоне), sm — варианты выбора реплик.
-   Выводится всегда: без аватара — заглушка с первой буквой имени */
+/* аватар говорящего в плеере: side — крупно слева от блока реплики, sm — варианты выбора реплик.
+   Выводится всегда: без аватара — заглушка с первой буквой имени; рамка — цвет персонажа */
 function plSlideAvatar(cid,extra){
   var c=charById(cid);
   if(!c)return '';
-  var st=(extra==='np')?'':' style="border-color:'+esc(c.color||'#9cb878')+'"';
-  return '<span class="pl-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'"'+st+'>'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
+  return '<span class="pl-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'">'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
 function plShowReply(r,noHist){
   PL.replyId=r.id;PL.intro=false;
@@ -11859,6 +12237,8 @@ function plAfterType(){
   if(PL.replyId&&n.type==='dialog'){
     var r=findReply(n.dialog.replies,PL.replyId);
     if(r){
+      /* включён «повтор»: после реплики диалог начнётся заново */
+      if(r.loop){$('#plHint').textContent='клик — повтор диалога ▸';return;}
       var kids=r.children||[];
       if(kids.length>1){
         plRenderChoices(kids.map(function(ch){return{label:ch.text||'Продолжить…',targets:plReplyBranchTargets(n,ch),fn:function(){plShowReply(ch);}};}));
@@ -11883,6 +12263,10 @@ function plAfterType(){
     }
   }
   var nx2=plNodeEdgeList(n);
+  if(n.type==='action'&&Array.isArray(n.actions)&&n.actions.length){
+    var ac=plActionChoices(n);
+    if(ac){plRenderBranchChoices(ac);return;}
+  }
   if(nx2.length>1){var bc2=plBranchChoices(n);if(bc2){plRenderBranchChoices(bc2);return;}mk(nx2);return;}
   if(nx2.length===1){
     var c2=condWithOverride(nx2[0].cond,n);
@@ -11910,6 +12294,9 @@ function plAdvance(){
   }
   if(n.type==='dialog'&&n.linear&&PL.seqIdx>=0){
     plPushHist();
+    /* «повтор» на текущей реплике: после неё диалог начнётся заново */
+    var curL=(PL.seqList&&PL.seqList[PL.seqIdx]!=null)?findReply(n.dialog.replies,PL.seqList[PL.seqIdx]):null;
+    if(curL&&curL.loop){PL.seqList=null;PL.seqIdx=-1;plGoNode(n);return;}
     PL.seqIdx++;
     plLinearShow(n); /* после последней реплики — выход из ноды (стрелки/конец) */
     return;
@@ -11917,6 +12304,8 @@ function plAdvance(){
   if(PL.replyId&&n.type==='dialog'){
     var r=findReply(n.dialog.replies,PL.replyId);
     if(r){
+      /* включён «повтор»: реплика проиграна — диалоговая нода запускается заново */
+      if(r.loop){plPushHist();plGoNode(n);return;}
       var kids=r.children||[];
       if(kids.length===1){plPushHist();plShowReply(kids[0]);return;}
       if(kids.length>1){plAfterType();return;} /* выбор не сделан — страховка */
