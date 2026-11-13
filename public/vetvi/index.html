@@ -636,6 +636,16 @@ body.connecting .vpinn{cursor:copy}
 .set-store-msg.ok{color:#9cb878}
 .set-foot-row{display:flex;align-items:center;gap:12px;margin-top:12px}
 .set-reload-note{font-size:12px;color:var(--tx3);margin-top:10px;line-height:1.45}
+/* разделы настроек: хаб с пунктами-кнопками */
+.dlg-modal.sub{z-index:120}
+.set-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:rgba(255,255,255,.02);border:1px solid var(--line2);border-radius:12px;padding:13px 15px;margin-bottom:9px;cursor:pointer;transition:border-color .15s,background .15s;font-family:inherit}
+.set-item:hover{border-color:#3d4450;background:rgba(255,255,255,.04)}
+.set-item-ico{width:38px;height:38px;flex:none;border-radius:10px;background:rgba(226,165,78,.1);color:var(--acc);display:flex;align-items:center;justify-content:center}
+.set-item-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.set-item-name{font-size:13.5px;font-weight:600;color:var(--tx)}
+.set-item-desc{font-size:12px;color:var(--tx3);line-height:1.45}
+.set-item-go{flex:none;color:var(--tx3);font-size:16px;line-height:1;transition:transform .15s,color .15s}
+.set-item:hover .set-item-go{transform:translateX(3px);color:var(--acc)}
 /* горячие клавиши в настройках */
 .hk-sep{height:1px;background:var(--line);margin:16px -20px 14px}
 .hk-list{max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:9px;margin-top:8px;background:rgba(255,255,255,.02)}
@@ -1223,7 +1233,29 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <div id="setModal" class="dlg-modal"><div class="dlg-modal-card set-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки проекта</span><button class="dlg-modal-close" id="setModalClose" title="Закрыть">×</button></div>
   <div class="dlg-modal-body">
-    <div class="set-sec-title">Хранилище данных в браузере</div>
+    <div class="set-hint">Каждый раздел открывается в отдельном окне — выберите нужный.</div>
+    <button class="set-item" id="setItemStore" type="button">
+      <span class="set-item-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span>
+      <span class="set-item-info">
+        <span class="set-item-name">Хранилище данных</span>
+        <span class="set-item-desc">LocalStorage или IndexedDB: занятое место и переключение режима</span>
+      </span>
+      <span class="set-item-go">→</span>
+    </button>
+    <button class="set-item" id="setItemKeys" type="button">
+      <span class="set-item-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg></span>
+      <span class="set-item-info">
+        <span class="set-item-name">Горячие клавиши</span>
+        <span class="set-item-desc">Список действий и переназначение сочетаний; настройки личные — у каждого участника свои</span>
+      </span>
+      <span class="set-item-go">→</span>
+    </button>
+  </div>
+  <div class="dlg-modal-foot"><span class="log-foot-info"></span><button class="btn primary" id="setDone">Готово</button></div>
+</div></div>
+<div id="setStoreModal" class="dlg-modal sub"><div class="dlg-modal-card set-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки — Хранилище данных</span><button class="dlg-modal-close" id="setStoreModalClose" title="Вернуться к настройкам">×</button></div>
+  <div class="dlg-modal-body">
     <div class="set-hint">Проекты, автосохранение, копии и аватары хранятся локально. LocalStorage ограничен ~5 МБ — с аватарами места может не хватить. При переключении данные копируются в другое хранилище, и страница перезагружается.</div>
     <div class="set-store-opt" id="setOptLs">
       <span class="set-radio"></span>
@@ -1244,13 +1276,17 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     </div>
     <div class="set-foot-row"><button class="btn primary" id="setStoreSwitch" disabled>Переключить</button><span class="set-store-msg" id="setStoreMsg"></span></div>
     <div class="set-reload-note">При возврате на LocalStorage сначала проверяется, поместятся ли данные: если нет — переключение не выполняется.</div>
-    <div class="hk-sep"></div>
-    <div class="set-sec-title">Горячие клавиши</div>
-    <div class="set-hint">Действуют вне полей ввода и не зависят от раскладки: Ctrl+Z, Ctrl+S и остальные работают одинаково на русской и английской. Нажмите «Изменить» и задайте своё сочетание: Esc — отмена, «↺» — вернуть по умолчанию. Занятые другим действием сочетания не назначаются.</div>
+  </div>
+  <div class="dlg-modal-foot"><button class="btn" id="setStoreBack">← Назад</button><button class="btn primary" id="setStoreDone">Готово</button></div>
+</div></div>
+<div id="hkModal" class="dlg-modal sub"><div class="dlg-modal-card set-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки — Горячие клавиши</span><button class="dlg-modal-close" id="hkModalClose" title="Вернуться к настройкам">×</button></div>
+  <div class="dlg-modal-body">
+    <div class="set-hint">Действуют вне полей ввода и не зависят от раскладки: Ctrl+Z, Ctrl+S и остальные работают одинаково на русской и английской. Нажмите «Изменить» и задайте своё сочетание: Esc — отмена, «↺» — вернуть по умолчанию. Занятые другим действием сочетания не назначаются. Сочетания — личные: они сохраняются у вас и не влияют на других участников.</div>
     <div class="hk-list" id="hkList"></div>
     <div class="set-foot-row"><button class="btn btn-xs" id="hkResetAll">Сбросить все</button><span class="set-store-msg" id="hkMsg"></span></div>
   </div>
-  <div class="dlg-modal-foot"><span class="log-foot-info"></span><button class="btn primary" id="setDone">Готово</button></div>
+  <div class="dlg-modal-foot"><button class="btn" id="hkBack">← Назад</button><button class="btn primary" id="hkDone">Готово</button></div>
 </div></div>
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 <input type="file" id="txtFileInput" accept=".json,.txt,application/json,text/plain" hidden>
@@ -9362,7 +9398,6 @@ function isTyping(){
    Сочетания хранятся по e.code (физическая клавиша), поэтому работают при любой
    раскладке; если браузер не отдал e.code — клавиша восстанавливается из e.key
    (в том числе из кириллицы) по карте RU2CODE. */
-var HK_KEY='vetvi-hotkeys';
 var HK_DEFS=[
   {id:'undo',name:'Отменить',def:'Mod+KeyZ'},
   {id:'redo',name:'Вернуть (повторить)',def:'Mod+KeyY',alias:['Mod+Shift+KeyZ']},
@@ -9386,8 +9421,30 @@ var HK_DEFS=[
   {id:'zoomOut',name:'Отдалить',def:'Minus'}
 ];
 var hkUser={};
-try{var _hkRaw=JSON.parse(localStorage.getItem(HK_KEY)||'{}');if(_hkRaw&&typeof _hkRaw==='object'&&!Array.isArray(_hkRaw))hkUser=_hkRaw;}catch(e){hkUser={};}
-Object.keys(hkUser).forEach(function(k){if(!hkDef(k))delete hkUser[k];});
+/* личные настройки: сочетания хранятся отдельно для каждого пользователя
+   (ключ строится по id текущего пользователя из vetvi-me-v1) и идут через
+   фасад хранилища — попадают и в IndexedDB при соответствующем режиме */
+function hkStoreKey(){
+  var id='anon';
+  try{var m=syncMe();if(m&&m.id)id=m.id;}catch(e){}
+  return 'vetvi-hotkeys-'+id;
+}
+function hkLoad(){
+  var obj=null;
+  try{obj=JSON.parse(stItem(hkStoreKey())||'{}')||null;}catch(e){obj=null;}
+  if(!obj||typeof obj!=='object'||Array.isArray(obj))obj={};
+  if(!Object.keys(obj).length){
+    /* однократная миграция старого общего ключа в личный */
+    var old=null;
+    try{old=JSON.parse(stItem('vetvi-hotkeys')||'{}')||null;}catch(e){old=null;}
+    if(old&&typeof old==='object'&&!Array.isArray(old)&&Object.keys(old).length){
+      obj=old;
+      try{stSetItem(hkStoreKey(),JSON.stringify(obj));stRemoveItem('vetvi-hotkeys');}catch(e){}
+    }
+  }
+  hkUser=obj;
+  Object.keys(hkUser).forEach(function(k){if(!hkDef(k))delete hkUser[k];});
+}
 function hkDef(id){for(var i=0;i<HK_DEFS.length;i++)if(HK_DEFS[i].id===id)return HK_DEFS[i];return null;}
 var RU2CODE={й:'KeyQ',ц:'KeyW',у:'KeyE',к:'KeyR',е:'KeyT',н:'KeyY',г:'KeyU',ш:'KeyI',щ:'KeyO',з:'KeyP',ф:'KeyA',ы:'KeyS',в:'KeyD',а:'KeyF',п:'KeyG',р:'KeyH',о:'KeyJ',л:'KeyK',д:'KeyL',я:'KeyZ',ч:'KeyX',с:'KeyC',м:'KeyV',и:'KeyB',т:'KeyN',ь:'KeyM',х:'BracketLeft',ъ:'BracketRight',ж:'Semicolon',э:'Quote',б:'Comma',ю:'Period',ё:'Backquote'};
 function hkKeyCode(e){
@@ -9443,7 +9500,7 @@ function hkHuman(combo){
   return out.join(hkMac?'':'+');
 }
 function hkSaveUser(){
-  try{localStorage.setItem(HK_KEY,JSON.stringify(hkUser));}
+  try{stSetItem(hkStoreKey(),JSON.stringify(hkUser));}
   catch(e){toast('Не удалось сохранить горячие клавиши','warn');}
 }
 var hkCap=null;
@@ -10760,7 +10817,23 @@ function setStoreRefresh(){
 function openSettings(){
   setTargetMode=null;setStoreBusy=false;hkCap=null;
   $('#setModal').classList.add('show');
-  hkMsg('','');hkRenderList();
+}
+/* закрыть всю оболочку настроек: хаб + оба раздела */
+function closeSettings(){
+  $('#setModal').classList.remove('show');
+  $('#setStoreModal').classList.remove('show');
+  $('#hkModal').classList.remove('show');
+  hkCap=null;
+}
+/* вернуться из раздела в хаб настроек */
+function setBackHub(){
+  $('#setStoreModal').classList.remove('show');
+  $('#hkModal').classList.remove('show');
+  hkCap=null;
+}
+function openSetStore(){
+  setTargetMode=null;setStoreBusy=false;
+  $('#setStoreModal').classList.add('show');
   setStoreRefresh();
   if(setStoreIdbBytes()===null&&!setIdbSizeReq){
     setIdbSizeReq=true;
@@ -10768,14 +10841,25 @@ function openSettings(){
       var out={};
       for(var k in map)if(isDataKey(k))out[k]=map[k];
       setIdbSizeCache=storeSizeOf(out);
-      if($('#setModal').classList.contains('show'))setStoreRefresh();
-    })['catch'](function(){setIdbSizeCache=0;if($('#setModal').classList.contains('show'))setStoreRefresh();});
+      if($('#setStoreModal').classList.contains('show'))setStoreRefresh();
+    })['catch'](function(){setIdbSizeCache=0;if($('#setStoreModal').classList.contains('show'))setStoreRefresh();});
   }
 }
-function closeSettings(){$('#setModal').classList.remove('show');}
+function openHk(){
+  hkCap=null;hkLoad();hkMsg('','');hkRenderList();
+  $('#hkModal').classList.add('show');
+}
 $('#bSettings').onclick=openSettings;
 $('#setModalClose').onclick=closeSettings;
 $('#setDone').onclick=closeSettings;
+$('#setItemStore').onclick=openSetStore;
+$('#setItemKeys').onclick=openHk;
+$('#setStoreModalClose').onclick=setBackHub;
+$('#setStoreBack').onclick=setBackHub;
+$('#setStoreDone').onclick=closeSettings;
+$('#hkModalClose').onclick=setBackHub;
+$('#hkBack').onclick=setBackHub;
+$('#hkDone').onclick=closeSettings;
 $('#hkResetAll').onclick=function(){
   hkUser={};hkSaveUser();hkCap=null;hkRenderList();
   hkMsg('Все горячие клавиши возвращены к значениям по умолчанию','ok');
@@ -10814,8 +10898,10 @@ $('#setStoreSwitch').onclick=function(){
   }
 };
 window.addEventListener('keydown',function(e){
-  if(!$('#setModal').classList.contains('show'))return;
-  if(e.key==='Escape'){closeSettings();return;}
+  if(e.key!=='Escape')return;
+  /* Esc в открытом разделе возвращает в хаб, Esc в хабе закрывает настройки */
+  if($('#hkModal').classList.contains('show')||$('#setStoreModal').classList.contains('show')){setBackHub();return;}
+  if($('#setModal').classList.contains('show')){closeSettings();return;}
 },true);
 /* ═══ менеджер проектов: список, переключение, автосохранение каждого ═══ */
 var LS_PROJECTS='vetvi-projects-v1',LS_CURPROJ='vetvi-cur-v1';
@@ -12956,6 +13042,7 @@ try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key
   }
   $('#projName').value=project.meta.name;
   updateHistUI();updateStatus();
+  try{hkLoad();}catch(e){}
   initSync();
   setTimeout(function(){
     project.nodes.forEach(function(n){updateEdgesFor(n.id);});
