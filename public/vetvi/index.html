@@ -1020,7 +1020,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="sm-i" data-a="jsonas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M8 3v5h7V3"/></svg>Сохранить как… (JSON)<kbd>Ctrl+Shift+S</kbd></div>
       <div class="sm-i" data-a="txt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/></svg>Текстовый файл (.txt)</div>
       <div class="sm-i" data-a="txjson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h6M9 16h6M9 9h2"/></svg>Тексты (JSON)</div>
-      <div class="sm-i" data-a="txsel" title="Экспортировать только выделенные ноды: клик по карточке, Shift+клик — добавить, рамкой или группой. Файл того же формата «Текстов (JSON)» — подходит для «Импорт текстов (JSON)»: совпавшие ноды обновятся, отсутствующие создадутся"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h4M11 10.5v4"/><rect x="3" y="3" width="5" height="5" rx="1" stroke-dasharray="1.6 1.4"/><rect x="16" y="16" width="5" height="5" rx="1" stroke-dasharray="1.6 1.4"/></svg>Тексты выделенных нод (JSON)</div>
+      <div class="sm-i" data-a="txsel" title="Экспортировать только выделенные ноды: клик по карточке, Shift+клик — добавить, рамкой или группой. Файл того же формата «Текстов (JSON)» — подходит для «Импорт текстов (JSON)»: совпавшие ноды обновятся, отсутствующие создадутся. Также доступно по Ctrl+E и из контекстного меню ноды, группы или цепочки (правый клик)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h4M11 10.5v4"/><rect x="3" y="3" width="5" height="5" rx="1" stroke-dasharray="1.6 1.4"/><rect x="16" y="16" width="5" height="5" rx="1" stroke-dasharray="1.6 1.4"/></svg>Тексты выделенных нод (JSON)</div>
       <div class="sm-i" data-a="tximp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10.5"/><path d="m7.5 9.5 4.5 4.5 4.5-4.5"/><path d="M4.5 20.5h15"/></svg>Импорт текстов (JSON)…</div>
     </div>
   </div>
@@ -1375,7 +1375,8 @@ var EXTRA_ICONS={
   door:'<path d="M6.5 21V9.5a5.5 5.5 0 0 1 11 0V21"/><path d="M4 21h16"/><path d="M14.5 13h.01" stroke-width="2.4"/>',
   candle:'<path d="M9 11.5h6V20H9z"/><path d="M12 11.5V9"/><path d="M12 2.5c1 1.2 1.6 2.1 1.6 3.1A1.6 1.6 0 0 1 12 7.2a1.6 1.6 0 0 1-1.6-1.6c0-1 .6-1.9 1.6-3.1z"/><path d="M6.5 20h11"/>',
   variable:'<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>',
-  rback:'<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5v1"/><path d="M4 20h6"/>'
+  rback:'<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5v1"/><path d="M4 20h6"/>',
+  expJson:'<path d="M5 3.5h9l5 5V21H5z"/><path d="M14 3.5v5h5"/><path d="M12 8v7M9.3 12.3 12 15l2.7-2.7"/><path d="M8.5 19h7"/>'
 };
 var ALLICONS={};
 Object.keys(ICONS).forEach(function(k){ALLICONS[k]=ICONS[k];});
@@ -9221,6 +9222,7 @@ canvas.addEventListener('contextmenu',function(e){
     var items=[
       {ico:'play',label:'Играть отсюда',fn:function(){plStart(id);}},
       {ico:'copy',label:'Дублировать',fn:function(){var r=duplicateSel();if(r)startCarry(r.ids,r.pre);}},
+      {ico:'expJson',label:'Экспорт выделенных в JSON (Ctrl+E)',fn:function(){exportTextsJson(true);}},
       {ico:'target',label:'Центрировать',fn:function(){centerOn(n);}},
       {ico:'clock',label:'Журнал изменений',fn:function(){openNodeLog(id);}}
     ];
@@ -9285,7 +9287,8 @@ canvas.addEventListener('contextmenu',function(e){
       var qiNid=(qiR&&qiR.dataset.nid&&nodeById(qiR.dataset.nid))?qiR.dataset.nid:null;
       var itemsQ=[
         {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}},
-        {ico:'clock',label:'Журнал изменений',fn:(qiNid?function(){openNodeLog(qiNid);}:function(){openGroupLog(gid);})}
+        {ico:'clock',label:'Журнал изменений',fn:(qiNid?function(){openNodeLog(qiNid);}:function(){openGroupLog(gid);})},
+        {ico:'expJson',label:'Экспорт цепочки в JSON (Ctrl+E)',fn:function(){exportTextsJson(true);}}
       ];
       itemsQ.push({ico:'expand',label:'Преобразовать в группу',fn:function(){stackToGroup(gid);}});
       if(g.parent){
@@ -9302,6 +9305,7 @@ canvas.addEventListener('contextmenu',function(e){
       {ico:'target',label:'Выделить все ноды группы',fn:function(){selectGroupNodes(gid);}},
       {ico:'pencil',label:'Переименовать / настроить',fn:function(){setTimeout(function(){var i=$('#igName');if(i){i.focus();i.select();}},30);}},
       {ico:'clock',label:'Журнал изменений',fn:function(){openGroupLog(gid);}},
+      {ico:'expJson',label:'Экспорт группы в JSON (Ctrl+E)',fn:function(){exportTextsJson(true);}},
       {ico:g.badge?'eyeOff':'eye',label:g.badge?'Скрыть ярлык':'Показать ярлык',fn:function(){discrete(function(){g.badge=!g.badge;});updateGroupBadges();renderInspector();}},
       {ico:'expand',label:g.auto?'Авторазмер: выключить':'Авторазмер: включить',fn:function(){toggleAuto(g);}}
     ];
@@ -9357,6 +9361,7 @@ window.addEventListener('keydown',function(e){
   if(mod&&code==='KeyO'){e.preventDefault();showProjectsModal();return;}
   if(mod&&e.altKey&&code==='KeyN'){e.preventDefault();projCreate();return;}
   if(mod&&code==='KeyD'){e.preventDefault();var r=duplicateSel();if(r)startCarry(r.ids,r.pre);return;}
+  if(mod&&code==='KeyE'){e.preventDefault();exportTextsJson(true);return;}
   if(mod&&e.shiftKey&&code==='KeyA'){e.preventDefault();alignSelH();return;}
   if(mod&&e.shiftKey&&code==='KeyV'){e.preventDefault();alignSelV();return;}
   if(mod&&!e.shiftKey&&code==='KeyG'){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+Shift+ЛКМ)','warn');return;}
