@@ -1249,7 +1249,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <span class="set-item-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg></span>
       <span class="set-item-info">
         <span class="set-item-name">Горячие клавиши</span>
-        <span class="set-item-desc">Список действий и переназначение сочетаний; настройки личные — у каждого участника свои</span>
+        <span class="set-item-desc">Список действий и переназначение сочетаний</span>
       </span>
       <span class="set-item-go">→</span>
     </button>
@@ -1259,12 +1259,12 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 <div id="setStoreModal" class="dlg-modal sub"><div class="dlg-modal-card set-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки — Хранилище данных</span><button class="dlg-modal-close" id="setStoreModalClose" title="Вернуться к настройкам">×</button></div>
   <div class="dlg-modal-body">
-    <div class="set-hint">Проекты, автосохранение, копии и аватары хранятся локально. LocalStorage ограничен ~5 МБ — с аватарами места может не хватить. При переключении данные копируются в другое хранилище, и страница перезагружается.</div>
+    <div class="set-hint">При переключении данные копируются в другое хранилище, и страница перезагружается.</div>
     <div class="set-store-opt" id="setOptLs">
       <span class="set-radio"></span>
       <span class="set-store-info">
         <span class="set-store-name">LocalStorage<em class="set-cur" id="setCurLs" hidden>— текущий</em></span>
-        <span class="set-store-desc">Классическое хранилище браузера. Ограничено ~5 МБ: с аватарами-картинками место может закончиться.</span>
+        <span class="set-store-desc">Классическое хранилище браузера. Ограничено ~5 МБ</span>
         <span class="set-store-size" id="setSizeLs"></span>
         <span class="set-store-bar" id="setBarLsWrap"><i id="setBarLs" style="width:0%"></i></span>
       </span>
@@ -1273,19 +1273,19 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <span class="set-radio"></span>
       <span class="set-store-info">
         <span class="set-store-name">IndexedDB<em class="set-cur" id="setCurIdb" hidden>— текущий</em></span>
-        <span class="set-store-desc">База данных браузера. Практически без ограничений по объёму — рекомендуется для проектов с аватарами.</span>
+        <span class="set-store-desc">База данных браузера. Практически без ограничений по объёму — рекомендуется</span>
         <span class="set-store-size" id="setSizeIdb"></span>
       </span>
     </div>
     <div class="set-foot-row"><button class="btn primary" id="setStoreSwitch" disabled>Переключить</button><span class="set-store-msg" id="setStoreMsg"></span></div>
-    <div class="set-reload-note">При возврате на LocalStorage сначала проверяется, поместятся ли данные: если нет — переключение не выполняется.</div>
+    <div class="set-reload-note"></div>
   </div>
   <div class="dlg-modal-foot"><button class="btn" id="setStoreBack">← Назад</button><button class="btn primary" id="setStoreDone">Готово</button></div>
 </div></div>
 <div id="hkModal" class="dlg-modal sub"><div class="dlg-modal-card set-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки — Горячие клавиши</span><button class="dlg-modal-close" id="hkModalClose" title="Вернуться к настройкам">×</button></div>
   <div class="dlg-modal-body">
-    <div class="set-hint">Действуют вне полей ввода и не зависят от раскладки: сочетания из списка работают одинаково на русской и английской раскладке. Нажмите «Изменить» и задайте своё сочетание: Esc — отмена, «↺» — вернуть по умолчанию. Занятые другим действием сочетания не назначаются. Сочетания — личные: они сохраняются у вас и не влияют на других участников.</div>
+    <div class="set-hint"></div>
     <div class="hk-list" id="hkList"></div>
     <div class="set-foot-row"><button class="btn btn-xs" id="hkResetAll">Сбросить все</button><span class="set-store-msg" id="hkMsg"></span></div>
   </div>
@@ -5233,7 +5233,7 @@ function renderVarsPane(){
     '</div>';
   });
   html+='</div>';
-  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов. Стрелка в строке разворачивает удобный редактор переменной.</div>';
+  if(l.length)html+='<div class="v-hint"><b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов.</div>';
   pane.innerHTML=html;
   var add=$('#vAdd');
   if(add)add.onclick=function(){
@@ -5527,7 +5527,7 @@ function renderCharsPane(){
     '</div>';
   });
   html+='</div>';
-  if(l.length)html+='<div class="v-hint">Стрелка в строке разворачивает редактор персонажа: имя, цвет и описание. Удаление персонажа убирает его из участников диалогов и узлов, а авторство его реплик сбрасывается.</div>';
+  if(l.length)html+='<div class="v-hint"></div>';
   pane.innerHTML=html;
   var add=$('#cAdd');
   if(add)add.onclick=function(){
