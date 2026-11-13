@@ -782,6 +782,14 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .swatch.on{border-color:#fff;box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--acc)}
 .swatch.reset{background:#14161a;border:1px dashed var(--line2);color:var(--tx3);display:flex;align-items:center;justify-content:center}
 .swatch.reset:hover{color:var(--tx)}
+.swatch.custom{position:relative;display:flex;align-items:center;justify-content:center;background:conic-gradient(#e2a54e,#cf6d4f,#d6c96a,#9cb878,#7fb5a2,#aab1bb,#8b929c,#e2a54e);color:#fff}
+.swatch.custom svg{filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.65))}
+.swatch.custom:hover{border-color:#3d434f}
+.sw-picker{position:absolute;width:0;height:0;opacity:0;pointer-events:none;border:0;padding:0}
+.sw-toggle{height:26px;padding:0 10px;border-radius:8px;border:1px dashed var(--line2);background:transparent;color:var(--tx3);font:500 11px var(--body);cursor:pointer;transition:.15s;display:inline-flex;align-items:center;white-space:nowrap}
+.sw-toggle:hover{color:var(--tx);border-color:#3d434f}
+.sw-more{display:none}
+.swatches.sw-x .sw-more{display:contents}
 .dst-win{position:fixed;z-index:105;display:none;min-width:160px;background:#1a1d22;border:1px solid #2e333c;border-radius:12px;box-shadow:var(--sh);flex-direction:column}
 .dst-win.show{display:flex}
 .dst-win-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);cursor:grab;user-select:none}
@@ -930,12 +938,12 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-body{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;z-index:3}
 .pl-wrap{width:min(940px,94vw);display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 0 34px}
 .pl-row{display:flex;align-items:center;gap:16px;width:100%}
-.pl-side{width:64px;height:64px;flex:none;display:none;align-self:flex-end;margin-bottom:14px}
+.pl-side{width:118px;height:118px;flex:none;display:none;align-self:flex-end;margin-bottom:0}
 .pl-row.has-av .pl-side{display:block}
 .pl-side .pl-av{width:100%;height:100%;margin-left:0;border-width:2px}
 .pl-side .pl-av.circle{border-radius:50%}
-.pl-side .pl-av.square{border-radius:12px}
-.pl-side .pl-av.empty{font-size:26px}
+.pl-side .pl-av.square{border-radius:22px}
+.pl-side .pl-av.empty{font-size:46px}
 .pl-actions{display:flex;justify-content:center;align-items:center;gap:10px}
 .pl-choices{display:none;flex-direction:column;gap:9px;width:min(620px,92vw);margin-bottom:4px}
 .pl-choice{display:flex;align-items:center;gap:12px;padding:12px 18px;border-radius:12px;border:1px solid #343b47;background:rgba(20,23,29,.92);color:var(--tx);font:500 14.5px var(--body);text-align:left;cursor:pointer;transition:all .16s;backdrop-filter:blur(6px);animation:plSlide .3s cubic-bezier(.2,.8,.3,1) both}
@@ -946,7 +954,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .pl-choice:hover .num{color:var(--plc,#e2a54e);border-color:var(--plc,#e2a54e)}
 .pl-choice .lbl{flex:1}
 .pl-box{position:relative;flex:1;min-width:0;background:rgba(15,17,22,.94);border:1px solid #2c313b;border-radius:16px;padding:24px 28px 30px;min-height:118px;box-shadow:0 26px 70px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
-.pl-box::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:16px 16px 0 0;background:var(--plc,#e2a54e);opacity:.85}
+.pl-box::before{content:'';position:absolute;left:0;right:0;top:0;height:16px;border-radius:15px 15px 0 0;background:linear-gradient(var(--plc,#e2a54e),var(--plc,#e2a54e)) 0 0/100% 3px no-repeat;opacity:.85;pointer-events:none}
 .pl-name{position:absolute;top:-16px;left:24px;display:flex;align-items:center;gap:8px;padding:5px 15px;border-radius:9px;background:var(--plc,#e2a54e);color:#16181d;font:700 13px var(--body);box-shadow:0 8px 22px rgba(0,0,0,.45);max-width:70%;overflow:hidden;white-space:nowrap}
 .pl-name.hidden{display:none}
 .pl-name .pl-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -1341,8 +1349,61 @@ var KINDS={flow:'Обычная',choice:'Выбор',cond:'Условие',bridg
 var KINDS_RU={flow:'обычная',choice:'выбор',cond:'условие',bridge:'мост'};
 var FOLD_NAMES=['Компакт','Список','Развёрнута'];
 var PALETTE_COLORS=['#e2a54e','#e0b46b','#d0714e','#cf6b5a','#c9857a','#d6c96a','#b7b26a','#9cb878','#7fb5a2','#cbbd92','#aab1bb','#8b929c'];
+/* ═══ палитра цветов: базовый набор + свои цвета проекта (добавляются в начало списка) ═══
+   свотчи сворачиваются: видимы первые 16 (два ряда), остальные — по кнопке «Ещё N» */
+var PALETTE_VIS=16;
+function paletteAll(extraFirst){return (Array.isArray(project.palette)?project.palette:[]).concat(extraFirst||[],PALETTE_COLORS);}
+function paletteAdd(hex){
+  if(typeof hex!=='string'||!/^#[0-9a-fA-F]{6}$/.test(hex))return;
+  hex=hex.toLowerCase();
+  if(PALETTE_COLORS.indexOf(hex)>=0)return;
+  if(!Array.isArray(project.palette))project.palette=[];
+  var i=project.palette.indexOf(hex);
+  if(i>0)project.palette.splice(i,1);
+  if(i!==0)project.palette.unshift(hex);
+  if(project.palette.length>24)project.palette.length=24;
+}
+function paletteCoreHtml(cur,attr,extraFirst){
+  var list=paletteAll(extraFirst);
+  var h='',rest='',more=0;
+  for(var i=0;i<list.length;i++){
+    var on=(cur&&String(cur).toLowerCase()===String(list[i]).toLowerCase());
+    var b='<button type="button" class="swatch'+(on?' on':'')+'" '+attr+'="'+list[i]+'" style="background:'+list[i]+'" title="'+list[i]+'"></button>';
+    if(i<PALETTE_VIS)h+=b;else{rest+=b;more++;}
+  }
+  if(more)h+='<span class="sw-more">'+rest+'</span><button type="button" class="sw-toggle" data-n="'+more+'" title="Показать скрытые цвета">Ещё '+more+' ▾</button>';
+  h+='<button type="button" class="swatch custom" data-custom="1" title="Свой цвет — выбрать любой и добавить в палитру">'+ic('plus',13)+'</button>';
+  h+='<input type="color" class="sw-picker" tabindex="-1" aria-hidden="true" value="'+(/^#[0-9a-fA-F]{6}$/.test(String(cur||''))?cur:'#e2a54e')+'">';
+  return h;
+}
+function toggleSwatches(host){
+  if(!host)return;
+  var ex=host.classList.toggle('sw-x');
+  var tg=host.querySelector('.sw-toggle');
+  if(tg){tg.textContent=ex?'Свернуть ▴':'Ещё '+tg.dataset.n+' ▾';tg.title=ex?'Свернуть палитру':'Показать скрытые цвета';}
+}
+function openSwPicker(picker){
+  if(!picker)return;
+  try{if(picker.showPicker)picker.showPicker();else picker.click();}catch(e){picker.click();}
+}
+function bindPalette(root,attr,onPick){
+  if(!root)return;
+  Array.prototype.forEach.call(root.querySelectorAll('.swatch['+attr+']'),function(s){
+    s.onclick=function(){onPick(s.getAttribute(attr)||null,false);};
+  });
+  var custom=root.querySelector('.swatch.custom'),picker=root.querySelector('.sw-picker');
+  if(custom&&picker){
+    custom.onclick=function(){openSwPicker(picker);};
+    picker.addEventListener('change',function(){
+      var hex=(picker.value||'').toLowerCase();
+      if(/^#[0-9a-f]{6}$/.test(hex))onPick(hex,true);
+    });
+  }
+  var tg=root.querySelector('.sw-toggle');
+  if(tg)tg.onclick=function(){toggleSwatches(root);};
+}
 /* ═══ состояние ═══ */
-var project={meta:{name:'Без названия',created:'',modified:''},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[],chars:[]};
+var project={meta:{name:'Без названия',created:'',modified:''},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[],chars:[],palette:[]};
 var vp={x:80,y:80,z:1};
 var sel=new Set(), selGroups=new Set(), selEdges=new Set(), selEdge=null, selGroup=null;
 var history=[], future=[], preSnap=null;
@@ -1878,7 +1939,7 @@ function condWithOverride(c,fn){
   return{vid:ov,op:c.op,val:c.val};
 }
 /* ═══ история ═══ */
-function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,vars:varsList(),chars:charsList()});}
+function serialize(){return JSON.stringify({nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,vars:varsList(),chars:charsList(),palette:(Array.isArray(project.palette)?project.palette:[]).slice(0,24)});}
 function pushHistory(s,label){flushPendingLog();pendingLog={pre:s,by:editIdentity(),t:Date.now(),label:label||null};scheduleLogFlush();history.push(s);if(history.length>150)history.shift();future.length=0;updateHistUI();}
 function updateHistUI(){
   $('#bUndo').classList.toggle('disabled',history.length===0);
@@ -4300,10 +4361,7 @@ function renderInspGroup(){
       if(snip.length>70)snip=snip.slice(0,70)+'…';
       return '<div class="gm-row" data-nid="'+nQ.id+'"><span class="q-num">'+(i+1)+'</span><span class="dot" style="background:'+esc(dotQ)+';color:'+esc(dotQ)+'"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(nQ.title)+(snip?' <span class="gm-snip">— '+esc(snip)+'</span>':'')+'</span>'+(castQ.html||'')+'</div>';
     }).join('');
-    var colSwQ=PALETTE_COLORS.map(function(c){
-      return '<button class="swatch'+(g.color===c?' on':'')+'" data-qc="'+c+'" style="background:'+c+'" title="'+c+'"></button>';
-    }).join('');
-    colSwQ+='<button class="swatch reset'+(g.color?'':' on')+'" data-qc="" title="Сбросить к обычному цвету нод">'+ic('x',12)+'</button>';
+    var colSwQ=paletteCoreHtml(g.color,'data-qc')+'<button class="swatch reset'+(g.color?'':' on')+'" data-qc="" title="Сбросить к обычному цвету нод">'+ic('x',12)+'</button>';
     insp.innerHTML=
       '<div class="i-cap">Цепочка</div>'+
       '<label class="i-lab">Название</label>'+
@@ -4330,12 +4388,10 @@ function renderInspGroup(){
     });
     inpQ.addEventListener('change',editEnd);
     inpQ.addEventListener('blur',editEnd);
-    $all('#iqSw .swatch').forEach(function(s){
-      s.onclick=function(){
-        var v=s.dataset.qc||null;
-        discrete(function(){g.color=v;if(!v)g.tint=0;});
-        applyGroupStyle(g);renderInspector();
-      };
+    bindPalette($('#iqSw'),'data-qc',function(v,fromPicker){
+      if(v===null){discrete(function(){g.color=null;g.tint=0;});}
+      else{discrete(function(){if(fromPicker)paletteAdd(v);g.color=v;});}
+      applyGroupStyle(g);renderInspector();
     });
     var trQ=$('#iqTint');
     trQ.addEventListener('pointerdown',editStart);
@@ -4361,10 +4417,7 @@ function renderInspGroup(){
   var foldBtns=[2,1,0].map(function(f){
     return '<button data-f="'+f+'" class="'+(g.fold===f?'on':'')+'">'+FOLD_NAMES[f]+'</button>';
   }).join('');
-  var swHtml=['#9aa1ac'].concat(PALETTE_COLORS).map(function(c){
-    var on=gColor(g).toLowerCase()===c.toLowerCase();
-    return '<button class="swatch'+(on?' on':'')+'" data-gc="'+c+'" style="background:'+c+'" title="'+c+'"></button>';
-  }).join('');
+  var swHtml=paletteCoreHtml(gColor(g),'data-gc',['#9aa1ac']);
   var parOpts='<option value="">— нет —</option>';
   project.groups.forEach(function(o){
     if(o.id===g.id)return;
@@ -4419,11 +4472,9 @@ function renderInspGroup(){
     discrete(function(){g.parent=v;});
     renderAll();
   };
-  $all('#igSw .swatch').forEach(function(s){
-    s.onclick=function(){
-      discrete(function(){g.color=s.dataset.gc;});
-      applyGroupStyle(g);updateGroupBadges();renderInspector();
-    };
+  bindPalette($('#igSw'),'data-gc',function(v,fromPicker){
+    discrete(function(){if(fromPicker)paletteAdd(v);g.color=v;});
+    applyGroupStyle(g);updateGroupBadges();renderInspector();
   });
   var rng=$('#igAlpha');
   rng.addEventListener('pointerdown',editStart);
@@ -4848,10 +4899,7 @@ function renderInspNode(){
   var stBtns=Object.keys(STATUS).map(function(k){
     return '<button data-s="'+k+'" class="'+(n.status===k?'on c-'+k:'')+'">'+STATUS[k]+'</button>';
   }).join('');
-  var colSw=PALETTE_COLORS.map(function(c){
-    return '<button class="swatch'+(n.color===c?' on':'')+'" data-nc="'+c+'" style="background:'+c+'" title="'+c+'"></button>';
-  }).join('');
-  colSw+='<button class="swatch reset'+(n.color?'':' on')+'" data-nc="" title="Сбросить к базовому виду">'+ic('x',12)+'</button>';
+  var colSw=paletteCoreHtml(n.color,'data-nc')+'<button class="swatch reset'+(n.color?'':' on')+'" data-nc="" title="Сбросить к базовому виду">'+ic('x',12)+'</button>';
   var tintV=nodeTint(n);
   insp.innerHTML=
     '<div class="i-cap">'+(isCustom?'Свой тип: '+esc(vis.name):'Элемент')+'</div>'+
@@ -4905,12 +4953,10 @@ function renderInspNode(){
   if(n.type==='branch'){bindInspOuts(n);}
   if(n.type==='action'){bindInspActions(n);}
   if(n.type==='varnode')bindInspVar(n);
-  $all('#inSw .swatch').forEach(function(s){
-    s.onclick=function(){
-      var v=s.dataset.nc||null;
-      discrete(function(){n.color=v;if(!v)n.tint=0;});
-      renderAll();
-    };
+  bindPalette($('#inSw'),'data-nc',function(v,fromPicker){
+    if(v===null){discrete(function(){n.color=null;n.tint=0;});renderAll();return;}
+    discrete(function(){if(fromPicker)paletteAdd(v);n.color=v;},'Цвет элемента');
+    renderAll();
   });
   var tr=$('#inTint');
   tr.addEventListener('pointerdown',editStart);
@@ -6182,7 +6228,7 @@ function clearSel(){sel.clear();selGroups.clear();selGroup=null;selEdges.clear()
 /* ═══ операции с узлами ═══ */
 function addNode(typeKey,x,y,select){
   var info=typeInfo(typeKey);
-  var n={id:uid(),type:typeKey,gid:null,x:Math.round(x),y:Math.round(y),title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
+  var n={id:uid(),type:typeKey,gid:null,x:Math.round(x),y:Math.round(y),title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:-60,dlgWidth:null};
   if(typeKey==='dialog'){ensureDialog(n);}
   if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   mutate(function(){project.nodes.push(n);},{nodes:[n.id]},'Создание ноды');
@@ -7338,7 +7384,7 @@ function insertNewAtEdge(edgeId,typeKey){
   var e=edgeById(edgeId); if(!e)return;
   var pre=serialize();
   var info=typeInfo(typeKey);
-  var n={id:uid(),type:typeKey,gid:null,x:0,y:0,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
+  var n={id:uid(),type:typeKey,gid:null,x:0,y:0,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:-60,dlgWidth:null};
   if(typeKey==='dialog')ensureDialog(n);
   performInsert(n,e,pre,true);
   toast('Элемент встроен в связь');
@@ -7679,7 +7725,7 @@ function createConnected(fromId,typeKey,cloneId,pt,fromReply,fromOut){
     n=cloneNode(s,pt.x,pt.y);
   }else{
     var info=typeInfo(typeKey);
-    n={id:uid(),type:typeKey,gid:null,x:0,y:0,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
+    n={id:uid(),type:typeKey,gid:null,x:0,y:0,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:-60,dlgWidth:null};
     if(typeKey==='dialog')ensureDialog(n);
     if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   }
@@ -8882,7 +8928,7 @@ function attachNewTo(target,typeKey,cloneId){
     n=cloneNode(src,nx,ny);
   }else{
     var info=typeInfo(typeKey);
-    n={id:uid(),type:typeKey,gid:null,x:nx,y:ny,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
+    n={id:uid(),type:typeKey,gid:null,x:nx,y:ny,title:info.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:-60,dlgWidth:null};
     if(typeKey==='dialog')ensureDialog(n);
     if(typeKey==='varnode'){n.varMode='set';n.varOp='=';n.varVal=0;n.vid=null;}
   }
@@ -8910,7 +8956,7 @@ canvas.addEventListener('drop',function(e){
   if(vr&&!t&&!cl){
     var vv=varById(vr);
     if(vv){
-      var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null,varMode:'set',varOp:'=',varVal:defValOf(vv),vid:vv.id};
+      var vn={id:uid(),type:'varnode',gid:null,x:Math.round(w.x-NODE_W/2),y:Math.round(w.y-20),title:vv.name,text:'',status:'idea',tags:[],expand:1,color:null,tint:-60,dlgWidth:null,varMode:'set',varOp:'=',varVal:defValOf(vv),vid:vv.id};
       var tgV=deepestGroupAt(w.x,w.y);
       vn.gid=tgV?tgV.id:null;
       mutate(function(){project.nodes.push(vn);},{nodes:[vn.id]},'Создание ноды переменной');
@@ -9351,9 +9397,7 @@ function openTypeEditor(existing){
   var isNew=!existing;
   var curColor=existing?existing.color:'#e2a54e';
   var curIcon=existing?existing.icon:'star';
-  var sw=PALETTE_COLORS.map(function(c){
-    return '<button class="swatch'+(c===curColor?' on':'')+'" data-c="'+c+'" style="background:'+c+'" title="'+c+'"></button>';
-  }).join('');
+  var sw=paletteCoreHtml(curColor,'data-c');
   var text=
     '<label class="i-lab">Название типа</label>'+
     '<input class="inp" id="ctName" maxlength="40" placeholder="Например: Босс, Тайник, Спутник…" value="'+(existing?esc(existing.name):'')+'">'+
@@ -9378,15 +9422,26 @@ function openTypeEditor(existing){
   $('#mCard').addEventListener('click',function(ev){
     var swb=ev.target.closest?ev.target.closest('.swatch'):null;
     if(swb){
+      if(swb.dataset.custom!==undefined){openSwPicker($('#mCard .sw-picker'));return;}
       curColor=swb.dataset.c;
       $all('#mCard .swatch').forEach(function(x){x.classList.toggle('on',x===swb);});
       return;
     }
+    var tgb=ev.target.closest?ev.target.closest('.sw-toggle'):null;
+    if(tgb){toggleSwatches(tgb.closest('.swatches'));return;}
     var icb=ev.target.closest?ev.target.closest('.ico-btn'):null;
     if(icb){
       curIcon=icb.dataset.i;
       $all('#mCard .ico-btn').forEach(function(x){x.classList.toggle('on',x===icb);});
     }
+  });
+  $('#mCard').addEventListener('change',function(ev){
+    if(!ev.target||!ev.target.classList||!ev.target.classList.contains('sw-picker'))return;
+    var hex=(ev.target.value||'').toLowerCase();
+    if(!/^#[0-9a-f]{6}$/.test(hex))return;
+    paletteAdd(hex);curColor=hex;
+    var host=$('#ctSw');
+    if(host)host.innerHTML=paletteCoreHtml(curColor,'data-c');
   });
   setTimeout(function(){var i=$('#ctName');if(i)i.focus();},60);
 }
@@ -9403,7 +9458,7 @@ function deleteCustomType(id){
 /* ═══ файлы ═══ */
 function exportJSON(){
   project.meta.modified=new Date().toISOString();
-return JSON.stringify({app:'vetvi',version:18,bend:bendMode,meta:project.meta,viewport:vp,nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,listHidden:project.listHidden,vars:varsList(),chars:charsList()},null,2);}
+return JSON.stringify({app:'vetvi',version:18,bend:bendMode,meta:project.meta,viewport:vp,nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,groups:project.groups,listHidden:project.listHidden,vars:varsList(),chars:charsList(),palette:(Array.isArray(project.palette)?project.palette:[]).slice(0,24)},null,2);}
 function slug(s){
   var r=(s||'proekt').toLowerCase().replace(/[^a-zа-яё0-9]+/gi,'-').replace(/^-+|-+$/g,'');
   return r.slice(0,60)||'proekt';
@@ -9803,7 +9858,7 @@ function textsImpApply(d,opt){
       if(!opt.cre)return;
       var t=(en.type&&TYPES[en.type])?en.type:'note';
       var nn={id:en.id,type:t,gid:null,x:Math.round(bx+col*300+(row%2)*60),y:Math.round(by+170+row*210),
-        title:(en.title!==null)?en.title:TYPES[t].name,text:'',status:'idea',tags:[],expand:1,color:null,tint:0,dlgWidth:null};
+        title:(en.title!==null)?en.title:TYPES[t].name,text:'',status:'idea',tags:[],expand:1,color:null,tint:-60,dlgWidth:null};
       if(t==='dialog'){ensureDialog(nn);if(en.text!==null){nn.dialog.description=en.text;nn.text=en.text;}if(opt.med&&en.replies)nn.dialog.replies=en.replies;}
       else if(en.text!==null)nn.text=en.text;
       if(t==='branch'&&opt.med&&en.outcomes)nn.outcomes=en.outcomes.map(function(oo){return{id:oo.id,label:oo.label,cond:null};});
@@ -9976,6 +10031,7 @@ bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:
   });
   p.listHidden=Array.isArray(p.listHidden)?p.listHidden:(Array.isArray(p.hiddenTypes)?p.hiddenTypes:[]);
   p.listHidden=p.listHidden.filter(function(k){return TYPES[k]||cmap[k];});
+  p.palette=(Array.isArray(p.palette)?p.palette:[]).filter(function(c){return typeof c==='string'&&/^#[0-9a-fA-F]{6}$/.test(c);}).map(function(c){return c.toLowerCase();}).slice(0,24);
   p.vars=Array.isArray(p.vars)?p.vars.filter(function(v){return v&&typeof v.id==='string'&&typeof v.name==='string';}).map(function(v){
     var type=VAR_TYPES[v.type]?v.type:((typeof v.val==='number')?'num':'str');
     return{id:v.id.slice(0,40),name:String(v.name).slice(0,40),type:type,val:varCastVal(type,v.val)};
@@ -9985,7 +10041,7 @@ bd:(e.bd&&isFinite(e.bd.dl))?{dl:+e.bd.dl||0,dy:+e.bd.dy||0,dr:+e.bd.dr||0}:{dl:
 function loadProject(p,name){
   syncLeaveIfRoom();
   p=normalize(p);
-  project={meta:p.meta||{name:'Без названия',created:'',modified:''},nodes:p.nodes,edges:p.edges,customTypes:p.customTypes,groups:p.groups,listHidden:p.listHidden,vars:p.vars||[],chars:p.chars||[]};
+  project={meta:p.meta||{name:'Без названия',created:'',modified:''},nodes:p.nodes,edges:p.edges,customTypes:p.customTypes,groups:p.groups,listHidden:p.listHidden,vars:p.vars||[],chars:p.chars||[],palette:Array.isArray(p.palette)?p.palette:[]};
   project.groups.forEach(function(g){
     if(g.fold<2&&!g.bbox){
       var ms=allDescNodes(g.id),y0=1e9,y1=-1e9,hh={};
@@ -10066,7 +10122,7 @@ function guardOpen(){guardDirtyThen(openProject);}
 function newProject(){
   guardDirtyThen(function(){
     var now=new Date().toISOString();
-    project={meta:{name:'Новый проект',created:now,modified:now},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[],chars:[]};
+    project={meta:{name:'Новый проект',created:now,modified:now},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[],vars:[],chars:[],palette:[]};
     sel.clear();selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;history=[];future=[];fileName=null;fileHandle=null;
     $('#projName').value=project.meta.name;
     markSaved();renderAll();fitView(false);
@@ -10079,7 +10135,7 @@ function newProject(){
 function demoProject(){
   var now=new Date().toISOString();
   function N(type,title,text,x,y,st,tags){
-    return{id:uid(),type:type,gid:null,title:title,text:text,x:x,y:y,status:st||'idea',tags:tags||[],expand:1,color:null,tint:0,dlgWidth:null};
+    return{id:uid(),type:type,gid:null,title:title,text:text,x:x,y:y,status:st||'idea',tags:tags||[],expand:1,color:null,tint:-60,dlgWidth:null};
   }
   var ctBoss={id:uid(),name:'Босс',color:'#cf6b5a',icon:'skull'};
   var ctStash={id:uid(),name:'Тайник',color:'#d6c96a',icon:'chest'};
@@ -10099,7 +10155,7 @@ function demoProject(){
   var n12=N(ctStash.id,'Тайник картографа','Скрытый схрон Вейса с припасами и записками о старых тропах.',1268,470,'idea',['вейс']);
   var dlgId=uid();
   var r1=uid(),r2=uid(),r3=uid(),r4=uid(),r5=uid();
-  var nDlg={id:dlgId,type:'dialog',gid:null,title:'Разговор с Вейсом у костра',text:'',x:332,y:116,status:'draft',tags:['акт 1','хаб'],expand:2,color:null,tint:0,dlgWidth:null,
+  var nDlg={id:dlgId,type:'dialog',gid:null,title:'Разговор с Вейсом у костра',text:'',x:332,y:116,status:'draft',tags:['акт 1','хаб'],expand:2,color:null,tint:-60,dlgWidth:null,
     dialog:{
       participants:[cW.id],
       description:'Первая встреча со Странником: игрок выбирает тон разговора. Вейс раскроет часть правды только при высоком доверии.',
@@ -10548,7 +10604,8 @@ function syncMe(){
 function syncDocObj(){
   return{app:'vetvi-room',version:1,meta:project.meta,bend:bendMode,
     nodes:project.nodes,edges:project.edges,customTypes:project.customTypes,
-    groups:project.groups,listHidden:project.listHidden,vars:varsList(),chars:charsList()};
+    groups:project.groups,listHidden:project.listHidden,vars:varsList(),chars:charsList(),
+    palette:(Array.isArray(project.palette)?project.palette:[]).slice(0,24)};
 }
 function syncBusy(){
   return !!(dragS||gdrag||carryS||dlgResizeS||wpDrag||brDrag||lblDrag||inDrag||outDrag||repOutDrag||grestore||gcreateS||marS||knifeS||connS||isTyping()||
@@ -10666,6 +10723,7 @@ function syncApplyRemote(doc,fit,keepPid){
     project.listHidden=Array.isArray(doc.listHidden)?doc.listHidden:[];
     project.vars=Array.isArray(doc.vars)?doc.vars:[];
     project.chars=Array.isArray(doc.chars)?doc.chars:[];
+    project.palette=(Array.isArray(doc.palette)?doc.palette:[]).filter(function(c){return typeof c==='string'&&/^#[0-9a-fA-F]{6}$/.test(c);}).slice(0,24);
     migrateCharNodesInPlace();/* снимок от старой версии: ноды персонажей → список */
     var charsDirty=false;
     try{charsDirty=$('#paneChars')&&$('#paneChars').classList.contains('active');}catch(e){}
