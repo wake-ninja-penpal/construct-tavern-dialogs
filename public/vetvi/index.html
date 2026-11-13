@@ -1020,6 +1020,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       <div class="sm-i" data-a="jsonas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M8 3v5h7V3"/></svg>Сохранить как… (JSON)<kbd>Ctrl+Shift+S</kbd></div>
       <div class="sm-i" data-a="txt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/></svg>Текстовый файл (.txt)</div>
       <div class="sm-i" data-a="txjson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h6M9 16h6M9 9h2"/></svg>Тексты (JSON)</div>
+      <div class="sm-i" data-a="txsel" title="Экспортировать только выделенные ноды: клик по карточке, Shift+клик — добавить, рамкой или группой. Файл того же формата «Текстов (JSON)» — подходит для «Импорт текстов (JSON)»: совпавшие ноды обновятся, отсутствующие создадутся"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l4 4v14H5z"/><path d="M9 12.5h4M11 10.5v4"/><rect x="3" y="3" width="5" height="5" rx="1" stroke-dasharray="1.6 1.4"/><rect x="16" y="16" width="5" height="5" rx="1" stroke-dasharray="1.6 1.4"/></svg>Тексты выделенных нод (JSON)</div>
       <div class="sm-i" data-a="tximp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10.5"/><path d="m7.5 9.5 4.5 4.5 4.5-4.5"/><path d="M4.5 20.5h15"/></svg>Импорт текстов (JSON)…</div>
     </div>
   </div>
@@ -9699,7 +9700,15 @@ function textsRepliesOut(arr){
   });
   return out;
 }
-function exportTextsJson(){
+function exportTextsJson(onlySel){
+  /* только выделенные: узлы выделения + содержимое выделенных групп (plSelectionIds) */
+  var selIds=null;
+  if(onlySel){
+    var pl=(typeof plSelectionIds==='function')?plSelectionIds():null;
+    if(!pl||!pl.length){toast('Сначала выделите ноды на холсте: клик по карточке, Shift+клик — добавить, рамкой или группой','warn');return;}
+    selIds=new Set();
+    pl.forEach(function(n){if(n&&n.id)selIds.add(n.id);});
+  }
   var texts=[],nodes=[],links=[],nRep=0;
   function put(id,s){texts.push({id:id,text:s});}
   function repsOut(nid,arr){
@@ -9716,6 +9725,7 @@ function exportTextsJson(){
     return out;
   }
   project.nodes.forEach(function(n){
+    if(selIds&&!selIds.has(n.id))return;
     var o={id:n.id},tx=textsNodeText(n);
     if(tx)put(n.id,tx);
     if(n.title)o.title=n.title;
@@ -9728,16 +9738,21 @@ function exportTextsJson(){
     nodes.push(o);
   });
   project.edges.forEach(function(e){
+    if(selIds&&!(selIds.has(e.from)&&selIds.has(e.to)))return;
     var o={from:e.from,to:e.to};
     if(e.label)o.label=e.label;
     if(e.fromReply)o.fromReply=e.fromReply;
     if(e.fromOut)o.fromOut=e.fromOut;
     links.push(o);
   });
-  var out={texts:texts,service:{format:'vetvi-texts-v3',app:'vetvi',project:project.meta.name||'',exported:new Date().toISOString(),
+  var nm=project.meta.name||'';
+  var out={texts:texts,service:{format:'vetvi-texts-v3',app:'vetvi',
+    project:selIds?((nm?nm+' — ':'')+'выделенные ноды ('+nodes.length+')'):nm,
+    exported:new Date().toISOString(),
     nodes:nodes,links:links}};
-  download(JSON.stringify(out,null,2),slug(project.meta.name)+'-teksty.json','application/json;charset=utf-8');
-  toast('Экспортировано: текстов '+texts.length+', нод '+nodes.length+(nRep?', реплик '+nRep:'')+' — связи в блоке service');
+  download(JSON.stringify(out,null,2),slug(project.meta.name)+(selIds?'-teksty-vydel':'-teksty')+'.json','application/json;charset=utf-8');
+  toast(selIds?('Экспортировано выделенных: нод '+nodes.length+', текстов '+texts.length+(nRep?', реплик '+nRep:'')+' — вернуть в проект можно через «Импорт текстов (JSON)»')
+       :('Экспортировано: текстов '+texts.length+', нод '+nodes.length+(nRep?', реплик '+nRep:'')+' — связи в блоке service'));
 }
 function textsImpParse(str){
   var p;
@@ -9818,7 +9833,7 @@ function openTextsImport(keep){
   showModal({title:'Импорт текстов из JSON',
     text:'<p style="margin:2px 0 9px;font-size:12.5px;color:var(--tx2)">Вставьте JSON с текстами нод: массив <b style="color:var(--acc2)">texts</b> — пары <b style="color:var(--acc2)">{id, text}</b> (каждая строка встаёт по своему id, порядок не важен) — и служебный блок <b style="color:var(--acc2)">service</b>. Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.</p>'+
       '<textarea id="txImpTa" class="tx-imp-ta" spellcheck="false"></textarea>'+
-      '<div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="txImpFile">Выбрать файл…</button><span style="font-size:11px;color:var(--tx3)">файл можно получить в меню «Сохранить» → «Тексты (JSON)»</span></div>',
+      '<div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="txImpFile">Выбрать файл…</button><span style="font-size:11px;color:var(--tx3)">файл — из меню «Сохранить» → «Тексты (JSON)» или «Тексты выделенных нод (JSON)»: ноды из него вернутся в проект</span></div>',
     buttons:[{label:'Проверить',primary:1,fn:function(){
         var ta=$('#txImpTa');var r=textsImpParse(ta?ta.value:'');
         if(r.err){toast(r.err,'err');openTextsImport(ta?ta.value:'');return;}
@@ -10258,6 +10273,7 @@ $all('#saveMenu .sm-i').forEach(function(el){
     else if(a==='jsonas')saveAs();
     else if(a==='txt')exportTXT();
     else if(a==='txjson')exportTextsJson();
+    else if(a==='txsel')exportTextsJson(true);
     else if(a==='tximp')openTextsImport();
   };
 });
