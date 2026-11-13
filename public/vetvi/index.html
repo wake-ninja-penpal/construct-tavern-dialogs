@@ -636,6 +636,21 @@ body.connecting .vpinn{cursor:copy}
 .set-store-msg.ok{color:#9cb878}
 .set-foot-row{display:flex;align-items:center;gap:12px;margin-top:12px}
 .set-reload-note{font-size:12px;color:var(--tx3);margin-top:10px;line-height:1.45}
+/* горячие клавиши в настройках */
+.hk-sep{height:1px;background:var(--line);margin:16px -20px 14px}
+.hk-list{max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:9px;margin-top:8px;background:rgba(255,255,255,.02)}
+.hk-list::-webkit-scrollbar{width:8px}
+.hk-list::-webkit-scrollbar-thumb{background:#3a404b;border-radius:4px}
+.hk-list::-webkit-scrollbar-track{background:transparent}
+.hk-row{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--line)}
+.hk-row:last-child{border-bottom:0}
+.hk-row.cap{background:rgba(226,165,78,.09)}
+.hk-name{flex:1;min-width:0;font-size:12.5px;color:var(--tx);line-height:1.3}
+.hk-keys{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.hk-wait{font-size:11.5px;color:var(--tx3);font-style:italic}
+.hk-flag{font-size:9.5px;font-style:normal;color:var(--tx3);border:1px solid var(--line2);border-radius:4px;padding:0 4px}
+.hk-acts{display:flex;gap:5px}
+.btn.btn-xs{height:auto;font-size:11px;padding:3px 9px;border-radius:7px;gap:4px}
 .dlg-reply-ed{position:relative;padding:6px 6px 6px 16px;margin:3px 0;background:rgba(255,255,255,.02);border-radius:7px;border:1px solid transparent;transition:border-color .15s}
 .dlg-reply-ed::before{content:'';position:absolute;left:4px;top:0;bottom:0;width:1.5px;background:var(--line2);border-radius:1px}
 .dlg-reply-ed::after{content:'';position:absolute;left:4px;top:12px;width:8px;height:1.5px;background:var(--line2);border-radius:1px}
@@ -1229,6 +1244,11 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     </div>
     <div class="set-foot-row"><button class="btn primary" id="setStoreSwitch" disabled>Переключить</button><span class="set-store-msg" id="setStoreMsg"></span></div>
     <div class="set-reload-note">При возврате на LocalStorage сначала проверяется, поместятся ли данные: если нет — переключение не выполняется.</div>
+    <div class="hk-sep"></div>
+    <div class="set-sec-title">Горячие клавиши</div>
+    <div class="set-hint">Действуют вне полей ввода и не зависят от раскладки: Ctrl+Z, Ctrl+S и остальные работают одинаково на русской и английской. Нажмите «Изменить» и задайте своё сочетание: Esc — отмена, «↺» — вернуть по умолчанию. Занятые другим действием сочетания не назначаются.</div>
+    <div class="hk-list" id="hkList"></div>
+    <div class="set-foot-row"><button class="btn btn-xs" id="hkResetAll">Сбросить все</button><span class="set-store-msg" id="hkMsg"></span></div>
   </div>
   <div class="dlg-modal-foot"><span class="log-foot-info"></span><button class="btn primary" id="setDone">Готово</button></div>
 </div></div>
@@ -9338,6 +9358,143 @@ function isTyping(){
   if(a&&!a.isConnected)return false;
   return a&&((a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT')||a.isContentEditable);
 }
+/* ═══ реестр горячих клавиш: переназначение + независимость от раскладки ═══
+   Сочетания хранятся по e.code (физическая клавиша), поэтому работают при любой
+   раскладке; если браузер не отдал e.code — клавиша восстанавливается из e.key
+   (в том числе из кириллицы) по карте RU2CODE. */
+var HK_KEY='vetvi-hotkeys';
+var HK_DEFS=[
+  {id:'undo',name:'Отменить',def:'Mod+KeyZ'},
+  {id:'redo',name:'Вернуть (повторить)',def:'Mod+KeyY',alias:['Mod+Shift+KeyZ']},
+  {id:'save',name:'Сохранить проект (JSON)',def:'Mod+KeyS'},
+  {id:'saveAs',name:'Сохранить как… (JSON)',def:'Mod+Shift+KeyS'},
+  {id:'projects',name:'Менеджер проектов',def:'Mod+KeyO'},
+  {id:'newProject',name:'Новый проект',def:'Mod+Alt+KeyN'},
+  {id:'duplicate',name:'Дублировать выделение',def:'Mod+KeyD'},
+  {id:'exportSel',name:'Экспорт выделенных нод (JSON)',def:'Mod+KeyE'},
+  {id:'selectAll',name:'Выделить все ноды',def:'Mod+KeyA'},
+  {id:'group',name:'Сгруппировать выделение',def:'Mod+KeyG'},
+  {id:'ungroup',name:'Разгруппировать',def:'Mod+Shift+KeyG'},
+  {id:'alignH',name:'Выровнять в ряд',def:'Mod+Shift+KeyA'},
+  {id:'alignV',name:'Выровнять в столбец',def:'Mod+Shift+KeyV'},
+  {id:'rename',name:'Переименовать ноду',def:'F2'},
+  {id:'deleteSel',name:'Удалить выделенное',def:'Delete',alias:['Backspace']},
+  {id:'centerSel',name:'Центрировать на выделенной ноде',def:'KeyF'},
+  {id:'play',name:'Проиграть диалог',def:'KeyP'},
+  {id:'fitView',name:'Вписать весь проект',def:'Digit0'},
+  {id:'zoomIn',name:'Приблизить',def:'Equal',alias:['Shift+Equal']},
+  {id:'zoomOut',name:'Отдалить',def:'Minus'}
+];
+var hkUser={};
+try{var _hkRaw=JSON.parse(localStorage.getItem(HK_KEY)||'{}');if(_hkRaw&&typeof _hkRaw==='object'&&!Array.isArray(_hkRaw))hkUser=_hkRaw;}catch(e){hkUser={};}
+Object.keys(hkUser).forEach(function(k){if(!hkDef(k))delete hkUser[k];});
+function hkDef(id){for(var i=0;i<HK_DEFS.length;i++)if(HK_DEFS[i].id===id)return HK_DEFS[i];return null;}
+var RU2CODE={й:'KeyQ',ц:'KeyW',у:'KeyE',к:'KeyR',е:'KeyT',н:'KeyY',г:'KeyU',ш:'KeyI',щ:'KeyO',з:'KeyP',ф:'KeyA',ы:'KeyS',в:'KeyD',а:'KeyF',п:'KeyG',р:'KeyH',о:'KeyJ',л:'KeyK',д:'KeyL',я:'KeyZ',ч:'KeyX',с:'KeyC',м:'KeyV',и:'KeyB',т:'KeyN',ь:'KeyM',х:'BracketLeft',ъ:'BracketRight',ж:'Semicolon',э:'Quote',б:'Comma',ю:'Period',ё:'Backquote'};
+function hkKeyCode(e){
+  if(e.code)return e.code;
+  var k=(e.key||'').toLowerCase();
+  if(RU2CODE[k])return RU2CODE[k];
+  if(/^[0-9]$/.test(k))return 'Digit'+k;
+  if(/^[a-z]$/.test(k))return 'Key'+k.toUpperCase();
+  return e.key||'';
+}
+function hkComboOf(e){
+  var p=[];
+  if(e.ctrlKey||e.metaKey)p.push('Mod');
+  if(e.altKey)p.push('Alt');
+  if(e.shiftKey)p.push('Shift');
+  p.push(hkKeyCode(e));
+  return p.join('+');
+}
+function hkBound(id){var d=hkDef(id);return (d&&hkUser[id])?hkUser[id]:d.def;}
+function hkIs(e,id){
+  var d=hkDef(id);if(!d)return false;
+  var c=hkComboOf(e);
+  if(c===hkBound(id))return true;
+  return !!(!hkUser[id]&&d.alias&&d.alias.indexOf(c)>=0);
+}
+function hkConflict(combo,exceptId){
+  for(var i=0;i<HK_DEFS.length;i++){
+    var d=HK_DEFS[i];if(d.id===exceptId)continue;
+    if(hkBound(d.id)===combo)return d.name;
+    if(!hkUser[d.id]&&d.alias&&d.alias.indexOf(combo)>=0)return d.name;
+  }
+  return null;
+}
+var hkMac=/mac/i.test(navigator.platform||'');
+function hkHuman(combo){
+  if(!combo)return '—';
+  var parts=combo.split('+'),code=parts[parts.length-1],mods=parts.slice(0,-1),k=code;
+  if(code.indexOf('Key')===0)k=code.slice(3);
+  else if(code.indexOf('Digit')===0)k=code.slice(5);
+  else if(code==='Equal')k='=';
+  else if(code==='Minus')k='-';
+  else if(code==='Backquote')k='`';
+  else if(code==='BracketLeft')k='[';
+  else if(code==='BracketRight')k=']';
+  else if(code==='Semicolon')k=';';
+  else if(code==='Quote')k="'";
+  else if(code==='Comma')k=',';
+  else if(code==='Period')k='.';
+  else if(code==='Delete')k='Del';
+  var map=hkMac?{Mod:'⌘',Alt:'⌥',Shift:'⇧'}:{Mod:'Ctrl',Alt:'Alt',Shift:'Shift'};
+  var out=mods.map(function(m){return map[m]||m;});
+  out.push(k);
+  return out.join(hkMac?'':'+');
+}
+function hkSaveUser(){
+  try{localStorage.setItem(HK_KEY,JSON.stringify(hkUser));}
+  catch(e){toast('Не удалось сохранить горячие клавиши','warn');}
+}
+var hkCap=null;
+function hkMsg(t,cls){var el=$('#hkMsg');if(!el)return;el.textContent=t||'';el.className='set-store-msg'+(cls?' '+cls:'');}
+function hkRenderList(){
+  var el=$('#hkList');if(!el)return;
+  var html='';
+  HK_DEFS.forEach(function(d){
+    var isCap=(hkCap===d.id);
+    html+='<div class="hk-row'+(isCap?' cap':'')+'" data-id="'+d.id+'">'
+      +'<span class="hk-name">'+esc(d.name)+'</span>';
+    if(isCap){
+      html+='<span class="hk-keys hk-wait">нажмите сочетание…</span>'
+        +'<span class="hk-acts"><button class="btn btn-xs" data-hk-cancel>Отмена</button></span>';
+    }else{
+      html+='<span class="hk-keys"><kbd>'+esc(hkHuman(hkBound(d.id)))+'</kbd>'
+        +(hkUser[d.id]?'<i class="hk-flag" title="Значение изменено вручную">своё</i>':'')+'</span>'
+        +'<span class="hk-acts">'
+        +'<button class="btn btn-xs" data-hk-set>Изменить</button>'
+        +(hkUser[d.id]?'<button class="btn btn-xs" data-hk-reset title="Вернуть по умолчанию">↺</button>':'')
+        +'</span>';
+    }
+    html+='</div>';
+  });
+  el.innerHTML=html;
+  $all('#hkList [data-hk-set]').forEach(function(b){b.onclick=function(){hkCap=b.closest('.hk-row').dataset.id;hkMsg('','');hkRenderList();};});
+  $all('#hkList [data-hk-cancel]').forEach(function(b){b.onclick=function(){hkCapDone(null);hkMsg('Захват отменён','');};});
+  $all('#hkList [data-hk-reset]').forEach(function(b){b.onclick=function(){var id=b.closest('.hk-row').dataset.id;delete hkUser[id];hkSaveUser();hkRenderList();hkMsg('«'+hkDef(id).name+'» возвращено к значению по умолчанию','ok');};});
+}
+function hkCapDone(combo){
+  var id=hkCap;hkCap=null;hkRenderList();
+  if(id&&combo)toast('«'+hkDef(id).name+'» — '+hkHuman(combo),'ok');
+}
+/* захват нового сочетания: перехватывает ВСЕ клавиши до остальных обработчиков */
+window.addEventListener('keydown',function(e){
+  if(!hkCap)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  var k=e.key;
+  if(k==='Escape'){hkCapDone(null);hkMsg('Захват отменён','');return;}
+  if(k==='Control'||k==='Meta'||k==='Shift'||k==='Alt'||k==='OS'||k==='NumLock'||k==='CapsLock')return; /* ждём основную клавишу */
+  var codePart=hkKeyCode(e);
+  if(!codePart){hkMsg('Не удалось распознать клавишу — попробуйте другую','err');hkCapDone(null);return;}
+  if(codePart==='Space'){hkMsg('Space закреплён за панорамированием холста — выберите другую клавишу','err');hkCapDone(null);return;}
+  var combo=hkComboOf(e);
+  var conf=hkConflict(combo,hkCap);
+  if(conf){hkMsg('«'+hkHuman(combo)+'» уже занято — «'+conf+'». Сначала сбросьте или переназначьте его.','err');hkCapDone(null);return;}
+  var targetId=hkCap;
+  hkUser[targetId]=combo;hkSaveUser();
+  hkCapDone(combo);
+  hkMsg('«'+hkDef(targetId).name+'» — назначено '+hkHuman(combo),'ok');
+},true);
 window.addEventListener('keydown',function(e){
   if(plIsOpen()){plKey(e);return;}
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
@@ -9347,36 +9504,35 @@ window.addEventListener('keydown',function(e){
     return;
   }
   if(e.code==='Space'){spaceDown=true;document.body.classList.add('space');e.preventDefault();return;}
-  var mod=e.ctrlKey||e.metaKey;
-  var code=e.code;
-  if(e.key==='F2'&&sel.size===1){
+  if(hkIs(e,'rename')&&sel.size===1){
     e.preventDefault();
     var elF=nodeEls.get(sel.values().next().value);
     if(elF&&elF.style.display!=='none')startInlineEdit(elF);
     return;
   }
-  if(mod&&code==='KeyZ'&&!e.shiftKey){e.preventDefault();undo();return;}
-  if(mod&&(code==='KeyY'||(code==='KeyZ'&&e.shiftKey))){e.preventDefault();redo();return;}
-  if(mod&&code==='KeyS'){e.preventDefault();if(e.shiftKey)saveAs();else save();return;}
-  if(mod&&code==='KeyO'){e.preventDefault();showProjectsModal();return;}
-  if(mod&&e.altKey&&code==='KeyN'){e.preventDefault();projCreate();return;}
-  if(mod&&code==='KeyD'){e.preventDefault();var r=duplicateSel();if(r)startCarry(r.ids,r.pre);return;}
-  if(mod&&code==='KeyE'){e.preventDefault();exportTextsJson(true);return;}
-  if(mod&&e.shiftKey&&code==='KeyA'){e.preventDefault();alignSelH();return;}
-  if(mod&&e.shiftKey&&code==='KeyV'){e.preventDefault();alignSelV();return;}
-  if(mod&&!e.shiftKey&&code==='KeyG'){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+Shift+ЛКМ)','warn');return;}
-  if(mod&&e.shiftKey&&code==='KeyG'){
+  if(hkIs(e,'undo')){e.preventDefault();undo();return;}
+  if(hkIs(e,'redo')){e.preventDefault();redo();return;}
+  if(hkIs(e,'saveAs')){e.preventDefault();saveAs();return;}
+  if(hkIs(e,'save')){e.preventDefault();save();return;}
+  if(hkIs(e,'projects')){e.preventDefault();showProjectsModal();return;}
+  if(hkIs(e,'newProject')){e.preventDefault();projCreate();return;}
+  if(hkIs(e,'duplicate')){e.preventDefault();var r=duplicateSel();if(r)startCarry(r.ids,r.pre);return;}
+  if(hkIs(e,'exportSel')){e.preventDefault();exportTextsJson(true);return;}
+  if(hkIs(e,'alignH')){e.preventDefault();alignSelH();return;}
+  if(hkIs(e,'alignV')){e.preventDefault();alignSelV();return;}
+  if(hkIs(e,'ungroup')){
     e.preventDefault();
     var gidU=selGroup;
     if(!gidU&&selGroups.size)gidU=selGroups.values().next().value;
-    if(!gidU&&sel.size===1){var nn=nodeById(sel.values().next().value);if(nn)gidU=nn.gid;}
+    if(!gidU&&sel.size===1){var nnN=nodeById(sel.values().next().value);if(nnN)gidU=nnN.gid;}
     if(gidU)ungroup(gidU);else toast('Нет группы для роспуска','warn');
     return;
   }
-  if(mod&&code==='KeyA'){e.preventDefault();
+  if(hkIs(e,'group')){e.preventDefault();if(sel.size+selGroups.size>=2)groupModal();else toast('Выделите минимум два объекта (или нарисуйте группу: Ctrl+Shift+ЛКМ)','warn');return;}
+  if(hkIs(e,'selectAll')){e.preventDefault();
     sel=new Set(project.nodes.filter(function(n){return !collapsedAncestorOf(n);}).map(function(n){return n.id;}));
     selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;syncSel();renderInspector();return;}
-  if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();removeSelected();return;}
+  if(hkIs(e,'deleteSel')){e.preventDefault();removeSelected();return;}
   if(e.key==='Escape'){
     if(carryS){cancelCarry();return;}
     if(gcreateS){gcreateS=null;marquee.style.display='none';marquee.classList.remove('mg');return;}
@@ -9389,11 +9545,11 @@ window.addEventListener('keydown',function(e){
     $('#saveMenu').classList.remove('show');$('#saveWrap').classList.remove('open');
     clearSel();return;
   }
-  if(code==='KeyF'){if(sel.size===1)centerOn(nodeById(sel.values().next().value));return;}
-  if(code==='KeyP'&&!mod){e.preventDefault();plStart();return;}
-  if(e.key==='0'){fitView(true);return;}
-  if(e.key==='='||e.key==='+'){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1.15);return;}
-  if(e.key==='-'){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1/1.15);return;}
+  if(hkIs(e,'centerSel')){if(sel.size===1)centerOn(nodeById(sel.values().next().value));return;}
+  if(hkIs(e,'play')){e.preventDefault();plStart();return;}
+  if(hkIs(e,'fitView')){fitView(true);return;}
+  if(hkIs(e,'zoomIn')){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1.15);return;}
+  if(hkIs(e,'zoomOut')){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1/1.15);return;}
 });
 window.addEventListener('keyup',function(e){
   if(e.code==='Space'){spaceDown=false;document.body.classList.remove('space');}
@@ -10390,7 +10546,7 @@ function storeSetMode(m){
 }
 /* ключи с данными приложения (переносятся между хранилищами) */
 function isDataKey(k){
-  return typeof k==='string'&&k.indexOf('vetvi-')===0&&k!==STORE_MODE_KEY&&k!=='vetvi-left-w';
+  return typeof k==='string'&&k.indexOf('vetvi-')===0&&k!==STORE_MODE_KEY&&k!=='vetvi-left-w'&&k!=='vetvi-hotkeys';
 }
 /* ── IndexedDB: обещания-обёртки ── */
 var _idbPr=null;
@@ -10602,8 +10758,9 @@ function setStoreRefresh(){
   }
 }
 function openSettings(){
-  setTargetMode=null;setStoreBusy=false;
+  setTargetMode=null;setStoreBusy=false;hkCap=null;
   $('#setModal').classList.add('show');
+  hkMsg('','');hkRenderList();
   setStoreRefresh();
   if(setStoreIdbBytes()===null&&!setIdbSizeReq){
     setIdbSizeReq=true;
@@ -10619,6 +10776,10 @@ function closeSettings(){$('#setModal').classList.remove('show');}
 $('#bSettings').onclick=openSettings;
 $('#setModalClose').onclick=closeSettings;
 $('#setDone').onclick=closeSettings;
+$('#hkResetAll').onclick=function(){
+  hkUser={};hkSaveUser();hkCap=null;hkRenderList();
+  hkMsg('Все горячие клавиши возвращены к значениям по умолчанию','ok');
+};
 $('#setOptLs').onclick=function(){if(setStoreBusy)return;setTargetMode='ls';setStoreRefresh();};
 $('#setOptIdb').onclick=function(){if(setStoreBusy)return;setTargetMode='idb';setStoreRefresh();};
 $('#setStoreSwitch').onclick=function(){
@@ -12754,7 +12915,7 @@ function plKey(e){
   if(e.key==='Escape'){e.preventDefault();plExit();return;}
   if(e.key===' '||e.key==='Enter'||e.key==='ArrowRight'){e.preventDefault();plAdvance();return;}
   if(e.key==='ArrowLeft'||e.key==='Backspace'){e.preventDefault();plBack();return;}
-  if(e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К'){e.preventDefault();plRestart();return;}
+  if(hkKeyCode(e)==='KeyR'){e.preventDefault();plRestart();return;}
   var m=/^Digit([1-9])$/.exec(e.code);
   if(m){
     var c=$('#plChoices');
