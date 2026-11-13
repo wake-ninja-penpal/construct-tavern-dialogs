@@ -62,3 +62,6 @@ download/
 /agent-ctx
 /tool-results
 dev.log
+
+# vetvi-sync: состояние комнат (никогда не коммитится)
+mini-services/vetvi-sync/data/

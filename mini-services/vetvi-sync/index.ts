@@ -19,6 +19,7 @@
  */
 
 import { createServer } from 'http'
+import { createHash } from 'crypto'
 import { Server, type Socket } from 'socket.io'
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs'
 
@@ -55,6 +56,8 @@ interface MergeRequest {
 interface StoredRoom {
   doc: unknown
   updatedAt: string
+  /* пароль комнаты (salt + sha256) — персистится вместе с комнатой */
+  pass?: { salt: string; hash: string } | null
 }
 
 interface StoreShape {
@@ -109,6 +112,9 @@ interface RoomState {
   members: Map<string, RoomMember>
   locks: Map<string, ObjLock>
   focus: Map<string, SocketFocus>
+  /* пароль комнаты: первый вошедший с защищённым проектом закрепляет salt+hash,
+     дальнейшие join требуют пароль (проверка на сервере) */
+  pass: { salt: string; hash: string } | null
   gcTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -143,7 +149,7 @@ const rooms = new Map<string, RoomState>()
 function getRoom(name: string): RoomState {
   let room = rooms.get(name)
   if (!room) {
-    room = { name, members: new Map(), locks: new Map(), focus: new Map(), gcTimer: null }
+    room = { name, members: new Map(), locks: new Map(), focus: new Map(), pass: null, gcTimer: null }
     rooms.set(name, room)
   }
   if (room.gcTimer) {
@@ -152,6 +158,9 @@ function getRoom(name: string): RoomState {
   }
   return room
 }
+
+/* sha256 в hex — тот же формат, что и на клиенте (utf-8) */
+const sha256hex = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
 function scheduleRoomGc(room: RoomState) {
   if (room.gcTimer) clearTimeout(room.gcTimer)
@@ -289,7 +298,17 @@ io.on('connection', (socket: Socket) => {
   /* ── вход в комнату ── */
   socket.on(
     'vetvi:join',
-    (payload: { roomId?: string; user?: UserMeta }, ack?: (r: unknown) => void) => {
+    (
+      payload: {
+        roomId?: string
+        user?: UserMeta
+        /* пароль комнаты (если защищена) */
+        password?: string
+        /* salt+hash защищённого проекта: закрепляется за комнатой первым вошедшим */
+        pass?: { salt?: string; hash?: string }
+      },
+      ack?: (r: unknown) => void,
+    ) => {
       try {
         const roomName = payload?.roomId
         if (!isSafeRoom(roomName)) {
@@ -302,8 +321,51 @@ io.on('connection', (socket: Socket) => {
           color: String(payload?.user?.color || '#8b929c').slice(0, 20),
         }
 
-        joinedRoom = roomName
         const room = getRoom(roomName)
+
+        /* пароль комнаты: восстановить из персистентного хранилища */
+        const storedRoom = store.rooms[roomName]
+        if (!room.pass && storedRoom?.pass?.salt && storedRoom?.pass?.hash) {
+          room.pass = { salt: String(storedRoom.pass.salt), hash: String(storedRoom.pass.hash) }
+        }
+
+        const isMember = room.members.has(socket.id)
+
+        /* закрепление пароля: комната ещё без пароля, вошедший пришёл salt+hash
+           защищённого проекта. Пустая комната — закрепляем сразу; в комнате с
+           документом — только если это тот же защищённый проект. */
+        if (
+          !room.pass &&
+          !isMember &&
+          payload.pass &&
+          typeof payload.pass.salt === 'string' &&
+          typeof payload.pass.hash === 'string' &&
+          /^[0-9a-f]{16,64}$/.test(payload.pass.salt) &&
+          /^[0-9a-f]{64}$/.test(payload.pass.hash)
+        ) {
+          const claimSalt = payload.pass.salt.slice(0, 64)
+          const claimHash = payload.pass.hash.slice(0, 64)
+          const storedDoc = storedRoom?.doc as { meta?: { passHash?: string } } | undefined
+          const docHash =
+            storedDoc && typeof storedDoc === 'object' && storedDoc.meta
+              ? storedDoc.meta.passHash
+              : null
+          if (!storedDoc || !docHash || docHash === claimHash) {
+            room.pass = { salt: claimSalt, hash: claimHash }
+            schedulePersist()
+          }
+        }
+
+        /* проверка пароля: участник комнаты (rejoin/rename) проходит без повторного ввода */
+        if (room.pass && !isMember) {
+          const given = typeof payload.password === 'string' ? payload.password : ''
+          if (sha256hex(room.pass.salt + ':' + given) !== room.pass.hash) {
+            ack?.({ ok: false, error: 'password', needPassword: true })
+            return
+          }
+        }
+
+        joinedRoom = roomName
         socket.join(roomName)
         room.members.set(socket.id, { socketId: socket.id, user })
 
@@ -609,6 +671,57 @@ io.on('connection', (socket: Socket) => {
       // ignore
     }
   })
+
+  /* ── управление паролем комнаты (только для участников): set/clear ──
+     Для смены/снятия нужен действующий пароль (если он установлен). */
+  socket.on(
+    'vetvi:pass',
+    (
+      payload: { roomId?: string; mode?: 'set' | 'clear'; salt?: string; hash?: string; password?: string },
+      ack?: (r: unknown) => void,
+    ) => {
+      try {
+        if (!isSafeRoom(payload?.roomId) || payload.roomId !== joinedRoom) {
+          ack?.({ ok: false, error: 'not joined' })
+          return
+        }
+        const room = rooms.get(payload.roomId)
+        if (!room) {
+          ack?.({ ok: false, error: 'no room' })
+          return
+        }
+        if (room.pass) {
+          const given = typeof payload?.password === 'string' ? payload.password : ''
+          if (sha256hex(room.pass.salt + ':' + given) !== room.pass.hash) {
+            ack?.({ ok: false, error: 'password' })
+            return
+          }
+        }
+        if (payload?.mode === 'clear') {
+          room.pass = null
+          schedulePersist()
+          ack?.({ ok: true })
+          return
+        }
+        if (
+          payload?.mode === 'set' &&
+          typeof payload.salt === 'string' &&
+          typeof payload.hash === 'string' &&
+          /^[0-9a-f]{16,64}$/.test(payload.salt) &&
+          /^[0-9a-f]{64}$/.test(payload.hash)
+        ) {
+          room.pass = { salt: payload.salt.slice(0, 64), hash: payload.hash.slice(0, 64) }
+          schedulePersist()
+          ack?.({ ok: true })
+          return
+        }
+        ack?.({ ok: false, error: 'bad payload' })
+      } catch (error) {
+        console.error('[vetvi-sync] pass error', error)
+        ack?.({ ok: false })
+      }
+    },
+  )
 
   socket.on('disconnect', () => {
     try {

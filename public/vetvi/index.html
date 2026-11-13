@@ -530,6 +530,30 @@ body.connecting .vpinn{cursor:copy}
 .shp-ic{width:10px;height:10px;flex:none;border:1.5px solid currentColor}
 .shp-ic.circle{border-radius:50%}
 .shp-ic.square{border-radius:3px}
+/* аватар: выбор файла прямо из строки списка и по ссылке из редактора */
+.c-avpick{display:inline-flex;flex:none;cursor:pointer;position:relative}
+.c-avpick:hover .c-av,.c-avpick:hover .c-dot{box-shadow:0 0 0 2px rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.35)}
+.ce-avurl{display:flex;gap:6px}
+.ce-avurl .inp{flex:1;min-width:0;font-size:11.5px;height:26px;padding:2px 8px}
+.ce-av-apply{flex:none;height:26px;padding:0 10px;background:#262b33;border:1px solid #363b45;border-radius:7px;color:var(--tx2);font:600 11px var(--body);cursor:pointer;transition:.15s}
+.ce-av-apply:hover{color:var(--tx);border-color:#4a515d}
+.ce-av-apply:disabled{opacity:.5;cursor:default}
+/* экран блокировки проекта паролем */
+.lock-wrap{position:fixed;inset:0;z-index:1500;display:none;align-items:center;justify-content:center;background:rgba(9,11,14,.86);backdrop-filter:blur(10px)}
+.lock-wrap.show{display:flex}
+.lock-card{width:min(360px,92vw);background:#1b1e24;border:1px solid #303540;border-radius:14px;padding:24px 22px;display:flex;flex-direction:column;gap:10px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.lock-card h3{margin:0;font:700 15px var(--body);color:var(--tx)}
+.lock-name{font:600 11.5px var(--mono);color:var(--tx3);letter-spacing:.4px}
+.lock-ico{display:flex;justify-content:center;color:var(--acc)}
+.lock-card .inp{text-align:center}
+.lock-err{min-height:14px;font:600 11px var(--body);color:#cf6b5a}
+/* аватар в вариантах выбора реплик плеера */
+.pl-av.sm{width:18px;height:18px;margin-left:0}
+/* пароль проекта в модалке «Поделиться» */
+.share-pass{margin-top:12px;background:rgba(255,255,255,.03);border:1px solid #2e333c;border-radius:10px;padding:10px 12px}
+.sp-cap{font:600 9.5px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--tx3);margin-bottom:5px}
+.sp-st{font-size:11.5px;color:var(--tx2);line-height:1.5}
+.sp-acts{display:flex;gap:8px;margin-top:8px}
 #paneVars .v-row.dragging{opacity:.45}
 #paneVars .v-row .v-del{margin-right:2px}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
@@ -1012,6 +1036,16 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     </div>
   </div>
 </div>
+<div id="lockWrap" class="lock-wrap">
+  <div class="lock-card">
+    <span class="lock-ico"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2"/></svg></span>
+    <h3>Проект защищён паролем</h3>
+    <div class="lock-name" id="lockName"></div>
+    <input type="password" class="inp" id="lockPass" autocomplete="off" placeholder="пароль проекта">
+    <div class="lock-err" id="lockErr"></div>
+    <button class="btn primary" id="lockGo">Открыть проект</button>
+  </div>
+</div>
 <div id="toasts"></div>
 <div id="modalWrap"><div class="m-card" id="mCard"></div></div>
 <div id="dlgModal" class="dlg-modal">
@@ -1409,6 +1443,122 @@ function fileToAvatar(file,cb){
   };
   fr.onerror=function(){toast('Не удалось прочитать файл','warn');};
   fr.readAsDataURL(file);
+}
+/* ═══ пароль проекта: sha256 (чистый JS — работает и по http, без Web Crypto) ═══
+   Хранится только соль+хэш (meta.passSalt/meta.passHash); сам пароль держим в памяти сессии. */
+function utf8str(s){try{return unescape(encodeURIComponent(String(s)));}catch(e){return String(s);}}
+function sha256hex(asciiIn){
+  var ascii=utf8str(asciiIn);
+  function rightRotate(value,amount){return (value>>>amount)|(value<<(32-amount));}
+  var mathPow=Math.pow,maxWord=mathPow(2,32),result='';
+  var words=[],asciiBitLength=ascii.length*8,i,j;
+  var hash=sha256hex.h=sha256hex.h||[];
+  var k=sha256hex.k=sha256hex.k||[];
+  var primeCounter=k.length;
+  var isComposite={};
+  for(var candidate=2;primeCounter<64;candidate++){
+    if(!isComposite[candidate]){
+      for(i=0;i<313;i+=candidate)isComposite[i]=candidate;
+      hash[primeCounter]=(mathPow(candidate,.5)*maxWord)|0;
+      k[primeCounter++]=(mathPow(candidate,1/3)*maxWord)|0;
+    }
+  }
+  ascii+='\x80';
+  while(ascii.length%64-56){ascii+='\x00';}
+  for(i=0;i<ascii.length;i++){
+    j=ascii.charCodeAt(i)&255;
+    words[i>>2]|=j<<((3-i)%4)*8;
+  }
+  words[words.length]=(asciiBitLength/maxWord)|0;
+  words[words.length]=asciiBitLength;
+  for(j=0;j<words.length;){
+    var w=words.slice(j,j+=16);
+    hash=hash.slice(0,8);
+    for(i=16;i<64;i++){
+      var w15=w[i-15],w2=w[i-2];
+      var s0=rightRotate(w15,7)^rightRotate(w15,18)^(w15>>>3);
+      var s1=rightRotate(w2,17)^rightRotate(w2,19)^(w2>>>10);
+      w[i]=(w[i-16]+s0+w[i-7]+s1)|0;
+    }
+    var a=hash[0],b=hash[1],c=hash[2],d=hash[3],e=hash[4],f=hash[5],g=hash[6],h=hash[7];
+    for(i=0;i<64;i++){
+      var S1=rightRotate(e,6)^rightRotate(e,11)^rightRotate(e,25);
+      var ch=(e&f)^(~e&g);
+      var temp1=(h+S1+ch+k[i]+w[i])|0;
+      var S0=rightRotate(a,2)^rightRotate(a,13)^rightRotate(a,22);
+      var maj=(a&b)^(a&c)^(b&c);
+      var temp2=(S0+maj)|0;
+      h=g;g=f;f=e;e=(d+temp1)|0;d=c;c=b;b=a;a=(temp1+temp2)|0;
+    }
+    hash[0]=(hash[0]+a)|0;hash[1]=(hash[1]+b)|0;hash[2]=(hash[2]+c)|0;hash[3]=(hash[3]+d)|0;
+    hash[4]=(hash[4]+e)|0;hash[5]=(hash[5]+f)|0;hash[6]=(hash[6]+g)|0;hash[7]=(hash[7]+h)|0;
+  }
+  for(i=0;i<8;i++){
+    for(j=3;j+1;j--){
+      var b2=(hash[i]>>(j*8))&255;
+      result+=((b2<16)?0:'')+b2.toString(16);
+    }
+  }
+  return result;
+}
+function passRandomSalt(){
+  var out='',arr=new Uint8Array(16);
+  try{(window.crypto||{getRandomValues:function(a){for(var i=0;i<a.length;i++)a[i]=Math.floor(Math.random()*256);return a;}}).getRandomValues(arr);}
+  catch(e){for(var q=0;q<16;q++)arr[q]=Math.floor(Math.random()*256);}
+  for(var i=0;i<arr.length;i++)out+=('0'+arr[i].toString(16)).slice(-2);
+  return out;
+}
+var projPass=null;/* пароль в памяти (текущая сессия) — нигде не сохраняется */
+var lockUnlocked=false,lockPendingSync=null;
+function projLocked(){return !!(project&&project.meta&&project.meta.passHash);}
+function passVerify(v){
+  var m=(project&&project.meta)||{};
+  if(!m.passHash)return true;
+  return sha256hex((m.passSalt||'')+':'+v)===m.passHash;
+}
+function passRememberSession(){
+  try{var pid=project.meta.projectId;if(pid)sessionStorage.setItem('vetvi-unlock-'+pid,projPass||'');}catch(e){}
+}
+function passSessionLookup(){
+  try{
+    var pid=project.meta.projectId;if(!pid)return null;
+    var v=sessionStorage.getItem('vetvi-unlock-'+pid);
+    return (v&&passVerify(v))?v:null;
+  }catch(e){return null;}
+}
+function lockApplyState(){
+  var w=$('#lockWrap');
+  if(!projLocked()){lockUnlocked=true;if(w)w.classList.remove('show');return;}
+  var v=passSessionLookup();
+  if(v){projPass=v;lockUnlocked=true;return;}/* уже вводили в этой сессии */
+  lockUnlocked=false;
+  lockShow();
+}
+function lockNeeded(){return projLocked()&&!lockUnlocked;}
+function lockAfterUnlock(fn){
+  if(!lockNeeded()){fn();return;}
+  lockPendingSync=fn;
+  lockShow();
+}
+function lockShow(){
+  var w=$('#lockWrap');if(!w)return;
+  $('#lockName').textContent=(project.meta&&project.meta.name)||'Без названия';
+  $('#lockErr').textContent='';
+  w.classList.add('show');
+  setTimeout(function(){var i=$('#lockPass');if(i)i.focus();},80);
+}
+function lockTry(){
+  var v=$('#lockPass').value||'';
+  if(!v){$('#lockErr').textContent='Введите пароль';return;}
+  if(!passVerify(v)){$('#lockErr').textContent='Неверный пароль';$('#lockPass').value='';setTimeout(function(){var i=$('#lockPass');if(i)i.focus();},10);return;}
+  projPass=v;lockUnlocked=true;passRememberSession();
+  $('#lockPass').value='';$('#lockErr').textContent='';
+  $('#lockWrap').classList.remove('show');
+  if(lockPendingSync){var f=lockPendingSync;lockPendingSync=null;f();}
+}
+function lockBind(){
+  var lg=$('#lockGo');if(lg)lg.onclick=lockTry;
+  var lp=$('#lockPass');if(lp)lp.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();lockTry();}});
 }
 /* конвертация старых нод «Персонаж» в записи списка (для снимков из комнаты) */
 function migrateCharNodesInPlace(){
@@ -4957,9 +5107,12 @@ function renderCharsPane(){
     var open=!!charsOpen[c.id];
     html+='<div class="v-item'+(open?' open':'')+'" data-cid="'+esc(c.id)+'">'+
       '<div class="v-row">'+
-        (c.av
-          ?charAvatarHtml(c,'','Аватар персонажа')
-          :'<span class="c-dot" style="background:'+esc(c.color||'#9cb878')+'" title="Цвет персонажа"></span>')+
+        '<label class="c-avpick" title="'+(c.av?'Сменить аватар':'Задать аватар — загрузить картинку')+'">'+
+          (c.av
+            ?charAvatarHtml(c)
+            :'<span class="c-dot" style="background:'+esc(c.color||'#9cb878')+'"></span>')+
+          '<input type="file" class="c-av-pick" accept="image/*" hidden>'+
+        '</label>'+
         '<input class="inp v-name c-name" value="'+esc(c.name)+'" maxlength="60" title="Имя персонажа" placeholder="имя персонажа">'+
         '<button class="v-del" title="Удалить персонажа">'+ic('x',12)+'</button>'+
         '<button class="v-fold" title="'+(open?'Свернуть':'Развернуть для редактирования')+'">'+ic('chev',12)+'</button>'+
@@ -5001,6 +5154,10 @@ function charEditHtml(c){
           '<button class="shp'+(charAvShape(c)==='square'?' on':'')+'" data-sh="square" title="Аватар-квадрат со скруглёнными углами"><i class="shp-ic square"></i>квадрат</button>'+
         '</div>'+
       '</div>'+
+    '</div>'+
+    '<div class="ce-avurl">'+
+      '<input class="inp ce-av-link" placeholder="или ссылка на картинку с другого ресурса (https://…)" value="'+esc(c.av&&!/^data:/i.test(c.av)?c.av:'')+'" maxlength="2000" spellcheck="false" title="Ссылка на картинку — аватар загрузится прямо по ней">'+
+      '<button class="ce-av-apply" title="Проверить ссылку и поставить аватар">ОК</button>'+
     '</div>'+
     '<div><label>Имя</label><input class="inp ce-name" value="'+esc(c.name)+'" maxlength="60" placeholder="имя персонажа"></div>'+
     '<div><label>Цвет</label><div class="swatches">'+sw+'</div></div>'+
@@ -5087,17 +5244,38 @@ function bindCharsRows(){
       edesc.addEventListener('input',function(){c.text=edesc.value;markDirty();});
       edesc.addEventListener('change',editEnd);edesc.addEventListener('blur',editEnd);
     }
-    /* аватар: загрузка файла, удаление, форма (круг/квадрат) */
+    /* аватар: загрузка файла (мини-карточка в строке или редактор), ссылка, удаление, форма */
+    var pk=item.querySelector('.c-av-pick');
+    if(pk)pk.addEventListener('change',function(){
+      var f=pk.files&&pk.files[0];pk.value='';
+      if(f)charApplyFile(f,c);
+    });
     var fInp=item.querySelector('.ce-av-file');
     if(fInp)fInp.addEventListener('change',function(){
       var f=fInp.files&&fInp.files[0];fInp.value='';
-      if(!f)return;
-      fileToAvatar(f,function(url){
-        discrete(function(){c.av=url;if(c.avShape!=='square')c.avShape='circle';},'Аватар персонажа');
-        renderCharsPane();
-        toast('Аватар обновлён');
-      });
+      if(f)charApplyFile(f,c);
     });
+    var ulink=item.querySelector('.ce-av-link'),uap=item.querySelector('.ce-av-apply');
+    if(uap&&ulink){
+      var applyUrl=function(){
+        var u=(ulink.value||'').trim();
+        if(!u)return;
+        if(!/^https?:\/\/\S+$/i.test(u)){toast('Ссылка должна начинаться с http:// или https://','warn');return;}
+        uap.disabled=true;
+        var probe=new Image();
+        probe.onload=function(){
+          uap.disabled=false;
+          discrete(function(){c.av=u;if(c.avShape!=='square')c.avShape='circle';},'Аватар персонажа');
+          renderCharsPane();
+          toast('Аватар по ссылке установлен');
+        };
+        probe.onerror=function(){uap.disabled=false;toast('По этой ссылке картинка не открылась','err');};
+        probe.referrerPolicy='no-referrer';
+        probe.src=u;
+      };
+      uap.onclick=applyUrl;
+      ulink.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();applyUrl();}});
+    }
     var avRm=item.querySelector('.ce-av-rm');
     if(avRm)avRm.onclick=function(){
       discrete(function(){c.av=null;},'Аватар персонажа');
@@ -5112,6 +5290,14 @@ function bindCharsRows(){
         renderCharsPane();
       };
     });
+  });
+}
+/* файл → аватар (общая для строки списка и редактора) */
+function charApplyFile(f,c){
+  fileToAvatar(f,function(url){
+    discrete(function(){c.av=url;if(c.avShape!=='square')c.avShape='circle';},'Аватар персонажа');
+    renderCharsPane();
+    toast('Аватар обновлён');
   });
 }
 function ensureBranch(n){if(n.type==='branch'&&!Array.isArray(n.outcomes))n.outcomes=[];}
@@ -9267,7 +9453,7 @@ function normalize(p){
       name:String(c.name||'Персонаж').slice(0,60),
       color:(typeof c.color==='string'&&/^#([0-9a-f]{6})$/i.test(c.color))?c.color:'#9cb878',
       text:String(c.text==null?'':c.text).slice(0,500),
-      av:(typeof c.av==='string'&&c.av.slice(0,11)==='data:image/'&&c.av.length<=120000)?c.av:null,
+      av:(typeof c.av==='string'&&((c.av.slice(0,11)==='data:image/'&&c.av.length<=120000)||(/^https?:\/\/\S+$/i.test(c.av)&&c.av.length<=2000)))?c.av:null,
       avShape:(c.avShape==='square')?'square':'circle'};
   });
   var legacyCharNodes=[];
@@ -9430,7 +9616,9 @@ sel.clear();selGroups.clear();selGroup=null;selEdges.clear();selEdge=null;histor
     }
   });
   refreshGroupFrames();
-  if(p.viewport&&p.viewport.z)applyView();else fitView(false);mmReady=false;updateHistUI();}
+  if(p.viewport&&p.viewport.z)applyView();else fitView(false);mmReady=false;updateHistUI();
+  lockApplyState();/* если проект с паролем — показать экран блокировки */
+}
 function openProject(){
   if(window.showOpenFilePicker){
     showOpenFilePicker({types:[{description:'JSON',accept:{'application/json':['.json']}}]})
@@ -9755,8 +9943,10 @@ function projInitStartup(){
   var room=(fromHash&&hp.room)?hp.room:(hp.room?null:entry.roomId);
   if(room){
     syncState.mode='room';
-    syncConnect(room,entry.id,{own:true,silent:true});
-    syncSetHash(room,entry.id);
+    lockAfterUnlock(function(){
+      syncConnect(room,entry.id,{own:true,silent:true});
+      syncSetHash(room,entry.id);
+    });
   }
   return entry;
 }
@@ -9783,9 +9973,11 @@ function projOpen(id,silent){
   $('#projName').value=project.meta.name;
   projSetCur(entry.id);
   if(entry.roomId){
-    syncState.mode='room';
-    syncConnect(entry.roomId,entry.id,{own:true,silent:true});
-    syncSetHash(entry.roomId,entry.id);
+    lockAfterUnlock(function(){
+      syncState.mode='room';
+      syncConnect(entry.roomId,entry.id,{own:true,silent:true});
+      syncSetHash(entry.roomId,entry.id);
+    });
   }else{
     /* проект вне комнаты — обязательно сбрасываем хэш, чтобы не цепляться к комнате предыдущего проекта */
     syncSetHash(null);
@@ -9912,6 +10104,7 @@ function showProjectsModal(){
 var syncState={
   enabled:false,room:null,projectId:null,sock:null,me:null,
   status:'off',users:[],applyingRemote:false,pendingRemote:null,
+  joinPass:null,/* пароль комнаты в памяти сессии */
   stateTimer:null,lastSent:'',liveT:0,liveDlgT:0,livePtsT:0,
   mode:'local',activeCopy:null,mergeCount:0,initDone:false,popFor:0,
   rlocks:null,myLocks:{},lockHB:null,
@@ -9969,7 +10162,7 @@ function syncSetStatus(s){
 function syncRenderChip(){
   var dot=$('#ccDot'),txt=$('#ccTxt'),btn=$('#bCollab');
   if(!dot)return;
-  var map={off:['#6d7480','офлайн'],conn:['#d8c96f','подключение…'],on:['#8fbf7f','онлайн'],err:['#cf6b5a','ошибка связи']};
+  var map={off:['#6d7480','офлайн'],conn:['#d8c96f','подключение…'],on:['#8fbf7f','онлайн'],err:['#cf6b5a','ошибка связи'],lost:['#cf6b5a','связь потеряна — нажмите для переподключения']};
   var st=map[syncState.enabled?syncState.status:'off'];
   dot.style.background=st[0];
   dot.classList.toggle('pulse',syncState.enabled&&syncState.status==='conn');
@@ -10327,8 +10520,20 @@ function syncConnect(roomId,pid,opts){
   var sock=ioFn('/?XTransformPort=3003',{path:'/',transports:['websocket','polling'],reconnection:true,reconnectionDelay:800,reconnectionDelayMax:4000});
   syncState.sock=sock;
   sock.on('connect',function(){
-    sock.emit('vetvi:join',{roomId:roomId,user:{id:me.id,name:me.name,color:me.color}},function(res){
-      if(!res||!res.ok){syncSetStatus('err');toast('Не удалось войти в комнату','err');return;}
+    var jpay={roomId:roomId,user:{id:me.id,name:me.name,color:me.color}};
+    var jpw=(typeof opts.password==='string'&&opts.password)?opts.password:(projPass||syncState.joinPass||null);
+    if(jpw)jpay.password=jpw;
+    if(project.meta&&project.meta.passHash)jpay.pass={salt:String(project.meta.passSalt||''),hash:String(project.meta.passHash)};
+    sock.emit('vetvi:join',jpay,function(res){
+      if(!res||!res.ok){
+        if(res&&res.needPassword){
+          if(jpw)opts._pwWrong=true;
+          syncAskRoomPassword(roomId,pid,opts);
+          return;
+        }
+        syncSetStatus('err');toast('Не удалось войти в комнату','err');return;
+      }
+      opts._pwWrong=false;
       syncSetStatus('on');
       syncState.users=res.users||[];
       lockApplyServerList(res.locks);
@@ -10372,7 +10577,7 @@ function syncConnect(roomId,pid,opts){
       if(syncState.mergeCount>0)toast('Merge-запросов в очереди: '+syncState.mergeCount,'warn');
     });
   });
-  sock.on('disconnect',function(){if(syncState.enabled)syncSetStatus('conn');});
+  sock.on('disconnect',function(){if(syncState.enabled)syncSetStatus('lost');});
   sock.io.on('reconnect',function(){syncSetStatus('conn');});
   sock.on('connect_error',function(){syncSetStatus('err');});
   sock.on('vetvi:users',function(m){if(!m||m.roomId!==syncState.room)return;syncState.users=m.users||[];syncRenderChip();syncRenderPop();});
@@ -10395,12 +10600,42 @@ function syncConnect(roomId,pid,opts){
   });
   sock.on('vetvi:error',function(m){if(m&&m.message)toast(m.message,'err');});
 }
+/* модалка «комната защищена паролем» — ввод и повторная попытка входа */
+function syncAskRoomPassword(roomId,pid,opts){
+  syncSetStatus('err');
+  var wrong=!!(opts&&opts._pwWrong);
+  showModal({title:'Комната защищена паролем',
+    text:(wrong?'<p style="color:#cf6b5a;font-size:12px;margin:0 0 8px">Неверный пароль — попробуйте ещё раз.</p>':'')+
+      '<label class="i-lab">Пароль комнаты</label><input type="password" class="inp" id="roomPassInp" autocomplete="off" placeholder="пароль проекта">',
+    buttons:[
+      {label:'Отмена',fn:function(){syncDisconnect(true);toast('Вход в комнату отменён','warn');}},
+      {label:'Войти',primary:1,fn:function(){
+        var v=($('#roomPassInp')?$('#roomPassInp').value:'')||'';
+        if(!v){toast('Введите пароль комнаты','warn');syncAskRoomPassword(roomId,pid,opts);return;}
+        syncState.joinPass=v;
+        opts._pwWrong=false;
+        syncConnect(roomId,pid,opts);
+      }}
+    ]});
+  var inp=$('#roomPassInp');
+  if(inp){inp.focus();inp.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();var bs=$all('#mCard .m-btns .btn');if(bs[1])bs[1].click();}});}
+}
+/* ручное переподключение: клик по чипу со статусом разрыва или кнопка в списке участников */
+function syncReconnect(){
+  if(!syncState.enabled||!syncState.room)return;
+  if(syncState.status==='on'){toast('Соединение уже активно');return;}
+  toast('Переподключение…');
+  var room=syncState.room,pid=syncState.projectId;
+  var own=(syncState.mode!=='copy');
+  syncState.lastSent='';/* после переподключения состояние публикуется заново */
+  syncConnect(room,pid,{silent:true,own:own});
+}
 function syncDisconnect(silent){
   lockGiveAll();
   if(syncState.lockHB){clearInterval(syncState.lockHB);syncState.lockHB=null;}
   if(syncState.sock){try{syncState.sock.disconnect();}catch(e){}}
   syncState.sock=null;syncState.enabled=false;syncState.room=null;syncState.users=[];
-  syncState.mergeCount=0;syncState.pendingRemote=null;syncState.rlocks=null;
+  syncState.mergeCount=0;syncState.pendingRemote=null;syncState.rlocks=null;syncState.joinPass=null;
   syncState.focus={};syncState.myFocus=null;syncState.focusSent=null;
   try{updateGroupBadges();applyInspectorLockState();}catch(e){}
   if(syncState.mode!=='copy')syncState.mode='local';
@@ -10430,6 +10665,7 @@ function syncRenderPop(){
   }).join('');
   pop.innerHTML='<div class="cp-cap">Участники комнаты</div>'+rows+
     '<div class="cp-acts">'+
+    (syncState.status!=='on'?'<button class="cp-act" data-a="reconn">'+ic('rback',13)+'Переподключиться</button>':'')+
     '<button class="cp-act" data-a="rename">'+ic('pencil',13)+'Сменить имя</button>'+
     (syncState.room?'<button class="cp-act" data-a="link">'+ic('copy',13)+'Скопировать ссылку</button>':'')+
     '<button class="cp-act" data-a="leave">'+ic('x',13)+(syncState.mode==='copy'?'Закрыть панель':'Выйти из комнаты')+'</button>'+
@@ -10438,7 +10674,8 @@ function syncRenderPop(){
     b.onclick=function(){
       pop.classList.remove('show');
       var a=b.dataset.a;
-      if(a==='rename')syncRenameModal();
+      if(a==='reconn')syncReconnect();
+      else if(a==='rename')syncRenameModal();
       else if(a==='link'){var u=syncShareUrl();if(u)copyText(u);}
       else if(a==='leave'){
         if(syncState.mode==='copy'){syncState.mode='local';syncState.activeCopy=null;renderSyncUI();toast('Панель копии закрыта');}
@@ -10506,14 +10743,86 @@ function shareProject(){
 function showShareModal(){
   var u=syncShareUrl();
   if(!u){toast('Комната ещё не открыта','warn');return;}
+  var pwSet=!!(project.meta&&project.meta.passHash);
   showModal({title:'Совместный доступ',
     text:'<p>Отправьте эту ссылку соавторам — они смогут редактировать проект вместе с вами в реальном времени.</p>'+
       '<div class="share-link"><input id="shareUrl" readonly value="'+esc(u)+'"><button class="btn primary" id="shareCopyBtn" title="Скопировать ссылку">'+ic('copy',14)+'</button></div>'+
-      '<p style="font-size:11.5px;color:var(--tx3);margin:4px 0 0">Проект хранится на сервере комнаты: соавторы смогут подключиться, даже если вы офлайн. Статус — индикатор в панели сверху.</p>',
+      '<p style="font-size:11.5px;color:var(--tx3);margin:4px 0 0">Проект хранится на сервере комнаты: соавторы смогут подключиться, даже если вы офлайн. Статус — индикатор в панели сверху.</p>'+
+      '<div class="share-pass">'+
+        '<div class="sp-cap">Пароль проекта</div>'+
+        (pwSet
+          ?'<div class="sp-st">Установлен — вход в комнату по паролю: новый участник введёт его при подключении по ссылке.</div>'+
+           '<div class="sp-acts"><button class="btn" id="spChangeBtn">Сменить…</button><button class="btn" id="spRemoveBtn">Убрать</button></div>'
+          :'<div class="sp-st">Не установлен — редактировать сможет любой, у кого есть ссылка.</div>'+
+           '<div class="sp-acts"><button class="btn" id="spSetBtn">Задать пароль…</button></div>')+
+      '</div>',
     buttons:[{label:'Готово',primary:1,fn:function(){}}]});
   var inp=$('#shareUrl'),btn=$('#shareCopyBtn');
   if(btn)btn.onclick=function(){copyText(u);};
   if(inp){inp.onclick=function(){inp.select();};setTimeout(function(){inp.select();},80);}
+  var sb=$('#spSetBtn');if(sb)sb.onclick=function(){passSetModal(false);};
+  var cb=$('#spChangeBtn');if(cb)cb.onclick=function(){passSetModal(true);};
+  var rb=$('#spRemoveBtn');if(rb)rb.onclick=passRemoveModal;
+}
+/* ── пароль проекта: установка/смена/снятие (meta.passSalt+meta.passHash) ── */
+function passSetModal(change){
+  var needCur=change&&project.meta&&project.meta.passHash;
+  showModal({title:change?'Сменить пароль проекта':'Пароль проекта',
+    text:(needCur?'<label class="i-lab">Текущий пароль</label><input type="password" class="inp" id="pwCur" autocomplete="off" style="margin-bottom:8px">':'')+
+      '<label class="i-lab">Новый пароль</label><input type="password" class="inp" id="pwNew" autocomplete="off">'+
+      '<label class="i-lab" style="margin-top:8px">Повторите новый пароль</label><input type="password" class="inp" id="pwNew2" autocomplete="off">'+
+      '<p style="font-size:11px;color:var(--tx3);margin:8px 0 0">Хранится только хэш (sha256 с солью) — сам пароль нигде не сохраняется. Локально проект попросит пароль при открытии, в комнате — при подключении по ссылке.</p>',
+    buttons:[
+      {label:'Отмена',fn:function(){}},
+      {label:change?'Сменить':'Установить',primary:1,fn:function(){
+        var cur=needCur?(($('#pwCur')&&$('#pwCur').value)||''):null;
+        if(needCur&&!passVerify(cur)){toast('Текущий пароль неверен','err');passSetModal(change);return;}
+        var a=(($('#pwNew')&&$('#pwNew').value)||''),b=(($('#pwNew2')&&$('#pwNew2').value)||'');
+        if(!a){toast('Введите новый пароль','warn');passSetModal(change);return;}
+        if(a!==b){toast('Пароли не совпадают','warn');passSetModal(change);return;}
+        var salt=passRandomSalt();
+        project.meta.passSalt=salt;
+        project.meta.passHash=sha256hex(salt+':'+a);
+        projPass=a;lockUnlocked=true;passRememberSession();
+        markDirty();
+        toast('Пароль проекта установлен');
+        syncPushPass('set',salt,project.meta.passHash,a);
+      }}
+    ]});
+  var pn=$('#pwNew');
+  if(pn){setTimeout(function(){pn.focus();},60);
+    var go=function(){var bs=$all('#mCard .m-btns .btn');if(bs[1])bs[1].click();};
+    ['#pwCur','#pwNew','#pwNew2'].forEach(function(sel){var el=$(sel);if(el)el.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();go();}});});
+  }
+}
+function passRemoveModal(){
+  showModal({title:'Убрать пароль проекта',
+    text:'<label class="i-lab">Текущий пароль</label><input type="password" class="inp" id="pwCur" autocomplete="off">'+
+      '<p style="font-size:11px;color:var(--tx3);margin:8px 0 0">Проект снова откроется без пароля, а комната станет доступной всем, у кого есть ссылка.</p>',
+    buttons:[
+      {label:'Отмена',fn:function(){}},
+      {label:'Убрать пароль',danger:1,fn:function(){
+        var cur=(($('#pwCur')&&$('#pwCur').value)||'');
+        if(!passVerify(cur)){toast('Пароль неверен','err');passRemoveModal();return;}
+        delete project.meta.passSalt;delete project.meta.passHash;
+        projPass=null;lockUnlocked=true;
+        markDirty();
+        toast('Пароль снят');
+        syncPushPass('clear',null,null,cur);
+      }}
+    ]});
+  var pc=$('#pwCur');
+  if(pc){setTimeout(function(){pc.focus();},60);pc.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();var bs=$all('#mCard .m-btns .btn');if(bs[1])bs[1].click();}});}
+}
+/* применить новый пароль к активной комнате (если подключены) */
+function syncPushPass(mode,salt,hash,curPw){
+  if(!syncState.enabled||!syncState.sock||!syncState.sock.connected)return;
+  try{
+    syncState.sock.emit('vetvi:pass',{roomId:syncState.room,mode:mode,salt:salt||undefined,hash:hash||undefined,password:curPw||projPass||syncState.joinPass||''},function(res){
+      if(res&&res.ok)toast(mode==='set'?'Пароль комнаты обновлён':'Пароль комнаты снят');
+      else if(res&&res.error==='password')toast('Не удалось обновить пароль комнаты — нужен прежний пароль','warn');
+    });
+  }catch(e){}
 }
 /* ── копии ── */
 function copiesAll(){
@@ -10843,6 +11152,8 @@ function bindSyncUI(){
       else shareProject();
       return;
     }
+    /* разрыв связи: клик по чипу — немедленное переподключение */
+    if(syncState.status!=='on'){syncReconnect();return;}
     if(pop.classList.contains('show')){pop.classList.remove('show');return;}
     syncRenderPop();
     var r=bc.getBoundingClientRect();
@@ -10870,19 +11181,20 @@ function initSync(){
     document.body.appendChild(pop);
   }
   bindSyncUI();
+  lockBind();
   renderSyncUI();
   var p=syncHashParams();
   /* если projInitStartup уже подключился к комнате своего проекта — не переподключаемся;
      чужая комната из хэша (ссылка соавтора) — подключаемся как гость */
-  if(p.room&&!syncState.enabled){
+  if(p.room&&!syncState.enabled&&!lockPendingSync){
     syncState.mode='room';
-    syncConnect(p.room,p.project||null,{});
+    lockAfterUnlock(function(){syncConnect(p.room,p.project||null,{});});
   }
   window.addEventListener('hashchange',function(){
     var np=syncHashParams();
     if(np.room&&np.room!==syncState.room){
       syncState.mode='room';
-      syncConnect(np.room,np.project||null,{});
+      lockAfterUnlock(function(){syncConnect(np.room,np.project||null,{});});
     }
   });
   setInterval(function(){
@@ -11199,7 +11511,7 @@ function plRenderChoices(list){
   list.forEach(function(it,i){
     var b=document.createElement('button');
     b.className='pl-choice';
-    b.innerHTML='<span class="num">'+(i+1)+'</span><span class="lbl">'+esc(it.label)+'</span>';
+    b.innerHTML='<span class="num">'+(i+1)+'</span>'+(it.av||'')+'<span class="lbl">'+esc(it.label)+'</span>';
     b.onclick=function(ev){
       ev.stopPropagation();
       plPushHist();
@@ -11351,11 +11663,11 @@ function plAfterVarnode(n,keepPath){
   if(PL.mode==='list'){plListJumpNext();return;}
   plShowEnd();
 }
-/* аватар говорящего в плашке имени плеера */
-function plSlideAvatar(cid){
+/* аватар говорящего в плашке имени плеера (и, с extra='sm', в списке выбора реплик) */
+function plSlideAvatar(cid,extra){
   var c=charById(cid);
   if(!c||!c.av)return '';
-  return '<span class="pl-av '+charAvShape(c)+'"><img src="'+esc(c.av)+'" alt=""></span>';
+  return '<span class="pl-av '+charAvShape(c)+(extra?' '+extra:'')+'"><img src="'+esc(c.av)+'" alt=""></span>';
 }
 function plShowReply(r,noHist){
   PL.replyId=r.id;PL.intro=false;
@@ -11450,7 +11762,8 @@ function plShowEnd(){
 function plShowDialogChoices(n,rs){
   var items=rs.map(function(r){
     var nm=r.speaker?charName(r.speaker):null;
-    return{label:(nm?nm+': ':'')+(r.text||'…'),targets:plReplyBranchTargets(n,r),fn:function(){plShowReply(r);}};
+    var av=r.speaker?plSlideAvatar(r.speaker,'sm'):'';
+    return{label:(nm?nm+': ':'')+(r.text||'…'),av:av,targets:plReplyBranchTargets(n,r),fn:function(){plShowReply(r);}};
   });
   plRenderChoices(items);
 }
