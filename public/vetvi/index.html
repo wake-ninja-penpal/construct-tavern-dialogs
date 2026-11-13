@@ -612,6 +612,30 @@ body.connecting .vpinn{cursor:copy}
 .dlg-modal-close:hover{background:#262b33;color:var(--tx)}
 .dlg-modal-body{padding:16px 20px;overflow-y:auto;flex:1}
 .dlg-modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--line)}
+/* ═══ настройки проекта ═══ */
+.set-card{width:600px;min-width:0}
+.set-sec-title{font-size:13px;font-weight:700;color:var(--tx);margin:2px 0 6px}
+.set-hint{font-size:12px;color:var(--tx3);line-height:1.5;margin-bottom:12px}
+.set-store-opt{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--line2);border-radius:11px;padding:11px 13px;margin-bottom:8px;cursor:pointer;transition:border-color .15s,background .15s}
+.set-store-opt:hover{border-color:#3d4450}
+.set-store-opt.sel{border-color:var(--acc);background:rgba(226,165,78,.07)}
+.set-store-opt.lock{opacity:.55;cursor:not-allowed}
+.set-radio{width:16px;height:16px;border-radius:50%;border:2px solid #4a515e;flex:none;margin-top:2px;position:relative}
+.set-store-opt.sel .set-radio{border-color:var(--acc)}
+.set-store-opt.sel .set-radio::after{content:'';position:absolute;inset:2.5px;border-radius:50%;background:var(--acc)}
+.set-store-info{flex:1;min-width:0}
+.set-store-name{font-size:13px;font-weight:600;color:var(--tx)}
+.set-cur{font-style:normal;font-size:11px;font-weight:600;color:var(--acc);margin-left:6px}
+.set-store-desc{font-size:12px;color:var(--tx3);line-height:1.45;display:block;margin-top:3px}
+.set-store-size{font-size:12px;color:#b7bec9;display:block;margin-top:6px}
+.set-store-bar{height:5px;border-radius:3px;background:#262a31;margin-top:5px;overflow:hidden;max-width:300px}
+.set-store-bar>i{display:block;height:100%;border-radius:3px;background:var(--acc);transition:width .3s}
+.set-store-bar.warn>i{background:#cf6d4f}
+.set-store-msg{font-size:12px;line-height:1.45;flex:1;min-width:0}
+.set-store-msg.err{color:#e08a75}
+.set-store-msg.ok{color:#9cb878}
+.set-foot-row{display:flex;align-items:center;gap:12px;margin-top:12px}
+.set-reload-note{font-size:12px;color:var(--tx3);margin-top:10px;line-height:1.45}
 .dlg-reply-ed{position:relative;padding:6px 6px 6px 16px;margin:3px 0;background:rgba(255,255,255,.02);border-radius:7px;border:1px solid transparent;transition:border-color .15s}
 .dlg-reply-ed::before{content:'';position:absolute;left:4px;top:0;bottom:0;width:1.5px;background:var(--line2);border-radius:1px}
 .dlg-reply-ed::after{content:'';position:absolute;left:4px;top:12px;width:8px;height:1.5px;background:var(--line2);border-radius:1px}
@@ -1019,6 +1043,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <button class="btn" id="bLog" title="Журнал действий: кто и что менял в проекте"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 2"/></svg><span class="t">Журнал</span></button>
   <button class="btn primary" id="bShare" title="Поделиться ссылкой на проект"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6"/></svg><span class="t">Поделиться</span></button>
 <div class="spacer"></div>
+  <button class="btn ibtn" id="bSettings" title="Настройки проекта"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   <button class="btn ibtn" id="bHelp" title="Горячие клавиши">?</button>
 </header>
 <div id="layout">
@@ -1178,6 +1203,33 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <div class="dlg-modal-head"><span class="dlg-modal-title">Журнал действий</span><button class="dlg-modal-close" id="logModalClose" title="Закрыть">×</button></div>
   <div class="dlg-modal-body" id="logModalBody"></div>
   <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logAll" title="Показать все записи" style="display:none">Все записи</button><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
+</div></div>
+<div id="setModal" class="dlg-modal"><div class="dlg-modal-card set-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки проекта</span><button class="dlg-modal-close" id="setModalClose" title="Закрыть">×</button></div>
+  <div class="dlg-modal-body">
+    <div class="set-sec-title">Хранилище данных в браузере</div>
+    <div class="set-hint">Проекты, автосохранение, копии и аватары хранятся локально. LocalStorage ограничен ~5 МБ — с аватарами места может не хватить. При переключении данные копируются в другое хранилище, и страница перезагружается.</div>
+    <div class="set-store-opt" id="setOptLs">
+      <span class="set-radio"></span>
+      <span class="set-store-info">
+        <span class="set-store-name">LocalStorage<em class="set-cur" id="setCurLs" hidden>— текущий</em></span>
+        <span class="set-store-desc">Классическое хранилище браузера. Ограничено ~5 МБ: с аватарами-картинками место может закончиться.</span>
+        <span class="set-store-size" id="setSizeLs"></span>
+        <span class="set-store-bar" id="setBarLsWrap"><i id="setBarLs" style="width:0%"></i></span>
+      </span>
+    </div>
+    <div class="set-store-opt" id="setOptIdb">
+      <span class="set-radio"></span>
+      <span class="set-store-info">
+        <span class="set-store-name">IndexedDB<em class="set-cur" id="setCurIdb" hidden>— текущий</em></span>
+        <span class="set-store-desc">База данных браузера. Практически без ограничений по объёму — рекомендуется для проектов с аватарами.</span>
+        <span class="set-store-size" id="setSizeIdb"></span>
+      </span>
+    </div>
+    <div class="set-foot-row"><button class="btn primary" id="setStoreSwitch" disabled>Переключить</button><span class="set-store-msg" id="setStoreMsg"></span></div>
+    <div class="set-reload-note">При возврате на LocalStorage сначала проверяется, поместятся ли данные: если нет — переключение не выполняется.</div>
+  </div>
+  <div class="dlg-modal-foot"><span class="log-foot-info"></span><button class="btn primary" id="setDone">Готово</button></div>
 </div></div>
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 <input type="file" id="txtFileInput" accept=".json,.txt,application/json,text/plain" hidden>
@@ -2608,7 +2660,7 @@ function scheduleAutosave(){
   flashT=setTimeout(function(){
     if(typeof syncState!=='undefined'&&syncState&&syncState.mode==='copy'){syncPersistCopyTick();}
     else{
-      try{localStorage.setItem(LS_KEY,JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){}
+      try{stSetItem(LS_KEY,JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){}
       try{projSaveCurrent();}catch(e){}
     }
     var a=$('#stAuto');a.classList.add('flash');setTimeout(function(){a.classList.remove('flash');},1100);
@@ -10306,21 +10358,298 @@ $('#sQ').addEventListener('input',renderList);
 window.addEventListener('beforeunload',function(e){
   if(dirty){e.preventDefault();e.returnValue='';}
 });
+/* ═══ хранилище браузера: localStorage ↔ IndexedDB (настройки проекта) ═══ */
+var STORE_MODE_KEY='vetvi-store-mode',LS_LIMIT_CHARS=4500000,LS_LIMIT_BYTES=5242880;
+var _storeMem=null,_storeDirty=null,_storeFlushT=null,_storeToastT=0;
+function storeMode(){
+  try{var m=localStorage.getItem(STORE_MODE_KEY);return m==='idb'?'idb':'ls';}catch(e){return'ls';}
+}
+function storeSetMode(m){
+  try{localStorage.setItem(STORE_MODE_KEY,(m==='idb')?'idb':'ls');}catch(e){}
+}
+/* ключи с данными приложения (переносятся между хранилищами) */
+function isDataKey(k){
+  return typeof k==='string'&&k.indexOf('vetvi-')===0&&k!==STORE_MODE_KEY&&k!=='vetvi-left-w';
+}
+/* ── IndexedDB: обещания-обёртки ── */
+var _idbPr=null;
+function idbOpen(){
+  if(_idbPr)return _idbPr;
+  _idbPr=new Promise(function(res,rej){
+    var r=null;
+    try{r=indexedDB.open('vetvi-store',1);}catch(e){rej(e);return;}
+    r.onupgradeneeded=function(){try{r.result.createObjectStore('kv');}catch(e){}};
+    r.onsuccess=function(){res(r.result);};
+    r.onerror=function(){rej(r.error||new Error('IndexedDB недоступна'));};
+    r.onblocked=function(){rej(new Error('IndexedDB заблокирована другой вкладкой'));};
+  });
+  _idbPr['catch'](function(){_idbPr=null;});
+  return _idbPr;
+}
+function idbPutMany(map){
+  return idbOpen().then(function(db){
+    return new Promise(function(res,rej){
+      var tx=null,st=null,k;
+      try{tx=db.transaction('kv','readwrite');st=tx.objectStore('kv');}catch(e){rej(e);return;}
+      for(k in map){if(Object.prototype.hasOwnProperty.call(map,k)){if(map[k]===null||map[k]===undefined)st['delete'](k);else st.put(String(map[k]),k);}}
+      tx.oncomplete=function(){res(true);};
+      tx.onerror=function(){rej(tx.error||new Error('Ошибка записи в IndexedDB'));};
+      tx.onabort=function(){rej(tx.error||new Error('Запись в IndexedDB прервана'));};
+    });
+  });
+}
+function idbReadAll(){
+  return idbOpen().then(function(db){
+    return new Promise(function(res,rej){
+      var tx=null,hasKV=true;
+      try{tx=db.transaction('kv','readonly');}catch(e){rej(e);return;}
+      var st=tx.objectStore('kv');
+      if(!st.getAllKeys||!st.getAll){hasKV=false;}
+      var rqK=hasKV?st.getAllKeys():null,rqV=hasKV?st.getAll():null,out={};
+      if(!hasKV){
+        /* старые браузеры без getAll — читаем по курсору */
+        var rq=st.openCursor();
+        rq.onsuccess=function(){var c=rq.result;if(c){out[c.key]=c.value;c['continue']();}else res(out);};
+        rq.onerror=function(){rej(rq.error);};
+        return;
+      }
+      rqK.onerror=rqV.onerror=function(){rej(rqK.error||rqV.error);};
+      tx.oncomplete=function(){
+        var ks=rqK.result||[],vs=rqV.result||[];
+        for(var i=0;i<ks.length&&i<vs.length;i++)out[ks[i]]=vs[i];
+        res(out);
+      };
+      tx.onerror=function(){rej(tx.error||new Error('Не удалось прочитать IndexedDB'));};
+    });
+  });
+}
+/* ── фасад синхронного доступа: режим ls → localStorage, режим idb → память + отложенная запись ── */
+function stItem(k){
+  if(storeMode()!=='idb'){try{return localStorage.getItem(k);}catch(e){return null;}}
+  return (_storeMem&&Object.prototype.hasOwnProperty.call(_storeMem,k))?_storeMem[k]:null;
+}
+function stSetItem(k,v){
+  if(storeMode()!=='idb'){localStorage.setItem(k,String(v));return;}
+  _storeMem=_storeMem||{};_storeMem[k]=String(v);
+  _storeDirty=_storeDirty||{};_storeDirty[k]=String(v);
+  clearTimeout(_storeFlushT);_storeFlushT=setTimeout(storeFlushNow,350);
+}
+function stRemoveItem(k){
+  if(storeMode()!=='idb'){try{localStorage.removeItem(k);}catch(e){}return;}
+  if(_storeMem)delete _storeMem[k];
+  _storeDirty=_storeDirty||{};_storeDirty[k]=null;
+  clearTimeout(_storeFlushT);_storeFlushT=setTimeout(storeFlushNow,350);
+}
+function storeFlushNow(){
+  clearTimeout(_storeFlushT);_storeFlushT=null;
+  if(storeMode()!=='idb'||!_storeDirty)return;
+  var map=_storeDirty;_storeDirty=null;
+  idbPutMany(map)['catch'](function(e){
+    _idbPr=null; /* при следующей записи попробуем открыть базу заново */
+    var now=Date.now();
+    if(now-_storeToastT>10000){_storeToastT=now;toast('Ошибка записи в IndexedDB: '+((e&&e.message)||e),'err');}
+  });
+}
+function storeFlushSync(cb){
+  clearTimeout(_storeFlushT);_storeFlushT=null;
+  if(storeMode()!=='idb'||!_storeDirty){if(cb)cb();return;}
+  var map=_storeDirty;_storeDirty=null;
+  idbPutMany(map).then(function(){if(cb)cb();},function(){if(cb)cb();});
+}
+window.addEventListener('pagehide',function(){try{if(storeMode()==='idb'&&_storeDirty)storeFlushNow();}catch(e){}});
+document.addEventListener('visibilitychange',function(){try{if(document.hidden&&storeMode()==='idb'&&_storeDirty)storeFlushNow();}catch(e){}});
+/* ── загрузка карты ключей из IndexedDB при старте (до чтения проектов) ── */
+function storeBoot(cb){
+  if(storeMode()!=='idb'){cb();return;}
+  idbReadAll().then(function(map){_storeMem=map;cb();},function(e){
+    _storeMem={};
+    toast('Не удалось прочитать IndexedDB — данные проектов недоступны. Приложение открыто с пустым состоянием; данные в IndexedDB не тронуты.','warn');
+    console.warn('storeBoot:',e);
+    cb();
+  });
+}
+/* ── сбор/подсчёт данных ── */
+function storeCollectLs(){
+  var out={};
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(isDataKey(k))out[k]=localStorage.getItem(k);
+    }
+  }catch(e){}
+  return out;
+}
+function storeSizeOf(map){
+  var t=0;
+  for(var k in map){if(Object.prototype.hasOwnProperty.call(map,k))t+=(String(k).length+(map[k]?String(map[k]).length:0))*2;}
+  return t;
+}
+function storeFmtSize(b){
+  b=Math.max(0,Math.round(b));
+  if(b>=1048576)return (Math.round(b/104857.6)/10).toFixed(1).replace('.',',')+' МБ';
+  if(b>=1024)return Math.round(b/1024)+' КБ';
+  return b+' Б';
+}
+function storeCollectMem(){
+  var out={};
+  if(_storeMem){for(var k in _storeMem)if(isDataKey(k))out[k]=_storeMem[k];}
+  return out;
+}
+/* ── немедленное сохранение текущего состояния (перед переключением хранилища) ── */
+function storePersistNow(){
+  try{
+    if(typeof syncState!=='undefined'&&syncState&&syncState.mode==='copy'&&typeof syncPersistCopyTick==='function'){syncPersistCopyTick();}
+    else{
+      try{stSetItem(LS_KEY,JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){}
+      try{projSaveCurrent();}catch(e){}
+    }
+  }catch(e){}
+}
+/* ── переключение: localStorage → IndexedDB ── */
+function storeSwitchToIdb(cb){
+  storePersistNow(); /* режим ещё ls — всё пишется в localStorage */
+  var data=storeCollectLs(),n=0,k;
+  for(k in data)n++;
+  idbPutMany(data).then(function(){
+    storeSetMode('idb');
+    /* вычищаем перенесённые ключи из localStorage — освобождаем место */
+    var left=storeCollectLs();
+    for(var k2 in left){try{localStorage.removeItem(k2);}catch(e){}}
+    try{localStorage.removeItem(LS_KEY);}catch(e){}
+    cb(true,n,null);
+  },function(e){
+    cb(false,0,(e&&e.message)||String(e));
+  });
+}
+/* ── переключение: IndexedDB → localStorage (с проверкой, поместится ли) ── */
+function storeSwitchToLs(cb){
+  storeFlushSync(function(){
+    var map=storeCollectMem(),k,chars=0,total=0;
+    for(k in map){chars+=k.length+String(map[k]||'').length;}
+    total=storeSizeOf(map);
+    if(chars>LS_LIMIT_CHARS){
+      cb(false,total,'Данные ('+storeFmtSize(total)+') не поместятся в LocalStorage (лимит ~'+storeFmtSize(LS_LIMIT_BYTES)+'). Переключение не выполнено — данные остались в IndexedDB без изменений. Освободите место: удалите лишние копии/резервы или аватары.');
+      return;
+    }
+    var wrote=[],ok=true;
+    try{
+      for(var k2 in map){localStorage.setItem(k2,map[k2]);wrote.push(k2);}
+    }catch(e){ok=false;}
+    if(!ok){
+      for(var i=0;i<wrote.length;i++){try{localStorage.removeItem(wrote[i]);}catch(e){}}
+      cb(false,total,'Не хватает места в LocalStorage ('+storeFmtSize(total)+' данных). Переключение отменено — данные остались в IndexedDB без изменений.');
+      return;
+    }
+    storeSetMode('ls');
+    var n=0;for(var k3 in map)n++;
+    cb(true,n,null);
+  });
+}
+/* ═══ настройки проекта: модал ═══ */
+var setTargetMode=null,setStoreBusy=false,setIdbSizeReq=false,setIdbSizeCache=null;
+function setStoreIdbBytes(){
+  if(storeMode()==='idb')return storeSizeOf(storeCollectMem());
+  return null;
+}
+function setStoreRefresh(){
+  var cur=storeMode();
+  if(!setTargetMode)setTargetMode=cur;
+  $('#setOptLs').classList.toggle('sel',setTargetMode==='ls');
+  $('#setOptIdb').classList.toggle('sel',setTargetMode==='idb');
+  $('#setCurLs').hidden=(cur!=='ls');
+  $('#setCurIdb').hidden=(cur!=='idb');
+  var lsB=storeSizeOf(storeCollectLs());
+  $('#setSizeLs').textContent='Занято: '+storeFmtSize(lsB)+' из ~'+storeFmtSize(LS_LIMIT_BYTES);
+  var pct=Math.min(100,Math.round(lsB/LS_LIMIT_BYTES*100));
+  $('#setBarLs').style.width=pct+'%';
+  $('#setBarLsWrap').classList.toggle('warn',pct>80);
+  var idbB=setStoreIdbBytes();
+  if(idbB===null)idbB=setIdbSizeCache;
+  $('#setSizeIdb').textContent=(idbB===null)?'Занято: измеряем…':(idbB?('Занято: '+storeFmtSize(idbB)):'Хранилище пока пустое');
+  var btn=$('#setStoreSwitch'),msg=$('#setStoreMsg');
+  msg.textContent='';msg.classList.remove('show','err','ok');
+  btn.disabled=(setTargetMode===cur)||setStoreBusy;
+  btn.textContent=(setTargetMode===cur)?'Сейчас используется этот вариант':('Переключить на '+(setTargetMode==='idb'?'IndexedDB':'LocalStorage'));
+  if(setTargetMode==='ls'&&cur==='idb'&&_storeMem){
+    var chars=0;
+    for(var k in _storeMem)if(isDataKey(k))chars+=k.length+String(_storeMem[k]||'').length;
+    if(chars>LS_LIMIT_CHARS){
+      btn.disabled=true;
+      msg.textContent='Данные ('+storeFmtSize(chars*2)+') не поместятся в LocalStorage (лимит ~'+storeFmtSize(LS_LIMIT_BYTES)+'). Освободите место: удалите лишние копии и резервные архивы или уменьшите аватары.';
+      msg.classList.add('show','err');
+    }
+  }
+}
+function openSettings(){
+  setTargetMode=null;setStoreBusy=false;
+  $('#setModal').classList.add('show');
+  setStoreRefresh();
+  if(setStoreIdbBytes()===null&&!setIdbSizeReq){
+    setIdbSizeReq=true;
+    idbReadAll().then(function(map){
+      var out={};
+      for(var k in map)if(isDataKey(k))out[k]=map[k];
+      setIdbSizeCache=storeSizeOf(out);
+      if($('#setModal').classList.contains('show'))setStoreRefresh();
+    })['catch'](function(){setIdbSizeCache=0;if($('#setModal').classList.contains('show'))setStoreRefresh();});
+  }
+}
+function closeSettings(){$('#setModal').classList.remove('show');}
+$('#bSettings').onclick=openSettings;
+$('#setModalClose').onclick=closeSettings;
+$('#setDone').onclick=closeSettings;
+$('#setOptLs').onclick=function(){if(setStoreBusy)return;setTargetMode='ls';setStoreRefresh();};
+$('#setOptIdb').onclick=function(){if(setStoreBusy)return;setTargetMode='idb';setStoreRefresh();};
+$('#setStoreSwitch').onclick=function(){
+  if(setStoreBusy)return;
+  var cur=storeMode(),target=setTargetMode;
+  if(!target||target===cur)return;
+  setStoreBusy=true;
+  var btn=$('#setStoreSwitch'),msg=$('#setStoreMsg');
+  btn.disabled=true;msg.textContent='';msg.classList.remove('show','err','ok');
+  msg.textContent='Копирую данные…';msg.classList.add('show');
+  var done=function(ok,text){
+    setStoreBusy=false;
+    if(ok){
+      msg.textContent=text;msg.classList.remove('err');msg.classList.add('show','ok');
+      toast(text);
+      setTimeout(function(){location.reload();},800);
+    }else{
+      setTargetMode=null;setStoreRefresh(); /* вернуть выбор к текущему режиму */
+      msg.textContent=text;msg.classList.add('show','err');
+    }
+  };
+  if(target==='idb'){
+    storeSwitchToIdb(function(ok,n,err){
+      if(ok)done(true,'Данные перенесены в IndexedDB ('+n+' зап.) — страница перезагрузится…');
+      else done(false,'Не удалось переключить: '+err);
+    });
+  }else{
+    storeSwitchToLs(function(ok,bytes,err){
+      if(ok)done(true,'Данные перенесены в LocalStorage — страница перезагрузится…');
+      else done(false,err||'Не удалось переключить.');
+    });
+  }
+};
+window.addEventListener('keydown',function(e){
+  if(!$('#setModal').classList.contains('show'))return;
+  if(e.key==='Escape'){closeSettings();return;}
+},true);
 /* ═══ менеджер проектов: список, переключение, автосохранение каждого ═══ */
 var LS_PROJECTS='vetvi-projects-v1',LS_CURPROJ='vetvi-cur-v1';
 var projSkipSaveId=null; /* id удаляемого проекта — не пересохранять его при переключении */
 function projRegistry(){
-  try{return JSON.parse(localStorage.getItem(LS_PROJECTS)||'[]')||[];}catch(e){return[];}
+  try{return JSON.parse(stItem(LS_PROJECTS)||'[]')||[];}catch(e){return[];}
 }
 function projSaveRegistry(list){
-  try{localStorage.setItem(LS_PROJECTS,JSON.stringify(list));}catch(e){toast('Хранилище переполнено — список проектов не сохранён','err');}
+  try{stSetItem(LS_PROJECTS,JSON.stringify(list));}catch(e){toast('Хранилище переполнено — список проектов не сохранён','err');}
 }
 function projSlotKey(id){return 'vetvi-project-'+id;}
 function projCurId(){
-  try{return localStorage.getItem(LS_CURPROJ)||'';}catch(e){return'';}
+  try{return stItem(LS_CURPROJ)||'';}catch(e){return'';}
 }
 function projSetCur(id){
-  try{localStorage.setItem(LS_CURPROJ,id||'');}catch(e){}
+  try{stSetItem(LS_CURPROJ,id||'');}catch(e){}
 }
 /* сохранить текущий проект в свой слот + обновить запись реестра */
 function projSaveCurrent(){
@@ -10340,7 +10669,7 @@ function projSaveCurrent(){
   entry.at=now;
   list.sort(function(a,b){return (b.modified||b.at||'').localeCompare(a.modified||a.at||'');});
   projSaveRegistry(list);
-  try{localStorage.setItem(projSlotKey(entry.id),JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){toast('Хранилище переполнено — проект не сохранён','err');}
+  try{stSetItem(projSlotKey(entry.id),JSON.stringify({project:project,vp:vp,bend:bendMode}));}catch(e){toast('Хранилище переполнено — проект не сохранён','err');}
   projSetCur(entry.id);
 }
 /* миграция старого одиночного автосейва в реестр */
@@ -10348,7 +10677,7 @@ function projMigrateLegacy(){
   var list=projRegistry();
   if(list.length)return list;
   var raw=null;
-  try{raw=localStorage.getItem(LS_KEY)||localStorage.getItem('vetvi-autosave-v16')||localStorage.getItem('vetvi-autosave-v15');}catch(e){}
+  try{raw=stItem(LS_KEY)||stItem('vetvi-autosave-v16')||stItem('vetvi-autosave-v15');}catch(e){}
   if(raw){
     try{
       var d=JSON.parse(raw);
@@ -10359,7 +10688,7 @@ function projMigrateLegacy(){
         if(!p.meta.created)p.meta.created=new Date().toISOString();
         var now=new Date().toISOString();
         var entry={id:p.meta.projectId,name:p.meta.name||'Без названия',created:p.meta.created,modified:p.meta.modified||now,nodes:(p.nodes||[]).length,roomId:null,at:now};
-        try{localStorage.setItem(projSlotKey(entry.id),JSON.stringify({project:p,vp:d.viewport||null,bend:d.bend||null}));}catch(e){}
+        try{stSetItem(projSlotKey(entry.id),JSON.stringify({project:p,vp:d.viewport||null,bend:d.bend||null}));}catch(e){}
         list=[entry];
         projSaveRegistry(list);
         return list;
@@ -10383,7 +10712,7 @@ function projInitStartup(){
   if(!entry){for(var j=0;j<list.length;j++)if(list[j].id===cur)entry=list[j];}
   if(!entry)entry=list[0];
   var data=null;
-  try{data=JSON.parse(localStorage.getItem(projSlotKey(entry.id))||'null');}catch(e){}
+  try{data=JSON.parse(stItem(projSlotKey(entry.id))||'null');}catch(e){}
   var p=(data&&data.project)||null;
   if(!p||!Array.isArray(p.nodes)){
     p={meta:{name:entry.name||'Без названия',created:entry.created||new Date().toISOString(),modified:entry.modified||new Date().toISOString(),projectId:entry.id},nodes:[],edges:[],customTypes:[],groups:[],listHidden:[]};
@@ -10413,7 +10742,7 @@ function projOpen(id,silent){
   if(!entry){toast('Проект не найден','err');return;}
   if(entry.id===projCurId()&&syncState.mode!=='copy'){toast('Этот проект уже открыт');return;}
   var data=null;
-  try{data=JSON.parse(localStorage.getItem(projSlotKey(id))||'null');}catch(e){}
+  try{data=JSON.parse(stItem(projSlotKey(id))||'null');}catch(e){}
   if(!data||!data.project||!Array.isArray(data.project.nodes)){
     /* битая запись — убираем из списка, чтобы не мешала */
     var rest=list.filter(function(e){return e.id!==id;});
@@ -10462,7 +10791,7 @@ function projDelete(id){
   if(!entry)return;
   projSkipSaveId=id;
   projSaveRegistry(left);
-  try{localStorage.removeItem(projSlotKey(id));}catch(e){}
+  try{stRemoveItem(projSlotKey(id));}catch(e){}
   var wasCur=id===projCurId()&&syncState.mode!=='copy';
   if(wasCur){
     var next=left[0];
@@ -10592,12 +10921,12 @@ function syncShareUrl(){
 }
 function syncMe(){
   var m=null;
-  try{m=JSON.parse(localStorage.getItem(LS_ME)||'null');}catch(e){}
+  try{m=JSON.parse(stItem(LS_ME)||'null');}catch(e){}
   if(!m||!m.id){
     var names=['Лис','Филин','Барс','Выдра','Кречет','Рысь','Сурок','Куница','Тюлень','Сыч','Хорёк','Ласка'];
     m={id:uid()+uid(),name:names[Math.floor(Math.random()*names.length)]+'-'+Math.floor(100+Math.random()*900),
        color:PALETTE_COLORS[Math.floor(Math.random()*PALETTE_COLORS.length)]};
-    try{localStorage.setItem(LS_ME,JSON.stringify(m));}catch(e){}
+    try{stSetItem(LS_ME,JSON.stringify(m));}catch(e){}
   }
   return m;
 }
@@ -11171,7 +11500,7 @@ function syncRenameModal(){
       var v=($('#rnName').value||'').trim();
       if(v&&v!==m.name){
         m.name=v;
-        try{localStorage.setItem(LS_ME,JSON.stringify(m));}catch(e){}
+        try{stSetItem(LS_ME,JSON.stringify(m));}catch(e){}
         if(syncState.sock&&syncState.sock.connected){
           syncState.sock.emit('vetvi:join',{roomId:syncState.room,user:{id:m.id,name:m.name,color:m.color}},function(){});
         }
@@ -11283,14 +11612,14 @@ function syncPushPass(mode,salt,hash,curPw){
 }
 /* ── копии ── */
 function copiesAll(){
-  try{return JSON.parse(localStorage.getItem(LS_COPIES)||'[]');}catch(e){return[];}
+  try{return JSON.parse(stItem(LS_COPIES)||'[]');}catch(e){return[];}
 }
 function copiesSave(list){
-  try{localStorage.setItem(LS_COPIES,JSON.stringify(list));}
+  try{stSetItem(LS_COPIES,JSON.stringify(list));}
   catch(e){toast('Хранилище переполнено — копия не сохранена','err');}
 }
 function backupsAll(){
-  try{return JSON.parse(localStorage.getItem(LS_BACKUPS)||'[]');}catch(e){return[];}
+  try{return JSON.parse(stItem(LS_BACKUPS)||'[]');}catch(e){return[];}
 }
 function syncActiveCopy(){
   if(!syncState.activeCopy)return null;
@@ -11353,7 +11682,7 @@ function exitCopyMode(reconnect){
   syncState.activeCopy=null;
   if(reconnect&&cp&&cp.sourceRoomId){
     var raw=null;
-    try{raw=localStorage.getItem(LS_KEY);}catch(e){}
+    try{raw=stItem(LS_KEY);}catch(e){}
     if(raw){
       try{
         var d=JSON.parse(raw);
@@ -11368,7 +11697,7 @@ function exitCopyMode(reconnect){
     syncConnect(cp.sourceRoomId,cp.sourceProjectId,{});
   }else{
     var raw2=null;
-    try{raw2=localStorage.getItem(LS_KEY);}catch(e){}
+    try{raw2=stItem(LS_KEY);}catch(e){}
     if(raw2){
       try{
         var d2=JSON.parse(raw2);
@@ -11564,7 +11893,7 @@ function applyMergeRequest(req){
   var backups=backupsAll();
   backups.unshift({id:uid(),at:new Date().toISOString(),label:'Перед merge от '+(req.sender&&req.sender.name||'гостя'),doc:JSON.parse(JSON.stringify(syncDocObj()))});
   if(backups.length>10)backups.length=10;
-  try{localStorage.setItem(LS_BACKUPS,JSON.stringify(backups));}catch(e){}
+  try{stSetItem(LS_BACKUPS,JSON.stringify(backups));}catch(e){}
   pushHistory(serialize(),'Слияние копий');
   mergeDocInto(base,cur);
   markDirty();
@@ -12435,6 +12764,7 @@ $('#plEndBack').onclick=function(e){e.stopPropagation();plBack();};
 $('#bPlay').onclick=function(){plStart();};
 /* ═══ запуск ═══ */
 try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key!=='Escape')return;if($('#noteModal').classList.contains('show')){closeNoteEditor();}if($('#noteViewModal').classList.contains('show')){closeNoteView();}},true);renderPalette();
+  storeBoot(function(){
   try{
     projInitStartup();
   }catch(e){
@@ -12452,6 +12782,7 @@ try{bindNotesDelegation();window.addEventListener('keydown',function(e){if(e.key
     fitView(false);
   },350);
   console.info('Ветви: инициализация завершена. Узлов:',project.nodes.length,'Связей:',project.edges.length,'Групп:',project.groups.length);
+  });
 }catch(err){
   console.error(err);
   toast('Ошибка запуска: '+err.message,'err');
