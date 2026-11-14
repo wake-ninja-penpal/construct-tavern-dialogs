@@ -631,6 +631,28 @@ body.connecting .vpinn{cursor:copy}
 .patch-tag.add{color:#9cb878;background:rgba(156,184,120,.13);box-shadow:inset 0 0 0 1px rgba(156,184,120,.35)}
 .patch-tag.fix{color:#e08a75;background:rgba(224,138,117,.12);box-shadow:inset 0 0 0 1px rgba(224,138,117,.32)}
 .patch-tag.chg{color:#d6c96a;background:rgba(214,201,106,.12);box-shadow:inset 0 0 0 1px rgba(214,201,106,.32)}
+/* ═══ поиск по проекту: окно с находками по всем полям нод (Mod+F) ═══ */
+.search-card{width:660px;max-width:92vw}
+.search-body{padding:12px 14px}
+.search-bar{display:flex;align-items:center;gap:9px;background:#191c21;border:1px solid #262a31;border-radius:10px;padding:8px 12px}
+.search-bar svg{flex:none;color:var(--tx3)}
+.search-bar input{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--tx);font:600 13.5px var(--body)}
+.search-bar input::placeholder{color:#5a6069;font-weight:400}
+.search-hint{font-size:11px;color:var(--tx3);margin:8px 2px 6px;min-height:14px}
+.search-results{max-height:46vh;overflow-y:auto;border:1px solid var(--line2);border-radius:10px;background:rgba(255,255,255,.015)}
+.search-node-row+.search-node-row{border-top:1px solid rgba(255,255,255,.05)}
+.search-node-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:rgba(226,165,78,.05);border:none;padding:7px 11px;cursor:pointer;transition:background .15s;font:inherit;color:inherit}
+.search-node-head:hover{background:rgba(226,165,78,.11)}
+.search-nico{flex:none;display:flex;align-items:center}
+.search-ntitle{flex:1;min-width:0;font:700 12.5px var(--body);color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-ntype{flex:none;font:700 9px var(--body);letter-spacing:.4px;text-transform:uppercase;color:var(--tx3);background:rgba(255,255,255,.06);border-radius:5px;padding:2px 7px}
+.search-hit{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;background:transparent;border:none;padding:5px 11px 5px 32px;cursor:pointer;transition:background .15s;font:inherit;color:inherit}
+.search-hit:hover{background:rgba(255,255,255,.05)}
+.search-kind{flex:none;font:700 9.5px var(--body);letter-spacing:.3px;text-transform:uppercase;color:#9aa1ac;background:rgba(255,255,255,.05);border-radius:4px;padding:2px 6px;min-width:56px;text-align:center}
+.search-frag{flex:1;min-width:0;font:400 12px/1.45 var(--body);color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-mark{background:rgba(226,165,78,.28);color:#f0c179;border-radius:3px;padding:0 2px;font-weight:700}
+.search-more{font:600 10px var(--body);color:var(--tx3);padding:4px 11px 6px 32px}
+.search-empty{padding:18px 14px;text-align:center;font-size:12px;color:var(--tx3)}
 /* ═══ настройки проекта ═══ */
 .set-card{width:600px;min-width:0}
 .set-sec-title{font-size:13px;font-weight:700;color:var(--tx);margin:2px 0 6px}
@@ -1258,6 +1280,15 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <div class="dlg-modal-head"><span class="dlg-modal-title">Что нового — патчноут</span><button class="dlg-modal-close" id="patchModalClose" title="Закрыть">×</button></div>
   <div class="dlg-modal-body patch-body" id="patchBody"></div>
   <div class="dlg-modal-foot"><button class="btn primary" id="patchDone">Закрыть</button></div>
+</div></div>
+<div id="searchModal" class="dlg-modal"><div class="dlg-modal-card search-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Поиск по проекту</span><button class="dlg-modal-close" id="searchModalClose" title="Закрыть">×</button></div>
+  <div class="dlg-modal-body search-body">
+    <div class="search-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input id="searchInp" placeholder="Найти в репликах, названиях, заметках, метках, исходах…" autocomplete="off" spellcheck="false"></div>
+    <div class="search-hint" id="searchHint"></div>
+    <div class="search-results" id="searchResults"><div class="search-empty">Введите минимум два символа — поиск идёт по всем нодам проекта</div></div>
+  </div>
+  <div class="dlg-modal-foot"><span class="log-foot-info">Enter — к первой находке · Esc — закрыть</span><button class="btn primary" id="searchDone">Закрыть</button></div>
 </div></div>
 <div id="setModal" class="dlg-modal"><div class="dlg-modal-card set-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки проекта</span><button class="dlg-modal-close" id="setModalClose" title="Закрыть">×</button></div>
@@ -9468,6 +9499,7 @@ var HK_DEFS=[
   {id:'save',name:'Сохранить проект (JSON)',def:'Mod+KeyS'},
   {id:'saveAs',name:'Сохранить как… (JSON)',def:'Mod+Shift+KeyS'},
   {id:'projects',name:'Менеджер проектов',def:'Mod+KeyO'},
+  {id:'search',name:'Поиск по проекту',def:'Mod+KeyF'},
   {id:'newProject',name:'Новый проект',def:'Mod+Alt+KeyN'},
   {id:'duplicate',name:'Дублировать выделение',def:'Mod+KeyD'},
   {id:'exportSel',name:'Экспорт выделенных нод (JSON)',def:'Mod+KeyE'},
@@ -9592,17 +9624,21 @@ function hkRefreshStatic(){
    k — тип записи: add = «новое», fix = «исправлено», chg = «изменено». */
 var PATCHNOTES=[
   {date:'14.11.2026',items:[
-    {k:'add',t:'Проигрыватель: Кнопка «К ноде» подсвечивает текущую реплику на карточке;'},
-    {k:'add',t:'Проигрыватель по P стартует с ноды под курсором (или с выделенной, если курсор не над нодой) — работает аналогично кнопке «Играть отсюда» из контекстного меню; Добавлен новый hotkey Alt+P - проигрывает только эту ноду(выделенную или на которую наведен указатель мыши).'},
-    {k:'add',t:'Горячие клавиши кнопок проигрывателя: «К ноде» ('+hkHuman('KeyG')+') и «Заново» ('+hkHuman('KeyR')+')'},
+    {k:'add',t:'Поиск по проекту ('+hkHuman('Mod+KeyF')+'): ищет по всем содержимым полям нод — реплики и говорящие диалогов, названия и тексты, описания, заметки, метки, исходы развилок с их условиями, кнопки действий, значения переменных и участники. Список находок с подсветкой совпадений; клик по находке — переход к ноде на холсте (свёрнутые группы разворачиваются), найденная реплика мигает, как «К ноде» в плеере. Сочетание переназначается в настройках клавиш.'},
+    {k:'chg',t:'Сервер совместного редактирования: хранилище переведено с общего JSON-файла на SQLite — комната и каждая merge-заявка хранятся отдельными записями, сохранение одного проекта больше не перезаписывает данные всех комнат. Старый store.json мигрируется в базу автоматически при первом запуске (копия сохраняется рядом как store.json.backup-…), пароли комнат теперь корректно переживают перезапуск сервера.'},
+    {k:'add',t:'Окно патчноута «Что нового» — журнал того, что добавлено и изменено. Открывается сочетанием '+hkHuman('Mod+KeyH')+' (кнопок для него пока нет; сочетание переназначается в настройках клавиш).'},
+    {k:'add',t:'Горячие клавиши кнопок проигрывателя: «К ноде» ('+hkHuman('KeyG')+') и «Заново» ('+hkHuman('KeyR')+') — работают в плеере и на экране «КОНЕЦ», переназначаются в настройках клавиш; подсказки на кнопках показывают актуальное сочетание.'},
+    {k:'fix',t:'«К ноде» в проигрывателе теперь подсвечивает текущую реплику на карточке ноды и в режиме «проигрывать подряд» — раньше в этом режиме реплика не подсвечивалась.'},
     {k:'chg',t:'У нод «Действие» и «Развилка» главный выход перенесён вниз правой грани — как у «Диалога»; добавлен отступ снизу, чтобы пин не висел поверх внутренних узлов, а стрелки от блока выходили из нижней точки.'}
   ]},
   {date:'13.11.2026',items:[
+    {k:'add',t:'Проигрыватель: «К ноде» подсвечивает текущую реплику на карточке — нода при надобности разворачивается, вид наводится на реплику, реплика мигает пару секунд.'},
+    {k:'add',t:'Проигрыватель по P стартует с ноды под курсором (или с выделенной, если курсор не над нодой) — как «Играть отсюда» из контекстного меню; Alt+P проигрывает только эту ноду.'},
     {k:'chg',t:'Поле ввода реплики при редактировании подстраивается под текст: в фокусе виден весь текст и поле растёт при вводе, вне фокуса — обычная высота.'},
-    {k:'add',t:'Двойной клик по реплике в редакторе — переход к ней на холсте.'},
+    {k:'add',t:'Подписи горячих клавиш в меню и подсказках обновляются сразу после переназначения; двойной клик по реплике в редакторе — переход к ней на холсте.'},
     {k:'add',t:'Настройки: разделы отдельными окнами; личные горячие клавиши для каждого пользователя; выбор хранилища localStorage / IndexedDB.'},
     {k:'add',t:'Экспорт выделенных нод в JSON (Ctrl+E) через контекстные меню нод, групп и цепочек.'},
-    {k:'chg',t:'Палитра цветов: свой цвет попадает в начало списка, свотчи сворачиваются;'},
+    {k:'chg',t:'Палитра цветов: свой цвет попадает в начало списка, свотчи сворачиваются; у новых нод яркость цвета по умолчанию −60%.'},
     {k:'add',t:'Плеер: зацикливание диалога («повтор» на реплике), нода «Действие», иконки вкладок, кадрирование аватаров.'}
   ]}
 ];
@@ -9629,6 +9665,139 @@ function closePatchModal(){$('#patchModal').classList.remove('show');}
 $('#patchModalClose').onclick=closePatchModal;
 $('#patchDone').onclick=closePatchModal;
 $('#patchModal').addEventListener('click',function(e){if(e.target===this)closePatchModal();});
+/* ═══ поиск по проекту: по всем содержимым полям нод (Mod+F) ═══
+   Открывается горячей клавишей «search» (по умолчанию Ctrl+F / ⌘F).
+   Ищет по названиям и текстам нод, репликам диалогов и говорящим, описаниям,
+   заметкам, меткам, исходам развилок (включая текст условий), кнопкам действий,
+   значениям переменных и участникам. Список находок с подсветкой совпадений;
+   клик — переход к ноде на холсте (свёрнутые группы разворачиваются),
+   найденная реплика мигает, как «К ноде» в проигрывателе. */
+function searchOpen(){var el=$('#searchModal');return !!(el&&el.classList.contains('show'));}
+var searchTimer=null;
+function searchPlainHtml(html){
+  return String(html==null?'':html)
+    .replace(/<br\s*\/?>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;/gi,' ')
+    .replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&quot;/gi,'"')
+    .replace(/\s+/g,' ').trim();
+}
+function searchFragHtml(s,q){
+  s=String(s==null?'':s).replace(/\s+/g,' ').trim();
+  if(!s)return '';
+  var i=q?s.toLowerCase().indexOf(q.toLowerCase()):-1;
+  if(i<0)return esc(s.length>120?s.slice(0,120)+'…':s);
+  var w=48,a=Math.max(0,i-w),b=Math.min(s.length,i+q.length+w),frag=s.slice(a,b),rel=i-a;
+  return (a>0?'…':'')+esc(frag.slice(0,rel))+'<mark class="search-mark">'+esc(frag.slice(rel,rel+q.length))+'</mark>'+esc(frag.slice(rel+q.length))+(b<s.length?'…':'');
+}
+function searchHitsOf(n,q){
+  var ql=q.toLowerCase(),hits=[];
+  function add(kind,text,rid,plain){
+    if(text==null)return;
+    var s=plain?searchPlainHtml(text):String(text);
+    s=s.replace(/\s+/g,' ').trim();
+    if(!s||s.toLowerCase().indexOf(ql)<0)return;
+    hits.push({kind:kind,text:s,rid:rid||null});
+  }
+  add('Название',n.title);
+  add('Текст',n.text);
+  (Array.isArray(n.tags)?n.tags:[]).forEach(function(t){add('Метка',t);});
+  ensureNotes(n);
+  (n.notes||[]).forEach(function(nt){if(!nt)return;add('Заметка',nt.title);add('Заметка',nt.html,null,true);});
+  if(n.type==='dialog'){
+    ensureDialog(n);
+    add('Описание',n.dialog.description);
+    (n.dialog.participants||[]).forEach(function(pid){var c=charById(pid);if(c&&c.name)add('Участник',c.name);});
+    (function walk(reps){
+      (reps||[]).forEach(function(r){
+        if(!r)return;
+        add('Реплика',r.text,r.id);
+        var sp=r.speaker?charById(r.speaker):null;
+        if(sp&&sp.name)add('Говорящий',sp.name,r.id);
+        walk(r.children);
+      });
+    })(n.dialog.replies);
+  }
+  if(n.type==='branch'){
+    ensureBranch(n);
+    (n.outcomes||[]).forEach(function(o,i){
+      if(!o)return;
+      add('Исход '+(i+1),o.label);
+      if(o.cond)add('Условие исхода',condText(o.cond));
+    });
+  }
+  if(n.type==='action'){
+    ensureActions(n);
+    (n.actions||[]).forEach(function(a,i){if(!a)return;add('Кнопка '+(i+1),a.label);});
+  }
+  if(n.type==='varnode')add('Значение переменной',n.varVal);
+  return hits;
+}
+function searchRun(q){
+  var box=$('#searchResults'),hint=$('#searchHint');
+  if(!box)return;
+  q=String(q||'').replace(/\s+/g,' ').trim();
+  if(q.length<2){
+    box.innerHTML='<div class="search-empty">Введите минимум два символа — поиск идёт по всем нодам проекта</div>';
+    if(hint)hint.textContent='';
+    return;
+  }
+  var groups=[],nodeCount=0,total=0;
+  project.nodes.forEach(function(n){
+    if(!n)return;
+    var hits=searchHitsOf(n,q);
+    if(!hits.length)return;
+    nodeCount++;total+=hits.length;
+    if(groups.length<80)groups.push({n:n,hits:hits.slice(0,5),more:Math.max(0,hits.length-5)});
+  });
+  if(hint)hint.textContent=nodeCount?('Найдено: нод — '+nodeCount+', совпадений — '+total+(total>400?' (показаны первые)':'')):'';
+  if(!groups.length){box.innerHTML='<div class="search-empty">Ничего не найдено по «'+esc(q)+'»</div>';return;}
+  var html='';
+  groups.forEach(function(g){
+    var vis=nodeVisual(g.n);
+    html+='<div class="search-node-row">'
+      +'<button class="search-node-head" data-nid="'+esc(g.n.id)+'">'
+      +'<span class="search-nico" style="color:'+esc(vis.baseColor)+'">'+ic(vis.icon,13)+'</span>'
+      +'<span class="search-ntitle">'+esc(g.n.title||'Без названия')+'</span>'
+      +'<span class="search-ntype">'+esc(vis.name)+'</span></button>';
+    g.hits.forEach(function(h){
+      html+='<button class="search-hit" data-nid="'+esc(g.n.id)+'"'+(h.rid?' data-rid="'+esc(h.rid)+'"':'')+'">'
+        +'<span class="search-kind">'+esc(h.kind)+'</span>'
+        +'<span class="search-frag">'+searchFragHtml(h.text,q)+'</span></button>';
+    });
+    if(g.more)html+='<div class="search-more">ещё совпадений: '+g.more+'</div>';
+    html+='</div>';
+  });
+  box.innerHTML=html;
+  $all('#searchResults [data-nid]').forEach(function(b){
+    b.onclick=function(){searchGo(b.dataset.nid,b.dataset.rid||null);};
+  });
+}
+function searchGo(nid,rid){
+  var n=nodeById(nid);
+  if(!n){toast('Нода не найдена — возможно, она удалена','warn');return;}
+  closeSearchModal();
+  revealNode(n);
+  selectOnly(n.id);
+  centerOn(n);
+  if(rid&&n.type==='dialog')plFlashReplyOnNode(n.id,rid);
+}
+function openSearchModal(){
+  $('#searchModal').classList.add('show');
+  searchRun($('#searchInp')?$('#searchInp').value:'');
+  setTimeout(function(){var inp=$('#searchInp');if(inp){inp.focus();inp.select();}},30);
+}
+function closeSearchModal(){$('#searchModal').classList.remove('show');}
+$('#searchModalClose').onclick=closeSearchModal;
+$('#searchDone').onclick=closeSearchModal;
+$('#searchModal').addEventListener('click',function(e){if(e.target===this)closeSearchModal();});
+$('#searchInp').addEventListener('input',function(e){
+  clearTimeout(searchTimer);
+  var v=e.target.value;
+  searchTimer=setTimeout(function(){searchRun(v);},160);
+});
+$('#searchInp').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){e.preventDefault();var f=$('#searchResults .search-hit,#searchResults .search-node-head');if(f)f.click();}
+  if(e.key==='Escape'){e.preventDefault();closeSearchModal();}
+});
 var hkCap=null;
 function hkMsg(t,cls){var el=$('#hkMsg');if(!el)return;el.textContent=t||'';el.className='set-store-msg'+(cls?' '+cls:'');}
 function hkRenderList(){
@@ -9686,6 +9855,11 @@ window.addEventListener('keydown',function(e){
     if(e.key==='Escape'||hkIs(e,'patchnotes')){e.preventDefault();closePatchModal();return;}
     return;
   }
+  /* окно поиска открыто: закрывается по Esc или повторному сочетанию, остальное глушится */
+  if(searchOpen()){
+    if(e.key==='Escape'||hkIs(e,'search')){e.preventDefault();closeSearchModal();return;}
+    return;
+  }
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
   if((e.key==='Control'||e.key==='Meta')&&!isTyping())document.body.classList.add('ctrlpan');
   if(isTyping()){
@@ -9694,6 +9868,7 @@ window.addEventListener('keydown',function(e){
   }
   if(e.code==='Space'){spaceDown=true;document.body.classList.add('space');e.preventDefault();return;}
   if(hkIs(e,'patchnotes')){e.preventDefault();openPatchModal();return;}
+  if(hkIs(e,'search')){e.preventDefault();openSearchModal();return;}
   if(hkIs(e,'rename')&&sel.size===1){
     e.preventDefault();
     var elF=nodeEls.get(sel.values().next().value);
@@ -10683,6 +10858,7 @@ $('#bHelp').onclick=function(){
       '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: наведите курсор на блок — проигрывание пойдёт с него до конца цепочки (или выделите блок — с него, если курсор не над нодой); выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без наведения и выделения — весь сюжет; ПКМ на блоке — «Играть отсюда»; в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, '+hkText('plRestart')+' — заново, '+hkText('plShow')+' — к ноде, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
       '<div><kbd>'+hkText('playNode')+'</kbd></div><div>проиграть только эту ноду (под курсором или выделенную); переходы к другим блокам отсекаются — реплики самой ноды доступны; если ни на что не навели и ничего не выделено — ничего не запускается</div>'+
       '<div><kbd>'+hkText('patchnotes')+'</kbd></div><div>окно патчноута «Что нового» — журнал изменений: что добавлено и что изменено; Esc или повторное сочетание — закрыть</div>'+
+      '<div><kbd>'+hkText('search')+'</kbd></div><div>поиск по проекту — по всем содержимым полям нод: реплики и говорящие диалогов, названия и тексты, описания, заметки, метки, исходы и условия развилок, кнопки действий, переменные; клик по находке — переход к ноде, найденная реплика мигает; Esc или повторное сочетание — закрыть</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
 };
