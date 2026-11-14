@@ -450,6 +450,10 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .port:hover::after{border-color:var(--acc);background:#2a2113;transform:scale(1.25);box-shadow:0 0 10px rgba(226,165,78,.5)}
 .node.t-dialog .pout{top:auto;bottom:8px;right:-13px;left:auto;margin-top:0}
 .node.t-dialog .n-body{padding-bottom:34px}
+/* у «Действие» и «Развилки» главный выход тоже внизу справа, как у «Диалога»:
+   отступ снизу резервирует место, чтобы пин не висел поверх внутренних узлов */
+.node.t-action .pout,.node.t-branch .pout{top:auto;bottom:8px;right:-13px;left:auto;margin-top:0}
+.node.t-action .n-body,.node.t-branch .n-body{padding-bottom:34px}
 .dlg-tree{margin-top:8px;padding:4px 0}
 .dlg-empty{color:var(--tx3);font-style:italic;text-align:center;padding:12px 4px;font-size:10.5px}
 .dlg-participants{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
@@ -614,6 +618,19 @@ body.connecting .vpinn{cursor:copy}
 .dlg-modal-close:hover{background:#262b33;color:var(--tx)}
 .dlg-modal-body{padding:16px 20px;overflow-y:auto;flex:1}
 .dlg-modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--line)}
+/* ═══ патчноут: окно «Что нового» — открывается горячей клавишей (Mod+H) ═══ */
+.patch-card{width:680px;max-width:92vw}
+.patch-body{padding:12px 14px}
+.patch-ver+.patch-ver{margin-top:12px}
+.patch-ver-head{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:9px;background:rgba(226,165,78,.08);box-shadow:inset 0 0 0 1px rgba(226,165,78,.26)}
+.patch-ver-date{font:700 12.5px var(--body);color:var(--acc2)}
+.patch-latest{font:700 9px var(--body);letter-spacing:.5px;text-transform:uppercase;color:#14161a;background:var(--acc);border-radius:5px;padding:2px 7px}
+.patch-item{display:flex;gap:9px;align-items:flex-start;padding:6px 4px 1px;margin:0 2px;font:400 12.5px/1.5 var(--body);color:var(--tx2)}
+.patch-item>span:last-child{min-width:0}
+.patch-tag{flex:none;margin-top:2px;font:700 8.5px var(--body);letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:5px}
+.patch-tag.add{color:#9cb878;background:rgba(156,184,120,.13);box-shadow:inset 0 0 0 1px rgba(156,184,120,.35)}
+.patch-tag.fix{color:#e08a75;background:rgba(224,138,117,.12);box-shadow:inset 0 0 0 1px rgba(224,138,117,.32)}
+.patch-tag.chg{color:#d6c96a;background:rgba(214,201,106,.12);box-shadow:inset 0 0 0 1px rgba(214,201,106,.32)}
 /* ═══ настройки проекта ═══ */
 .set-card{width:600px;min-width:0}
 .set-sec-title{font-size:13px;font-weight:700;color:var(--tx);margin:2px 0 6px}
@@ -1148,8 +1165,8 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       </div>
       <div class="pl-actions">
         <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
-        <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
-        <button class="pl-btn" id="plShowBtn" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
+        <button class="pl-btn" id="plRestartBtn" data-hk-title="plRestart" data-hk-base="Сначала" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+        <button class="pl-btn" id="plShowBtn" data-hk-title="plShow" data-hk-base="Выйти из проигрывания и показать на холсте ноду текущего текста" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
         <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
       </div>
     </div>
@@ -1159,8 +1176,8 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     <div class="pl-sub">эта ветка истории завершена</div>
     <div class="pl-btns">
       <button class="pl-btn" id="plEndBack" title="Вернуться на шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
-      <button class="pl-btn" id="plEndRestart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
-      <button class="pl-btn" id="plEndShow" title="Показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
+      <button class="pl-btn" id="plEndRestart" data-hk-title="plRestart" data-hk-base="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+      <button class="pl-btn" id="plEndShow" data-hk-title="plShow" data-hk-base="Показать на холсте ноду текущего текста" title="Показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
       <button class="pl-btn accent" id="plEndExit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>В редактор</button>
     </div>
   </div>
@@ -1236,6 +1253,11 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <div class="dlg-modal-head"><span class="dlg-modal-title">Журнал действий</span><button class="dlg-modal-close" id="logModalClose" title="Закрыть">×</button></div>
   <div class="dlg-modal-body" id="logModalBody"></div>
   <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logAll" title="Показать все записи" style="display:none">Все записи</button><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
+</div></div>
+<div id="patchModal" class="dlg-modal"><div class="dlg-modal-card patch-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Что нового — патчноут</span><button class="dlg-modal-close" id="patchModalClose" title="Закрыть">×</button></div>
+  <div class="dlg-modal-body patch-body" id="patchBody"></div>
+  <div class="dlg-modal-foot"><button class="btn primary" id="patchDone">Закрыть</button></div>
 </div></div>
 <div id="setModal" class="dlg-modal"><div class="dlg-modal-card set-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки проекта</span><button class="dlg-modal-close" id="setModalClose" title="Закрыть">×</button></div>
@@ -1641,6 +1663,7 @@ function dlgNodeWidth(n){
   return (n.dlgWidth||NODE_W)+maxD*DLG_REPLY_INDENT;
 }
 function dlgMainAnchor(n,el){
+  /* общий якорь главного выхода (низ правой грани): диалог, действие, развилка */
   var w=el?el.offsetWidth:dlgNodeWidth(n);
   var h=el?el.offsetHeight:200;
   return{x:n.x+w,y:n.y+h-21};
@@ -3636,7 +3659,7 @@ function renderWorld(spawn,spawnEdge){
       '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-vars"></div><div class="n-tags"></div></div>'+
       '<i class="port pin" title="вход — потяните, чтобы перенести входящие стрелки"></i>'+
       '<i class="port pin" title="вход — потяните (можно с Ctrl), чтобы отсоединить и перенести входящие стрелки"></i>'+
-'<i class="port pout" title="'+(n.type==='dialog'?'выход диалога (правая грань, внизу) · Ctrl+тянуть — перенести исходящие':'выход — тяните к другому узлу · Ctrl+тянуть — отсоединить и перенести исходящие стрелки')+'"></i>';
+'<i class="port pout" title="'+((n.type==='dialog'||n.type==='action'||n.type==='branch')?(n.type==='dialog'?'выход диалога (правая грань, внизу)':'выход (правая грань, внизу)'):'выход — тяните к другому узлу')+' · Ctrl+тянуть — отсоединить и перенести исходящие"></i>';
     el.querySelector('.n-title').textContent=n.title;
     if(n.type==='dialog'){
       var cntEl=el.querySelector('.n-reply-cnt');
@@ -3813,7 +3836,7 @@ function edgeAnchors(e){
     }
   }else{
     var a=nodeEls.get(na.id);if(!a)return null;
-    if(na.type==='dialog'){
+    if(na.type==='dialog'||na.type==='action'||na.type==='branch'){
       var mm=dlgMainAnchor(na,a);
       x1=mm.x;y1=mm.y;
     }else{
@@ -7853,7 +7876,7 @@ function startConnect(e,nodeEl){
   var prev=svgEl('path');prev.setAttribute('class','preview');
   edgesSvg.appendChild(prev);
   var x1,y1;
-  if(n.type==='dialog'){
+  if(n.type==='dialog'||n.type==='action'||n.type==='branch'){
     var mm=dlgMainAnchor(n,nodeEl);
     x1=mm.x;y1=mm.y;
   }else{
@@ -9458,9 +9481,12 @@ var HK_DEFS=[
   {id:'centerSel',name:'Центрировать на выделенной ноде',def:'KeyF'},
   {id:'play',name:'Проиграть диалог',def:'KeyP'},
   {id:'playNode',name:'Проиграть только эту ноду',def:'Alt+KeyP'},
+  {id:'plRestart',name:'Плеер: заново (кнопка «Заново»)',def:'KeyR'},
+  {id:'plShow',name:'Плеер: к ноде на холсте (кнопка «К ноде»)',def:'KeyG'},
   {id:'fitView',name:'Вписать весь проект',def:'Digit0'},
   {id:'zoomIn',name:'Приблизить',def:'Equal',alias:['Shift+Equal']},
-  {id:'zoomOut',name:'Отдалить',def:'Minus'}
+  {id:'zoomOut',name:'Отдалить',def:'Minus'},
+  {id:'patchnotes',name:'Что нового (патчноут)',def:'Mod+KeyH'}
 ];
 var hkUser={};
 /* личные настройки: сочетания хранятся отдельно для каждого пользователя
@@ -9560,6 +9586,51 @@ function hkRefreshStatic(){
     else{var base=el.getAttribute('data-hk-base')||'';el.title=base?base+' ('+t+')':t;}
   });
 }
+/* ═══ патчноут: окно «Что нового» — журнал изменений проекта ═══
+   Открывается горячей клавишей «patchnotes» (по умолчанию Ctrl+H / ⌘H).
+   Новые записи добавлять в НАЧАЛО списка PATCHNOTES (свежая дата сверху).
+   k — тип записи: add = «новое», fix = «исправлено», chg = «изменено». */
+var PATCHNOTES=[
+  {date:'14.11.2026',items:[
+    {k:'add',t:'Окно патчноута «Что нового» — журнал того, что добавлено и изменено. Открывается сочетанием '+hkHuman('Mod+KeyH')+' (кнопок для него пока нет; сочетание переназначается в настройках клавиш).'},
+    {k:'add',t:'Горячие клавиши кнопок проигрывателя: «К ноде» ('+hkHuman('KeyG')+') и «Заново» ('+hkHuman('KeyR')+') — работают в плеере и на экране «КОНЕЦ», переназначаются в настройках клавиш; подсказки на кнопках показывают актуальное сочетание.'},
+    {k:'fix',t:'«К ноде» в проигрывателе теперь подсвечивает текущую реплику на карточке ноды и в режиме «проигрывать подряд» — раньше в этом режиме реплика не подсвечивалась.'},
+    {k:'chg',t:'У нод «Действие» и «Развилка» главный выход перенесён вниз правой грани — как у «Диалога»; добавлен отступ снизу, чтобы пин не висел поверх внутренних узлов, а стрелки от блока выходили из нижней точки.'}
+  ]},
+  {date:'13.11.2026',items:[
+    {k:'add',t:'Проигрыватель: «К ноде» подсвечивает текущую реплику на карточке — нода при надобности разворачивается, вид наводится на реплику, реплика мигает пару секунд.'},
+    {k:'add',t:'Проигрыватель по P стартует с ноды под курсором (или с выделенной, если курсор не над нодой) — как «Играть отсюда» из контекстного меню; Alt+P проигрывает только эту ноду.'},
+    {k:'chg',t:'Поле ввода реплики при редактировании подстраивается под текст: в фокусе виден весь текст и поле растёт при вводе, вне фокуса — обычная высота.'},
+    {k:'add',t:'Подписи горячих клавиш в меню и подсказках обновляются сразу после переназначения; двойной клик по реплике в редакторе — переход к ней на холсте.'},
+    {k:'add',t:'Настройки: разделы отдельными окнами; личные горячие клавиши для каждого пользователя; выбор хранилища localStorage / IndexedDB.'},
+    {k:'add',t:'Экспорт выделенных нод в JSON (Ctrl+E) через контекстные меню нод, групп и цепочек.'},
+    {k:'chg',t:'Палитра цветов: свой цвет попадает в начало списка, свотчи сворачиваются; у новых нод яркость цвета по умолчанию −60%.'},
+    {k:'add',t:'Плеер: зацикливание диалога («повтор» на реплике), нода «Действие», иконки вкладок, кадрирование аватаров.'}
+  ]}
+];
+function patchOpen(){var el=$('#patchModal');return !!(el&&el.classList.contains('show'));}
+function patchRender(){
+  var el=$('#patchBody');if(!el)return;
+  var TAGS={add:'новое',fix:'исправлено',chg:'изменено'};
+  var html='';
+  PATCHNOTES.forEach(function(v,i){
+    html+='<div class="patch-ver"><div class="patch-ver-head"><span class="patch-ver-date">'+esc(v.date)+'</span>'+(i===0?'<span class="patch-latest">актуально</span>':'')+'</div>';
+    (v.items||[]).forEach(function(it){
+      var k=it.k||'chg';
+      html+='<div class="patch-item"><span class="patch-tag '+esc(k)+'">'+esc(TAGS[k]||k)+'</span><span>'+esc(it.t)+'</span></div>';
+    });
+    html+='</div>';
+  });
+  el.innerHTML=html||'<div class="patch-empty">Записей пока нет</div>';
+}
+function openPatchModal(){
+  patchRender();
+  $('#patchModal').classList.add('show');
+}
+function closePatchModal(){$('#patchModal').classList.remove('show');}
+$('#patchModalClose').onclick=closePatchModal;
+$('#patchDone').onclick=closePatchModal;
+$('#patchModal').addEventListener('click',function(e){if(e.target===this)closePatchModal();});
 var hkCap=null;
 function hkMsg(t,cls){var el=$('#hkMsg');if(!el)return;el.textContent=t||'';el.className='set-store-msg'+(cls?' '+cls:'');}
 function hkRenderList(){
@@ -9612,6 +9683,11 @@ window.addEventListener('keydown',function(e){
 },true);
 window.addEventListener('keydown',function(e){
   if(plIsOpen()){plKey(e);return;}
+  /* окно патчноута открыто: закрывается по Esc или повторному сочетанию, остальное глушится */
+  if(patchOpen()){
+    if(e.key==='Escape'||hkIs(e,'patchnotes')){e.preventDefault();closePatchModal();return;}
+    return;
+  }
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
   if((e.key==='Control'||e.key==='Meta')&&!isTyping())document.body.classList.add('ctrlpan');
   if(isTyping()){
@@ -9619,6 +9695,7 @@ window.addEventListener('keydown',function(e){
     return;
   }
   if(e.code==='Space'){spaceDown=true;document.body.classList.add('space');e.preventDefault();return;}
+  if(hkIs(e,'patchnotes')){e.preventDefault();openPatchModal();return;}
   if(hkIs(e,'rename')&&sel.size===1){
     e.preventDefault();
     var elF=nodeEls.get(sel.values().next().value);
@@ -10605,8 +10682,9 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>'+hkText('rename')+'</kbd> · <kbd>'+hkText('deleteSel')+'</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: наведите курсор на блок — проигрывание пойдёт с него до конца цепочки (или выделите блок — с него, если курсор не над нодой); выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без наведения и выделения — весь сюжет; ПКМ на блоке — «Играть отсюда»; в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
+      '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: наведите курсор на блок — проигрывание пойдёт с него до конца цепочки (или выделите блок — с него, если курсор не над нодой); выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без наведения и выделения — весь сюжет; ПКМ на блоке — «Играть отсюда»; в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, '+hkText('plRestart')+' — заново, '+hkText('plShow')+' — к ноде, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
       '<div><kbd>'+hkText('playNode')+'</kbd></div><div>проиграть только эту ноду (под курсором или выделенную); переходы к другим блокам отсекаются — реплики самой ноды доступны; если ни на что не навели и ничего не выделено — ничего не запускается</div>'+
+      '<div><kbd>'+hkText('patchnotes')+'</kbd></div><div>окно патчноута «Что нового» — журнал изменений: что добавлено и что изменено; Esc или повторное сочетание — закрыть</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
 };
@@ -12337,7 +12415,7 @@ function initSync(){
    Переключатель на карточке диалога («проигрывать подряд», поле linear) — все
    реплики идут по порядку одна за другой, без выбора ответа.
    Ноды переменных срабатывают молча и не выводятся как слайды. */
-var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null,seqList:null,seqIdx:-1};
+var PL={open:false,nodeId:null,replyId:null,lastReply:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null,seqList:null,seqIdx:-1};
 function plIsOpen(){return PL.open;}
 function plPickStartNode(){
   if(sel&&sel.size===1){
@@ -12725,6 +12803,7 @@ function plLinearShow(n){
   while(PL.seqIdx>=0&&PL.seqIdx<ids.length&&!findReply(n.dialog.replies,ids[PL.seqIdx]))PL.seqIdx++;
   if(PL.seqIdx<0||PL.seqIdx>=ids.length){PL.seqIdx=-1;PL.seqList=null;plAfterNodeFinal(n);return;}
   var r=findReply(n.dialog.replies,ids[PL.seqIdx]);
+  PL.lastReply=r?r.id:null;
   plShowSlide({name:(r.speaker?charName(r.speaker):null),color:(r.speaker?charColor(r.speaker):'#8b929c'),avCid:(r.speaker||null),text:r.text||'…',chapter:n});
 }
 function plLinearBegin(n){
@@ -12825,7 +12904,7 @@ function plSlideAvatar(cid,extra){
   return '<span class="pl-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'">'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
 function plShowReply(r,noHist){
-  PL.replyId=r.id;PL.intro=false;
+  PL.replyId=r.id;PL.lastReply=r.id;PL.intro=false;
   var name=r.speaker?charName(r.speaker):null;
   var color=r.speaker?charColor(r.speaker):'#8b929c';
   var n=nodeById(PL.nodeId);
@@ -13084,7 +13163,8 @@ function plKey(e){
   if(e.key==='Escape'){e.preventDefault();plExit();return;}
   if(e.key===' '||e.key==='Enter'||e.key==='ArrowRight'){e.preventDefault();plAdvance();return;}
   if(e.key==='ArrowLeft'||e.key==='Backspace'){e.preventDefault();plBack();return;}
-  if(hkKeyCode(e)==='KeyR'){e.preventDefault();plRestart();return;}
+  if(hkIs(e,'plRestart')){e.preventDefault();plRestart();return;}
+  if(hkIs(e,'plShow')){e.preventDefault();plShowNodeOnCanvas();return;}
   var m=/^Digit([1-9])$/.exec(e.code);
   if(m){
     var c=$('#plChoices');
@@ -13101,6 +13181,10 @@ $('#player').addEventListener('click',function(e){
 function plShowNodeOnCanvas(){
   var n=PL.nodeId?nodeById(PL.nodeId):null;
   var rid=PL.replyId;
+  /* режим «проигрывать подряд»: текущая реплика хранится в seqList, а не в replyId;
+     после исчерпания цепочки (экран «КОНЕЦ») — последняя показанная реплика */
+  if(!rid&&PL.seqList&&PL.seqIdx>=0&&PL.seqList[PL.seqIdx]!=null)rid=PL.seqList[PL.seqIdx];
+  if(!rid)rid=PL.lastReply;
   plExit();
   if(!n){toast('Нода не найдена','warn');return;}
   selectOnly(n.id);
