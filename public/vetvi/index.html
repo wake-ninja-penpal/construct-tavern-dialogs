@@ -674,6 +674,8 @@ body.connecting .vpinn{cursor:copy}
 .dlg-reply-row-ed select{flex:0 0 auto;width:auto;min-width:90px;height:26px;font-size:11px;padding:0 6px;background:#1a1d22;border:1px solid var(--line2);border-radius:5px;color:var(--tx)}
 .dlg-reply-row-ed textarea{flex:1;min-height:32px;max-height:120px;resize:vertical;font-size:11.5px;line-height:1.45;padding:5px 8px;background:#1a1d22;border:1px solid var(--line2);border-radius:5px;color:var(--tx);font-family:var(--body)}
 .dlg-reply-row-ed textarea:focus{outline:none;border-color:var(--acc)}
+/* активная реплика: поле раскрывается под весь текст, чтобы он был виден целиком */
+.dlg-reply-row-ed textarea.grow{max-height:none;overflow:hidden;resize:none}
 .dlg-reply-acts{display:flex;gap:4px;justify-content:flex-end;margin-top:3px}
 /* ═══ кадрирование аватара ═══ */
 .crop-wrap{position:fixed;inset:0;z-index:140;display:none;align-items:center;justify-content:center;background:rgba(6,7,9,.72)}
@@ -4681,6 +4683,12 @@ function dlgModalRenderReplies(replies,depth,chars){
   });
   return html;
 }
+/* авторазмер поля реплики: в фокусе высота подстраивается под весь текст,
+   вне фокуса поле возвращается к обычной высоте (CSS min/max) */
+function dlgTaGrow(ta){
+  ta.style.height='auto';
+  ta.style.height=(ta.scrollHeight+2)+'px'; /* +2 — верхняя и нижняя границы */
+}
 function dlgModalBind(chars){
   var n=dlgModalNode;if(!n)return;
   var d=n.dialog;
@@ -4710,7 +4718,11 @@ function dlgModalBind(chars){
       });
     }
     if(txt){
-      txt.addEventListener('focus',editStart);
+      txt.addEventListener('focus',function(){
+        editStart();
+        txt.classList.add('grow');
+        dlgTaGrow(txt);
+      });
       txt.addEventListener('input',function(){
         r.text=txt.value;
         markDirty();
@@ -4721,9 +4733,14 @@ function dlgModalBind(chars){
           if(tree)tree.innerHTML=dlgTreeInner(n,n.expand);
           updateDlgRowStates();
         }
+        dlgTaGrow(txt);
       });
       txt.addEventListener('change',editEnd);
-      txt.addEventListener('blur',editEnd);
+      txt.addEventListener('blur',function(){
+        txt.classList.remove('grow');
+        txt.style.height='';
+        editEnd();
+      });
     }
     var acts=ed.querySelectorAll('.dlg-reply-acts .mini-btn');
     for(var i=0;i<acts.length;i++){
