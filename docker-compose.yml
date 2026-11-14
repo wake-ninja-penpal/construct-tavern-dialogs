@@ -49,8 +49,9 @@ services:
       start_period: 30s
 
   # Realtime-сервер совместного редактирования (socket.io, path '/')
-  # Состояние комнат хранится в /app/data/store.json — он в volume, поэтому
-  # проекты переживают перезапуск контейнера.
+  # Состояние хранится в SQLite /app/data/store.db — он в volume, поэтому
+  # проекты переживают перезапуск контейнера. Каждая комната — отдельная
+  # запись; legacy data/store.json мигрируется в БД при первом старте.
   sync:
     build:
       context: ./mini-services/vetvi-sync
