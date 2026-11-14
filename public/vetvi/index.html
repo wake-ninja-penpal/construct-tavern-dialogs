@@ -465,6 +465,8 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .dlg-reply-row.has-out{background:rgba(226,165,78,.10);box-shadow:inset 0 0 0 1px rgba(226,165,78,.45)}
 .dlg-reply-row.src-hl{background:rgba(240,193,121,.14);box-shadow:inset 0 0 0 1px var(--acc2)}
 .dlg-reply-row.src-sel{background:rgba(226,165,78,.16);box-shadow:inset 0 0 0 1.5px var(--acc)}
+/* подсветка реплики на карточке ноды: «К ноде» из проигрывателя */
+.dlg-reply-row.dlg-flash{animation:dlgFlash 2.4s ease}
 .dlg-reply-pin{position:absolute;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;flex:none;opacity:0;transition:opacity .15s,border-color .15s,background .15s}
 .node:hover .dlg-reply-pin,.node.sel .dlg-reply-pin{opacity:1}
 .dlg-reply-pin.out{right:-5px;cursor:grab}
@@ -9455,6 +9457,7 @@ var HK_DEFS=[
   {id:'deleteSel',name:'Удалить выделенное',def:'Delete',alias:['Backspace']},
   {id:'centerSel',name:'Центрировать на выделенной ноде',def:'KeyF'},
   {id:'play',name:'Проиграть диалог',def:'KeyP'},
+  {id:'playNode',name:'Проиграть только эту ноду',def:'Alt+KeyP'},
   {id:'fitView',name:'Вписать весь проект',def:'Digit0'},
   {id:'zoomIn',name:'Приблизить',def:'Equal',alias:['Shift+Equal']},
   {id:'zoomOut',name:'Отдалить',def:'Minus'}
@@ -9658,7 +9661,14 @@ window.addEventListener('keydown',function(e){
     clearSel();return;
   }
   if(hkIs(e,'centerSel')){if(sel.size===1)centerOn(nodeById(sel.values().next().value));return;}
-  if(hkIs(e,'play')){e.preventDefault();plStart();return;}
+  if(hkIs(e,'play')){e.preventDefault();var ph=plPointerNodeId();plStart(ph);return;}
+  if(hkIs(e,'playNode')){
+    e.preventDefault();
+    var pn=plPointerNodeId();
+    if(!pn){toast('Наведите курсор на ноду или выделите одну ноду — и её можно проиграть отдельно','warn');return;}
+    plStart(pn,true);
+    return;
+  }
   if(hkIs(e,'fitView')){fitView(true);return;}
   if(hkIs(e,'zoomIn')){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1.15);return;}
   if(hkIs(e,'zoomOut')){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1/1.15);return;}
@@ -10595,7 +10605,8 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>'+hkText('rename')+'</kbd> · <kbd>'+hkText('deleteSel')+'</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
+      '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: наведите курсор на блок — проигрывание пойдёт с него до конца цепочки (или выделите блок — с него, если курсор не над нодой); выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без наведения и выделения — весь сюжет; ПКМ на блоке — «Играть отсюда»; в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
+      '<div><kbd>'+hkText('playNode')+'</kbd></div><div>проиграть только эту ноду (под курсором или выделенную); переходы к другим блокам отсекаются — реплики самой ноды доступны; если ни на что не навели и ничего не выделено — ничего не запускается</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
 };
@@ -12339,6 +12350,19 @@ function plPickStartNode(){
   var sc=roots.filter(function(n){return n.type==='scene';});
   return sc[0]||roots[0]||project.nodes[0]||null;
 }
+/* нода для запуска проигрывания по горячей клавише: под курсором мыши;
+   если курсор не над нодой — единственная выделенная; иначе null */
+function plPointerNodeId(){
+  var elp=null;
+  try{elp=document.elementFromPoint(lastPtr.x,lastPtr.y);}catch(e){}
+  var nel=elpp(elp);
+  if(nel&&nel.dataset.id&&nodeById(nel.dataset.id))return nel.dataset.id;
+  if(sel.size===1){
+    var id=sel.values().next().value;
+    if(nodeById(id))return id;
+  }
+  return null;
+}
 /* блоки текущего выделения: узлы + содержимое выделенных групп (включая вложенные) */
 function plSelectionIds(){
   if(!sel.size&&!selGroups.size)return null;
@@ -12381,11 +12405,15 @@ function plBuildPlaylist(nodes){
   arr.filter(function(n){return !done.has(n.id);}).sort(byPos).forEach(function(n){out.push(n);}); /* циклы — в конец */
   return out;
 }
-function plStart(nodeId){
+function plStart(nodeId,onlyThis){
   if(PL.open)return;
   /* есть выделение (блоки/группа) — проигрываем только его списком по порядку */
   var list=null;
-  if(!nodeId){
+  if(onlyThis&&nodeId){
+    /* «только эта нода»: список из одной ноды — переходы к другим блокам отсекаются */
+    var one=nodeById(nodeId);
+    if(one)list=[one];
+  }else if(!nodeId){
     var s=plSelectionIds();
     if(s&&s.length){
       list=plBuildPlaylist(s);
@@ -13068,13 +13096,58 @@ $('#player').addEventListener('click',function(e){
   if(e.target.closest&&e.target.closest('button'))return;
   plAdvance();
 });
-/* выйти из проигрывания и показать на холсте ноду текущего текста */
+/* выйти из проигрывания и показать на холсте ноду текущего текста;
+   текущая реплика подсвечивается на карточке ноды, чтобы её было сразу видно */
 function plShowNodeOnCanvas(){
   var n=PL.nodeId?nodeById(PL.nodeId):null;
+  var rid=PL.replyId;
   plExit();
   if(!n){toast('Нода не найдена','warn');return;}
   selectOnly(n.id);
   centerOn(n);
+  if(rid)plFlashReplyOnNode(n.id,rid);
+}
+/* подсветка реплики на карточке ноды: при надобности развернуть ноду,
+   навести вид на реплику и мигнуть ей пару секунд */
+function plFlashReplyOnNode(nid,rid){
+  if(!rid)return;
+  var n=nodeById(nid);
+  if(!n||n.type!=='dialog')return;
+  ensureDialog(n);
+  if(!findReply(n.dialog.replies,rid))return;
+  var el=nodeEls.get(nid);
+  if(!el)return;
+  if(n.expand===0){ /* нода свёрнута: развернуть, чтобы реплика стала видна */
+    n.expand=1;
+    el.classList.remove('ex-0','ex-1','ex-2');
+    el.classList.add('ex-1');
+    var fold=el.querySelector('.n-fold');
+    if(fold){fold.innerHTML=ic(FOLD_ICONS[1],12);fold.title=FOLD_TITLES[1];}
+    var tree=el.querySelector('.dlg-tree');
+    if(tree)tree.innerHTML=dlgTreeInner(n,1);
+    setNodeText(el,n);
+    var cntEl=el.querySelector('.n-reply-cnt');
+    if(cntEl)cntEl.textContent=countReplies(n.dialog.replies)+' репл.';
+    updateDlgRowStates();
+    updateEdgesFor(nid);
+    setTimeout(function(){updateEdgesFor(nid);},40);
+  }
+  var row=el.querySelector('.dlg-reply-row[data-reply-id="'+rid+'"]');
+  if(!row)return;
+  /* центрируем на самой реплике — нода может быть выше экрана */
+  try{
+    var nr=el.getBoundingClientRect(),rr=row.getBoundingClientRect();
+    if(vp.z>0){
+      var wx=n.x+(rr.left+rr.width/2-nr.left)/vp.z;
+      var wy=n.y+(rr.top+rr.height/2-nr.top)/vp.z;
+      var z=Math.max(vp.z,0.8);
+      animateView(canvas.clientWidth/2-wx*z,canvas.clientHeight/2-wy*z,z);
+    }
+  }catch(e){}
+  row.classList.remove('dlg-flash');
+  void row.offsetWidth; /* перезапуск анимации */
+  row.classList.add('dlg-flash');
+  setTimeout(function(){row.classList.remove('dlg-flash');},2600);
 }
 $('#plExitBtn').onclick=function(e){e.stopPropagation();plExit();};
 $('#plShowBtn').onclick=function(e){e.stopPropagation();plShowNodeOnCanvas();};
