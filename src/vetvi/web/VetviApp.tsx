@@ -11,6 +11,7 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { hkIs, hkLoad, hkText } from '@/vetvi/core/hotkeys';
 import { getStore, type VetviStore } from './store';
+import { SyncClient } from './sync';
 import { TopBar } from './TopBar';
 import { CanvasBoard } from './CanvasBoard';
 import { LeftPane } from './LeftPane';
@@ -19,6 +20,7 @@ import { Player } from './Player';
 import { DialogModal } from './DialogModal';
 import { ModalHost, ConfirmHost, bindLogHelpers } from './Modals';
 import { CtxMenuHost, ToastHost } from './CtxMenu';
+import { CollabPopover, LockScreen, LockTipHost } from './SyncModals';
 import { canvasApi } from './canvasApi';
 
 function useStoreRevision(store: VetviStore): number {
@@ -36,18 +38,37 @@ export default function VetviApp() {
   useStoreRevision(store);
   const mounted = useMounted();
 
-  /* личные хоткеи + проект из хеша (#project=<id>) */
+  /* личные хоткеи + проект из хеша (#project=<id>) + realtime-клиент */
   useEffect(() => {
     hkLoad();
     store.applyHashProject();
+    store.applyLockState();
     store.setPlayerStart(null, false);
     (window as unknown as { __vetvi?: VetviStore }).__vetvi = store;
     bindLogHelpers((_e, nid) => {
       const n = store.nodeById(nid);
       return n ? (n.title || '') : null;
     });
-     
+    /* realtime-коллаборация: rooms/live/локи/копии/merge (этап 3) */
+    if (!store.sync) {
+      store.setSyncClient(new SyncClient(store));
+      store.sync!.init();
+    }
   }, [store]);
+
+  /* попап участников закрывается кликом мимо (capture, как bindSyncUI оригинала) */
+  useEffect(() => {
+    if (!store.collabPop) return;
+    const onDoc = (e: Event) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (t.closest('.collab-pop')) return;
+      if (t.closest('.rn-sync-chip')) return;
+      store.setCollabPop(false);
+    };
+    document.addEventListener('pointerdown', onDoc, true);
+    return () => document.removeEventListener('pointerdown', onDoc, true);
+  }, [store, store.collabPop]);
 
   /* ── диспетчер горячих клавиш (цепочка условий оригинала) ── */
   useEffect(() => {
@@ -60,7 +81,8 @@ export default function VetviApp() {
       const patchOpen = modal === 'patch';
       const searchOpen = modal === 'search';
 
-      /* экран пароля комнаты — хоткеи глушим (в этой версии отсутствует) */
+      /* экран пароля запертого проекта/ввод пароля комнаты — хоткеи глушим */
+      if (store.lockNeeded()) return;
 
       if (playerOpen) return; // Player слушает сам
 
@@ -202,7 +224,7 @@ export default function VetviApp() {
         <Inspector store={store} onClose={() => store.clearSelection()} />
       </div>
       <footer className="rn-statusbar" role="contentinfo">
-        <span>React-версия · этап 2: переменные, персонажи, группы, проигрыватель, журнал, поиск, хоткеи</span>
+        <span>React-версия · этап 3: realtime-коллаборация (комнаты, живые правки, локи, копии, merge, пароли)</span>
         <span className="rn-status-r">
           {store.doc.nodes.length} нод · {store.doc.edges.length} связей · {store.doc.vars?.length || 0} перем. · {store.doc.chars?.length || 0} персон. · масштаб {Math.round(store.vp.z * 100)}%
         </span>
@@ -214,6 +236,9 @@ export default function VetviApp() {
       {store.modal === 'player' && <Player store={store} />}
       <CtxMenuHost store={store} />
       <ToastHost store={store} />
+      <CollabPopover store={store} />
+      <LockTipHost store={store} />
+      <LockScreen store={store} />
       {/* подсказки сочетаний на кнопках обновляет hkText при рендере */}
       <span hidden data-hk-play={hkText('play')} />
     </main>

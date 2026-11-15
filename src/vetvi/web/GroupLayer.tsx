@@ -8,6 +8,7 @@
 import { useLayoutEffect, useRef } from 'react';
 
 import { nodeColor, shadeHex } from '@/vetvi/core/geometry';
+import { getMe } from '@/vetvi/core/identity';
 import type { NodeSize, VetviGroup, VetviViewport } from '@/vetvi/core/types';
 import { groupFrameRect } from './ggroups';
 import type { VetviStore } from './store';
@@ -55,16 +56,20 @@ export function GroupLayer(props: {
           const rect = manual
             ? { x: g.x, y: g.y, w: g.fw as number, h: g.fh as number }
             : groupFrameRect(store.doc, g, sizes, cardSizes);
+          /* чужой лок рамки — обводка цветом участника */
+          const lkRawG = store.syncLocks[g.id];
+          const lkG = (lkRawG && lkRawG.id && lkRawG.id !== getMe().id) ? lkRawG : null;
           return (
             <div
               key={g.id}
               ref={(el) => { refs.current.set(g.id, el); }}
-              className={'rn-gframe' + (sel ? ' sel' : '')}
+              className={'rn-gframe' + (sel ? ' sel' : '') + (lkG ? ' lkb' : '')}
               style={{
                 left: rect.x, top: rect.y, width: rect.w, height: rect.h,
                 ['--gc' as string]: col,
                 ['--gca' as string]: String(alpha),
                 ['--gcb' as string]: shadeHex(col, 30),
+                ...(lkG ? { ['--lkc' as string]: lkG.color } : {}),
               }}
               onMouseDown={(e) => props.onGroupDown(e, g.id)}
               onDoubleClick={(e) => { e.stopPropagation(); store.selectGroupOnly(g.id); }}

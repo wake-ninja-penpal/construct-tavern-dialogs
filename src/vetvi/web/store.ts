@@ -15,11 +15,14 @@ import { AUTOSAVE_MS, HISTORY_LIMIT, TYPES } from '@/vetvi/core/constants';
 import { docFromParsed, loadAutosave, saveAutosave, serializeDoc } from '@/vetvi/core/doc';
 import { defaultDoc, defaultViewport, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
 import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
+import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
+import { passVerify } from '@/vetvi/core/passlock';
 import { projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
-import type { NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
+import type { NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, varCastVal, varType } from '@/vetvi/core/vars';
+import type { SyncClient } from './sync';
 
 type Listener = () => void;
 
@@ -40,15 +43,13 @@ export interface LogEntry {
   snap?: string | null;
 }
 
-export function editIdentity(): { id: string; name: string; color: string } {
-  try {
-    const raw = window.localStorage.getItem('vetvi-me-v1');
-    if (raw) {
-      const me = JSON.parse(raw) as { id?: string; name?: string; color?: string };
-      if (me && me.id && me.name) return { id: me.id, name: me.name, color: me.color || '#8b929c' };
-    }
-  } catch { /* локальная личность */ }
-  return { id: 'вы', name: 'вы', color: '#8b929c' };
+export function editIdentity(): MeIdentity {
+  /* та же личность, что и в комнатах совместного редактирования (vetvi-me-v1) */
+  return getMe();
+}
+
+export function renameMe(name: string): MeIdentity {
+  return setMeName(name);
 }
 
 const LOG_LIMIT = 60;
@@ -94,6 +95,29 @@ export class VetviStore {
   syncMergeCount = 0;
   syncLocks: Record<string, { id: string; name: string; color: string }> = {};
   syncBusyFlag = false;
+  syncFocus: Record<string, string> = {};
+  syncJoinPass: string | null = null;
+  syncProjPass: string | null = null;
+  lockUnlocked = false;
+  lockPendingCb: (() => void) | null = null;
+  lockTip: { x: number; y: number; by: { id: string; name: string; color: string } | null } | null = null;
+  /** Показан попап участников комнаты. */
+  collabPop = false;
+
+  /** Клиент realtime-коллаборации (подключается в VetviApp). */
+  sync: SyncClient | null = null;
+  /** Активная группа/канвасный жест: при блокировке чужим локом откатываем его. */
+  gestureRollback: (() => void) | null = null;
+
+  setSyncClient(c: SyncClient | null): void {
+    this.sync = c;
+    this.emit();
+  }
+
+  /** Откат активного жеста при проигранной гонке локов (замыкание ставит холст). */
+  setGestureRollback(fn: (() => void) | null): void {
+    this.gestureRollback = fn;
+  }
 
   revision = 0;
   saveState: SaveState = 'idle';
@@ -239,6 +263,7 @@ export class VetviStore {
   scheduleSave(): void {
     if (this.saveT) clearTimeout(this.saveT);
     this.saveState = 'pending';
+    if (this.sync) this.sync.queueState();
     this.saveT = setTimeout(() => {
       this.saveT = null;
       this.doc.meta.modified = Date.now();
@@ -255,6 +280,7 @@ export class VetviStore {
     }
     saveAutosave(this.doc, this.vp, this.bend);
     projSaveCurrent(this.doc, this.vp, this.bend, this.syncRoom);
+    if (this.syncMode === 'copy' && this.sync) this.sync.persistCopyTick();
   }
 
   /** Мутация с записью в историю. fn меняет this.doc напрямую. */
@@ -331,6 +357,7 @@ export class VetviStore {
     this.persist();
     this.saveState = 'saved';
     this.lastSavedAt = Date.now();
+    if (this.sync) this.sync.flushState(false);
     this.emit();
   }
 
@@ -342,6 +369,7 @@ export class VetviStore {
     this.selGroups.clear();
     this.sel.add(id);
     this.emit();
+    if (this.sync) this.sync.focusTrack(id);
   }
 
   toggleSelect(id: string): void {
@@ -464,6 +492,7 @@ export class VetviStore {
     this.dialogEdit = nodeId;
     this.ctx = null;
     this.emit();
+    if (this.sync) this.sync.focusTrack(nodeId);
   }
 
   closeDialogEditor(): void {
@@ -545,6 +574,8 @@ export class VetviStore {
 
   setDlgWidth(id: string, w: number): void {
     this.updateNode(id, { dlgWidth: clamp(Math.round(w), 216, 1200) }, { history: false });
+    const n = this.nodeById(id);
+    if (n && this.sync) this.sync.liveDlg(n);
   }
 
   /** Входящие перекидываются на исходящие (detachNode «Выдернуть»). */
@@ -585,6 +616,7 @@ export class VetviStore {
       n.y += dy;
     }
     this.emit();
+    if (this.sync) this.sync.liveDrag({ ids: this.sel });
   }
 
   dragEnd(): void {
@@ -786,6 +818,28 @@ export class VetviStore {
     if (!e || !Array.isArray(e.pts) || !e.pts[index]) return;
     e.pts[index] = { x: Math.round(x), y: Math.round(y) };
     this.emit();
+    if (this.sync) this.sync.livePts(e);
+  }
+
+  /** Старые снимки: ноды «Персонаж» → записи списка персонажей (migrateCharNodesInPlace). */
+  migrateCharNodesInPlace(): void {
+    const legacy = this.doc.nodes.filter((n) => n.type === 'char');
+    if (!legacy.length) return;
+    if (!Array.isArray(this.doc.chars)) this.doc.chars = [];
+    const have: Record<string, number> = {};
+    this.doc.chars.forEach((c) => { have[c.id] = 1; });
+    legacy.forEach((n) => {
+      if (have[n.id]) return;
+      this.doc.chars!.push({
+        id: n.id,
+        name: String(n.title || 'Персонаж').slice(0, 60),
+        color: (typeof n.color === 'string' && /^#([0-9a-f]{6})$/i.test(n.color)) ? n.color : '#9cb878',
+        text: String(n.text || '').slice(0, 500),
+      });
+    });
+    const ids = new Set(legacy.map((n) => n.id));
+    this.doc.nodes = this.doc.nodes.filter((n) => n.type !== 'char');
+    this.doc.edges = this.doc.edges.filter((e) => !ids.has(e.from) && !ids.has(e.to));
   }
 
   deleteWaypoint(id: string, index: number): void {
@@ -1493,8 +1547,22 @@ export class VetviStore {
     this.selGroups.clear();
     this.past = [];
     this.future = [];
+    /* экран пароля: смена проекта сбрасывает разблокировку (сессия помнит ввод) */
+    this.lockUnlocked = false;
+    const pv = this.passSessionLookup();
+    if (pv) { this.syncProjPass = pv; this.lockUnlocked = true; }
     projSetCur(id);
     this.toast('Открыт проект: ' + (this.doc.meta.name || 'Без названия'), 'ok');
+    /* проект привязан к комнате — подключаемся после разблокировки (projOpen оригинала) */
+    const entry = projList().find((e) => e.id === id);
+    if (entry && entry.roomId && this.sync) {
+      this.sync.mode = 'room';
+      const roomId = entry.roomId;
+      this.lockAfterUnlock(() => {
+        this.sync!.connect(roomId, id, { own: true, silent: true });
+        this.sync!.setHash(roomId, id);
+      });
+    }
     this.emit();
   }
 
@@ -1657,6 +1725,11 @@ export class VetviStore {
     this.emit();
   }
 
+  setCollabPop(v: boolean): void {
+    this.collabPop = v;
+    this.emit();
+  }
+
   finishGestureDrag(): void {
     this.dragStartSnapshot = null;
     this.dragMoved = false;
@@ -1670,6 +1743,216 @@ export class VetviStore {
 
   pointerNodeId(): string | null {
     return this.pointerFn ? this.pointerFn() : null;
+  }
+
+  /* ── совместное редактирование: помощь SyncClient ── */
+
+  /** Активный ввод/модалка/жест: в комнате удалённые снимки ждут (pendingRemote). */
+  busyNow(): boolean {
+    const t = typeof document !== 'undefined' ? document.activeElement : null;
+    const typing = !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
+    return typing || this.modal != null || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag;
+  }
+
+  /** Снимок проекта для комнаты (syncDocObj оригинала). */
+  syncDocObj(): Record<string, unknown> {
+    return {
+      app: 'vetvi-room',
+      version: 1,
+      meta: this.doc.meta,
+      bend: this.bend,
+      nodes: this.doc.nodes,
+      edges: this.doc.edges,
+      customTypes: Array.isArray(this.doc.customTypes) ? this.doc.customTypes : [],
+      groups: this.doc.groups,
+      listHidden: this.doc.listHidden && typeof this.doc.listHidden === 'object' ? this.doc.listHidden : {},
+      vars: Array.isArray(this.doc.vars) ? this.doc.vars : [],
+      chars: Array.isArray(this.doc.chars) ? this.doc.chars : [],
+      palette: (Array.isArray(this.doc.palette) ? this.doc.palette : []).slice(0, 24),
+    };
+  }
+
+  /**
+   * Применение удалённого состояния комнаты (syncApplyRemote оригинала):
+   * журнал действий объединяется с пришедшим (правки участников не теряют
+   * друг друга), выделение подрезается до живых id, история не пишется.
+   * keepPid: снимок комнаты без meta.projectId — сохраняем привязку к проекту.
+   */
+  applyRemoteDoc(doc: Record<string, unknown> | null, keepPid = false): void {
+    if (!doc || !Array.isArray(doc.nodes)) return;
+    this.flushPendingLog();
+    const d = doc as {
+      meta?: Record<string, unknown>;
+      bend?: string;
+      nodes?: VetviNode[];
+      edges?: VetviEdge[];
+      groups?: VetviGroup[];
+      customTypes?: unknown[];
+      listHidden?: unknown;
+      vars?: VetviVar[];
+      chars?: VetviChar[];
+      palette?: unknown[];
+    };
+    const localMeta = this.doc.meta as Record<string, unknown>;
+    const myPid = typeof localMeta.projectId === 'string' ? localMeta.projectId : null;
+    if (d.meta && typeof d.meta === 'object') {
+      this.doc.meta = d.meta as VetviMeta;
+      const newMeta = this.doc.meta as unknown as Record<string, unknown>;
+      if (keepPid && !newMeta.projectId && myPid) newMeta.projectId = myPid;
+      /* журнал действий и список редакторов — объединить локальные записи с пришедшими */
+      try {
+        const seen: Record<string, number> = {};
+        const merged: unknown[] = [];
+        const loc = Array.isArray(localMeta.actionLog) ? localMeta.actionLog : [];
+        const rem = Array.isArray(newMeta.actionLog) ? newMeta.actionLog : [];
+        loc.concat(rem).forEach((en) => {
+          const e = en as { id?: string };
+          if (!e || !e.id || seen[e.id]) return;
+          seen[e.id] = 1;
+          merged.push(en);
+        });
+        merged.sort((a, b) => (((b as { t?: number }).t || 0) - ((a as { t?: number }).t || 0)));
+        if (merged.length > 60) merged.length = 60;
+        if (merged.length) newMeta.actionLog = merged;
+        this.logTrimSnaps();
+        const seenE: Record<string, number> = {};
+        const mE: unknown[] = [];
+        const locE = Array.isArray(localMeta.editLog) ? localMeta.editLog : [];
+        const remE = Array.isArray(newMeta.editLog) ? newMeta.editLog : [];
+        locE.concat(remE).forEach((en) => {
+          const e = en as { id?: string; name?: string; at?: string };
+          const k = (((e.id || e.name) || '?') + '|' + (e.at || ''));
+          if (seenE[k]) return;
+          seenE[k] = 1;
+          mE.push(en);
+        });
+        mE.sort((a, b) => {
+          const ta = Date.parse((a as { at?: string }).at || '') || 0;
+          const tb = Date.parse((b as { at?: string }).at || '') || 0;
+          return tb - ta;
+        });
+        if (mE.length) {
+          const out: unknown[] = [];
+          for (const en of mE) {
+            const p = out[out.length - 1] as { id?: string; name?: string } | undefined;
+            const c = en as { id?: string; name?: string };
+            if (p && ((p.id && p.id === c.id) || (p.name && p.name === c.name))) continue;
+            out.push(c);
+            if (out.length >= 6) break;
+          }
+          newMeta.editLog = out;
+        }
+      } catch { /* журнал — необязательное поле */ }
+    }
+    if (d.bend === 'ortho90' || d.bend === 'ortho45' || d.bend === 'smooth') {
+      if (d.bend !== this.bend) this.bend = d.bend;
+    }
+    this.doc.nodes = d.nodes || [];
+    this.doc.edges = d.edges || [];
+    this.doc.customTypes = Array.isArray(d.customTypes) ? d.customTypes : [];
+    this.doc.groups = Array.isArray(d.groups) ? d.groups : [];
+    /* цепочки всегда fold=1; старое «Очередь» → «Цепочка» */
+    for (const g of this.doc.groups) {
+      if (g.stack && (g.fold !== 1 || g.name === 'Очередь')) {
+        g.fold = 1;
+        if (g.name === 'Очередь') g.name = 'Цепочка';
+      }
+    }
+    this.doc.listHidden = (d.listHidden && typeof d.listHidden === 'object') ? d.listHidden as Record<string, unknown> : {};
+    this.doc.vars = Array.isArray(d.vars) ? d.vars : [];
+    this.doc.chars = Array.isArray(d.chars) ? d.chars : [];
+    this.doc.palette = (Array.isArray(d.palette) ? d.palette : []).filter((c) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c as string)).slice(0, 24) as string[];
+    /* снимок от старой версии: ноды персонажей → список */
+    this.migrateCharNodesInPlace();
+    const ids = new Set(this.doc.nodes.map((n) => n.id));
+    const ns = new Set<string>();
+    this.sel.forEach((id) => { if (ids.has(id)) ns.add(id); });
+    this.sel = ns;
+    const eids = new Set(this.doc.edges.map((e) => e.id));
+    const es = new Set<string>();
+    this.selEdges.forEach((id) => { if (eids.has(id)) es.add(id); });
+    this.selEdges = es;
+    const gids = new Set(this.doc.groups.map((g) => g.id));
+    const gs = new Set<string>();
+    this.selGroups.forEach((id) => { if (gids.has(id)) gs.add(id); });
+    this.selGroups = gs;
+    /* открытый редактор диалога: нода удалена — закрываем */
+    if (this.dialogEdit && !this.nodeById(this.dialogEdit)) this.closeDialogEditor();
+    this.scheduleSave();
+    this.emit();
+  }
+
+  /* ── пароль проекта (passSalt+passHash в meta, сам пароль — только память сессии) ── */
+
+  projLocked(): boolean {
+    return !!(this.doc.meta && typeof (this.doc.meta as unknown as { passHash?: string }).passHash === 'string' && (this.doc.meta as unknown as { passHash?: string }).passHash);
+  }
+
+  passOk(v: string): boolean {
+    return passVerify(this.doc.meta as unknown as { passSalt?: string; passHash?: string }, v);
+  }
+
+  passRememberSession(): void {
+    try {
+      const pid = this.doc.meta.projectId as string | undefined;
+      if (pid) window.sessionStorage.setItem('vetvi-unlock-' + pid, this.syncProjPass || '');
+    } catch { /* нет доступа */ }
+  }
+
+  passSessionLookup(): string | null {
+    try {
+      const pid = this.doc.meta.projectId as string | undefined;
+      if (!pid) return null;
+      const v = window.sessionStorage.getItem('vetvi-unlock-' + pid);
+      return (v && this.passOk(v)) ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Нужно ли показывать экран пароля. */
+  lockNeeded(): boolean {
+    return this.projLocked() && !this.lockUnlocked;
+  }
+
+  /** Состояние замка при старте/смене проекта: сессия помнит ввод (lockApplyState). */
+  applyLockState(): void {
+    this.lockUnlocked = false;
+    const v = this.passSessionLookup();
+    if (v) {
+      this.syncProjPass = v;
+      this.lockUnlocked = true;
+      return;
+    }
+    this.emit();
+  }
+
+  /** Выполнить fn после разблокировки (или сразу, если проект не заперт). */
+  lockAfterUnlock(fn: () => void): void {
+    if (!this.lockNeeded()) { fn(); return; }
+    this.lockPendingCb = fn;
+    this.emit();
+  }
+
+  /** Ввод пароля на экране блокировки: true — принято (и выполнен отложенный вход). */
+  applyUnlock(v: string): boolean {
+    if (!v) return false;
+    if (!this.passOk(v)) return false;
+    this.syncProjPass = v;
+    this.lockUnlocked = true;
+    this.passRememberSession();
+    const cb = this.lockPendingCb;
+    this.lockPendingCb = null;
+    this.emit();
+    if (cb) cb();
+    return true;
+  }
+
+  /** Подсказка «объект используется другим пользователем» (lockTip оригинала). */
+  showLockTip(x: number, y: number, by: { id: string; name: string; color: string } | null): void {
+    this.lockTip = { x: clamp(x, 110, (typeof window !== 'undefined' ? window.innerWidth : 800) - 110), y: Math.max(48, y), by };
+    this.emit();
+    setTimeout(() => { this.lockTip = null; this.emit(); }, 2400);
   }
 
   /* ── вспомогательное ── */

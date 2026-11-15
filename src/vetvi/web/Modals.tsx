@@ -21,6 +21,7 @@ import { STATUS_RU, TYPES } from '@/vetvi/core/constants';
 import type { VetviNode } from '@/vetvi/core/types';
 import type { LogEntry, VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
+import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RenameMeModal, RoomPassModal, ShareModal } from './SyncModals';
 
 /* ═══════════ общий каркас ═══════════ */
 
@@ -787,21 +788,6 @@ function StoreModal({ store }: { store: VetviStore }) {
   );
 }
 
-/* заглушка совместного редактирования (полный клиент vetvi-sync — этап 3) */
-function ShareStub({ store }: { store: VetviStore }) {
-  return (
-    <ModalShell title="Поделиться проектом" onClose={() => store.closeModal()}>
-      <div className="rn-modal-body">
-        <div className="rn-insp-hint">
-          Совместное редактирование (комнаты, live-правки, merge-заявки) — третий этап React-порта.
-          Сейчас оно доступно в классической версии: кнопка «Поделиться» на /vetvi/index.html.
-          Реактовые правки и классическая версия работают с одним и тем же хранилищем проектов.
-        </div>
-      </div>
-    </ModalShell>
-  );
-}
-
 /* хост всех модалок по store.modal */
 export function ModalHost({ store }: { store: VetviStore }) {
   void store.revision;
@@ -814,7 +800,14 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'settings': return <SettingsModal store={store} section="hub" />;
     case 'settingsHk': return <SettingsModal store={store} section="hk" />;
     case 'settingsStore': return <SettingsModal store={store} section="store" />;
-    case 'share': return <ShareStub store={store} />;
+    case 'share': return <ShareModal store={store} />;
+    case 'passSet': return <PassSetModal store={store} />;
+    case 'passRemove': return <PassRemoveModal store={store} />;
+    case 'roomPass': return <RoomPassModal store={store} />;
+    case 'copies': return <CopiesModal store={store} />;
+    case 'copyBar': return <CopyBarModal store={store} />;
+    case 'merge': return <MergeModal store={store} />;
+    case 'renameMe': return <RenameMeModal store={store} />;
     default: return null;
   }
 }

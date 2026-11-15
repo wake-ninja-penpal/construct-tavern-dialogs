@@ -9,6 +9,7 @@
 import { useLayoutEffect, useEffect, useRef } from 'react';
 
 import { STATUS_RU } from '@/vetvi/core/constants';
+import { getMe } from '@/vetvi/core/identity';
 import { nodeColor, typeInfo } from '@/vetvi/core/geometry';
 import type { VetviNode, VetviViewport } from '@/vetvi/core/types';
 import { condText, varNodeChipText } from '@/vetvi/core/vars';
@@ -88,6 +89,9 @@ export function NodeCard(props: {
   const status = STATUS_RU[n.status] ? n.status : 'idea';
   const collapsed = n.expand === 0;
   const mainBottom = n.type === 'dialog' || n.type === 'action' || n.type === 'branch';
+  /* чужой лок: обводка цветом участника (lkb оригинала) */
+  const lkRaw = props.lockedBy as { id?: string; name?: string; color?: string } | null | undefined;
+  const lk = (lkRaw && lkRaw.id && lkRaw.id !== getMe().id) ? lkRaw : null;
   const width = n.dlgWidth && n.dlgWidth >= 216 ? n.dlgWidth : 216;
   const isFlash = !!(flash && flash.nodeId === n.id);
   const chars = store.doc.chars || [];
@@ -139,8 +143,8 @@ export function NodeCard(props: {
     <div
       ref={rootRef}
       data-node-id={n.id}
-      className={'rn-node' + (selected ? ' sel' : '') + (collapsed ? ' ex-0' : n.expand === 2 ? ' ex-2' : ' ex-1') + (isFlash ? ' flash' : '')}
-      style={{ left: n.x, top: n.y, width, ['--c' as string]: color }}
+      className={'rn-node' + (selected ? ' sel' : '') + (collapsed ? ' ex-0' : n.expand === 2 ? ' ex-2' : ' ex-1') + (isFlash ? ' flash' : '') + (lk ? ' lkb' : '')}
+      style={{ left: n.x, top: n.y, width, ['--c' as string]: color, ...(lk ? { ['--lkc' as string]: lk.color } : {}) }}
       onMouseDown={(e) => {
         const t = e.target as HTMLElement;
         if (t.closest('[data-pin]') || t.closest('[data-nodrag]')) return;

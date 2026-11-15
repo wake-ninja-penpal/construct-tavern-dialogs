@@ -182,6 +182,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (store.carry) return;
     gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY };
     store.dragBegin();
+    /* soft-lock: захват выделенных нод на время жеста */
+    if (store.sync && store.sync.enabled) { store.sync.lockTake([...store.sel]); store.setGestureRollback(null); }
     e.preventDefault();
   }, [store]);
 
@@ -212,6 +214,13 @@ export function CanvasBoard(props: { store: VetviStore }) {
     }
     gestRef.current = { mode: 'group', gid, lx: e.clientX, ly: e.clientY, base };
     store.dragBegin();
+    /* soft-lock: члены группы + рамки */
+    if (store.sync && store.sync.enabled) {
+      const lkIds: string[] = [gid];
+      for (const [k] of base) lkIds.push(k);
+      store.sync.lockTake(lkIds);
+      store.setGestureRollback(null);
+    }
     e.preventDefault();
     e.stopPropagation();
   }, [store]);
@@ -230,6 +239,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
     gestRef.current = { mode: 'link', from: id, out, reply, wx: w.x, wy: w.y, sx: w.x, sy: w.y, target: null, varin: false };
     setPendingLink({ from: id, out, reply, x: w.x, y: w.y, startX: w.x, startY: w.y });
+    if (store.sync && store.sync.enabled) {
+      store.sync.lockTake([id]);
+      store.setGestureRollback(() => { setPendingLink(null); setHoverTarget(null); });
+    }
     e.preventDefault();
   }, [store]);
 
@@ -242,6 +255,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const n = store.nodeById(id);
     if (!n) return;
     gestRef.current = { mode: 'dlgW', id, startX: e.clientX, startW: n.dlgWidth || 216 };
+    if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
   }, [store]);
 
@@ -279,8 +293,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   const onWpDown = useCallback((e: React.MouseEvent, id: string, i: number) => {
     gestRef.current = { mode: 'wp', eid: id, idx: i };
+    store.dragBegin();
+    if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
-  }, []);
+  }, [store]);
 
   const onWpDbl = (e: React.MouseEvent, id: string, i: number) => {
     store.deleteWaypoint(id, i);
@@ -297,6 +313,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const bd = ed.bd || { dl: 0, dy: 0, dr: 0 };
     gestRef.current = { mode: 'bridge', eid: id, part, lx: e.clientX, ly: e.clientY, dl: bd.dl, dy: bd.dy, dr: bd.dr };
     store.dragBegin();
+    if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
   }, [store]);
 
@@ -317,6 +334,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
   useEffect(() => {
     const move = (e: MouseEvent) => {
       const g = gestRef.current;
+      if (g && !store.syncBusyFlag) store.syncBusyFlag = true;
       if (store.carry) {
         // дубликат следует за курсором
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -404,6 +422,16 @@ export function CanvasBoard(props: { store: VetviStore }) {
             }
           }
           store.emit();
+          /* живые перетаскивания: члены группы + рамки (включая подгруппы) */
+          if (store.sync) {
+            const ids = new Set<string>();
+            const cards = new Set<string>([g.gid]);
+            for (const [id] of g.base) {
+              if (id.startsWith('g:')) cards.add(id.slice(2));
+              else ids.add(id);
+            }
+            store.sync.liveDrag({ ids, cards });
+          }
           break;
         }
         case 'gresize': {
@@ -509,6 +537,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const up = () => {
       const g = gestRef.current;
       gestRef.current = null;
+      store.syncBusyFlag = false;
+      store.gestureRollback = null;
+      if (store.sync && store.sync.enabled) store.sync.lockGiveAll();
       if (!g) return;
       switch (g.mode) {
         case 'pan': store.panEnd(); break;
@@ -682,6 +713,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return () => {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
+      store.syncBusyFlag = false;
+      store.gestureRollback = null;
     };
   }, [store, doc, items, sizesMap, cardSizes]);
 
@@ -824,6 +857,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           pending={pendingLink}
           hoverTarget={hoverTarget}
           showWps={!altDown}
+          locks={store.syncLocks}
           onEdgeDown={onEdgeDown}
           onEdgeDbl={onEdgeDbl}
           onWpDown={onWpDown}

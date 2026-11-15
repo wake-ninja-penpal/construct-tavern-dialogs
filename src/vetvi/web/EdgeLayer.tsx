@@ -9,6 +9,7 @@ import { useMemo } from 'react';
 
 import { edgePathD, bridgeCorners, pathPoint } from '@/vetvi/core/edgepath';
 import { clamp, mainAnchor, nodeHeight, nodeWidth } from '@/vetvi/core/geometry';
+import { getMe } from '@/vetvi/core/identity';
 import type { EdgeGeom, NodeSize, VetviDoc, VetviEdge } from '@/vetvi/core/types';
 import { condText } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, memberFrac } from './ggroups';
@@ -148,9 +149,12 @@ export function EdgeLayer(props: {
   onLabelDown: (e: React.MouseEvent, id: string) => void;
   onBridgeDown: (e: React.MouseEvent, id: string, part: 'l' | 'r' | 'h') => void;
   showWps: boolean;
+  /** Карта локов объектов: ключ — id связи, значение — {id: userId, name, color}. */
+  locks?: Record<string, { id: string; name: string; color: string }>;
 }) {
   const { doc, items, selected, pending, hoverTarget } = props;
   void doc;
+  const locks = props.locks;
 
   const pendingD = useMemo(() => {
     if (!pending) return null;
@@ -182,9 +186,11 @@ export function EdgeLayer(props: {
         const bridge = kind === 'bridge';
         const tvar = e.tin === 'var';
         const hover = hoverTarget === e.id;
+        const lkRawE = locks ? locks[e.id] : undefined;
+        const lkE = (lkRawE && lkRawE.id && lkRawE.id !== getMe().id) ? lkRawE : null;
         const marker = on ? 'rn-arw-sel' : bridge ? 'rn-arw-br' : hover ? 'rn-arw-hi' : 'rn-arw';
         return (
-          <g key={e.id} data-edge-id={e.id} className={'rn-eg k-' + kind + (tvar ? ' tvar' : '') + (on ? ' sel' : '') + (hover ? ' hover' : '')}>
+          <g key={e.id} data-edge-id={e.id} className={'rn-eg k-' + kind + (tvar ? ' tvar' : '') + (on ? ' sel' : '') + (hover ? ' hover' : '') + (lkE ? ' lkb' : '')} style={lkE ? { ['--lkc' as string]: lkE.color } : undefined}>
             {bridge ? (
               <>
                 <path className="rn-edge-hit br" d={d} onMouseDown={(ev) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }} onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)} />

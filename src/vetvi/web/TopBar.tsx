@@ -33,6 +33,7 @@ export function TopBar(props: { store: VetviStore }) {
   const saveLabel =
     store.saveState === 'pending' ? 'сохранение…' : (store.saveState === 'saved' ? '✓ автосохранение' : 'готово');
 
+  const sc = store.sync;
   const statusChip = (() => {
     const map: Record<string, [string, string]> = {
       off: ['#6d7480', 'офлайн'],
@@ -43,13 +44,26 @@ export function TopBar(props: { store: VetviStore }) {
       copy: ['#e2a54e', 'копия'],
     };
     const [c, t] = map[store.syncStatus] || map.off;
+    const title = store.syncMode === 'copy'
+      ? 'Режим копии: ' + ((sc && sc.activeCopyObj()?.name) || '')
+      : 'Совместный доступ: статус и участники';
     return (
       <button
         type="button"
-        className="rn-sync-chip"
+        className={'rn-sync-chip' + (store.syncMode === 'copy' ? ' copy-mode' : '')}
         style={{ ['--sc' as string]: c }}
-        title="Совместное редактирование (ветка react-refactor: прототип)"
-        onClick={() => { store.openModal('share'); }}
+        title={title}
+        onClick={() => {
+          if (!sc) return;
+          if (!sc.enabled) {
+            if (store.syncMode === 'copy') store.openModal('copyBar');
+            else sc.shareProject();
+            return;
+          }
+          /* разрыв связи: клик по чипу — немедленное переподключение */
+          if (sc.status !== 'on') { sc.reconnect(); return; }
+          store.setCollabPop(!store.collabPop);
+        }}
       >
         <i />
         {store.syncStatus === 'on' && store.syncUsers.length ? store.syncUsers.length + ' онлайн' : t}
@@ -128,9 +142,23 @@ export function TopBar(props: { store: VetviStore }) {
         <button type="button" className="rn-btn" title={'Менеджер проектов (' + hkText('projects') + ')'} onClick={() => store.openModal('projects')}>📁</button>
         <button type="button" className="rn-btn" title={'Поиск по проекту (' + hkText('search') + ')'} onClick={() => store.openModal('search')}>🔍</button>
         <button type="button" className="rn-btn" title="Журнал действий" onClick={() => { store.setLogFilters(null, null); store.openModal('log'); }}>🕘</button>
-        <button type="button" className="rn-btn" title={'Что нового (' + hkText('patchnotes') + ')'} onClick={() => store.openModal('patch')}>v1.3.0</button>
+        <button type="button" className="rn-btn" title={'Что нового (' + hkText('patchnotes') + ')'} onClick={() => store.openModal('patch')}>v1.4.0</button>
         <button type="button" className="rn-btn" title="Настройки проекта" onClick={() => store.openModal('settings')}>⚙</button>
         <span className="rn-sep" />
+        <button type="button" className="rn-btn" title={store.syncMode === 'copy' ? 'Режим копии — отправить merge' : 'Совместный доступ по ссылке'} onClick={() => {
+          if (!sc) return;
+          if (store.syncMode === 'copy') store.openModal('copyBar');
+          else sc.shareProject();
+        }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline', verticalAlign: '-2px' }}><circle cx="6" cy="12" r="2.6" /><circle cx="17" cy="6" r="2.6" /><circle cx="17" cy="18" r="2.6" /><path d="M8.4 11l6.2-4M8.4 13l6.2 4" /></svg>
+        </button>
+        <button type="button" className="rn-btn" title="Локальные копии" onClick={() => store.openModal('copies')}>🗂</button>
+        {(sc && sc.enabled && store.syncMode !== 'copy') && (
+          <button type="button" className="rn-btn merge-btn" title="Merge-запросы копий" onClick={() => store.openModal('merge')}>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline', verticalAlign: '-2px' }}><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
+            {store.syncMergeCount > 0 && <span className="m-badge">{store.syncMergeCount}</span>}
+          </button>
+        )}
         {statusChip}
       </div>
 
