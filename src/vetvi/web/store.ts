@@ -11,18 +11,37 @@
  * Автосохранение — менеджер проектов классической версии через фасад LS/IDB.
  */
 
-import { AUTOSAVE_MS, HISTORY_LIMIT, TYPES } from '@/vetvi/core/constants';
+import { AUTOSAVE_MS, GRID, HISTORY_LIMIT, NODE_W, TYPES } from '@/vetvi/core/constants';
+import {
+  stackableType,
+  stackChainEdgeObj,
+  stackDetachEdges,
+  stackOrderIds,
+  stackParkPos,
+  stackRebuildChains,
+  stackSyncParks,
+} from '@/vetvi/core/chains';
 import { docFromParsed, loadAutosave, saveAutosave, serializeDoc } from '@/vetvi/core/doc';
+import { dlgMaxDepth } from '@/vetvi/core/dialog';
 import { defaultDoc, defaultViewport, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
 import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
+import { isBridge, splitPtsAtHalf } from '@/vetvi/core/insert';
+import { pathPoint } from '@/vetvi/core/edgepath';
 import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
-import { projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
+import { downloadJson, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
-import type { NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
-import { cleanupVarRefs, defValOf, varCastVal, varType } from '@/vetvi/core/vars';
+import { buildTextsExport, slug, textsImpApply as textsImpApplyDoc, textsImpParse as textsImpParseDoc, type TxImpData, type TxImpOpt } from '@/vetvi/core/texts';
+import type { EdgeGeom, NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
+import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
+import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import type { SyncClient } from './sync';
+
+/** dlgNodeWidth оригинала (1699): ширина диалога + отступы вложенности реплик. */
+function dlgNodeWidthOf(n: VetviNode): number {
+  return (n.dlgWidth || NODE_W) + dlgMaxDepth((n.dialog && n.dialog.replies) || [], 0) * 23;
+}
 
 type Listener = () => void;
 
@@ -33,6 +52,15 @@ export interface CtxItem { label?: string; head?: string; sep?: boolean; danger?
 export interface Toast { id: number; msg: string; kind: 'ok' | 'warn' | 'err' }
 export interface ConfirmBtn { label: string; primary?: boolean; danger?: boolean; fn?: () => void }
 export interface ConfirmCfg { title: string; text?: string; buttons?: ConfirmBtn[]; wide?: boolean }
+
+/** Цель анимации сдвига (animateShift оригинала): нода и её позиции from→to. */
+export interface ShiftTarget {
+  n: VetviNode;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+}
 
 export interface LogEntry {
   id: string;
@@ -87,6 +115,10 @@ export class VetviStore {
   ctrlDown = false;
   saveMenuOpen = false;
 
+  /* ── «Распределить по строкам» (dstState оригинала, строка 6725) ── */
+  /** ids — строки для раскладки (окно #dstWin открыто, пока не null), k — элементов в строке. */
+  dst: { ids: string[] | null; k: number } = { ids: null, k: 4 };
+
   /* ── совместное редактирование (заполняет SyncClient) ── */
   syncStatus: 'off' | 'conn' | 'on' | 'err' | 'lost' | 'copy' = 'off';
   syncMode: 'local' | 'room' | 'copy' = 'local';
@@ -108,6 +140,8 @@ export class VetviStore {
   sync: SyncClient | null = null;
   /** Активная группа/канвасный жест: при блокировке чужим локом откатываем его. */
   gestureRollback: (() => void) | null = null;
+  /** Идёт анимация автораздвижки (animateShift): удалённые снимки комнаты ждут, как при жесте. */
+  busyAnim = false;
 
   setSyncClient(c: SyncClient | null): void {
     this.sync = c;
@@ -122,6 +156,9 @@ export class VetviStore {
   revision = 0;
   saveState: SaveState = 'idle';
   lastSavedAt = 0;
+
+  /** Последняя позиция курсора (lastPtr оригинала) — для showLockTip вне жестов. */
+  lastPtr: { x: number; y: number } = { x: 0, y: 0 };
 
   private past: string[] = [];
   private future: string[] = [];
@@ -235,6 +272,16 @@ export class VetviStore {
   pushHistory(label?: string): void {
     this.flushPendingLog();
     const pre = this.serialize();
+    this.pendingLog = { pre, t: Date.now(), label: label || null };
+    this.scheduleLogFlush();
+    this.past.push(pre);
+    if (this.past.length > HISTORY_LIMIT) this.past.shift();
+    this.future.length = 0;
+  }
+
+  /** pushHistory(s,label) оригинала: снимок уже посчитан вызывающим (performInsert). */
+  private pushHistoryPre(pre: string, label?: string | null): void {
+    this.flushPendingLog();
     this.pendingLog = { pre, t: Date.now(), label: label || null };
     this.scheduleLogFlush();
     this.past.push(pre);
@@ -745,6 +792,206 @@ export class VetviStore {
     }, { label: 'Выровнять в столбец' });
   }
 
+  /* ═══ распределение выделения в строки с мостами (порт 6671–6831 оригинала) ═══ */
+
+  /** allDescNodes оригинала (3000): ноды группы + всей вложенности (с защитой от циклов). */
+  private allDescNodes(gid: string, visited?: Set<string>): VetviNode[] {
+    const seen = visited || new Set<string>();
+    if (seen.has(gid)) return [];
+    seen.add(gid);
+    const out: VetviNode[] = [];
+    for (const n of this.doc.nodes) if (n.gid === gid) out.push(n);
+    for (const cg of this.doc.groups) {
+      if (cg.parent === gid) out.push(...this.allDescNodes(cg.id, seen));
+    }
+    return out;
+  }
+
+  /**
+   * plSelectionIds оригинала (12730): выделенные ноды + содержимое выделенных групп.
+   * Возвращает id (null, если выделения нет) — источник для экспорта/импорта текстов.
+   */
+  plSelectionIds(): string[] | null {
+    if (!this.sel.size && !this.selGroups.size) return null;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (n: VetviNode | undefined) => {
+      if (n && !seen.has(n.id)) { seen.add(n.id); out.push(n.id); }
+    };
+    this.sel.forEach((id) => add(this.nodeById(id)));
+    this.selGroups.forEach((gid) => this.allDescNodes(gid).forEach((n) => add(n)));
+    return out;
+  }
+
+  /**
+   * layoutRows оригинала (6672–6703): раскладка по k в строке (шаг colStep=maxW+70,
+   * rowStep=maxH+120) от левого верхнего угла выделения (mnX/mnY со снапом);
+   * мосты внутри выделения конвертируются в flow, между концом строки и началом
+   * следующей ставится мост (существующая связь → kind='bridge'+bd, иначе новая).
+   * Историю пишет вызывающий — как pushHistory перед вызовом в оригинале.
+   */
+  layoutRows(ids: string[], k: number): void {
+    const rows: string[][] = [];
+    for (let i = 0; i < ids.length; i += k) rows.push(ids.slice(i, i + k));
+    let maxW = 0;
+    let maxH = 0;
+    ids.forEach((id) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      const m = this.dimsFn ? this.dimsFn(id) : null;
+      maxW = Math.max(maxW, m ? m.w : dlgNodeWidthOf(n));
+      maxH = Math.max(maxH, m ? m.h : 90);
+    });
+    const colStep = maxW + 70;
+    const rowStep = maxH + 120;
+    let mnX = 1e9;
+    let mnY = 1e9;
+    ids.forEach((id) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      mnX = Math.min(mnX, n.x);
+      mnY = Math.min(mnY, n.y);
+    });
+    if (mnX === 1e9) return;
+    if (this.snapOn) { mnX = Math.round(mnX / GRID) * GRID; mnY = Math.round(mnY / GRID) * GRID; }
+    rows.forEach((row, i) => {
+      row.forEach((id, j) => {
+        const n = this.nodeById(id);
+        if (!n) return;
+        n.x = Math.round(mnX + j * colStep);
+        n.y = Math.round(mnY + i * rowStep);
+      });
+    });
+    const idSet = new Set(ids);
+    for (const e of this.doc.edges) {
+      if (idSet.has(e.from) && idSet.has(e.to) && isBridge(e)) e.kind = 'flow';
+    }
+    for (let ri = 0; ri < rows.length - 1; ri++) {
+      const U = this.nodeById(rows[ri][rows[ri].length - 1]);
+      const L = this.nodeById(rows[ri + 1][0]);
+      if (!U || !L) continue;
+      const ex = this.doc.edges.find((e) => e.from === U.id && e.to === L.id);
+      if (ex) { ex.kind = 'bridge'; if (!ex.bd) ex.bd = { dl: 0, dy: 0, dr: 0 }; }
+      else {
+        this.doc.edges.push({ id: uid(), from: U.id, to: L.id, label: '', kind: 'bridge', pts: [], lt: 0.5, lp: 0, fromReply: null, bd: { dl: 0, dy: 0, dr: 0 } });
+      }
+    }
+  }
+
+  /** dstApply оригинала (6726–6731): раскладка по текущему dstState + сохранение. */
+  private dstApply(): void {
+    if (!this.dst.ids) return;
+    this.layoutRows(this.dst.ids, this.dst.k);
+    this.scheduleSave();
+    this.emit();
+  }
+
+  /** dstClamp оригинала (6732–6738): 1..числа раскладываемых нод. */
+  dstClamp(v: number): number {
+    const m = this.dst.ids ? this.dst.ids.length : 1;
+    if (isNaN(v)) v = 1;
+    if (v < 1) v = 1;
+    if (v > m) v = m;
+    return v;
+  }
+
+  /** dstSetK оригинала (6739–6745): новый k (с клампом) + немедленная раскладка. */
+  dstSetK(v: number): void {
+    const nk = this.dstClamp(v);
+    this.dst.k = nk;
+    this.dstApply();
+    this.emit();
+  }
+
+  /** closeDstWin оригинала (6757–6760): окно закрывается, ids сбрасывается (k остаётся). */
+  closeDstWin(): void {
+    this.dst.ids = null;
+    this.emit();
+  }
+
+  /**
+   * openDistributeModal оригинала (6761–6792): минимум 2 элемента, сортировка
+   * по раскладке (horizontal=(maxX-minX)>=(maxY-minY)); при 2 нодах — сразу
+   * layoutRows(ids,1) «Растягивание в строку» + тост; иначе dstState={ids,k:4},
+   * pushHistory «Распределение по строкам», раскладка и плавающее окно #dstWin.
+   */
+  alignRowsSel(): void {
+    const ids: string[] = [];
+    this.sel.forEach((id) => { if (this.nodeById(id)) ids.push(id); });
+    if (ids.length < 2) { this.toast('Выделите минимум два элемента', 'warn'); return; }
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    ids.forEach((id) => {
+      const n = this.nodeById(id)!;
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + NODE_W);
+      maxY = Math.max(maxY, n.y + 90);
+    });
+    const horizontal = (maxX - minX) >= (maxY - minY);
+    ids.sort((a, b) => {
+      const na = this.nodeById(a)!;
+      const nb = this.nodeById(b)!;
+      if (horizontal) return (na.x - nb.x) || (na.y - nb.y);
+      return (na.y - nb.y) || (na.x - nb.x);
+    });
+    if (ids.length === 2) {
+      this.pushHistory('Растягивание в строку');
+      this.layoutRows(ids, 1);
+      this.scheduleSave();
+      this.emit();
+      this.toast('Две строки по одному элементу, стык соединён мостом');
+      return;
+    }
+    this.dst = { ids, k: this.dstClamp(4) };
+    this.pushHistory('Распределение по строкам');
+    this.dstApply();
+    this.emit(); /* показать #dstWin (CanvasBoard) и поставить его в угол stage */
+  }
+
+  /** Псевдоним для пункта меню «Распределить по строкам…» (openDistributeModal). */
+  openDistribute(): void {
+    this.alignRowsSel();
+  }
+
+  /** bridgePairCandidate оригинала (6704–6714): пара выделенных без исходящих у a
+   *  и входящих у b — иначе наоборот; не пара и есть циклы — null. */
+  bridgePairCandidate(): { a: string; b: string } | null {
+    if (this.sel.size !== 2 || this.selGroups.size !== 0) return null;
+    const it = this.sel.values();
+    const aId = it.next().value as string;
+    const bId = it.next().value as string;
+    const a = this.nodeById(aId);
+    const b = this.nodeById(bId);
+    if (!a || !b) return null;
+    const hasOut = (n: VetviNode) => this.doc.edges.some((e) => e.from === n.id);
+    const hasIn = (n: VetviNode) => this.doc.edges.some((e) => e.to === n.id);
+    if (!hasOut(a) && !hasIn(b)) return { a: a.id, b: b.id };
+    if (!hasOut(b) && !hasIn(a)) return { a: b.id, b: a.id };
+    return null;
+  }
+
+  /** createBridgeBetween оригинала (6715–6724): существующая связь a→b становится
+   *  мостом, иначе создаётся новая; тост «Мост создан». */
+  createBridgeBetween(srcId: string, dstId: string): void {
+    this.pushHistory('Создание моста');
+    const doc = this.doc;
+    const ex = doc.edges.find((e) => e.from === srcId && e.to === dstId);
+    if (ex) { ex.kind = 'bridge'; if (!ex.bd) ex.bd = { dl: 0, dy: 0, dr: 0 }; }
+    else {
+      doc.edges.push({ id: uid(), from: srcId, to: dstId, label: '', kind: 'bridge', pts: [], lt: 0.5, lp: 0, fromReply: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    }
+    this.scheduleSave();
+    this.emit();
+    this.toast('Мост создан');
+  }
+
+  /** Готовый хендлер для контекстного меню «Создать мост» (9444–9447):
+   *  пара определяется bridgePairCandidate на момент клика. */
+  createBridgeForPair(): void {
+    const bp = this.bridgePairCandidate();
+    if (bp) this.createBridgeBetween(bp.a, bp.b);
+  }
+
   /* ── связи ── */
 
   connectNodes(from: string, to: string, opts?: { fromOut?: string | null; fromReply?: string | null; tin?: string }): VetviEdge | null {
@@ -928,6 +1175,295 @@ export class VetviStore {
     this.deleteEdge(id);
     this.toast('Связь удалена', 'ok');
   }
+
+  /* ═══ встраивание в связь, автораздвижка (порт 7596–7709, 6488–6503 оригинала) ═══ */
+
+  dimsFn: ((id: string) => { w: number; h: number } | null) | null = null;
+
+  /** Колбэк измеренных размеров карточек (dims оригинала через nodeEls) — регистрирует CanvasBoard. */
+  registerDimsFn(fn: (id: string) => { w: number; h: number } | null): void {
+    this.dimsFn = fn;
+  }
+
+  edgeGeomFn: ((edgeId: string) => EdgeGeom | null) | null = null;
+
+  /** Колбэк геометрии связи (edgeGeom оригинала) — регистрирует CanvasBoard из items EdgeLayer. */
+  registerEdgeGeomFn(fn: ((edgeId: string) => EdgeGeom | null) | null): void {
+    this.edgeGeomFn = fn;
+  }
+
+  /** Размер карточки для расчётов (dims оригинала): измеренный или дефолт NODE_W/90. */
+  private dimsOf(id: string): { w: number; h: number } {
+    const m = this.dimsFn ? this.dimsFn(id) : null;
+    return m ? { w: m.w, h: m.h } : { w: NODE_W, h: 90 };
+  }
+
+  /**
+   * Встраивание ноды/клона в середину связи (performInsert оригинала, 7614–7632):
+   * история с готовым снимком pre, исходная связь удаляется, добавляются две новые
+   * (A→n с pts[0] и fromReply исхода, label:''; n→B с pts[1], label исходной,
+   * lt:0.5, lp:0), нода позиционируется в точке дропа (или середине пути),
+   * выделение связи снимается, затем автораздвижка с фиксированной новой нодой.
+   */
+  performInsert(n: VetviNode, edgeId: string, pre: string, isNew: boolean, pt?: { x: number; y: number } | null, g?: EdgeGeom | null): void {
+    const doc = this.doc;
+    const e = doc.edges.find((x) => x.id === edgeId);
+    if (!e) return;
+    this.pushHistoryPre(pre, 'Создание и подключение ноды');
+    const geom = g || (this.edgeGeomFn ? this.edgeGeomFn(edgeId) : null);
+    /* запасная геометрия свободных нод (edgeAnchors оригинала), если items её не дали */
+    let gm = geom;
+    if (!gm) {
+      const na = doc.nodes.find((x) => x.id === e.from);
+      const nb = doc.nodes.find((x) => x.id === e.to);
+      if (na && nb) {
+        const da = this.dimsOf(na.id);
+        const db = this.dimsOf(nb.id);
+        gm = { x1: na.x + da.w, y1: na.y + da.h / 2, x2: nb.x, y2: nb.y + db.h / 2, pts: (e.pts && e.pts.length ? e.pts : null) };
+      }
+    }
+    const sp = splitPtsAtHalf(e, gm);
+    const p = pt || (gm ? pathPoint(gm, 0.5) : null);
+    const A = e.from;
+    const B = e.to;
+    const kind = e.kind || 'flow';
+    const label = e.label || '';
+    const fromReplyA = e.fromReply || null;
+    doc.edges = doc.edges.filter((x) => x.id !== e.id);
+    if (isNew) doc.nodes.push(n);
+    const d0 = isNew ? null : this.dimsOf(n.id);
+    const hh = d0 ? d0.h : 96;
+    if (p) {
+      n.x = Math.round(p.x - (d0 ? d0.w : NODE_W) / 2);
+      n.y = Math.round(p.y - hh / 2);
+    }
+    doc.edges.push({ id: uid(), from: A, to: n.id, label: '', kind, pts: sp[0] || [], lt: 0.5, lp: 0, fromReply: fromReplyA, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    doc.edges.push({ id: uid(), from: n.id, to: B, label, kind, pts: sp[1] || [], lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    if (this.selEdges.has(e.id)) this.selEdges.clear();
+    this.emit();
+    this.resolveOverlaps(new Set([n.id]));
+    this.scheduleSave();
+    this.emit();
+  }
+
+  /**
+   * Создание ноды типа typeKey сразу встроенной в связь (insertNewAtEdge
+   * оригинала, 7633–7641): фабрика newNode (ensureDialog + varnode-дефолты),
+   * performInsert, toast «Элемент встроен в связь».
+   */
+  insertNewAtEdge(edgeId: string, typeKey: string, pt?: { x: number; y: number } | null, g?: EdgeGeom | null): void {
+    const e = this.edgeById(edgeId);
+    if (!e) return;
+    const pre = this.serialize();
+    const n = newNode(typeKey, 0, 0);
+    this.performInsert(n, edgeId, pre, true, pt || null, g);
+    this.toast('Элемент встроен в связь');
+  }
+
+  /**
+   * Копия одной ноды (cloneNode оригинала, 6488–6503): глубокая, новый id,
+   * gid сброшен, позиция округлена; varnode/branch — с валидацией полей.
+   */
+  cloneNodeAt(src: VetviNode, x: number, y: number): VetviNode {
+    const c = JSON.parse(JSON.stringify(src)) as VetviNode;
+    c.id = uid();
+    c.gid = null;
+    c.x = Math.round(x);
+    c.y = Math.round(y);
+    c.expand = (src.expand === 0 || src.expand === 1 || src.expand === 2) ? src.expand : 1;
+    c.color = src.color || null;
+    c.tint = src.tint || 0;
+    c.dlgWidth = src.dlgWidth || null;
+    c.notes = src.notes ? (JSON.parse(JSON.stringify(src.notes)) as NonNullable<VetviNode['notes']>) : [];
+    if (src.linear !== true) delete c.linear;
+    if (src.type === 'varnode') {
+      c.vid = src.vid || null;
+      c.varMode = src.varMode === 'get' ? 'get' : 'set';
+      c.varOp = VARS_OPS[src.varOp || '='] ? src.varOp : '=';
+      c.varVal = src.varVal;
+    }
+    if (src.type === 'branch' && Array.isArray(src.outcomes)) {
+      c.outcomes = (src.outcomes as VetviOutcome[]).map((o) => ({
+        id: o.id,
+        label: o.label || '',
+        cond: o.cond ? { vid: o.cond.vid, op: o.cond.op, val: o.cond.val } : null,
+      }));
+    }
+    return c;
+  }
+
+  /** Группа спрятана внутри свёрнутой (groupInsideCollapsed оригинала, 3028–3035). */
+  private groupInsideCollapsed(g: VetviGroup): boolean {
+    let cur = g.parent || null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      const p = this.groupById(cur);
+      if (!p) return false;
+      if ((p.fold === undefined ? 2 : p.fold) < 2) return true;
+      cur = p.parent || null;
+    }
+    return false;
+  }
+
+  /**
+   * Глубочайшая группа в мировой точке (deepestGroupAt оригинала, 3064–3076):
+   * fold=2 — по рамке, fold<2 — по карточке; размеры — измеренные (sizes/cardSizes
+   * из CanvasBoard, в оригинале offsetWidth/offsetHeight элементов).
+   */
+  deepestGroupAt(wx: number, wy: number, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): VetviGroup | null {
+    let best: VetviGroup | null = null;
+    let bestDepth = -1;
+    for (const g of this.doc.groups) {
+      if (this.groupInsideCollapsed(g)) continue;
+      const fold = g.fold === undefined ? 2 : g.fold;
+      let r: { x: number; y: number; w: number; h: number };
+      if (fold === 2) r = groupFrameRect(this.doc, g, sizes, cardSizes);
+      else {
+        const cr = groupCardRect(this.doc, g, cardSizes);
+        r = { x: g.x || 0, y: g.y || 0, w: cr.w, h: cr.h };
+      }
+      if (wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h) {
+        const d = groupDepth(this.doc, g.id);
+        if (d > bestDepth) { bestDepth = d; best = g; }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Бросок из палитры НА ноду (attachNewTo оригинала, 9177–9199): новая нода или
+   * клон справа от цели (nx=+NODE_W+70, snap), gid — глубочайшая группа в точке
+   * (если цель не внутри свёрнутой), связь target→n, автораздвижка, выделение.
+   */
+  attachNewTo(targetId: string, typeKey: string | null, cloneId: string | null, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): void {
+    const target = this.nodeById(targetId);
+    if (!target) return;
+    const nx = snapVal(target.x + NODE_W + 70, this.snapOn);
+    const ny = snapVal(target.y, this.snapOn);
+    let n: VetviNode;
+    if (cloneId) {
+      const src = this.nodeById(cloneId);
+      if (!src) return;
+      n = this.cloneNodeAt(src, nx, ny);
+    } else {
+      n = newNode(typeKey || 'note', nx, ny);
+    }
+    const tgtGroup = collapsedAncestorOf(this.doc, target.id) ? null : this.deepestGroupAt(target.x + NODE_W / 2, target.y + 40, sizes, cardSizes);
+    n.gid = tgtGroup ? tgtGroup.id : null;
+    const eid = uid();
+    this.mutate((doc) => {
+      doc.nodes.push(n);
+      doc.edges.push({ id: eid, from: target.id, to: n.id, label: '', kind: 'flow', pts: [], lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    });
+    this.resolveOverlaps(new Set([n.id]));
+    this.selectOnly(n.id);
+  }
+
+  /**
+   * Автораздвижка наезжающих карточек (resolveOverlaps оригинала, 7642–7691):
+   * pad=18, до 60 итераций, ноды внутри свёрнутых групп не участвуют, разводим
+   * по горизонтали (ox<=oy) или вертикали, fixed-ноды стоят на месте, snap
+   * не-fixed, затем анимация сдвига от старых позиций к новым.
+   */
+  resolveOverlaps(fixedIds: Set<string>): void {
+    const pad = 18;
+    const doc = this.doc;
+    const dims = (n: VetviNode) => this.dimsOf(n.id);
+    const oldPos = new Map<string, { x: number; y: number }>();
+    for (const n of doc.nodes) oldPos.set(n.id, { x: n.x, y: n.y });
+    /* ноды внутри свёрнутых групп не участвуют (collapsedAncestorOf оригинала) —
+       считаем один раз, чтобы не искать предков на каждую пару */
+    const collapsed = new Set<string>();
+    for (const n of doc.nodes) {
+      if (collapsedAncestorOf(doc, n.id)) collapsed.add(n.id);
+    }
+    let changed = false;
+    for (let it = 0; it < 60; it++) {
+      let moved = false;
+      for (let i = 0; i < doc.nodes.length; i++) {
+        if (collapsed.has(doc.nodes[i].id)) continue;
+        for (let j = i + 1; j < doc.nodes.length; j++) {
+          if (collapsed.has(doc.nodes[j].id)) continue;
+          const a = doc.nodes[i];
+          const b = doc.nodes[j];
+          const da = dims(a);
+          const db = dims(b);
+          const acx = a.x + da.w / 2;
+          const acy = a.y + da.h / 2;
+          const bcx = b.x + db.w / 2;
+          const bcy = b.y + db.h / 2;
+          const ox = (da.w + db.w) / 2 + pad - Math.abs(acx - bcx);
+          const oy = (da.h + db.h) / 2 + pad - Math.abs(acy - bcy);
+          if (ox > 0 && oy > 0) {
+            moved = true;
+            changed = true;
+            const fx = fixedIds.has(a.id);
+            const fy = fixedIds.has(b.id);
+            if (ox <= oy) {
+              const ax = acx <= bcx ? -1 : 1;
+              if (fx && !fy) b.x -= ax * ox;
+              else if (fy && !fx) a.x += ax * ox;
+              else { a.x += ax * ox / 2; b.x -= ax * ox / 2; }
+            } else {
+              const ay = acy <= bcy ? -1 : 1;
+              if (fx && !fy) b.y -= ay * oy;
+              else if (fy && !fx) a.y += ay * oy;
+              else { a.y += ay * oy / 2; b.y -= ay * oy / 2; }
+            }
+          }
+        }
+      }
+      if (!moved) break;
+    }
+    if (!changed) return;
+    if (this.snapOn) {
+      for (const n of doc.nodes) {
+        if (!fixedIds.has(n.id)) { n.x = snapVal(n.x, true); n.y = snapVal(n.y, true); }
+      }
+    }
+    const targets: ShiftTarget[] = [];
+    for (const n of doc.nodes) {
+      const o = oldPos.get(n.id) as { x: number; y: number };
+      if (o.x !== n.x || o.y !== n.y) {
+        targets.push({ n, fromX: o.x, fromY: o.y, toX: n.x, toY: n.y });
+        n.x = o.x;
+        n.y = o.y;
+      }
+    }
+    if (targets.length) this.animateShift(targets);
+    /* refreshGroupFrames() оригинала не нужен: рамки групп пересчитываются декларативно по emit() */
+  }
+
+  /**
+   * Анимация сдвига (animateShift оригинала, 7692–7708): rAF 340ms, ease-out
+   * cubic (e2=1-(1-k)^3), позиции нод обновляются в doc напрямую + emit() каждый
+   * кадр (React перерисовывает ноды/связи/рамки по doc — updateEdgesFor не нужен).
+   * На время анимации busyAnim=true: удалённые снимки комнаты не врываются.
+   */
+  animateShift(targets: ShiftTarget[]): void {
+    const t0 = performance.now();
+    const dur = 340;
+    this.busyAnim = true;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / dur);
+      const e2 = 1 - Math.pow(1 - k, 3);
+      for (const g of targets) {
+        g.n.x = g.fromX + (g.toX - g.fromX) * e2;
+        g.n.y = g.fromY + (g.toY - g.fromY) * e2;
+      }
+      this.emit();
+      if (k < 1) {
+        requestAnimationFrame(step);
+      } else {
+        this.busyAnim = false;
+        this.scheduleSave();
+        this.emit();
+      }
+    };
+    requestAnimationFrame(step);
+  }
+
 
   /* ── реплики диалога ── */
 
@@ -1203,26 +1739,31 @@ export class VetviStore {
     return '#8b929c';
   }
 
-  /** Разбить диалог на цепочку нод по репликам верхнего уровня (splitDialogNode). */
+  /** Разбить диалог на цепочку нод по репликам (splitDialogNode, 7463–7563).
+   *  Если нода внутри цепочки — созданные реплики входят в неё на место исходной. */
   splitDialogNode(id: string, deep: boolean): void {
     const n = this.nodeById(id);
     if (!n || n.type !== 'dialog' || !n.dialog) return;
     const flat: VetviReply[] = deep ? this.flatReplies(n.dialog.replies) : n.dialog.replies.filter((r) => !!r);
     if (flat.length < 2) return;
     const pre = this.serialize();
+    /* нода в цепочке: запоминаем группу и позицию для якорения созданных нод (7472–7473) */
+    const gS = this.stackGroupOf(n);
+    const kS = gS ? stackOrderIds(this.doc, gS).indexOf(id) : -1;
     const created: string[] = [];
     let prevId: string | null = null;
     for (let i = 0; i < flat.length; i++) {
       const r = flat[i];
       const c = JSON.parse(JSON.stringify(n)) as VetviNode;
       c.id = uid();
+      c.gid = null;
       c.x = n.x + i * 260;
       c.y = n.y;
       c.dialog = { participants: n.dialog.participants.slice(), description: i === 0 ? n.dialog.description : '', replies: [{ ...r, children: undefined }] };
       c.expand = 1;
       this.doc.nodes.push(c);
       created.push(c.id);
-      if (prevId) this.doc.edges.push(newEdge(prevId, c.id));
+      if (prevId && !gS) this.doc.edges.push(stackChainEdgeObj(prevId, c.id));
       prevId = c.id;
     }
     // входящие на первую копию, исходящие с последней
@@ -1232,8 +1773,19 @@ export class VetviStore {
     }
     this.doc.nodes = this.doc.nodes.filter((x) => x.id !== id);
     this.doc.edges = this.doc.edges.filter((e) => e.from !== id && e.to !== id);
+    if (gS) {
+      /* созданные ноды занимают место исходной в цепочке (7501–7507) */
+      const newOrder = stackOrderIds(this.doc, gS).filter((x) => x !== id);
+      newOrder.splice(Math.max(0, kS), 0, ...created);
+      gS.order = newOrder;
+      for (const cid of created) {
+        const cn = this.nodeById(cid);
+        if (cn) cn.gid = gS.id;
+      }
+      stackRebuildChains(this.doc, gS);
+    }
     this.commitEdit(pre, 'Разбивка диалога на реплики');
-    this.toast('Диалог разбит на ' + created.length + ' нод', 'ok');
+    this.toast('Диалог разбит на ' + created.length + ' нод' + (gS ? ' (внутри цепочки)' : ''), 'ok');
   }
 
   private flatReplies(arr: VetviReply[], out?: VetviReply[]): VetviReply[] {
@@ -1245,10 +1797,18 @@ export class VetviStore {
     return o;
   }
 
-  /** Объединить выделенные диалоги в один (mergeDialogNodes). */
+  /** Объединить выделенные диалоги в один (mergeDialogNodes, 7564+). */
   mergeDialogNodes(): void {
     const ids = [...this.sel].filter((id) => this.nodeById(id)?.type === 'dialog');
     if (ids.length < 2) return;
+    /* ноды внутри цепочки объединять нельзя (7568) */
+    for (const nid of ids) {
+      const nn = this.nodeById(nid);
+      if (nn && this.stackGroupOf(nn)) {
+        this.toast('Ноды внутри цепочки объединять нельзя — сначала выведите их (✕ на строке цепочки)', 'warn');
+        return;
+      }
+    }
     const pre = this.serialize();
     const keep = this.nodeById(ids[0]) as VetviNode;
     const created: string[] = [];
@@ -1267,6 +1827,384 @@ export class VetviStore {
     this.doc.edges = this.doc.edges.filter((e) => !created.includes(e.from) && !created.includes(e.to));
     this.commitEdit(pre, 'Объединение диалогов');
     this.toast('Диалогы объединены: ' + (created.length + 1), 'ok');
+  }
+
+  /* ═══ цепочки нод (стек-карточки): порт 7022–7462, 7839–7945 оригинала ═══ */
+
+  /** Группа-цепочка ноды (stackGroupOf, 7180). */
+  stackGroupOf(n: VetviNode): VetviGroup | null {
+    const g = n.gid ? this.groupById(n.gid) : undefined;
+    return g && g.stack === true ? g : null;
+  }
+
+  /** Лок, мешающий правке (lockBlockedBy оригинала). */
+  lockBlockedBy(ids: string[] | Set<string>): { id: string; name: string; color: string } | null {
+    return this.sync ? this.sync.blockedBy(ids) : null;
+  }
+
+  /** Все выделенные — stackable-ноды вне цепочек (selAllStackable, 7453). */
+  selAllStackable(): boolean {
+    if (this.sel.size < 2 || this.selGroups.size) return false;
+    for (const id of this.sel) {
+      const n = this.nodeById(id);
+      if (!n || !stackableType(n.type) || this.stackGroupOf(n)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Добавить ноду в конец цепочки без записи в историю (stackAppend, 7209–7218):
+   * старые связи убираются, нода встаёт в свой парк-слот, связи «кто за кем»
+   * перестраиваются. Историю пишет жест переноса (как в оригинале).
+   */
+  stackAppend(g: VetviGroup, nid: string): boolean {
+    const ids = stackOrderIds(this.doc, g);
+    if (ids.indexOf(nid) >= 0) return false;
+    stackDetachEdges(this.doc, nid);
+    g.order = ids.concat([nid]);
+    const n = this.nodeById(nid);
+    if (n) {
+      n.gid = g.id;
+      const pk = stackParkPos(g, ids.length);
+      n.x = pk.x;
+      n.y = pk.y;
+    }
+    stackRebuildChains(this.doc, g);
+    return true;
+  }
+
+  /**
+   * Сброс перетащенной ноды на свободную ноду/члена цепочки
+   * (stackDropCreate, 7239–7266): в существующую цепочку — в конец,
+   * иначе создаётся новая цепочка из пары. История — снимок pre жеста.
+   */
+  stackDropCreate(dragId: string, targetId: string, pre: string): boolean {
+    const A = this.nodeById(dragId);
+    const T = this.nodeById(targetId);
+    if (!A || !T) return false;
+    const sg = this.stackGroupOf(T);
+    this.pushHistoryPre(pre, 'Сборка цепочки');
+    const doc = this.doc;
+    if (sg) {
+      const ids = stackOrderIds(doc, sg);
+      /* нода попадает в цепочку: старые связи убираются, новая — по порядку цепочки */
+      stackDetachEdges(doc, dragId);
+      sg.order = ids.concat([dragId]);
+      A.gid = sg.id;
+      const pk = stackParkPos(sg, ids.length);
+      A.x = pk.x;
+      A.y = pk.y;
+      stackRebuildChains(doc, sg);
+      this.scheduleSave();
+      this.emit();
+      this.toast('«' + A.title + '» добавлена в цепочку «' + sg.name + '» (позиция ' + (ids.length + 1) + ') — старые связи убраны, добавлена связь от предыдущей ноды');
+      return true;
+    }
+    const g: VetviGroup = {
+      id: uid(),
+      name: 'Цепочка',
+      fold: 1,
+      x: Math.round(T.x),
+      y: Math.round(T.y),
+      parent: T.gid || null,
+      color: null,
+      alpha: 0.55,
+      badge: null,
+      auto: false,
+      stack: true,
+      order: [T.id, dragId],
+    };
+    stackDetachEdges(doc, dragId);
+    doc.groups.push(g);
+    T.gid = g.id;
+    A.gid = g.id;
+    const pk2 = stackParkPos(g, 1);
+    A.x = pk2.x;
+    A.y = pk2.y;
+    stackRebuildChains(doc, g);
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups = new Set([g.id]);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Объединены в цепочку: «' + T.title + '» → «' + A.title + '» — стандартная связь по порядку, старые связи «' + A.title + '» убраны. Порядок меняется перетаскиванием строк');
+    return true;
+  }
+
+  /** ✕ на строке цепочки (stackRowAction, 7267–7271): проверка локов → leaveGroup. */
+  stackRowAction(gid: string, nid: string): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const lk = this.lockBlockedBy(stackOrderIds(this.doc, g));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    this.leaveGroup(nid);
+  }
+
+  /** Перестановка строк цепочки (qRowApply, 7346–7362). */
+  reorderStackRows(gid: string, nid: string, insIdx: number | null): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const lk = this.lockBlockedBy(stackOrderIds(this.doc, g));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    const ids = stackOrderIds(this.doc, g);
+    const from = ids.indexOf(nid);
+    if (from < 0) return;
+    const rest = ids.filter((x) => x !== nid);
+    let idx = insIdx == null || insIdx < 0 ? rest.length : insIdx;
+    if (idx > rest.length) idx = rest.length;
+    const newOrder = rest.slice(0, idx).concat([nid], rest.slice(idx));
+    if (newOrder.join('\u0001') === ids.join('\u0001')) return;
+    this.pushHistory('Перестановка строк цепочки');
+    g.order = newOrder;
+    stackRebuildChains(this.doc, g);
+    stackSyncParks(this.doc, g);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Порядок цепочки изменён — связи «кто за кем» перестроены');
+  }
+
+  /**
+   * Вывод ноды из цепочки перетаскиванием (qExtractRow, 7364–7389): связь с
+   * соседями склеивается, нода ложится в точку отпускания, пустая цепочка
+   * удаляется. wp — мировая точка, client — экранные координаты для lock-подсказки.
+   */
+  extractStackRow(gid: string, nid: string, wp: { x: number; y: number }, client?: { x: number; y: number }): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const n = this.nodeById(nid);
+    if (!n) return;
+    const order0 = stackOrderIds(this.doc, g);
+    const idx = order0.indexOf(nid);
+    if (idx < 0) return;
+    const lk = this.lockBlockedBy(order0);
+    if (lk) {
+      this.showLockTip(client ? client.x : this.lastPtr.x, client ? client.y : this.lastPtr.y, lk);
+      return;
+    }
+    const prev = idx > 0 ? order0[idx - 1] : null;
+    const next = idx >= 0 && idx < order0.length - 1 ? order0[idx + 1] : null;
+    this.pushHistory('Вывод из цепочки');
+    const doc = this.doc;
+    doc.edges = doc.edges.filter((ed) => !(ed.q && (ed.from === nid || ed.to === nid)));
+    n.gid = g.parent || null;
+    g.order = order0.filter((x) => x !== nid);
+    if (prev && next && !doc.edges.some((ed) => ed.from === prev && ed.to === next && ed.tin !== 'var')) {
+      doc.edges.push(stackChainEdgeObj(prev, next));
+    }
+    /* ширина карточки диалога (dlgNodeWidth оригинала): своя ширина + отступы вложенности */
+    const w0 = n.type === 'dialog'
+      ? ((n.dlgWidth || NODE_W) + dlgMaxDepth((n.dialog && n.dialog.replies) || [], 0) * 23)
+      : NODE_W;
+    n.x = Math.round(wp.x - w0 / 2);
+    n.y = Math.round(wp.y - 24);
+    this.resolveOverlaps(new Set([nid]));
+    if (!g.order.length) {
+      doc.groups = doc.groups.filter((x) => x.id !== gid);
+      this.selGroups.delete(gid);
+    }
+    this.scheduleSave();
+    this.emit();
+    this.toast('Нода выведена из цепочки — связи с соседями склеены');
+  }
+
+  /**
+   * Цепочка → группа (stackToGroup, 7025–7052): ноды возвращаются на холст
+   * колонкой в порядке цепочки (вторая фаза — по реальным высотам после
+   * перерисовки), группа открывается рамкой с авторазмером.
+   */
+  stackToGroup(gid: string): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const ids = stackOrderIds(this.doc, g);
+    if (!ids.length) {
+      this.toast('Цепочка пуста', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy(ids);
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    const pre = this.serialize();
+    this.pushHistoryPre(pre, 'Цепочка → группа');
+    const gx = g.x || 0;
+    const gy = g.y || 0;
+    g.stack = false;
+    g.order = [];
+    g.fold = 2;
+    const gr = g as unknown as Record<string, unknown>;
+    gr.bbox = null;
+    gr.hh = null;
+    g.auto = true;
+    delete g.fx;
+    delete g.fy;
+    delete g.fw;
+    delete g.fh;
+    ids.forEach((id, i) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      n.x = Math.round(gx);
+      n.y = Math.round(gy + i * 130);
+    });
+    this.scheduleSave();
+    this.emit(); /* ноды видимы — можно измерить реальные высоты (renderAll, 7041) */
+    setTimeout(() => {
+      /* вторая фаза: колонка по реальным высотам (7042–7048) */
+      let yy = Math.round(gy);
+      for (const id of ids) {
+        const n = this.nodeById(id);
+        if (!n) continue;
+        const h = this.dimsOf(id).h;
+        n.y = Math.round(yy);
+        yy += h + 24;
+      }
+      this.resolveOverlaps(new Set(ids));
+      this.sel.clear();
+      this.selEdges.clear();
+      this.selGroups = new Set([g.id]);
+      this.scheduleSave();
+      this.emit();
+      this.toast('Цепочка «' + g.name + '» преобразована в группу: ноды на холсте в порядке цепочки, связи «кто за кем» сохранены');
+    }, 0);
+  }
+
+  /**
+   * Группа → цепочка (groupToStack, 7057–7099): порядок — по раскладке
+   * (шире, чем выше → слева направо, иначе сверху вниз), первая нода — якорь,
+   * у остальных старые связи убираются, между соседями — связи «кто за кем».
+   */
+  groupToStack(gid: string): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack === true) return;
+    const ms = this.membersOf(g.id);
+    if (ms.length < 2) {
+      this.toast('Для цепочки нужно минимум две ноды в группе', 'warn');
+      return;
+    }
+    const bad = ms.filter((n) => !stackableType(n.type));
+    if (bad.length) {
+      this.toast('В цепочку нельзя: ' + bad.slice(0, 3).map((n) => '«' + (n.title || '?') + '»').join(', ') + (bad.length > 3 ? '…' : '') + ' — персонажи и заметки в цепочки не входят', 'warn');
+      return;
+    }
+    const kids = this.doc.groups.filter((cg) => cg.parent === gid);
+    if (kids.length) {
+      this.toast('Сначала распустите или выньте вложенные группы (' + kids.length + ')', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy(ms.map((n) => n.id));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    let x0 = 1e9;
+    let x1 = -1e9;
+    let y0 = 1e9;
+    let y1 = -1e9;
+    ms.forEach((n) => {
+      const d = this.dimsOf(n.id);
+      x0 = Math.min(x0, n.x);
+      x1 = Math.max(x1, n.x + d.w);
+      y0 = Math.min(y0, n.y);
+      y1 = Math.max(y1, n.y + d.h);
+    });
+    const ids = (x1 - x0 >= y1 - y0)
+      ? ms.slice().sort((a, b) => a.x - b.x || a.y - b.y).map((n) => n.id)
+      : ms.slice().sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.id);
+    this.pushHistory('Группа → цепочка');
+    const doc = this.doc;
+    g.stack = true;
+    g.fold = 1;
+    g.order = ids.slice();
+    const gr = g as unknown as Record<string, unknown>;
+    gr.bbox = null;
+    gr.hh = null;
+    /* карточка цепочки — в левый верхний угол области группы (7080) */
+    g.x = Math.round(x0);
+    g.y = Math.round(y0);
+    ids.forEach((id, i) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      if (i > 0) stackDetachEdges(doc, id);
+      const pk = stackParkPos(g, i);
+      n.x = pk.x;
+      n.y = pk.y;
+    });
+    const set = new Set(ids);
+    const consec: Record<string, boolean> = {};
+    for (let ci = 0; ci < ids.length - 1; ci++) consec[ids[ci] + '>' + ids[ci + 1]] = true;
+    doc.edges = doc.edges.filter((e) => {
+      if (e.q && set.has(e.from) && set.has(e.to)) return !!consec[e.from + '>' + e.to];
+      return true;
+    });
+    for (let cj = 0; cj < ids.length - 1; cj++) {
+      const aC = ids[cj];
+      const bC = ids[cj + 1];
+      if (!doc.edges.some((e) => e.from === aC && e.to === bC && e.q)) doc.edges.push(stackChainEdgeObj(aC, bC));
+    }
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups = new Set([g.id]);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Группа «' + g.name + '» преобразована в цепочку (' + ids.length + '): порядок — по раскладке, у нод кроме первой старые связи убраны');
+  }
+
+  /** «Собрать в цепочку (по порядку выделения)» (stackFromSelection, 7426–7445). */
+  stackFromSelection(): void {
+    const ids: string[] = [];
+    for (const id of this.sel) {
+      const n = this.nodeById(id);
+      if (n && stackableType(n.type) && !this.stackGroupOf(n)) ids.push(id);
+    }
+    if (this.selGroups.size || ids.length !== this.sel.size || ids.length < 2) {
+      this.toast('Выделите минимум две ноды вне цепочек', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy(ids);
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    this.pushHistory('Сборка цепочки из выделения');
+    const doc = this.doc;
+    const first = this.nodeById(ids[0]) as VetviNode;
+    const g: VetviGroup = {
+      id: uid(),
+      name: 'Цепочка',
+      fold: 1,
+      x: Math.round(first.x),
+      y: Math.round(first.y),
+      parent: first.gid || null,
+      color: null,
+      alpha: 0.55,
+      badge: null,
+      auto: false,
+      stack: true,
+      order: ids.slice(),
+    };
+    doc.groups.push(g);
+    ids.forEach((id, i) => {
+      const n = this.nodeById(id) as VetviNode;
+      n.gid = g.id;
+      /* первая нода — якорь: её связи сохраняются; остальные — старые связи убираются */
+      if (i > 0) stackDetachEdges(doc, id);
+      const pk = stackParkPos(g, i);
+      n.x = pk.x;
+      n.y = pk.y;
+    });
+    stackRebuildChains(doc, g);
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups = new Set([g.id]);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Цепочка из ' + ids.length + ' нод собрана: связи перестроены по порядку (как «кто за кем»), вход в первую ноду сохранён');
   }
 
   /* ── группы ── */
@@ -1381,39 +2319,80 @@ export class VetviStore {
     const g = doc.groups.find((x) => x.id === gid);
     if (!g) return;
     const parent = g.parent || null;
-    if (g.stack && g.order) {
-      // цепочка: раскладываем ноды вертикально
-      const nodes = (g.order || []).map((id) => doc.nodes.find((n) => n.id === id)).filter(Boolean) as VetviNode[];
-      let y = g.y;
-      for (const n of nodes) {
-        n.x = g.x;
-        n.y = y;
-        y += 130;
+    if (g.stack === true) {
+      /* ungroup, 6997–7012: ноды колонкой от точки карточки; q-связи «кто за кем»
+         СОХРАНЯЮТСЯ как обычные связи на холсте (авто-связи не удаляются) */
+      const ids = stackOrderIds(doc, g);
+      ids.forEach((id, i) => {
+        const n = doc.nodes.find((x) => x.id === id);
+        if (!n) return;
         n.gid = parent;
-      }
-      doc.edges = doc.edges.filter((e) => !e.q);
+        n.x = Math.round(g.x || 0);
+        n.y = Math.round((g.y || 0) + i * 130);
+      });
     }
     for (const n of doc.nodes) if (n.gid === gid) n.gid = parent;
     for (const sg of doc.groups) if (sg.parent === gid) sg.parent = parent;
     doc.groups = doc.groups.filter((x) => x.id !== gid);
   }
 
+  /** Роспуск группы/разбор цепочки (ungroup, 6992–7021): локи, тосты 1:1. */
   dissolveGroup(gid: string): void {
-    this.mutate((doc) => { this.dissolveGroupIn(doc, gid); }, { label: 'Роспуск группы' });
+    const g = this.groupById(gid);
+    if (!g) return;
+    const lk = this.lockBlockedBy([gid].concat(this.membersOf(gid).map((n) => n.id)));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    const wasStack = g.stack === true;
+    const ids = wasStack ? stackOrderIds(this.doc, g) : [];
+    this.mutate((doc) => { this.dissolveGroupIn(doc, gid); }, { label: 'Разбор группы/цепочки' });
+    if (wasStack && ids.length) this.resolveOverlaps(new Set(ids));
+    this.toast(wasStack ? 'Цепочка разобрана — авто-связи «кто за кем» сохранены' : 'Группа «' + g.name + '» расформирована', 'warn');
   }
 
+  /** Покинуть группу / вывести из цепочки (leaveGroup, 7148–7177). */
   leaveGroup(nodeId: string): void {
     const n = this.nodeById(nodeId);
     if (!n || !n.gid) return;
-    this.mutate((doc) => {
-      const g = doc.groups.find((x) => x.id === n.gid);
-      n.gid = null;
-      if (g && g.stack && g.order) {
-        doc.edges = doc.edges.filter((e) => !e.q);
+    const gid = n.gid;
+    const g0 = this.groupById(gid);
+    if (g0 && g0.stack === true) {
+      /* цепочка (7152–7172): q-связи ноды убираются, соседи склеиваются, нода
+         встаёт в свой парк-слот; пустая цепочка удаляется */
+      const order0 = stackOrderIds(this.doc, g0);
+      const idx = order0.indexOf(nodeId);
+      const prev = idx > 0 ? order0[idx - 1] : null;
+      const next = idx >= 0 && idx < order0.length - 1 ? order0[idx + 1] : null;
+      this.mutate((doc) => {
+        const gg = doc.groups.find((x) => x.id === gid);
+        if (!gg) return;
+        doc.edges = doc.edges.filter((e) => !(e.q && (e.from === nodeId || e.to === nodeId)));
+        n.gid = gg.parent || null;
+        gg.order = order0.filter((x) => x !== nodeId);
+        if (prev && next && !doc.edges.some((e) => e.from === prev && e.to === next && e.tin !== 'var')) {
+          doc.edges.push(stackChainEdgeObj(prev, next));
+        }
+        const pk = stackParkPos(gg, Math.max(0, idx));
+        n.x = pk.x;
+        n.y = pk.y;
+      });
+      if (g0.order && !g0.order.length) {
+        this.doc.groups = this.doc.groups.filter((x) => x.id !== gid);
+        this.selGroups.delete(gid);
       }
+      this.emit();
+      this.toast('Узел выведен из цепочки', 'warn');
+      return;
+    }
+    this.mutate((doc) => {
+      const nn = doc.nodes.find((x) => x.id === nodeId);
+      if (nn) nn.gid = null;
     }, { label: 'Покинуть группу' });
     this.pruneEmptyGroups(this.doc);
     this.emit();
+    this.toast('Узел исключён из группы', 'warn');
   }
 
   /** После переноса: захват нод/групп под прямоугольником (reparentAfterMove). */
@@ -1641,6 +2620,58 @@ export class VetviStore {
     });
   }
 
+  /* ═══ лёгкий JSON текстов: экспорт/импорт (порт 10328–10600 оригинала) ═══ */
+
+  /**
+   * exportTextsJson оригинала (10344–10397): файл «Текстов (JSON)» v3.
+   * onlySel — только выделенные (plSelectionIds: выделение + содержимое
+   * выделенных групп); пустое выделение — warn-тост, файл не строится.
+   */
+  textsExport(onlySel: boolean): void {
+    let selIds: Set<string> | null = null;
+    if (onlySel) {
+      const pl = this.plSelectionIds();
+      if (!pl || !pl.length) {
+        this.toast('Сначала выделите ноды на холсте: клик по карточке, Shift+клик — добавить, рамкой или группой', 'warn');
+        return;
+      }
+      selIds = new Set(pl);
+    }
+    const r = buildTextsExport(this.doc, selIds);
+    const fname = slug(this.doc.meta.name || '') + (selIds ? '-teksty-vydel' : '-teksty') + '.json';
+    downloadJson(fname, r.out, 'application/json;charset=utf-8');
+    this.toast(
+      selIds
+        ? ('Экспортировано выделенных: нод ' + r.stat.nodes + ', текстов ' + r.stat.texts + (r.stat.nRep ? ', реплик ' + r.stat.nRep : '') + ' — вернуть в проект можно через «Импорт текстов (JSON)»')
+        : ('Экспортировано: текстов ' + r.stat.texts + ', нод ' + r.stat.nodes + (r.stat.nRep ? ', реплик ' + r.stat.nRep : '') + ' — связи в блоке service'),
+    );
+  }
+
+  /** textsImpParse оригинала (10398–10472): разбор строки файла (v3/v2/v1). */
+  textsImpParse(str: string): { err: string } | { data: TxImpData } {
+    return textsImpParseDoc(str);
+  }
+
+  /**
+   * textsImpApply оригинала (10530–10600): merge-логика импорта с историей
+   * «Импорт текстов из JSON» и итоговым тостом (обновлено/создано/связи…).
+   */
+  textsImpApply(d: TxImpData, opt: TxImpOpt): void {
+    let stat = { upd: 0, cre: 0, rep: 0, out: 0, lnkUp: 0, lnkNew: 0, lnkSkip: 0 };
+    this.mutate((doc) => {
+      stat = textsImpApplyDoc(doc, d, opt).stat;
+    }, { label: 'Импорт текстов из JSON' });
+    const parts: string[] = [];
+    if (stat.upd) parts.push('обновлено нод: ' + stat.upd);
+    if (stat.cre) parts.push('создано нод: ' + stat.cre);
+    if (stat.rep) parts.push('реплики обновлены: ' + stat.rep);
+    if (stat.out) parts.push('развилки обновлены: ' + stat.out);
+    if (stat.lnkUp) parts.push('связей исправлено: ' + stat.lnkUp);
+    if (stat.lnkNew) parts.push('связей добавлено: ' + stat.lnkNew);
+    if (stat.lnkSkip) parts.push('связей пропущено: ' + stat.lnkSkip);
+    this.toast(parts.length ? 'Импорт завершён — ' + parts.join(', ') : 'Импорт: тексты уже совпадают');
+  }
+
   importProject(parsed: unknown, filename?: string): void {
     const doc = docFromParsed(parsed);
     if (!doc.nodes.length && !doc.edges.length) {
@@ -1747,11 +2778,11 @@ export class VetviStore {
 
   /* ── совместное редактирование: помощь SyncClient ── */
 
-  /** Активный ввод/модалка/жест: в комнате удалённые снимки ждут (pendingRemote). */
+  /** Активный ввод/модалка/жест/анимация: в комнате удалённые снимки ждут (pendingRemote). */
   busyNow(): boolean {
     const t = typeof document !== 'undefined' ? document.activeElement : null;
     const typing = !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
-    return typing || this.modal != null || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag;
+    return typing || this.modal != null || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag || this.busyAnim;
   }
 
   /** Снимок проекта для комнаты (syncDocObj оригинала). */

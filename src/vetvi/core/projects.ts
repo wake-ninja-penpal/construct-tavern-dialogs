@@ -156,9 +156,9 @@ export function projFmtDate(iso: string | undefined): string {
   }
 }
 
-/** Скачивание JSON проекта (экспорт текущего или выделенных нод). */
-export function downloadJson(filename: string, data: unknown): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+/** Скачивание JSON проекта (экспорт текущего, выделенных нод или текстов). */
+export function downloadJson(filename: string, data: unknown, mime = 'application/json'): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

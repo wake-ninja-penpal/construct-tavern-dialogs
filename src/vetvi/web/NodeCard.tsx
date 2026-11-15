@@ -10,14 +10,15 @@
 
 import { useLayoutEffect, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
-import { NODE_W, STATUS_RU } from '@/vetvi/core/constants';
+import { NODE_W, STATUS_RU, iconPath, typeInfoOf } from '@/vetvi/core/constants';
 import { getMe } from '@/vetvi/core/identity';
-import { nodeColor, shadeHex, typeInfo } from '@/vetvi/core/geometry';
+import { nodeColor, shadeHex } from '@/vetvi/core/geometry';
 import { branchVarOverride, condText, varName, varNodeChipText } from '@/vetvi/core/vars';
 import type { VetviNode, VetviReply, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
 import type { MeasureSink } from './measure';
 import { ctxMenus } from './ctxMenus';
+import { noteBus } from './NoteModals';
 
 const STATUS_TITLE: Record<string, string> = { idea: 'Идея', draft: 'В работе', done: 'Готово' };
 
@@ -37,6 +38,17 @@ const VAR_D = 'M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5M5 12.5h14M5 17c2.6 5 5.4
 const MAX_DLG_DEPTH = 10;
 const DLG_REPLY_INDENT = 23;
 
+/** Иконка заметки на карточке (noteIconSvg оригинала, size 18). */
+function NoteIc({ size }: { size: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M15 3v4h4" />
+      <path d="M9 12h7M9 15.5h7M9 8.5h3" />
+    </svg>
+  );
+}
+
 /** Одиночная иконка оригинала (ic(): stroke 1.7, currentColor). */
 function Ic({ d, size }: { d: string; size: number }) {
   return (
@@ -46,7 +58,7 @@ function Ic({ d, size }: { d: string; size: number }) {
   );
 }
 
-export function TypeIcon({ type, size = 13 }: { type: string; size?: number }) {
+export function TypeIcon({ type, size = 13, icon }: { type: string; size?: number; icon?: string | null }) {
   const paths: Record<string, string> = {
     scene: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6l-2 4M13 6l-2 4M18 6l-2 4"/>',
     quest: '<path d="M6 3v18"/><path d="M6 4.5h11l-2.6 3.7 2.6 3.8H6"/>',
@@ -58,7 +70,9 @@ export function TypeIcon({ type, size = 13 }: { type: string; size?: number }) {
     event: '<path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21M6 6l2.4 2.4M15.6 15.6 18 18M18 6l-2.4 2.4M8.4 15.6 6 18"/>',
     note: '<path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/>',
   };
-  const d = paths[type] || paths.scene;
+  /* icon оригинала: у ноды своего типа — custom.icon из ALLICONS (fallback star);
+     без icon — базовые пути по ключу типа (совместимость с прежними вызовами) */
+  const d = icon ? iconPath(icon) : (paths[type] || paths.scene);
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <g dangerouslySetInnerHTML={{ __html: d }} />
@@ -162,7 +176,8 @@ export function NodeCard(props: {
   }, [renaming]);
 
   const isDlg = n.type === 'dialog';
-  const info = typeInfo(n.type);
+  /* typeInfo оригинала (2926–2931): у ноды своего типа — имя/цвет/иконка из customTypes */
+  const info = typeInfoOf(store.doc, n.type);
   const ex = (n.expand === 0 || n.expand === 1 || n.expand === 2) ? n.expand : 1;
   const status = STATUS_RU[n.status] ? n.status : 'idea';
   const isFlash = !!(flash && flash.nodeId === n.id);
@@ -195,6 +210,10 @@ export function NodeCard(props: {
   const ovIn = branchVarOverride(store.doc, n);
   const tags = Array.isArray(n.tags) ? n.tags : [];
   const txt = textOf(n);
+
+  /* заметки элемента: видимые стикеры с индексом в n.notes (renderNodeNotes) */
+  const notesArr = Array.isArray(n.notes) ? n.notes : [];
+  const visNotes = notesArr.map((note, ni) => ({ note, ni })).filter((x) => !x.note.hidden);
 
   const poutTitle =
     (isDlg ? 'выход диалога (правая грань, внизу)' : n.type === 'action' || n.type === 'branch' ? 'выход (правая грань, внизу)' : 'выход — тяните к другому узлу') +
@@ -300,7 +319,7 @@ export function NodeCard(props: {
       }}
     >
       <div className="n-head">
-        <span className="n-ico"><TypeIcon type={n.type} size={15} /></span>
+        <span className="n-ico"><TypeIcon type={n.type} size={15} icon={info.icon} /></span>
         {renaming ? (
           <input
             ref={renameRef}
@@ -505,6 +524,23 @@ export function NodeCard(props: {
         title={poutTitle}
         onMouseDown={(e) => { e.stopPropagation(); if (e.ctrlKey || e.metaKey) props.onPinReattach(e, n.id); else props.onPinDown(e, n.id, null, null); }}
       />
+      {visNotes.length > 0 && (
+        <div className="node-notes">
+          {visNotes.map(({ note, ni }) => (
+            <button
+              key={ni}
+              type="button"
+              className="node-note-ico"
+              title={note.title || 'Заметка'}
+              data-nodrag
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); noteBus.openView(n.id, ni); }}
+            >
+              <NoteIc size={18} />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

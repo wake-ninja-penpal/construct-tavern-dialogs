@@ -19,7 +19,7 @@ import type { ReactNode } from 'react';
 import { PALETTE_COLORS, TYPES } from '@/vetvi/core/constants';
 import { clamp, typeInfo } from '@/vetvi/core/geometry';
 import { hkText } from '@/vetvi/core/hotkeys';
-import type { VetviDoc, VetviGroup, VetviNode, VetviReply } from '@/vetvi/core/types';
+import type { VetviDoc, VetviGroup, VetviNode, VetviNote, VetviReply } from '@/vetvi/core/types';
 import {
   branchVarOverride, condOpsFor, isTrueVal, opsForType,
   varById, varName, varType, varsList,
@@ -28,6 +28,7 @@ import type { Cond } from '@/vetvi/core/vars';
 import { allDescNodes } from './ggroups';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
+import { NOTE_MAX, noteBus } from './NoteModals';
 
 /* ═══ константы оригинала ═══ */
 
@@ -53,6 +54,9 @@ const ICONS: Record<string, string> = {
   alignH: '<path d="M2 12h20"/><rect x="4" y="8" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="8" rx="1"/><rect x="16" y="8" width="4" height="8" rx="1"/>',
   alignV: '<path d="M12 2v20"/><rect x="8" y="4" width="8" height="4" rx="1"/><rect x="8" y="10" width="8" height="4" rx="1"/><rect x="8" y="16" width="8" height="4" rx="1"/>',
   grip: '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>',
+  eye: '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+  eyeOff: '<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>',
+  queue: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.1"/><circle cx="3.7" cy="12" r="1.1"/><circle cx="3.7" cy="18" r="1.1"/>',
 };
 
 function Ico({ name, size = 15 }: { name: string; size?: number }) {
@@ -81,8 +85,8 @@ function castInspVal(raw: unknown): string {
   return String(raw == null ? '' : raw).trim().slice(0, 200);
 }
 
-function customTypesOf(doc: VetviDoc): { id: string; name: string; color?: string }[] {
-  return Array.isArray(doc.customTypes) ? (doc.customTypes as { id: string; name: string; color?: string }[]) : [];
+function customTypesOf(doc: VetviDoc): { id: string; name: string; color?: string; icon?: string }[] {
+  return Array.isArray(doc.customTypes) ? (doc.customTypes as { id: string; name: string; color?: string; icon?: string }[]) : [];
 }
 
 /** paletteAdd оригинала: свой цвет в начало project.palette (≤24, без дублей). */
@@ -187,6 +191,124 @@ function lockFor(store: VetviStore, ids: string[]): { id: string; name: string; 
     if (l) return l;
   }
   return null;
+}
+
+/* ═══ заметки элемента: notesSectionHtml + bindNotesDelegation ═══ */
+
+function NotesSection({ store, n }: { store: VetviStore; n: VetviNode }) {
+  const notes: VetviNote[] = Array.isArray(n.notes) ? n.notes : [];
+  const cnt = notes.length;
+  const anyVisible = notes.some((x) => !x.hidden);
+
+  /* #notesHideAll: есть видимые — скрыть все, иначе показать все (6429) */
+  const hideAll = () => {
+    store.mutate((doc) => {
+      const nn = doc.nodes.find((x) => x.id === n.id);
+      if (!nn) return;
+      if (!Array.isArray(nn.notes)) nn.notes = [];
+      const anyVis = nn.notes.some((x) => !x.hidden);
+      nn.notes.forEach((x) => { x.hidden = anyVis; });
+    }, { label: 'Заметки элемента' });
+  };
+
+  /* #notesAdd (6427): лимит NOTE_MAX → warn, иначе openNoteEditor(n,-1) */
+  const add = (ev: React.MouseEvent) => {
+    if (cnt >= NOTE_MAX) {
+      store.toast('Максимум ' + NOTE_MAX + ' заметки', 'warn');
+      return;
+    }
+    noteBus.openEditor(n.id, -1, ev.clientX, ev.clientY);
+  };
+
+  /* data-note-act="hide" (6436): toggle hidden отдельной заметки */
+  const toggleHidden = (ni: number) => {
+    store.mutate((doc) => {
+      const nn = doc.nodes.find((x) => x.id === n.id);
+      if (!nn || !Array.isArray(nn.notes) || !nn.notes[ni]) return;
+      nn.notes[ni].hidden = !nn.notes[ni].hidden;
+    }, { label: 'Заметки элемента' });
+  };
+
+  /* data-note-act="del" (6435): удалить заметку */
+  const del = (ni: number) => {
+    store.mutate((doc) => {
+      const nn = doc.nodes.find((x) => x.id === n.id);
+      if (!nn || !Array.isArray(nn.notes)) return;
+      nn.notes.splice(ni, 1);
+    }, { label: 'Удаление заметки' });
+    store.toast('Заметка удалена', 'warn');
+  };
+
+  return (
+    <>
+      <label className="i-lab" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        Заметки ({cnt}/{NOTE_MAX})
+        <span style={{ display: 'flex', gap: 4 }}>
+          <button
+            type="button"
+            className={'mini-btn eye' + (anyVisible ? '' : ' off')}
+            id="notesHideAll"
+            title={anyVisible ? 'Скрыть все у элемента' : 'Показать все'}
+            onClick={hideAll}
+          >
+            <Ico name={anyVisible ? 'eye' : 'eyeOff'} size={12} />
+          </button>
+          <button
+            type="button"
+            className="mini-btn"
+            id="notesAdd"
+            title="Добавить заметку"
+            disabled={cnt >= NOTE_MAX}
+            style={cnt >= NOTE_MAX ? { opacity: 0.35 } : undefined}
+            onClick={add}
+          >
+            <Ico name="plus" size={12} />
+          </button>
+        </span>
+      </label>
+      <div className="note-list">
+        {cnt ? notes.map((note, ni) => (
+          <div key={ni} className={'note-row' + (note.hidden ? ' hidden' : '')} data-ni={ni}>
+            <span className="note-row-title" data-note-view={ni} onClick={() => noteBus.openView(n.id, ni)}>{note.title || 'Без названия'}</span>
+            <span className="note-row-acts">
+              <button
+                type="button"
+                className="mini-btn"
+                data-note-act="edit"
+                data-ni={ni}
+                title="Редактировать"
+                onClick={(ev) => noteBus.openEditor(n.id, ni, ev.clientX, ev.clientY)}
+              >
+                <Ico name="pencil" size={12} />
+              </button>
+              <button
+                type="button"
+                className={'mini-btn eye' + (note.hidden ? ' off' : '')}
+                data-note-act="hide"
+                data-ni={ni}
+                title={note.hidden ? 'Показать' : 'Скрыть от элемента'}
+                onClick={() => toggleHidden(ni)}
+              >
+                <Ico name={note.hidden ? 'eyeOff' : 'eye'} size={12} />
+              </button>
+              <button
+                type="button"
+                className="mini-btn del"
+                data-note-act="del"
+                data-ni={ni}
+                title="Удалить"
+                onClick={() => del(ni)}
+              >
+                <Ico name="x" size={12} />
+              </button>
+            </span>
+          </div>
+        )) : (
+          <div className="note-empty">Заметок нет — добавьте через +</div>
+        )}
+      </div>
+    </>
+  );
 }
 
 /* ═══ палитра: paletteCoreHtml + bindPalette + toggleSwatches ═══ */
@@ -427,7 +549,8 @@ function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; e
   const typehead = (
     <div className="i-typehead" id="iTypeWrap">
       <span className="i-typeico" style={{ color: typeColor, background: 'rgba(255,255,255,.05)' }}>
-        <TypeIcon type={n.type} size={18} />
+        {/* у ноды своего типа — иконка custom.icon (nodeVisual оригинала, fallback note) */}
+        <TypeIcon type={n.type} size={18} icon={isCustom ? ((cst && cst.icon) ? cst.icon : 'note') : null} />
       </span>
       <select className="inp" id="iType" value={n.type} onChange={(ev) => changeType(ev.target.value)}>
         {Object.keys(TYPES).map((t) => <option key={t} value={t}>{TYPES[t].name}</option>)}
@@ -566,6 +689,7 @@ function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; e
             </button>
           </div>
         )}
+        <NotesSection store={store} n={n} />
         {meta}
         {nodeActs}
       </>
@@ -661,6 +785,7 @@ function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; e
       {isBranch && <OutcomesEditor store={store} n={n} editPreRef={editPreRef} />}
       {isAction && <ActionsEditor store={store} n={n} editPreRef={editPreRef} />}
       {isVar && <VarNodeEditor store={store} n={n} editPreRef={editPreRef} />}
+      <NotesSection store={store} n={n} />
       {meta}
       {nodeActs}
     </>
@@ -1209,6 +1334,11 @@ function GroupBody({ store, gid, editPreRef }: { store: VetviStore; gid: string;
         >
           <Ico name="target" />Выделить все ноды
         </button>
+        {store.membersOf(gid).length >= 2 && (
+          <button type="button" className="btn" id="igToQ" onClick={() => store.groupToStack(gid)}>
+            <Ico name="queue" />Преобразовать в цепочку
+          </button>
+        )}
         <button type="button" className="btn danger" id="igUng" onClick={() => store.dissolveGroup(gid)}>
           <Ico name="x" />Распустить
         </button>
@@ -1310,6 +1440,9 @@ function StackBody({ store, g, editPreRef }: { store: VetviStore; g: VetviGroup;
         })}
       </div>
       <div className="i-actions">
+        <button type="button" className="btn" id="igToGrp" onClick={() => store.stackToGroup(g.id)}>
+          <Ico name="expand" />Преобразовать в группу
+        </button>
         <button type="button" className="btn danger" id="igUng" onClick={() => store.dissolveGroup(g.id)}>
           <Ico name="x" />Разобрать цепочку
         </button>
@@ -1352,6 +1485,11 @@ function MultiBody({ store }: { store: VetviStore }) {
       {allDialogs && (
         <button type="button" className="btn primary" id="mgMerge" style={{ width: '100%', marginTop: 8 }} onClick={() => store.mergeDialogNodes()}>
           <Ico name="dialog" size={14} />Объединить в один диалог
+        </button>
+      )}
+      {store.sel.size >= 2 && store.selAllStackable() && (
+        <button type="button" className="btn" id="mgQueue" style={{ width: '100%', marginTop: 8 }} onClick={() => store.stackFromSelection()}>
+          <Ico name="queue" size={14} />Собрать в цепочку (по порядку выделения)
         </button>
       )}
       <div className="i-actions">

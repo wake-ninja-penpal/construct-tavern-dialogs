@@ -17,6 +17,7 @@ import { CanvasBoard } from './CanvasBoard';
 import { LeftPane } from './LeftPane';
 import { Inspector } from './Inspector';
 import { Player } from './Player';
+import { NoteModals, noteBus, noteModalOpen } from './NoteModals';
 import { DialogModal } from './DialogModal';
 import { ModalHost, ConfirmHost, bindLogHelpers } from './Modals';
 import { CtxMenuHost, ToastHost } from './CtxMenu';
@@ -73,6 +74,12 @@ export default function VetviApp() {
   /* ── диспетчер горячих клавиш (цепочка условий оригинала) ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      /* модалки заметок: Esc закрывает первой — capture-обработчик оригинала (13531) */
+      if (e.key === 'Escape' && noteModalOpen()) {
+        e.preventDefault();
+        noteBus.closeAll();
+        return;
+      }
       const t = e.target as HTMLElement | null;
       const typing = !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
       const modal = store.modal;
@@ -238,6 +245,7 @@ export default function VetviApp() {
         </div>
       </footer>
 
+      <NoteModals store={store} />
       <DialogModal store={store} />
       <ModalHost store={store} />
       <ConfirmHost store={store} />
