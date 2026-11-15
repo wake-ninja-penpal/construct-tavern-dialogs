@@ -11,22 +11,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { snapVal } from '@/vetvi/core/factory';
-import { clamp, clampZoom, screenToWorld } from '@/vetvi/core/geometry';
+import { GRID, NODE_W } from '@/vetvi/core/constants';
+import { clamp, clampZoom, nodeColor, nodeWidth, screenToWorld, typeInfo } from '@/vetvi/core/geometry';
 import { nearestSegPoint } from '@/vetvi/core/edgepath';
-import type { NodeSize, VetviNode } from '@/vetvi/core/types';
+import { getMe } from '@/vetvi/core/identity';
+import { varById } from '@/vetvi/core/vars';
+import type { NodeSize, VetviDoc, VetviGroup, VetviNode, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
 import { NodeCard } from './NodeCard';
 import { GroupLayer } from './GroupLayer';
 import { EdgeLayer, buildEdgeItems } from './EdgeLayer';
-import { collapsedAncestorOf, groupCardRect, snapG } from './ggroups';
+import { collapsedAncestorOf, groupCardRect, groupFrameRect, snapG } from './ggroups';
 import { ctxMenus } from './ctxMenus';
 
 type Gest =
   | { mode: 'pan'; sx: number; sy: number; lx: number; ly: number }
   | { mode: 'marquee'; sx: number; sy: number; add: boolean; preN: Set<string>; preG: Set<string> }
   | { mode: 'gcreate'; sx: number; sy: number; cx: number; cy: number }
-  | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number }
+  | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number; wx: number; wy: number }
   | { mode: 'node'; lx: number; ly: number }
   | { mode: 'group'; gid: string; lx: number; ly: number; base: Map<string, { x: number; y: number }> }
   | { mode: 'gresize'; gid: string; dir: 'r' | 'b' | 'br'; sx: number; sy: number; fw: number; fh: number }
@@ -38,6 +41,68 @@ type Gest =
   | { mode: 'bridge'; eid: string; part: 'l' | 'r' | 'h'; lx: number; ly: number; dl: number; dy: number; dr: number }
   | { mode: 'dlgW'; id: string; startX: number; startW: number }
   | null;
+
+/* ═══ мини-карта: mmFit/mmRebuild/mmGeom/mmRender оригинала (строки 9269–9372 index.html) ═══
+   Оригинал НЕ сохраняет размер карты в localStorage — ресайз живёт до перезагрузки (1:1). */
+const MM_MIN_W = 180;
+const MM_MIN_H = 130;
+const MM_DEF_W = 260;
+const MM_DEF_H = 180;
+
+/* mmViewportBox оригинала: мировой прямоугольник, видимый на холсте */
+function mmViewportBoxOf(vp: VetviViewport, cw: number, ch: number): { x1: number; y1: number; x2: number; y2: number } {
+  const vx = -vp.x / vp.z;
+  const vy = -vp.y / vp.z;
+  return { x1: vx, y1: vy, x2: vx + cw / vp.z, y2: vy + ch / vp.z };
+}
+
+/* resolvedNodeColor оригинала (2945): персонаж-участник → своя краска → цвет типа */
+function mmNodeColor(store: VetviStore, n: VetviNode, depth = 0): string {
+  if (n.type !== 'dialog' && depth < 5 && Array.isArray(n.participants) && n.participants.length) {
+    const c0 = store.charById(n.participants[0]);
+    if (c0) return c0.color || '#9cb878';
+    const n0 = store.nodeById(n.participants[0]);
+    if (n0) {
+      const sub = mmNodeColor(store, n0, depth + 1);
+      if (sub) return sub;
+    }
+  }
+  return n.color ? nodeColor(n) : (typeInfo(n.type).color || '#8b929c');
+}
+
+/* groupRectWorld оригинала (3050): fold=2 — рамка, fold<2 — карточка (GCARD_W/QCARD_W) */
+function mmGroupWorldRect(doc: VetviDoc, g: VetviGroup, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): { x: number; y: number; w: number; h: number } {
+  const fold = g.fold === undefined ? 2 : g.fold;
+  if (fold === 2) return groupFrameRect(doc, g, sizes, cardSizes);
+  const cr = groupCardRect(doc, g, cardSizes);
+  return { x: g.x || 0, y: g.y || 0, w: cr.w, h: cr.h };
+}
+
+/* mmBBox оригинала: границы видимых нод и групп (свёрнутое пропускается) */
+function mmBBoxOf(doc: VetviDoc, nodes: VetviNode[], sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): { x1: number; y1: number; x2: number; y2: number } | null {
+  let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9, any = false;
+  for (const n of nodes) {
+    const s = sizes.get(n.id);
+    const w = s ? s.w : NODE_W;
+    const h = s ? s.h : 90;
+    any = true;
+    x1 = Math.min(x1, n.x);
+    y1 = Math.min(y1, n.y);
+    x2 = Math.max(x2, n.x + w);
+    y2 = Math.max(y2, n.y + h);
+  }
+  for (const g of doc.groups) {
+    if (groupInsideCollapsed(doc, g)) continue;
+    const r = mmGroupWorldRect(doc, g, sizes, cardSizes);
+    any = true;
+    x1 = Math.min(x1, r.x);
+    y1 = Math.min(y1, r.y);
+    x2 = Math.max(x2, r.x + r.w);
+    y2 = Math.max(y2, r.y + r.h);
+  }
+  if (!any) return null;
+  return { x1, y1, x2, y2 };
+}
 
 export function CanvasBoard(props: { store: VetviStore }) {
   const { store } = props;
@@ -51,10 +116,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const [tick, setTick] = useState(0);
   const gestRef = useRef<Gest>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number; g?: boolean } | null>(null);
+  /* линия «ножа» в мировых координатах (оригинал кладёт path.cutline в #edges) */
   const [cutline, setCutline] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ from: string; out: string | null; reply: string | null; x: number; y: number; startX: number; startY: number } | null>(null);
   const [hoverTarget, setHoverTarget] = useState<string | null>(null);
   const [altDown, setAltDown] = useState(false);
+  /* dropready — перетаскивание из палитры над холстом; panning — активный пан; animv — анимация вида */
+  const [dropReady, setDropReady] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const [viewAnim, setViewAnim] = useState(false);
 
   const sink = useMemo(
     () => ({
@@ -100,10 +170,18 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return () => { canvasApi.current = null; };
   }, [store, sizesMap]);
 
-  /* ── центрирование по запросу ── */
+  /* ── центрирование по запросу (с анимацией вида — animateView оригинала) ── */
   useEffect(() => {
-    if (store.centerReq && canvasApi.current) canvasApi.current.centerOn(store.centerReq.id);
-     
+    if (store.centerReq && canvasApi.current) {
+      canvasApi.current.centerOn(store.centerReq.id);
+      /* setState в кадре анимации, а не синхронно в эффекте */
+      const raf = requestAnimationFrame(() => setViewAnim(true));
+      const t = setTimeout(() => setViewAnim(false), 480);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(t);
+      };
+    }
   }, [store.centerReq?.t]);
 
   const items = useMemo(
@@ -146,17 +224,21 @@ export function CanvasBoard(props: { store: VetviStore }) {
   /* ── клики по пустому месту ── */
   const onCanvasDown = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
-    if (t.closest('[data-node-id]') || t.closest('[data-pin]') || t.closest('.rn-gframe') || t.closest('.rn-gcard')) return;
+    if (t.closest('[data-node-id]') || t.closest('[data-pin]') || t.closest('.rn-gframe, .groupbox') || t.closest('.rn-gcard, .gcard, .qcard')) return;
     store.closeCtx();
     if (e.button === 1 || store.spaceDown || (store.ctrlDown && !e.shiftKey) || e.button === 2) {
       gestRef.current = { mode: 'pan', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY };
+      setPanning(true);
+      document.body.classList.add('panning');
       e.preventDefault();
       return;
     }
     if (e.button !== 0) return;
     if (altDown) {
-      gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY };
-      setCutline({ x1: e.clientX, y1: e.clientY, x2: e.clientX, y2: e.clientY });
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const w0 = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
+      gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, wx: w0.x, wy: w0.y };
+      setCutline({ x1: w0.x, y1: w0.y, x2: w0.x, y2: w0.y });
       e.preventDefault();
       return;
     }
@@ -260,7 +342,11 @@ export function CanvasBoard(props: { store: VetviStore }) {
   }, [store]);
 
   const onNodeDbl = useCallback((id: string) => {
-    store.startRename(id);
+    /* как в оригинале: двойной клик — только выделение; у диалога — открыть редактор реплик */
+    if (store.nodeById(id)?.type === 'dialog') {
+      store.openDialogEditor(id);
+      store.requestFlash(id, null);
+    }
   }, [store]);
 
   const onReplyDbl = useCallback((nodeId: string, rid: string) => {
@@ -396,7 +482,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
         case 'knife': {
           g.lx = e.clientX;
           g.ly = e.clientY;
-          setCutline({ x1: g.sx, y1: g.sy, x2: e.clientX, y2: e.clientY });
+          const rect = canvasRef.current?.getBoundingClientRect();
+          const wk = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
+          setCutline({ x1: g.wx, y1: g.wy, x2: wk.x, y2: wk.y });
           break;
         }
         case 'node': {
@@ -540,6 +628,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       store.syncBusyFlag = false;
       store.gestureRollback = null;
       if (store.sync && store.sync.enabled) store.sync.lockGiveAll();
+      if (g && g.mode === 'pan') { setPanning(false); document.body.classList.remove('panning'); }
       if (!g) return;
       switch (g.mode) {
         case 'pan': store.panEnd(); break;
@@ -569,7 +658,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           if (!moved) {
             // одиночный клик: разрезать связь под курсором
             const el = document.elementFromPoint(g.lx, g.ly) as HTMLElement | null;
-            const path = el ? el.closest('svg.rn-edges path.rn-edge-hit') : null;
+            const path = el ? el.closest('svg.rn-edges path.hit, svg#edges path.hit') : null;
             void path;
             const hit = items.find((it) => {
               const pts = it.pts;
@@ -719,19 +808,26 @@ export function CanvasBoard(props: { store: VetviStore }) {
   }, [store, doc, items, sizesMap, cardSizes]);
 
 
-  /* Alt → нож */
+  /* Alt → нож (курсор — через body.knife, как в оригинале) */
   useEffect(() => {
     const kd = (e: KeyboardEvent) => {
-      if (e.key === 'Alt' && !isTyping()) { setAltDown(true); store.knifeOn = true; store.emit(); }
-      if (e.key === 'Control' || e.key === 'Meta') { store.ctrlDown = true; store.emit(); }
-      if (e.code === 'Space' && !isTyping()) { store.spaceDown = true; store.emit(); e.preventDefault(); }
+      if (e.key === 'Alt' && !isTyping()) { setAltDown(true); store.knifeOn = true; document.body.classList.add('knife'); store.emit(); }
+      if (e.key === 'Control' || e.key === 'Meta') { store.ctrlDown = true; document.body.classList.add('ctrlpan'); store.emit(); }
+      if (e.code === 'Space' && !isTyping()) { store.spaceDown = true; document.body.classList.add('space'); store.emit(); e.preventDefault(); }
     };
     const ku = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') { setAltDown(false); store.knifeOn = false; store.emit(); }
-      if (e.key === 'Control' || e.key === 'Meta') { store.ctrlDown = false; store.emit(); }
-      if (e.code === 'Space') { store.spaceDown = false; store.emit(); }
+      if (e.key === 'Alt') { setAltDown(false); store.knifeOn = false; document.body.classList.remove('knife'); store.emit(); }
+      if (e.key === 'Control' || e.key === 'Meta') { store.ctrlDown = false; document.body.classList.remove('ctrlpan'); store.emit(); }
+      if (e.code === 'Space') { store.spaceDown = false; document.body.classList.remove('space'); store.emit(); }
     };
-    const kb = () => { setAltDown(false); store.knifeOn = false; store.spaceDown = false; store.ctrlDown = false; store.emit(); };
+    const kb = () => {
+      setAltDown(false);
+      store.knifeOn = false;
+      store.spaceDown = false;
+      store.ctrlDown = false;
+      document.body.classList.remove('knife', 'ctrlpan', 'space', 'panning');
+      store.emit();
+    };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
     window.addEventListener('blur', kb);
@@ -740,8 +836,62 @@ export function CanvasBoard(props: { store: VetviStore }) {
       window.removeEventListener('keyup', ku);
       window.removeEventListener('blur', kb);
     };
-     
+
   }, []);
+
+  /* курсор copy при переносе дубликата (body.carry оригинала) */
+  useEffect(() => {
+    document.body.classList.toggle('carry', !!store.carry);
+    return () => { document.body.classList.remove('carry'); };
+  }, [store.carry]);
+
+  /* ── drag&drop из палитры на холст: dropready + создание ноды в точке ── */
+  const hasPalData = (e: React.DragEvent): boolean => {
+    const types = e.dataTransfer ? Array.from(e.dataTransfer.types) : [];
+    return types.indexOf('text/vetvi-type') >= 0 || types.indexOf('text/vetvi-clone') >= 0 || types.indexOf('text/vetvi-var') >= 0;
+  };
+  const clearDropVisuals = useCallback(() => {
+    setDropReady(false);
+    document.body.classList.remove('dropping');
+  }, []);
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (!hasPalData(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDropReady(true);
+    document.body.classList.add('dropping');
+  }, []);
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    if (!hasPalData(e)) return;
+    clearDropVisuals();
+  }, [clearDropVisuals]);
+  const onDrop = useCallback((e: React.DragEvent) => {
+    const dt = e.dataTransfer;
+    const type = dt ? dt.getData('text/vetvi-type') : '';
+    const vid = dt ? dt.getData('text/vetvi-var') : '';
+    clearDropVisuals();
+    if (!type && !vid) return;
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
+    if (type) {
+      store.addNodeAt(type, w.x - NODE_W / 2, w.y - 20);
+      return;
+    }
+    /* переменная из вкладки «Переменные» → нода переменной */
+    const v = varById(store.doc, vid);
+    if (!v) return;
+    const pre = store.beginEdit();
+    const vn = store.addNodeAtRaw('varnode', w.x - NODE_W / 2, w.y - 20);
+    if (vn) {
+      vn.varMode = 'set';
+      vn.varOp = '=';
+      vn.varVal = typeof v.val === 'number' ? v.val : 0;
+      vn.vid = vid;
+      store.selectOnly(vn.id);
+    }
+    store.commitEdit(pre, 'Нода переменной');
+  }, [store, clearDropVisuals]);
 
   /* отслеживание ноды под курсором (для старта плеера по P) */
   const lastPtr = useRef({ x: 0, y: 0 });
@@ -777,7 +927,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       store.openCtx(e.clientX, e.clientY, menus.node(nid));
       return;
     }
-    const egEl = t.closest('g.rn-eg') as SVGGElement | null;
+    const egEl = t.closest('g.rn-eg, g.edge, [data-edge-id]') as SVGGElement | null;
     if (egEl) {
       const eid = egEl.getAttribute('data-edge-id');
       if (eid && store.edgeById(eid)) {
@@ -786,7 +936,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
         return;
       }
     }
-    const gEl = t.closest('.rn-gframe, .rn-gcard') as HTMLElement | null;
+    const gEl = t.closest('.rn-gframe, .rn-gcard, .groupbox, .gcard, .qcard') as HTMLElement | null;
     if (gEl) {
       const gid = findGidFromEl(store, gEl);
       if (gid) {
@@ -801,55 +951,322 @@ export function CanvasBoard(props: { store: VetviStore }) {
   /* двойной клик по пустому месту → меню «Добавить» */
   const onDbl = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
-    if (t.closest('[data-node-id]') || t.closest('svg.rn-edges') || t.closest('.rn-gframe') || t.closest('.rn-gcard')) return;
+    if (t.closest('[data-node-id]') || t.closest('svg.rn-edges, svg#edges') || t.closest('.rn-gframe, .groupbox') || t.closest('.rn-gcard, .gcard, .qcard')) return;
     const menus = ctxMenus(store);
     store.openCtx(e.clientX, e.clientY, menus.canvas(e.clientX, e.clientY, true));
   }, [store]);
 
-  const fitNow = () => {
-    const el = canvasRef.current;
-    if (!el) return;
-    store.fitView(el.clientWidth, el.clientHeight, sizesMap);
-  };
-
-  const zoomStep = (f: number) => {
-    const el = canvasRef.current;
-    if (!el) return;
-    store.zoomAt(el.clientWidth / 2, el.clientHeight / 2, f);
-  };
-
   void tick;
 
-  const playerOpen = store.modal === 'player';
+  /* ═══ мини-карта: состояние вида + жесты (1:1 с окном 9269–9372 оригинала) ═══
+     mmView/mmDim — state (реф-в-рендер запрещён react-hooks/refs), жесты — через рефы */
+  const mmRef = useRef<HTMLDivElement>(null);
+  const [mmView, setMmView] = useState({ x: 0, y: 0, z: 0.2 });
+  /* null — CSS-размер по умолчанию (260×180 / 170×120 в узких окнах), как в оригинале до ресайза */
+  const [mmDim, setMmDim] = useState<{ w: number; h: number } | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  const mmReadyRef = useRef(false);
+  const mmFrameDragRef = useRef<{ wx: number; wy: number; cx: number; cy: number } | null>(null);
+  const mmPanRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
+  const mmResizeRef = useRef<{ sw: number; sh: number; cx: number; cy: number } | null>(null);
+
+  /* размер холста для рамки вида #mmView (canvas.clientWidth оригинала) */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const measure = () => setCanvasSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, []);
+
+  /* mmToLocal/mmToWorld оригинала: координаты в логической системе viewBox (260×180 по умолчанию) */
+  const mmToLocal = useCallback((clientX: number, clientY: number) => {
+    const box = mmRef.current?.getBoundingClientRect();
+    const hs = box ? (box.width / (mmDim ? mmDim.w : MM_DEF_W)) || 1 : 1;
+    return { x: (clientX - (box ? box.left : 0)) / hs, y: (clientY - (box ? box.top : 0)) / hs };
+  }, [mmDim]);
+
+  /* mmFit оригинала — один раз, когда ноды измерены: bbox контента ∪ вид холста, pad 16, z 0.02..4 */
+  useEffect(() => {
+    if (mmReadyRef.current) return;
+    const el = canvasRef.current;
+    if (!el || !el.clientWidth) return;
+    if (visibleNodes.length > 0 && sizesMap.size < visibleNodes.length) return;
+    const b = mmBBoxOf(doc, visibleNodes, sizesMap, cardSizes);
+    const v = mmViewportBoxOf(store.vp, el.clientWidth, el.clientHeight);
+    const x1 = b ? Math.min(b.x1, v.x1) : v.x1;
+    const y1 = b ? Math.min(b.y1, v.y1) : v.y1;
+    const x2 = b ? Math.max(b.x2, v.x2) : v.x2;
+    const y2 = b ? Math.max(b.y2, v.y2) : v.y2;
+    const bw = Math.max(1, x2 - x1);
+    const bh = Math.max(1, y2 - y1);
+    const pad = 16;
+    const z = clamp(Math.min(((mmDim ? mmDim.w : MM_DEF_W) - pad * 2) / bw, ((mmDim ? mmDim.h : MM_DEF_H) - pad * 2) / bh), 0.02, 4);
+    const mvFit = { x: (x1 + x2) / 2 - (mmDim ? mmDim.w : MM_DEF_W) / (2 * z), y: (y1 + y2) / 2 - (mmDim ? mmDim.h : MM_DEF_H) / (2 * z), z };
+    /* setState в кадре анимации — не синхронно в эффекте (иначе каскад рендеров) */
+    const raf = requestAnimationFrame(() => { mmReadyRef.current = true; setMmView(mvFit); });
+    return () => cancelAnimationFrame(raf);
+  });
+
+  /* mmFrameMove оригинала: ЛКМ на карте тянет вид холста за курсор */
+  const mmFrameMove = useCallback((e: PointerEvent) => {
+    const fd = mmFrameDragRef.current;
+    const el = canvasRef.current;
+    if (!fd || !el) return;
+    const p = mmToLocal(e.clientX, e.clientY);
+    const wx = mmView.x + p.x / mmView.z;
+    const wy = mmView.y + p.y / mmView.z;
+    const ncx = fd.cx + (wx - fd.wx);
+    const ncy = fd.cy + (wy - fd.wy);
+    const vw = el.clientWidth / store.vp.z;
+    const vh = el.clientHeight / store.vp.z;
+    store.setViewport({ x: -(ncx - vw / 2) * store.vp.z, y: -(ncy - vh / 2) * store.vp.z });
+  }, [mmToLocal, mmView, store]);
+
+  /* mmPanMove оригинала: СКМ панорамирует обзор самой карты */
+  const mmPanMove = useCallback((e: PointerEvent) => {
+    const pn = mmPanRef.current;
+    if (!pn) return;
+    const p = mmToLocal(e.clientX, e.clientY);
+    setMmView((prev) => ({ x: pn.vx - (p.x - pn.sx) / prev.z, y: pn.vy - (p.y - pn.sy) / prev.z, z: prev.z }));
+  }, [mmToLocal]);
+
+  /* mmResizeMove оригинала: угол карты — px-размер #miniMap + viewBox #mmSvg, центр обзора на месте */
+  const mmResizeMove = useCallback((e: PointerEvent) => {
+    const s = mmResizeRef.current;
+    if (!s) return;
+    const dx = e.clientX - s.cx;
+    const dy = e.clientY - s.cy;
+    const nw = clamp(s.sw - dx, MM_MIN_W, 1400);
+    const nh = clamp(s.sh + dy, MM_MIN_H, 1000);
+    setMmDim({ w: nw, h: nh });
+    setMmView((prev) => {
+      const cwx = prev.x + s.sw / (2 * prev.z);
+      const cwy = prev.y + s.sh / (2 * prev.z);
+      return { x: cwx - nw / (2 * prev.z), y: cwy - nh / (2 * prev.z), z: prev.z };
+    });
+  }, []);
+
+  /* глобальные pointermove/pointerup жестов карты (окно 8316/8700 оригинала) */
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      if (mmResizeRef.current) { mmResizeMove(e); return; }
+      if (mmFrameDragRef.current) { mmFrameMove(e); return; }
+      if (mmPanRef.current) { mmPanMove(e); return; }
+    };
+    const up = () => {
+      if (mmResizeRef.current) {
+        mmResizeRef.current = null;
+        const mb = mmRef.current;
+        if (mb) mb.classList.remove('mm-resizing');
+        return;
+      }
+      if (mmFrameDragRef.current) {
+        mmFrameDragRef.current = null;
+        const mf = mmRef.current;
+        if (mf) mf.style.cursor = '';
+        return;
+      }
+      if (mmPanRef.current) {
+        mmPanRef.current = null;
+        const mf = mmRef.current;
+        if (mf) mf.style.cursor = '';
+        return;
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [mmResizeMove, mmFrameMove, mmPanMove]);
+
+  /* wheel на карте — зум обзора оригинала (passive:false, 9337) */
+  useEffect(() => {
+    const el = mmRef.current;
+    if (!el) return;
+    const onMmWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const p = mmToLocal(e.clientX, e.clientY);
+      const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setMmView((prev) => {
+        const wx = prev.x + p.x / prev.z;
+        const wy = prev.y + p.y / prev.z;
+        const nz = clamp(prev.z * f, 0.02, 6);
+        return { x: wx - p.x / nz, y: wy - p.y / nz, z: nz };
+      });
+    };
+    el.addEventListener('wheel', onMmWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onMmWheel);
+  }, [mmToLocal]);
+
+  /* pointerdown на карте: ЛКМ — тянет вид, СКМ — пан обзора (обработчик 9318 оригинала) */
+  const onMmDown = useCallback((e: React.PointerEvent) => {
+    const t = e.target as Element;
+    if (t.closest && t.closest('.mm-resize')) return;
+    const mb = mmRef.current;
+    if (!mb) return;
+    const p = mmToLocal(e.clientX, e.clientY);
+    if (e.button === 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = canvasRef.current;
+      const vb = el && el.clientWidth ? mmViewportBoxOf(store.vp, el.clientWidth, el.clientHeight) : { x1: 0, y1: 0, x2: 0, y2: 0 };
+      const wx = mmView.x + p.x / mmView.z;
+      const wy = mmView.y + p.y / mmView.z;
+      mmFrameDragRef.current = { wx, wy, cx: (vb.x1 + vb.x2) / 2, cy: (vb.y1 + vb.y2) / 2 };
+      mb.style.cursor = 'grabbing';
+      return;
+    }
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      mmPanRef.current = { sx: p.x, sy: p.y, vx: mmView.x, vy: mmView.y };
+      mb.style.cursor = 'grabbing';
+    }
+  }, [mmToLocal, mmView, store]);
+
+  /* pointerdown на .mm-resize — старт ресайза карты (9346 оригинала) */
+  const onMmResizeDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const mb = mmRef.current;
+    if (!mb) return;
+    mb.classList.add('mm-resizing');
+    mmResizeRef.current = { sw: mmDim ? mmDim.w : MM_DEF_W, sh: mmDim ? mmDim.h : MM_DEF_H, cx: e.clientX, cy: e.clientY };
+  }, [mmDim]);
+
+  const onMmCtx = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+  }, []);
+
+  /* mmRebuild+mmGeom оригинала — декларативно: группы (пунктир цвета группы) / связи / ноды */
+  const mmGroupRects: React.ReactNode[] = [];
+  for (const g of doc.groups) {
+    if (groupInsideCollapsed(doc, g)) continue;
+    const r = mmGroupWorldRect(doc, g, sizesMap, cardSizes);
+    mmGroupRects.push(
+      <rect key={g.id} data-gid={g.id} fill="none" stroke={g.color || '#9aa1ac'} strokeOpacity="0.7" rx="3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" x={r.x} y={r.y} width={r.w} height={r.h} />,
+    );
+  }
+  const mmEdgeLines: React.ReactNode[] = [];
+  for (const it of items) {
+    const k = it.e.kind;
+    const col = k === 'bridge' ? '#79808d' : k === 'choice' ? '#8a8f99' : k === 'cond' ? '#6f7580' : '#575d68';
+    mmEdgeLines.push(
+      <line key={it.e.id} data-eid={it.e.id} x1={it.g.x1} y1={it.g.y1} x2={it.g.x2} y2={it.g.y2} stroke={col} strokeWidth={k === 'bridge' ? '2.4' : '1.2'} vectorEffect="non-scaling-stroke" />,
+    );
+  }
+  const mmNodeRects: React.ReactNode[] = [];
+  for (const n of visibleNodes) {
+    const s = sizesMap.get(n.id);
+    const w = s ? s.w : NODE_W;
+    const h = s ? s.h : 90;
+    mmNodeRects.push(
+      <rect key={n.id} data-id={n.id} x={n.x} y={n.y} width={w} height={h} fill={mmNodeColor(store, n)} fillOpacity="0.92" stroke="rgba(0,0,0,.45)" strokeWidth="1" rx="2" vectorEffect="non-scaling-stroke" />,
+    );
+  }
+
+  /* значения mmRender оригинала — декларативно из state (mmView/mmDim/canvasSize) */
+  const mmW = mmDim ? mmDim.w : MM_DEF_W;
+  const mmH = mmDim ? mmDim.h : MM_DEF_H;
+  const mmTransform = 'scale(' + mmView.z + ') translate(' + (-mmView.x) + ',' + (-mmView.y) + ')';
+  const mmVb = canvasSize.w > 0 ? mmViewportBoxOf(vp, canvasSize.w, canvasSize.h) : null;
+
+  /* ── #labels: ярлыки групп (gbadge) и «✏ редактирует …» (gbadge lbadge) — updateGroupBadges оригинала ── */
+  const labelBadges: { key: string; x: number; y: number; color: string; text: string; lbadge?: boolean }[] = [];
+  for (const g of doc.groups) {
+    if (!g.badge) continue;
+    if ((g.fold === undefined ? 2 : g.fold) !== 2) continue;
+    if (hiddenGids.has(g.id)) continue;
+    if (!doc.nodes.some((nn) => nn.gid === g.id)) continue;
+    const r = groupFrameRect(doc, g, sizesMap, cardSizes);
+    labelBadges.push({
+      key: 'g:' + g.id,
+      x: vp.x + (r.x + r.w / 2) * vp.z,
+      y: vp.y + r.y * vp.z - 8,
+      color: g.color || '#9aa1ac',
+      text: g.name || '',
+    });
+  }
+  const meId = getMe().id;
+  for (const oid of Object.keys(store.syncLocks)) {
+    const l = store.syncLocks[oid];
+    if (!l || !l.id || l.id === meId) continue;
+    const nn = doc.nodes.find((x) => x.id === oid);
+    if (nn && !collapsedAncestorOf(doc, nn.id)) {
+      const w = nodeWidth(nn, sizesMap.get(nn.id));
+      labelBadges.push({ key: 'l:' + oid, x: vp.x + (nn.x + w / 2) * vp.z, y: vp.y + nn.y * vp.z - 8, color: l.color || '#8b929c', text: '✏ редактирует ' + (l.name || '…'), lbadge: true });
+      continue;
+    }
+    const g2 = doc.groups.find((x) => x.id === oid);
+    if (g2 && !groupInsideCollapsed(doc, g2)) {
+      const r = (g2.fold === undefined ? 2 : g2.fold) === 2
+        ? groupFrameRect(doc, g2, sizesMap, cardSizes)
+        : groupCardRect(doc, g2, cardSizes);
+      labelBadges.push({ key: 'l:' + oid, x: vp.x + (r.x + r.w / 2) * vp.z, y: vp.y + r.y * vp.z - 8, color: l.color || '#8b929c', text: '✏ редактирует ' + (l.name || '…'), lbadge: true });
+    }
+  }
 
   return (
+    <>
     <div
       ref={canvasRef}
-      className={'rn-canvas' + (store.gridOn ? ' grid' : '') + (altDown ? ' knife' : '') + (store.spaceDown ? ' panning' : '') + (store.carry ? ' carry' : '') + (playerOpen ? ' dimmed' : '')}
+      id="canvas"
+      className={
+        'rn-canvas'
+        + (!store.gridOn ? ' nogrid' : '')
+        + (dropReady ? ' dropready' : '')
+        + (altDown ? ' knife' : '')
+        + (store.carry ? ' carry' : '')
+        + (store.spaceDown ? ' space' : '')
+        + (store.ctrlDown ? ' ctrlpan' : '')
+        + (panning ? ' panning' : '')
+        + (viewAnim ? ' animv' : '')
+      }
       style={{
-        backgroundImage: store.gridOn ? 'radial-gradient(circle, #262b33 1px, transparent 1px)' : undefined,
-        backgroundSize: 26 * vp.z + 'px ' + 26 * vp.z + 'px',
+        backgroundSize: GRID * vp.z + 'px ' + GRID * vp.z + 'px',
         backgroundPosition: vp.x + 'px ' + vp.y + 'px',
       }}
       onWheel={onWheel}
       onMouseDown={onCanvasDown}
       onContextMenu={onCtx}
       onDoubleClick={onDbl}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       role="application"
       aria-label="Холст проекта"
     >
-      <div className="rn-world" style={{ transform: 'translate(' + vp.x + 'px,' + vp.y + 'px) scale(' + vp.z + ')' }}>
-        <GroupLayer
-          groups={doc.groups.filter((g) => (g.fold === undefined ? 2 : g.fold) === 2 && !hiddenGids.has(g.id))}
-          store={store}
-          vp={vp}
-          sizes={sizesMap}
-          cardSizes={cardSizes}
-          sink={sink}
-          hiddenGids={new Set<string>()}
-          onGroupDown={onGroupDown}
-          onGroupResize={onGroupResize}
-        />
+      <div
+        id="world"
+        className={viewAnim ? 'animv' : undefined}
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          transformOrigin: '0 0',
+          transform: 'translate(' + vp.x + 'px,' + vp.y + 'px) scale(' + vp.z + ')',
+        }}
+      >
+        <div id="framesLayer">
+          <GroupLayer
+            groups={doc.groups.filter((g) => (g.fold === undefined ? 2 : g.fold) === 2 && !hiddenGids.has(g.id))}
+            store={store}
+            vp={vp}
+            sizes={sizesMap}
+            cardSizes={cardSizes}
+            sink={sink}
+            hiddenGids={new Set<string>()}
+            onGroupDown={onGroupDown}
+            onGroupResize={onGroupResize}
+          />
+        </div>
         <EdgeLayer
           doc={doc}
           items={items}
@@ -865,6 +1282,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
           onLabelDown={onLabelDown}
           onBridgeDown={onBridgeDown}
         />
+        {/* линия «ножа» — как path.cutline оригинала: поверх стрелок, под карточками нод */}
+        <svg aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, width: 10, height: 10, overflow: 'visible', pointerEvents: 'none' }}>
+          {cutline && <line className="cutline" x1={cutline.x1} y1={cutline.y1} x2={cutline.x2} y2={cutline.y2} style={CUTLINE_STYLE} />}
+        </svg>
         {visibleNodes.map((n: VetviNode) => (
           <NodeCard
             key={n.id}
@@ -895,30 +1316,89 @@ export function CanvasBoard(props: { store: VetviStore }) {
           onGroupResize={onGroupResize}
         />
       </div>
-      {marquee && (
-        <div className={'rn-marquee' + (marquee.g ? ' mg' : '')} style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />
-      )}
-      {cutline && (
-        <svg className="rn-cutline-svg">
-          <line className="rn-cutline" x1={cutline.x1} y1={cutline.y1} x2={cutline.x2} y2={cutline.y2} />
-        </svg>
-      )}
-      <div className="rn-ctrls" role="toolbar" aria-label="Масштаб и сетка">
-        <button type="button" title="Отдалить" onClick={() => zoomStep(1 / 1.2)}>−</button>
-        <span className="rn-zoom">{Math.round(vp.z * 100)}%</span>
-        <button type="button" title="Приблизить" onClick={() => zoomStep(1.2)}>+</button>
-        <button type="button" title="Вписать всё" onClick={fitNow}>⤢</button>
-        <button type="button" title="Сетка" className={store.gridOn ? 'on' : ''} onClick={() => store.toggleGrid()}>#</button>
-        <button type="button" title="Привязка к сетке" className={store.snapOn ? 'on' : ''} onClick={() => store.toggleSnap()}>⌗</button>
-        <button type="button" title="Связи: плавные" className={store.bend === 'smooth' ? 'on' : ''} onClick={() => store.setBend('smooth')}>⌒</button>
-        <button type="button" title="Связи: прямые 90°" className={store.bend === 'ortho90' ? 'on' : ''} onClick={() => store.setBend('ortho90')}>┐</button>
-        <button type="button" title="Связи: 45°" className={store.bend === 'ortho45' ? 'on' : ''} onClick={() => store.setBend('ortho45')}>◇</button>
+      <div id="labels" className={viewAnim ? 'animv' : undefined}>
+        {labelBadges.map((b) => (
+          <div
+            key={b.key}
+            className={'gbadge' + (b.lbadge ? ' lbadge' : '')}
+            style={{ left: b.x + 'px', top: b.y + 'px', borderColor: hexToRgba(b.color, b.lbadge ? 0.9 : 0.85), color: b.color }}
+          >
+            {b.text}
+          </div>
+        ))}
       </div>
+      <div id="emptyHint" className={doc.nodes.length ? undefined : 'show'}>
+        <div className="ring" />
+        <p>Холст пуст — перетащите элемент с панели слева</p>
+      </div>
+      <div
+        id="marquee"
+        className={marquee && marquee.g ? 'mg' : undefined}
+        style={{
+          left: (marquee ? marquee.x : 0) + 'px',
+          top: (marquee ? marquee.y : 0) + 'px',
+          width: (marquee ? marquee.w : 0) + 'px',
+          height: (marquee ? marquee.h : 0) + 'px',
+          display: marquee ? 'block' : 'none',
+        }}
+      />
     </div>
+    <div id="miniMap" ref={mmRef} onPointerDown={onMmDown} onContextMenu={onMmCtx} style={mmDim ? { width: mmDim.w + 'px', height: mmDim.h + 'px' } : undefined}>
+      <svg id="mmSvg" viewBox={'0 0 ' + mmW + ' ' + mmH} preserveAspectRatio="none">
+        <g id="mmContent" transform={mmTransform}>
+          <g id="mmGroups">{mmGroupRects}</g>
+          <g id="mmEdges">{mmEdgeLines}</g>
+          <g id="mmNodes">{mmNodeRects}</g>
+        </g>
+        <rect
+          id="mmView"
+          x={mmVb ? (mmVb.x1 - mmView.x) * mmView.z : 0}
+          y={mmVb ? (mmVb.y1 - mmView.y) * mmView.z : 0}
+          width={mmVb ? (mmVb.x2 - mmVb.x1) * mmView.z : 0}
+          height={mmVb ? (mmVb.y2 - mmVb.y1) * mmView.z : 0}
+        />
+      </svg>
+      <i className="mm-resize" id="mmResize" title="Потяни за угол, чтобы изменить размер карты" onPointerDown={onMmResizeDown} />
+    </div>
+    </>
   );
 }
 
 const lastMouse = { x: 0, y: 0 };
+
+/* path.cutline оригинала (#edges path.cutline) — линия в отдельном svg, стили инлайном */
+const CUTLINE_STYLE: React.CSSProperties = {
+  fill: 'none',
+  stroke: '#cf6b5a',
+  strokeWidth: 2,
+  strokeDasharray: '8 6',
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  pointerEvents: 'none',
+  filter: 'drop-shadow(0 0 6px rgba(207,107,90,.6))',
+  animation: 'dashmove .5s linear infinite',
+};
+
+function hexToRgba(hex: string, a: number): string {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return hex;
+  const v = parseInt(m[1], 16);
+  return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')';
+}
+
+/* группа спрятана внутри свёрнутой (groupInsideCollapsed оригинала) */
+function groupInsideCollapsed(doc: VetviDoc, g: VetviGroup): boolean {
+  let cur: string | null | undefined = g.parent;
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const p = doc.groups.find((x) => x.id === cur);
+    if (!p) return false;
+    if ((p.fold === undefined ? 2 : p.fold) < 2) return true;
+    cur = p.parent;
+  }
+  return false;
+}
 
 function isTyping(): boolean {
   const a = document.activeElement as HTMLElement | null;
@@ -942,8 +1422,11 @@ function carryCenter(store: VetviStore, ids: string[]): { x: number; y: number }
 }
 
 function findGidFromEl(store: VetviStore, el: HTMLElement): string | null {
-  // ищем по классам: у карточек нет data-атрибутов — сравниваем порядок
-  const all = document.querySelectorAll('.rn-gframe, .rn-gcard');
+  /* у рамок/карточек GroupLayer есть data-gid — читаем напрямую */
+  const direct = el.getAttribute('data-gid') || (el.closest('[data-gid]') as HTMLElement | null)?.getAttribute('data-gid') || null;
+  if (direct && store.groupById(direct)) return direct;
+  /* запасной путь: по классам (порядок рендера GroupLayer) */
+  const all = document.querySelectorAll('.rn-gframe, .rn-gcard, .groupbox, .gcard, .qcard');
   const idx = Array.from(all).indexOf(el);
   if (idx < 0) return null;
   const gids: string[] = [];

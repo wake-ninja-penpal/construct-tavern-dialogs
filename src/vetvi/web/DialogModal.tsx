@@ -1,16 +1,69 @@
 'use client';
 
 /**
- * Ветви — редактор диалога (dlgModal оригинала): дерево реплик с вложенными
- * ветками, говорящий из участников, «повтор», добавление ниже/веткой, удаление,
- * двойной клик — к реплике на холсте, порядок.
+ * Ветви — модалка реплик диалога (порт #dlgModal оригинала:
+ * dlgModalRender / dlgModalRenderReplies / dlgModalBind).
+ * Разметка 1:1: .dlg-modal.show > .dlg-modal-card > .dlg-modal-head +
+ * .dlg-modal-body (.dlg-participants с чипами участников, дерево .dlg-reply-ed(.root)
+ * с .dlg-reply-row-ed (говорящий + текст), .dlg-reply-acts (.mini-btn), вложенность
+ * .dlg-children-ed, кнопка корневой реплики .dlg-add-root-btn) + .dlg-modal-foot.
+ * Логика сохранена: добавление ниже/веткой/корневой, порядок (вверх/вниз),
+ * говорящий, текст с авторостом (.grow), «повтор» (.dlg-loop-tog.on), удаление,
+ * подсветка целевой реплики (.dlg-flash) с автопрокруткой.
  */
 
 import { useEffect, useRef } from 'react';
 
-import type { VetviNode, VetviReply } from '@/vetvi/core/types';
-import { findReplyParent } from '@/vetvi/core/dialog';
+import type { VetviChar, VetviReply } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
+
+/* svg-иконки оригинала (ic()): контур 24×24, stroke currentColor, width/height по size */
+const ICONS: Record<string, React.ReactNode> = {
+  plus: <path d="M12 5v14M5 12h14" />,
+  corner: <><path d="M5 5v4.6a3.9 3.9 0 0 0 3.9 3.9H19" /><path d="m15.5 9.5 3.5 3.5-3.5 3.5" /></>,
+  x: <path d="M6 6l12 12M18 6 6 18" />,
+  repeat: <><path d="M17 2.5 20.5 6 17 9.5" /><path d="M3.5 12V9a3 3 0 0 1 3-3h14" /><path d="M7 21.5 3.5 18 7 14.5" /><path d="M20.5 12v3a3 3 0 0 1-3 3h-14" /></>,
+  chev: <path d="m6 9 6 6 6-6" />,
+  chevUp: <path d="m6 15 6-6 6 6" />,
+  target: <><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></>,
+};
+
+function Ic(props: { name: string; size: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={props.size} height={props.size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+      {ICONS[props.name] || null}
+    </svg>
+  );
+}
+
+/* hexToRgba оригинала — подложка/рамка чипа участника */
+function hexToRgba(hex: string, a: number): string {
+  const h = String(hex || '').replace('#', '');
+  const f = h.length === 3 ? h.split('').map((x) => x + x).join('') : h;
+  const r = parseInt(f.slice(0, 2), 16);
+  const g = parseInt(f.slice(2, 4), 16);
+  const b = parseInt(f.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return 'rgba(154,161,172,' + a + ')';
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+}
+
+/* аватар персонажа (charAvatarHtml оригинала): рамка — цвет, без аватара — буква */
+function CharAvatar({ c, extra }: { c: VetviChar; extra?: string }) {
+  const shape = (c as { avShape?: string }).avShape === 'square' ? 'square' : 'circle';
+  const av = (c as { av?: string }).av;
+  const initial = (String(c.name || '').trim().charAt(0).toUpperCase()) || '?';
+  return (
+    <span className={'c-av ' + shape + (av ? '' : ' empty') + (extra ? ' ' + extra : '')} style={{ borderColor: c.color || '#9cb878' }}>
+      {av ? <img src={av} alt="" /> : initial}
+    </span>
+  );
+}
+
+/* авторазмер поля реплики (dlgTaGrow оригинала) */
+function taGrow(ta: HTMLTextAreaElement) {
+  ta.style.height = 'auto';
+  ta.style.height = (ta.scrollHeight + 2) + 'px'; /* +2 — верхняя и нижняя границы */
+}
 
 export function DialogModal({ store }: { store: VetviStore }) {
   const nodeId = store.dialogEdit;
@@ -25,17 +78,23 @@ export function DialogModal({ store }: { store: VetviStore }) {
      
   }, [store.dialogEdit]);
 
+  /* подсветка реплики: прокрутить к ней и мигнуть (dlgFlashReply оригинала) */
+  const flash = store.flash;
   useEffect(() => {
-    if (!listRef.current) return;
-    const el = listRef.current.querySelector('.flash');
-    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  });
+    const el = listRef.current && flash ? listRef.current.querySelector('.dlg-flash') : null;
+    if (!el) return;
+    (el as HTMLElement).scrollIntoView({ block: 'center', behavior: 'smooth' });
+    (el as HTMLElement).classList.remove('dlg-flash');
+    void (el as HTMLElement).offsetWidth; /* перезапуск анимации, если подсветка ещё идёт */
+    (el as HTMLElement).classList.add('dlg-flash');
+  }, [flash]);
 
   const n = node;
-  const chars = store.doc.chars || [];
+  const chars: VetviChar[] = store.doc.chars || [];
   const participants = n && n.dialog ? n.dialog.participants || [] : [];
-  const partChars = participants.map((pid) => chars.find((c) => c.id === pid)).filter(Boolean) as typeof chars;
-  const flash = store.flash;
+  const partChars = participants
+    .map((pid) => chars.find((c) => c.id === pid))
+    .filter(Boolean) as VetviChar[];
   const close = () => {
     store.commitReplyEdit(editPreRef.current);
     store.closeDialogEditor();
@@ -45,15 +104,19 @@ export function DialogModal({ store }: { store: VetviStore }) {
     return null;
   }
 
+  const removePart = (pid: string) => {
+    store.setParticipants(n.id, participants.filter((p) => p !== pid));
+  };
+
   const renderReply = (r: VetviReply, depth: number): React.ReactNode => {
+    const isRoot = depth === 0;
     const isFlash = !!(flash && flash.nodeId === n.id && flash.replyId === r.id);
-    const parent = findReplyParent(n.dialog!.replies, r.id, null);
+    const loop = !!(r as unknown as { loop?: boolean }).loop;
     return (
-      <div key={r.id} className={'rn-dlg-reply' + (isFlash ? ' flash' : '')} style={{ marginLeft: depth * 23 }}>
-        <div className="rn-dlg-toolbar">
-          <span className="rn-dlg-depth">{depth > 0 ? '└' : '·'}</span>
+      <div key={r.id} className={'dlg-reply-ed' + (isRoot ? ' root' : '') + (isFlash ? ' dlg-flash' : '')} data-rid={r.id}>
+        <div className="dlg-reply-row-ed">
           <select
-            className="rn-dlg-speaker"
+            data-f="speaker"
             value={r.speaker || ''}
             aria-label="Говорящий"
             onFocus={() => { editPreRef.current = editPreRef.current || store.beginEdit(); }}
@@ -67,89 +130,92 @@ export function DialogModal({ store }: { store: VetviStore }) {
             <option value="">— не выбран —</option>
             {partChars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          <textarea
+            data-f="text"
+            placeholder="Текст реплики…"
+            value={r.text}
+            aria-label={'Текст реплики ' + r.id}
+            onFocus={(e) => {
+              editPreRef.current = editPreRef.current || store.beginEdit();
+              e.currentTarget.classList.add('grow');
+              taGrow(e.currentTarget);
+            }}
+            onChange={(e) => {
+              store.updateReply(n.id, r.id, { text: e.target.value }, { history: false });
+              taGrow(e.currentTarget);
+            }}
+            onBlur={(e) => {
+              e.currentTarget.classList.remove('grow');
+              e.currentTarget.style.height = '';
+              const pre = editPreRef.current;
+              if (pre) { store.commitReplyEdit(pre); editPreRef.current = store.beginEdit(); }
+            }}
+          />
+        </div>
+        <div className="dlg-reply-acts">
           <button
             type="button"
-            className={'rn-dlg-loop' + ((r as unknown as { loop?: boolean }).loop ? ' on' : '')}
-            title="Повтор: диалог зациклится на этой реплике"
+            className={'mini-btn dlg-loop-tog' + (loop ? ' on' : '')}
+            data-act="loop"
+            title="Повтор: после этой реплики диалог начнётся заново. Включите, чтобы зациклить проигрывание после вывода реплики"
             onClick={() => {
-              const cur = (r as unknown as { loop?: boolean }).loop;
-              store.updateReply(n.id, r.id, { loop: !cur } as Partial<VetviReply>, { label: 'Повтор реплики' });
+              store.updateReply(n.id, r.id, { loop: !loop } as Partial<VetviReply>, { label: 'Повтор реплики' });
             }}
-          >↻</button>
-          <div className="rn-dlg-btns">
-            <button type="button" title="Реплика ниже" onClick={() => store.addReply(n.id, r.id, false)}>+ ниже</button>
-            <button type="button" title="Ответ-ветка" onClick={() => store.addReply(n.id, r.id, true)}>+ ветка</button>
-            <button type="button" title="Выше" onClick={() => store.moveReply(n.id, r.id, -1)}>↑</button>
-            <button type="button" title="Ниже" onClick={() => store.moveReply(n.id, r.id, 1)}>↓</button>
-            <button type="button" title="К реплике на холсте" onClick={() => { store.requestFlash(n.id, r.id); }}>⌖</button>
-            <button type="button" className="danger" title="Удалить реплику" onClick={() => store.deleteReply(n.id, r.id)}>×</button>
-          </div>
+          ><Ic name="repeat" size={11} /></button>
+          <button type="button" className="mini-btn" title="Реплика выше" onClick={() => store.moveReply(n.id, r.id, -1)}><Ic name="chevUp" size={11} /></button>
+          <button type="button" className="mini-btn" title="Реплика ниже" onClick={() => store.moveReply(n.id, r.id, 1)}><Ic name="chev" size={11} /></button>
+          <button type="button" className="mini-btn" title="К реплике на холсте" onClick={() => { store.requestFlash(n.id, r.id); }}><Ic name="target" size={11} /></button>
+          <button type="button" className="mini-btn" data-act="add-below" title="Новая реплика ниже" onClick={() => store.addReply(n.id, r.id, false)}><Ic name="plus" size={11} /></button>
+          <button type="button" className="mini-btn" data-act="add-child" title="Ответ-ветка (вложенная)" onClick={() => store.addReply(n.id, r.id, true)}><Ic name="corner" size={11} /></button>
+          <button type="button" className="mini-btn del" data-act="del" title="Удалить реплику" onClick={() => store.deleteReply(n.id, r.id)}><Ic name="x" size={11} /></button>
         </div>
-        <textarea
-          rows={2}
-          className="rn-dlg-text"
-          value={r.text}
-          placeholder="Текст реплики…"
-          aria-label={'Текст реплики ' + r.id}
-          onFocus={() => { editPreRef.current = editPreRef.current || store.beginEdit(); }}
-          onChange={(e) => store.updateReply(n.id, r.id, { text: e.target.value }, { history: false })}
-          onBlur={() => {
-            const pre = editPreRef.current;
-            if (pre) { store.commitReplyEdit(pre); editPreRef.current = store.beginEdit(); }
-          }}
-        />
-        {parent && depth === 0 && null}
-        {(r.children || []).map((ch) => renderReply(ch, depth + 1))}
+        {r.children && r.children.length ? (
+          <div className="dlg-children-ed">{r.children.map((ch) => renderReply(ch, depth + 1))}</div>
+        ) : null}
       </div>
     );
   };
 
   return (
-    <div className="rn-modal show" onClick={(e) => { if (e.target === e.currentTarget) close(); }} role="dialog" aria-label="Редактор диалога">
-      <div className="rn-modal-card rn-dlg-card">
-        <div className="rn-modal-head">
-          <span className="rn-modal-title">Реплики — {n.title || 'Диалог'}</span>
-          <button type="button" className="rn-modal-close" title="Закрыть" onClick={close}>×</button>
+    <div
+      id="dlgModal"
+      className="dlg-modal show"
+      role="dialog"
+      aria-label="Редактор диалога"
+      onPointerDown={(e) => { if ((e.target as HTMLElement).id === 'dlgModal') close(); }}
+    >
+      <div className="dlg-modal-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Реплики: {n.title || 'Диалог'}</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={close}>×</button>
         </div>
-        <div className="rn-modal-body">
-          <div className="rn-dlg-desc">
-            <label className="rn-field slim">
-              <span>Описание (интро диалога)</span>
-              <textarea
-                rows={2}
-                value={n.dialog.description}
-                onFocus={() => { editPreRef.current = editPreRef.current || store.beginEdit(); }}
-                onChange={(e) => store.updateNode(n.id, { dialog: { ...n.dialog!, description: e.target.value } }, { history: false })}
-                onBlur={() => {
-                  const pre = editPreRef.current;
-                  if (pre) { store.commitReplyEdit(pre); editPreRef.current = store.beginEdit(); }
-                }}
-                aria-label="Описание диалога"
-              />
-            </label>
-            <div className="rn-dlg-tools">
-              <span className="rn-insp-hint">Участников: {partChars.length} · реплик: {countAll(n.dialog.replies)}</span>
-              <button type="button" className="rn-mini" onClick={() => store.addReply(n.id)}>+ Реплика</button>
+        <div className="dlg-modal-body" ref={listRef}>
+          {partChars.length > 0 && (
+            <div className="dlg-participants">
+              {partChars.map((c) => {
+                const color = c.color || '#9cb878';
+                return (
+                  <span key={c.id} className="dlg-chip" style={{ background: hexToRgba(color, 0.15), color, borderColor: hexToRgba(color, 0.55) }}>
+                    <CharAvatar c={c} extra="chip" />
+                    <span>{c.name}</span>
+                    <span className="x" title="Убрать" onClick={() => removePart(c.id)}><Ic name="x" size={10} /></span>
+                  </span>
+                );
+              })}
             </div>
-          </div>
-          <div className="rn-dlg-list" ref={listRef}>
-            {n.dialog.replies.map((r) => renderReply(r, 0))}
-            {!n.dialog.replies.length && <div className="rn-insp-hint">Реплик пока нет — добавьте первую.</div>}
+          )}
+          {n.dialog.replies.map((r) => renderReply(r, 0))}
+          {!n.dialog.replies.length && <div className="dlg-empty">Реплик пока нет — добавьте первую.</div>}
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="dlg-add-root-btn" onClick={() => store.addReply(n.id)}>
+              <Ic name="plus" size={11} /> Добавить корневую реплику
+            </button>
           </div>
         </div>
-        <div className="rn-modal-foot">
-          <button type="button" className="rn-btn primary" onClick={close}>Готово</button>
+        <div className="dlg-modal-foot">
+          <button type="button" className="btn primary" onClick={close}>Готово</button>
         </div>
       </div>
     </div>
   );
-}
-
-function countAll(arr: VetviReply[]): number {
-  let c = 0;
-  for (const r of arr) {
-    c++;
-    if (r.children) c += countAll(r.children);
-  }
-  return c;
 }

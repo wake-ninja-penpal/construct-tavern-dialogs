@@ -3,6 +3,7 @@
 /**
  * Ветви — слой связей (этап 2): полная геометрия оригинала — smooth/орто/мосты/петли,
  * якоря к свёрнутым группам, изгибы (вейпоинты), подписи с условиями, режимы линий.
+ * DOM 1:1 с оригиналом: svg#edges + defs (6 маркеров arw*) + g.edge (hit/line/ep-h/wp/elabel*).
  */
 
 import { useMemo } from 'react';
@@ -11,7 +12,7 @@ import { edgePathD, bridgeCorners, pathPoint } from '@/vetvi/core/edgepath';
 import { clamp, mainAnchor, nodeHeight, nodeWidth } from '@/vetvi/core/geometry';
 import { getMe } from '@/vetvi/core/identity';
 import type { EdgeGeom, NodeSize, VetviDoc, VetviEdge } from '@/vetvi/core/types';
-import { condText } from '@/vetvi/core/vars';
+import { condText, condWithOverride } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, memberFrac } from './ggroups';
 
 export interface EdgeRender {
@@ -151,85 +152,82 @@ export function EdgeLayer(props: {
   showWps: boolean;
   /** Карта локов объектов: ключ — id связи, значение — {id: userId, name, color}. */
   locks?: Record<string, { id: string; name: string; color: string }>;
+  /** Линия «ножа» (Alt) в мировых координатах — рисуется как path.cutline внутри #edges (как в оригинале). */
+  cutline?: { x1: number; y1: number; x2: number; y2: number } | null;
 }) {
   const { doc, items, selected, pending, hoverTarget } = props;
-  void doc;
+  void hoverTarget;
   const locks = props.locks;
 
   const pendingD = useMemo(() => {
     if (!pending) return null;
     const sx = pending.startX;
     const sy = pending.startY;
-    const dx = pending.x >= sx ? clamp((pending.x - sx) * 0.55, 46, 190) : clamp((sx - pending.x) * 0.5 + 60, 70, 240);
-    return 'M' + sx + ' ' + sy + ' C ' + (sx + dx) + ' ' + sy + ', ' + (pending.x - dx) + ' ' + pending.y + ', ' + pending.x + ' ' + pending.y;
+    // превью оригинала: фиксированные выносы ±80
+    return 'M' + sx + ' ' + sy + ' C ' + (sx + 80) + ' ' + sy + ', ' + (pending.x - 80) + ' ' + pending.y + ', ' + pending.x + ' ' + pending.y;
   }, [pending]);
 
   return (
-    <svg className="rn-edges" aria-hidden="true">
+    <svg id="edges" width={10} height={10} style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible' }} className="rn-edges">
       <defs>
-        <marker id="rn-arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#575d68" />
-        </marker>
-        <marker id="rn-arw-hi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#8f97a3" />
-        </marker>
-        <marker id="rn-arw-sel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#e2a54e" />
-        </marker>
-        <marker id="rn-arw-br" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-          <path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#79808d" />
-        </marker>
+        <marker id="arw" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#5d636d" /></marker>
+        <marker id="arwHi" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#9aa1ac" /></marker>
+        <marker id="arwSel" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#e2a54e" /></marker>
+        <marker id="arwBridge" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#79808d" /></marker>
+        <marker id="arwBridgeHi" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#a6adb8" /></marker>
+        <marker id="arwBridgeSel" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#e2a54e" /></marker>
       </defs>
-      {items.map(({ e, g, d, labelPt, cond, pts }) => {
+      {items.map(({ e, g, d, labelPt, cond }) => {
         const on = selected.has(e.id);
         const kind = e.kind || 'flow';
         const bridge = kind === 'bridge';
         const tvar = e.tin === 'var';
-        const hover = hoverTarget === e.id;
         const lkRawE = locks ? locks[e.id] : undefined;
         const lkE = (lkRawE && lkRawE.id && lkRawE.id !== getMe().id) ? lkRawE : null;
-        const marker = on ? 'rn-arw-sel' : bridge ? 'rn-arw-br' : hover ? 'rn-arw-hi' : 'rn-arw';
+        // ручки концов скрываем, если нода внутри свёрнутой группы (endCollapsed оригинала)
+        const showFrom = !collapsedAncestorOf(doc, e.from);
+        const showTo = !collapsedAncestorOf(doc, e.to);
+        // текст условия: только у связей от развилки, с учётом перебивающей переменной (condWithOverride оригинала)
+        const fnA = doc.nodes.find((n) => n.id === e.from);
+        const ct = (cond && fnA && fnA.type === 'branch') ? '⟦ ' + condText(doc, condWithOverride(doc, cond, fnA)) + ' ⟧' : '';
+        const labelText = String(e.label || '');
         return (
-          <g key={e.id} data-edge-id={e.id} className={'rn-eg k-' + kind + (tvar ? ' tvar' : '') + (on ? ' sel' : '') + (hover ? ' hover' : '') + (lkE ? ' lkb' : '')} style={lkE ? { ['--lkc' as string]: lkE.color } : undefined}>
-            {bridge ? (
-              <>
-                <path className="rn-edge-hit br" d={d} onMouseDown={(ev) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }} onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)} />
-                <path className="rn-edge bridge" d={d} markerEnd={'url(#' + marker + ')'} />
-                {/* зоны перетаскивания моста */}
-                <path className="rn-br-zone" d={d} onMouseDown={(ev) => {
-                  ev.stopPropagation();
-                  props.onBridgeDown(ev, e.id, bridgePartAt(ev, g));
-                }} />
-              </>
-            ) : (
-              <>
-                <path className="rn-edge-hit" d={d} onMouseDown={(ev) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }} onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)} />
-                <path className="rn-edge" d={d} markerEnd={'url(#' + marker + ')'} />
-              </>
-            )}
-            {labelPt && (e.label || cond) && (
-              <g className="rn-elabel-g" onMouseDown={(ev) => { ev.stopPropagation(); props.onLabelDown(ev, e.id); }}>
-                <text className="rn-elabel" x={labelPt.x} y={labelPt.y - 7}>{String(e.label || '')}</text>
-                {cond && (
-                  <text className="rn-ecnd" x={labelPt.x} y={labelPt.y + 6}>{'⟦ ' + condText(props.doc, cond) + ' ⟧'}</text>
-                )}
-              </g>
-            )}
-            {props.showWps && (e.pts || []).map((p, i) => (
+          <g key={e.id} data-id={e.id} className={'edge kind-' + kind + (bridge ? ' bridge' : '') + (tvar ? ' tvar' : '') + (on ? ' sel' : '') + (lkE ? ' lkb' : '')} style={lkE ? { ['--lkc' as string]: lkE.color } : undefined}>
+            <path
+              className="hit"
+              d={d}
+              onMouseDown={bridge
+                ? (ev: React.MouseEvent) => { ev.stopPropagation(); props.onBridgeDown(ev, e.id, bridgePartAt(ev, g)); }
+                : (ev: React.MouseEvent) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }}
+              onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)}
+            />
+            <path className="line" d={d} markerEnd="url(#arw)" />
+            <circle className="ep-h" r={6} data-ep="from" cx={g.x1} cy={g.y1} style={showFrom ? undefined : { display: 'none' }} />
+            <circle className="ep-h" r={6} data-ep="to" cx={g.x2} cy={g.y2} style={showTo ? undefined : { display: 'none' }} />
+            {props.showWps && !bridge && (e.pts || []).map((p, i) => (
               <circle
                 key={i}
-                className="rn-wp"
-                cx={p.x}
-                cy={p.y}
+                className="wp"
+                data-i={i}
+                cx={Math.round(p.x)}
+                cy={Math.round(p.y)}
                 r={5}
                 onMouseDown={(ev) => { ev.stopPropagation(); props.onWpDown(ev, e.id, i); }}
                 onDoubleClick={(ev) => { ev.stopPropagation(); props.onWpDbl(ev, e.id, i); }}
               />
             ))}
+            {labelPt && (
+              <g onMouseDown={(ev) => { ev.stopPropagation(); props.onLabelDown(ev, e.id); }}>
+                <text className="elabel-hit" x={labelPt.x} y={labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
+                <text className="elabel" x={labelPt.x} y={labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
+                <text className="ecnd" x={labelPt.x} y={e.label ? labelPt.y + 13 : labelPt.y - 6} style={ct ? undefined : { display: 'none' }}>{ct}</text>
+              </g>
+            )}
           </g>
         );
       })}
-      {pendingD && <path className="rn-edge pending" d={pendingD} />}
+      {pendingD && <path className="preview" d={pendingD} />}
+      {props.cutline && <path className="cutline" d={'M' + props.cutline.x1 + ' ' + props.cutline.y1 + ' L' + props.cutline.x2 + ' ' + props.cutline.y2} />}
     </svg>
   );
 }
@@ -244,7 +242,6 @@ function bridgePartAt(ev: React.MouseEvent, g: EdgeGeom): 'l' | 'r' | 'h' {
       pt.x = ev.clientX;
       pt.y = ev.clientY;
       const u = pt.matrixTransform(el.getScreenCTM()!.inverse());
-      const dl = Math.abs(u.x - g.x1 + 0);
       const corners = g.corners || [];
       const bx2 = corners.length ? corners[0].x : g.x1;
       const bx1 = corners.length ? corners[2].x : g.x2;
@@ -258,8 +255,5 @@ function bridgePartAt(ev: React.MouseEvent, g: EdgeGeom): 'l' | 'r' | 'h' {
       return 'l';
     }
   } catch { /* фолбэк */ }
-  void dlUnused;
   return 'h';
 }
-const dlUnused = 0;
-

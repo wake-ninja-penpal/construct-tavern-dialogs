@@ -63,7 +63,7 @@ export default function VetviApp() {
       const t = e.target as Element | null;
       if (!t) return;
       if (t.closest('.collab-pop')) return;
-      if (t.closest('.rn-sync-chip')) return;
+      if (t.closest('.collab-chip')) return;
       store.setCollabPop(false);
     };
     document.addEventListener('pointerdown', onDoc, true);
@@ -216,18 +216,26 @@ export default function VetviApp() {
   return (
     <main className="rn-app" aria-label="Ветви — React-редактор">
       <TopBar store={store} />
-      <div className="rn-main">
+      <div id="layout">
         <LeftPane store={store} />
-        <div className="rn-center">
+        <section id="stage">
           <CanvasBoard store={store} />
-        </div>
+        </section>
         <Inspector store={store} onClose={() => store.clearSelection()} />
       </div>
-      <footer className="rn-statusbar" role="contentinfo">
-        <span>React-версия · этап 3: realtime-коллаборация (комнаты, живые правки, локи, копии, merge, пароли)</span>
-        <span className="rn-status-r">
-          {store.doc.nodes.length} нод · {store.doc.edges.length} связей · {store.doc.vars?.length || 0} перем. · {store.doc.chars?.length || 0} персон. · масштаб {Math.round(store.vp.z * 100)}%
-        </span>
+      <footer id="status" role="contentinfo">
+        <div className="st-left">
+          <span id="stFile">{store.doc.meta?.name || 'Без названия'}</span>
+          <span id="stDirty" className={store.saveState === 'pending' ? 'show' : undefined} />
+          <a className="st-classic" href="/vetvi/index.html" target="_blank" rel="noreferrer" title="Классическая версия в одном файле">Классическая версия</a>
+        </div>
+        <div className="spacer" />
+        <div className="st-right">
+          <span id="stCounts">
+            узлов: {store.doc.nodes.length} · связей: {store.doc.edges.length} · групп: {store.doc.groups.length}
+          </span>
+          <span id="stAuto" tabIndex={0} aria-label="Когда проект изменён последний раз и кто это сделал">✓ автосохранение</span>
+        </div>
       </footer>
 
       <DialogModal store={store} />

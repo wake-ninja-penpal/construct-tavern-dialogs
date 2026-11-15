@@ -8,13 +8,14 @@
  * «Заново», «К ноде» с подсветкой реплики, мёртвые ветки, экран «КОНЕЦ».
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { clamp } from '@/vetvi/core/geometry';
+import { TYPES } from '@/vetvi/core/constants';
 import type { VetviDoc, VetviNode, VetviReply } from '@/vetvi/core/types';
 import { condMet, condText, condWithOverride, opSym, varApplyOp, varById, varName, varType, varValText } from '@/vetvi/core/vars';
 import { linearIds } from '@/vetvi/core/dialog';
-import { hkIs, hkText } from '@/vetvi/core/hotkeys';
+import { hkIs } from '@/vetvi/core/hotkeys';
 import type { VetviStore } from './store';
 
 interface Choice {
@@ -60,6 +61,10 @@ interface PlState {
   choices: Choice[] | null;
   end: boolean;
   varFlash: { txt: string; t: number } | null;
+  /* avCid — персонаж аватара слайда (аналог содержимого #plAv оригинала);
+     hintOverride — подсказка «путь закрыт: … · ← назад» после заблокированного шага */
+  avCid: string | null;
+  hintOverride: string | null;
 }
 
 const PL_LIMIT = 120;
@@ -105,7 +110,7 @@ export function Player(props: { store: VetviStore }) {
     return { ...cur, typing: false, choices: null, end: true, shown: cur.full };
   };
 
-  const showSlide = (cur: PlState, n: VetviNode, text: string, keepIntro?: boolean): PlState => {
+  const showSlide = (cur: PlState, n: VetviNode, text: string, keepIntro?: boolean, avCid?: string | null): PlState => {
     return {
       ...cur,
       nodeId: n.id, replyId: null, intro: !!keepIntro,
@@ -113,6 +118,7 @@ export function Player(props: { store: VetviStore }) {
       choices: null, end: false,
       seqList: null, seqIdx: -1,
       path: n.type === 'varnode' ? cur.path : trackPath(cur, n.id),
+      avCid: avCid ?? null, hintOverride: null,
     };
   };
 
@@ -162,11 +168,11 @@ export function Player(props: { store: VetviStore }) {
           return null;
         }
         if (n.dialog.description) return showSlide(s, n, n.dialog.description, true);
-        if (rs.length > 1) return { ...s, typing: false, shown: '', full: '', choices: dialogChoices(n, rs) };
+        if (rs.length > 1) return { ...s, typing: false, shown: '', full: '', choices: dialogChoices(n, rs), avCid: null, hintOverride: null };
         if (rs.length === 1) { showReply(s, n, rs[0]); return null; }
-        return showSlide(s, n, '…');
+        return showSlide(s, n, '…', false, castAvCid(doc, n));
       }
-      return showSlide(s, n, n.text || '…');
+      return showSlide(s, n, n.text || '…', false, castAvCid(doc, n));
     });
   };
   const goNodeRef = useRef(goNode);
@@ -187,6 +193,7 @@ export function Player(props: { store: VetviStore }) {
       choices: null, end: false,
       seqList: ids, seqIdx: idx,
       lastReply: r.id,
+      avCid: r.speaker || null, hintOverride: null,
     }));
   };
 
@@ -197,6 +204,7 @@ export function Player(props: { store: VetviStore }) {
       full: r.text || '…', shown: '', typing: true,
       choices: null, end: false,
       lastReply: r.id,
+      avCid: r.speaker || null, hintOverride: null,
     }));
   };
 
@@ -204,11 +212,11 @@ export function Player(props: { store: VetviStore }) {
     const nx = playableEdges(doc, cur, n.id).filter((e) => !e.fromReply);
     if (nx.length === 1) {
       const e = nx[0];
-      const c0 = (e as unknown as { cond?: { vid: string; op: string; val: number | string } }).cond;
-      const cw = c0 ? condWithOverride(doc, c0, doc.nodes.find((x) => x.id === e.to) || null) : null;
+      const c0 = edgeCond(e);
+      const cw = c0 ? condWithOverride(doc, c0, n) : null;
       if (cw && !condMet(doc, cw, cur.vars)) {
-        actRef.current((c) => ({ ...c, varFlash: { txt: 'путь закрыт: ' + condText(doc, cw), t: Date.now() } }));
-        setTimeout(() => actRef.current((c2) => showEnd(c2)), 900);
+        /* нода переменной: закрытый путь — всплывашка и сразу экран «КОНЕЦ» (plAfterVarnode) */
+        actRef.current((c) => showEnd({ ...c, varFlash: { txt: 'путь закрыт: ' + condText(doc, cw), t: Date.now() } }));
         return;
       }
       const t = doc.nodes.find((x) => x.id === e.to);
@@ -219,35 +227,36 @@ export function Player(props: { store: VetviStore }) {
     if (nx.length > 1) {
       const bc = branchChoices(n, nx);
       if (bc) { actRef.current((c) => ({ ...c, choices: bc })); return; }
-      const t = doc.nodes.find((x) => x.id === nx[0].to);
-      if (t) goNodeRef.current(cur, t, true);
+      actRef.current((c) => ({ ...c, choices: genericEdgeChoices(nx) }));
       return;
     }
     listNextOrEnd(cur);
   };
 
   const afterNodeFinal = (cur: PlState, n: VetviNode): void => {
-    if (cur.mode === 'list') {
-      if (plListHasNext(cur)) listJumpNext(cur);
-      else actRef.current(showEnd);
-      return;
-    }
+    /* как plAfterNodeFinal оригинала: сначала стрелки узла, потом резерв списка выделения */
     const nx = playableEdges(doc, cur, n.id);
     if (nx.length === 1) {
-      const t = doc.nodes.find((x) => x.id === nx[0].to);
-      if (t) { pushHist(cur); goNodeRef.current(cur, t, false); }
+      const e = nx[0];
+      const c0 = edgeCond(e);
+      const cw = c0 ? condWithOverride(doc, c0, n) : null;
+      if (cw && !condMet(doc, cw, cur.vars)) {
+        cur.hist.pop(); /* шаг не состоялся — снимаем запись в истории */
+        actRef.current((c) => ({ ...c, hintOverride: 'путь закрыт: ' + condText(doc, cw) + ' · ← назад' }));
+        return;
+      }
+      const t = doc.nodes.find((x) => x.id === e.to);
+      if (t) goNodeRef.current(cur, t, false);
       else actRef.current(showEnd);
       return;
     }
     if (nx.length > 1) {
       const bc = branchChoices(n, nx);
       if (bc) { actRef.current((c) => ({ ...c, choices: bc })); return; }
-      pushHist(cur);
-      const t = doc.nodes.find((x) => x.id === nx[0].to);
-      if (t) goNodeRef.current(cur, t, false);
-      else actRef.current(showEnd);
+      actRef.current((c) => ({ ...c, choices: genericEdgeChoices(nx) }));
       return;
     }
+    if (cur.mode === 'list') { listNextOrEnd(cur); return; }
     actRef.current(showEnd);
   };
 
@@ -286,12 +295,25 @@ export function Player(props: { store: VetviStore }) {
   };
 
   /* ── фабрики вариантов ── */
+  const genericEdgeChoices = (nx: VetviDoc['edges']): Choice[] => {
+    return nx.map((e) => ({
+      label: edgeLabel(doc, e),
+      ok: true,
+      targets: [e.to],
+      fn: () => {
+        const c2 = stRef.current;
+        const t2 = c2 ? doc.nodes.find((x) => x.id === e.to) : null;
+        if (c2 && t2) goNodeRef.current(c2, t2, false);
+      },
+    }));
+  };
+
   const dialogChoices = (n: VetviNode, rs: VetviReply[]): Choice[] => {
     return rs.map((r) => {
       const c = r.speaker ? store.charById(r.speaker) : null;
       return {
-        label: r.text || 'Продолжить…',
-        av: c ? { url: (c.av as string | null) || null, shape: c.avShape === 'square' ? 'square' : 'circle', color: c.color || '#9cb878', letter: (c.name || '?')[0].toUpperCase() } : null,
+        label: (c?.name ? c.name + ': ' : '') + (r.text || '…'),
+        av: c ? { url: (c.av as string | null) || null, shape: c.avShape === 'square' ? 'square' : 'circle', color: c.color || '#9cb878', letter: charInitialOf(c) } : null,
         ok: true,
         targets: replyTargets(doc, n, r),
         fn: () => {
@@ -386,6 +408,13 @@ export function Player(props: { store: VetviStore }) {
         if (kids.length === 1) { showReply(cur, n, kids[0]); return; }
         const ex = doc.edges.filter((e) => e.from === n.id && e.fromReply === r.id && e.tin !== 'var' && (cur.mode !== 'list' || cur.listSet.has(e.to)));
         if (ex.length === 1) {
+          const c0 = edgeCond(ex[0]);
+          const cw = c0 ? condWithOverride(doc, c0, n) : null;
+          if (cw && !condMet(doc, cw, cur.vars)) {
+            cur.hist.pop(); /* шаг не состоялся — снимаем запись в истории */
+            actRef.current((c) => ({ ...c, hintOverride: 'путь закрыт: ' + condText(doc, cw) + ' · ← назад' }));
+            return;
+          }
           const t = doc.nodes.find((x) => x.id === ex[0].to);
           if (t) { goNodeRef.current(cur, t, false); return; }
         }
@@ -400,14 +429,21 @@ export function Player(props: { store: VetviStore }) {
         }
         const nx = playableEdges(doc, cur, n.id).filter((e) => !e.fromReply);
         if (nx.length === 1) {
+          const c0 = edgeCond(nx[0]);
+          const cw = c0 ? condWithOverride(doc, c0, n) : null;
+          if (cw && !condMet(doc, cw, cur.vars)) {
+            cur.hist.pop(); /* шаг не состоялся — снимаем запись в истории */
+            actRef.current((c) => ({ ...c, hintOverride: 'путь закрыт: ' + condText(doc, cw) + ' · ← назад' }));
+            return;
+          }
           const t = doc.nodes.find((x) => x.id === nx[0].to);
           if (t) { goNodeRef.current(cur, t, false); return; }
         }
         if (nx.length > 1) {
           const bc = branchChoices(n, nx);
           if (bc) { actRef.current((c) => ({ ...c, choices: bc })); return; }
-          const t = doc.nodes.find((x) => x.id === nx[0].to);
-          if (t) { goNodeRef.current(cur, t, false); return; }
+          actRef.current((c) => ({ ...c, choices: genericEdgeChoices(nx) }));
+          return;
         }
         if ((r as unknown as { loop?: boolean }).loop) {
           actRef.current((c) => ({ ...c, typing: false }));
@@ -437,6 +473,7 @@ export function Player(props: { store: VetviStore }) {
       visited: new Set(snap.visited || []),
       choices: null, end: false, typing: false, shown: '', full: '',
       path: cur.path.slice(0, -1),
+      avCid: null, hintOverride: null,
     };
     let guard = 0;
     while (restored.nodeId && guard++ < 50) {
@@ -458,13 +495,13 @@ export function Player(props: { store: VetviStore }) {
     }
     if (restored.replyId && n2.dialog) {
       const r = findReplyDeep(n2.dialog.replies || [], restored.replyId);
-      if (r) { setSt({ ...restored, full: r.text || '…', shown: r.text || '…', typing: false }); return; }
+      if (r) { setSt({ ...restored, full: r.text || '…', shown: r.text || '…', typing: false, avCid: r.speaker || null }); return; }
     }
     if (restored.seqIdx >= 0 && restored.seqList && n2.dialog) {
       const r = findReplyDeep(n2.dialog.replies || [], restored.seqList[restored.seqIdx]);
-      if (r) { setSt({ ...restored, full: r.text || '…', shown: r.text || '…', typing: false }); return; }
+      if (r) { setSt({ ...restored, full: r.text || '…', shown: r.text || '…', typing: false, avCid: r.speaker || null }); return; }
     }
-    setSt({ ...restored, full: n2.text || '…', shown: n2.text || '…', typing: false });
+    setSt({ ...restored, full: n2.text || '…', shown: n2.text || '…', typing: false, avCid: castAvCid(doc, n2) });
   };
   const backRef = useRef(back);
   backRef.current = back;
@@ -480,8 +517,9 @@ export function Player(props: { store: VetviStore }) {
       nodeId: null, replyId: null, intro: false, lastReply: null,
       full: '', shown: '', typing: false,
       hist: [], path: [], idx: cur.mode === 'list' ? 0 : -1,
-      varChanged: new Set(), visited: cur.mode === 'list' ? new Set(cur.list) : new Set(), dead: new Set(),
+      varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
+      avCid: null, hintOverride: null,
     };
     setSt(s0);
     setTimeout(() => { const c2 = stRef.current; if (c2) goNodeRef.current(c2, n, false); }, 0);
@@ -566,8 +604,9 @@ export function Player(props: { store: VetviStore }) {
       nodeId: null, replyId: null, intro: false, lastReply: null,
       full: '', shown: '', typing: false,
       hist: [], path: [], mode, list, listSet: new Set(list), idx: mode === 'list' ? 0 : -1,
-      vars, varChanged: new Set(), visited: mode === 'list' ? new Set(list) : new Set(), dead: new Set(),
+      vars, varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
+      avCid: null, hintOverride: null,
     };
     setSt(s0);
     setTimeout(() => { const c = stRef.current; if (c) goNodeRef.current(c, startNode as VetviNode, false); }, 0);
@@ -596,6 +635,16 @@ export function Player(props: { store: VetviStore }) {
     };
   }, [st?.nodeId, st?.replyId, st?.intro, st?.seqIdx, st?.typing]);
 
+  /* ── всплывашка изменения переменной: скрыть через 2.6с (plVarFlash оригинала) ── */
+  useEffect(() => {
+    if (!st?.varFlash) return;
+    const ft = st.varFlash.t;
+    const t = setTimeout(() => {
+      setSt((c) => (c && c.varFlash && c.varFlash.t === ft ? { ...c, varFlash: null } : c));
+    }, 2600);
+    return () => clearTimeout(t);
+  }, [st?.varFlash?.t]);
+
   /* ── клавиатура ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -619,26 +668,34 @@ export function Player(props: { store: VetviStore }) {
 
   /* ── рендер ── */
   const n = st && st.nodeId ? doc.nodes.find((x) => x.id === st.nodeId) : null;
-  const slideColor = n ? resolvedColor(doc, n) : '#e2a54e';
-  const speaker: { name: string; color: string; av: string | null; shape: string } | null = (() => {
-    if (!st || !n) return null;
-    if (st.replyId && n.dialog) {
-      const r = findReplyDeep(n.dialog.replies || [], st.replyId);
-      if (r && r.speaker) {
-        const c = store.charById(r.speaker);
-        if (c) return { name: c.name || '(без имени)', color: c.color || '#8b929c', av: (c.av as string | null) || null, shape: c.avShape === 'square' ? 'square' : 'circle' };
-        return { name: '(неизвестный)', color: '#8b929c', av: null, shape: 'circle' };
-      }
-      return null;
-    }
-    const nm = castName(doc, n);
-    if (!nm) return null;
-    const cid = n.dialog ? (n.dialog.participants || [])[0] : (Array.isArray(n.participants) ? (n.participants as string[])[0] : null);
-    const c = cid ? store.charById(cid) : null;
-    return { name: nm, color: c ? c.color || '#8b929c' : slideColor, av: c ? (c.av as string | null) || null : null, shape: c ? (c.avShape === 'square' ? 'square' : 'circle') : 'circle' };
+
+  /* реплика текущего слайда: выбранная (replyId) или «подряд» (seqList/seqIdx) — как plShowReply/plLinearShow */
+  const curReply: VetviReply | null = (() => {
+    if (!st || !n || !n.dialog) return null;
+    if (st.replyId) return findReplyDeep(n.dialog.replies || [], st.replyId);
+    if (st.seqList && st.seqIdx >= 0) return findReplyDeep(n.dialog.replies || [], st.seqList[st.seqIdx]);
+    return null;
   })();
+  const repChar = curReply && curReply.speaker ? store.charById(curReply.speaker) : null;
+
+  /* цвет слайда --plc: реплика — цвет персонажа (иначе #8b929c), слайд — цвет ноды */
+  const slideColor = curReply
+    ? (repChar ? repChar.color || '#9cb878' : '#8b929c')
+    : (n ? resolvedColor(doc, n) : '#e2a54e');
+  /* подпись плашки имени: реплика — имя говорящего, слайд — первый участник (plCastName) */
+  const nameStr = curReply
+    ? (repChar ? repChar.name || '(без имени)' : null)
+    : (n ? castName(doc, n) : null);
+  /* аватар слайда — из состояния (#plAv): рамка в цвет персонажа, без аватара — буква */
+  const avChar = st && st.avCid ? store.charById(st.avCid) : null;
+  const sideAv = avChar
+    ? { url: (avChar.av as string | null) || null, shape: avChar.avShape === 'square' ? 'square' : 'circle', color: avChar.color || '#9cb878', letter: charInitialOf(avChar) }
+    : null;
+  /* точка чипа главы — всегда цвет ноды (plChapterHtml использует nodeVisual) */
+  const chipColor = n ? resolvedColor(doc, n) : '#e2a54e';
 
   const pathTail = st ? st.path.slice(-4) : [];
+  const hasCnt = !!(st && st.mode === 'list' && st.list.length);
   const varsHud = useMemo(() => {
     if (!st) return [];
     return (doc.vars || []).map((v) => ({
@@ -646,107 +703,134 @@ export function Player(props: { store: VetviStore }) {
       cur: st.vars[v.id] !== undefined && st.vars[v.id] !== null ? st.vars[v.id] : v.val,
       chg: st.varChanged.has(v.id),
     }));
-     
+
   }, [st, doc.vars]);
 
   if (!st) return null;
 
-  const loopingReply = st.replyId && n?.dialog ? findReplyDeep(n.dialog.replies || [], st.replyId) : null;
-  const isLooping = !!(loopingReply && (loopingReply as unknown as { loop?: boolean }).loop);
+  /* подсказка: оригинал показывает её всегда, кроме выбора и экрана «КОНЕЦ» */
+  const hintVisible = !(st.choices && st.choices.length) && !st.end;
+  const hint = st.hintOverride || hintFor(doc, st, n ?? null);
+  /* пересборка .pl-box на каждый слайд — перезапуск анимации pl-anim */
+  const slideKey = (st.nodeId || '') + '|' + (st.replyId || '') + '|' + st.seqIdx + '|' + (st.intro ? 'i' : 's');
 
   return (
-    <div className="rn-player show" onClick={() => advanceRef.current()} role="dialog" aria-label="Проигрыватель">
+    <div
+      id="player"
+      className="show"
+      role="dialog"
+      aria-label="Режим новеллы"
+      onClick={(e) => { const t = e.target as HTMLElement | null; if (t && t.closest && t.closest('button')) return; advanceRef.current(); }}
+    >
       <div className="pl-vig" />
       <div className="pl-top">
-        <div className="pl-path">
-          {st.mode === 'list' && st.list.length > 0 && <span className="pl-cnt">{Math.max(0, st.idx) + 1} / {st.list.length}</span>}
+        <div className="pl-path" id="plPath">
+          {hasCnt && <span className="pl-cnt">{Math.max(0, st.idx) + 1} / {st.list.length}</span>}
           {pathTail.map((id, i) => {
             const pn = doc.nodes.find((x) => x.id === id);
             return (
-              <span key={id + ':' + i} style={{ display: 'contents' }}>
-                {!!i && <span className="pl-arr">→</span>}
+              <Fragment key={id + ':' + i}>
+                {(i > 0 || hasCnt) && <span className="sep">→</span>}
                 {i === pathTail.length - 1 ? <b>{pn?.title || '…'}</b> : <span>{pn?.title || '…'}</span>}
-              </span>
+              </Fragment>
             );
           })}
         </div>
       </div>
-      <div className="pl-vars" style={{ display: varsHud.length ? undefined : 'none' }}>
+      <div className="pl-vars" id="plVars" style={{ display: varsHud.length ? 'flex' : 'none' }}>
         {varsHud.map(({ v, cur, chg }) => (
-          <span className={'pl-var' + (chg ? ' chg' : '')} key={v.id} title={chg ? 'значение изменилось в проигрывании' : undefined}>
+          <span
+            className={'pl-var' + (chg ? ' chg' : '')}
+            key={v.id + '|' + String(cur) + (chg ? '|chg' : '')}
+            title={chg ? 'значение изменилось в проигрывании' : undefined}
+          >
             <i>{v.name}</i>
-            <b>{varValText(cur, v)}{chg ? ' ↯' : ''}</b>
+            <b>{varValText(cur, v)}</b>
           </span>
         ))}
       </div>
-      {st.varFlash && <div className="pl-varflash" key={st.varFlash.t} onClick={(e) => e.stopPropagation()}>{st.varFlash.txt}</div>}
+      <div className={'pl-varflash' + (st.varFlash ? ' show' : '')} id="plVarFlash">{st.varFlash ? st.varFlash.txt : ''}</div>
       <div className="pl-body">
-        <div className="pl-wrap" style={{ ['--plc' as string]: slideColor }}>
-          {st.choices && st.choices.length > 0 && (
-            <div className="pl-choices">
-              {st.choices.map((c, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className={'pl-choice' + (c.ok ? '' : ' lock')}
-                  onClick={(e) => { e.stopPropagation(); pickRef.current(st.choices as Choice[], c); }}
-                >
-                  <span className="pl-num">{i + 1}</span>
-                  {c.av && (
-                    <span className={'pl-av sm ' + c.av.shape + (c.av.url ? '' : ' empty')} style={{ borderColor: c.av.color }}>
-                      {c.av.url ? <img src={c.av.url} alt="" /> : c.av.letter}
-                    </span>
-                  )}
-                  <span className="pl-clabel">
-                    {c.label}
-                    {!c.ok && c.why && <em>путь закрыт — {c.why}</em>}
+        <div className="pl-wrap">
+          <div className="pl-choices" id="plChoices" style={{ display: st.choices && st.choices.length ? 'flex' : 'none' }}>
+            {(st.choices || []).map((c, i) => (
+              <button
+                key={i}
+                type="button"
+                className={'pl-choice' + (c.ok ? '' : ' lock')}
+                onClick={(e) => { e.stopPropagation(); pickRef.current(st.choices as Choice[], c); }}
+              >
+                <span className="num">{i + 1}</span>
+                {c.av && (
+                  <span className={'pl-av sm ' + c.av.shape + (c.av.url ? '' : ' empty')} style={{ borderColor: c.av.color }}>
+                    {c.av.url ? <img src={c.av.url} alt="" /> : c.av.letter}
                   </span>
-                </button>
-              ))}
-            </div>
-          )}
-          {n && (
-            <div className="pl-chapter">
+                )}
+                <span className="lbl">
+                  {c.label}
+                  {!c.ok && c.why && <i className="why">путь закрыт — {c.why}</i>}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="pl-chapter" id="plChapter">
+            {n && (
               <span className="pl-chip">
-                <i className="dot" style={{ background: slideColor }} />
-                {typeRu(n)}
+                <i className="dot" style={{ background: chipColor }} />
+                {typeNameOf(doc, n)}
                 <span className="ttl">· {n.title || ''}</span>
               </span>
-            </div>
-          )}
-          <div className="pl-row">
-            <div className={'pl-side' + (speaker ? ' has-av' : '')}>
-              {speaker && (
-                <span className={'pl-av side ' + speaker.shape + (speaker.av ? '' : ' empty')} style={{ borderColor: speaker.color }}>
-                  {speaker.av ? <img src={speaker.av} alt="" /> : speaker.name[0]?.toUpperCase() || '?'}
+            )}
+          </div>
+          <div className={'pl-row' + (sideAv ? ' has-av' : '')} id="plRow">
+            <div className="pl-side" id="plAv">
+              {sideAv && (
+                <span className={'pl-av ' + sideAv.shape + (sideAv.url ? '' : ' empty') + ' side'} style={{ borderColor: sideAv.color }}>
+                  {sideAv.url ? <img src={sideAv.url} alt="" /> : sideAv.letter}
                 </span>
               )}
             </div>
-            <div className="pl-box">
-              {speaker && <div className="pl-name" style={{ ['--plc' as string]: speaker.color }}>{speaker.name}</div>}
-              <div className="pl-text">{st.shown}{st.typing && <span className="caret" />}</div>
-              {!st.choices?.length && !st.end && !st.typing && (
-                <div className="pl-hint">{isLooping ? 'клик — повтор диалога ▸' : 'клик — далее ▸'}</div>
-              )}
+            <div className="pl-box pl-anim" id="plBox" key={slideKey} style={{ ['--plc' as string]: slideColor }}>
+              <div className={'pl-name' + (nameStr ? '' : ' hidden')} id="plName">
+                {nameStr && <span className="pl-t">{nameStr}</span>}
+              </div>
+              <div className="pl-text" id="plText">{st.shown}{st.typing && <span className="caret" />}</div>
+              <div className="pl-hint" id="plHint" style={{ display: hintVisible ? undefined : 'none' }}>{hint}</div>
             </div>
           </div>
-          <div className="pl-actions" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="pl-btn" style={{ opacity: st.hist.length ? '1' : '.4' }} title="Шаг назад (←)" onClick={() => backRef.current()}>← Назад</button>
-            <button type="button" className="pl-btn" title={'Сначала (' + hkText('plRestart') + ')'} onClick={() => restartRef.current()}>↺ Заново</button>
-            <button type="button" className="pl-btn" title={'К ноде на холсте (' + hkText('plShow') + ')'} onClick={() => showRef.current()}>⌖ К ноде</button>
-            <button type="button" className="pl-btn accent" title="Выйти в редактор (Esc)" onClick={() => store.closeModal()}>✕ Выход</button>
+          <div className="pl-actions">
+            <button type="button" className="pl-btn" id="plBackBtn" style={{ opacity: st.hist.length ? '1' : '.4' }} title="Шаг назад (←)" onClick={() => backRef.current()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M10 19l-7-7 7-7" /><path d="M3 12h13a5 5 0 0 1 0 10h-3" /></svg>Назад
+            </button>
+            <button type="button" className="pl-btn" id="plRestartBtn" data-hk-title="plRestart" data-hk-base="Сначала" title="Сначала" onClick={() => restartRef.current()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Заново
+            </button>
+            <button type="button" className="pl-btn" id="plShowBtn" data-hk-title="plShow" data-hk-base="Выйти из проигрывания и показать на холсте ноду текущего текста" title="Выйти из проигрывания и показать на холсте ноду текущего текста" onClick={() => showRef.current()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></svg>К ноде
+            </button>
+            <button type="button" className="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)" onClick={() => store.closeModal()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>Выход
+            </button>
           </div>
         </div>
       </div>
       {st.end && (
-        <div className="pl-end show" onClick={(e) => e.stopPropagation()}>
+        <div className="pl-end show" id="plEnd">
           <h2>~ КОНЕЦ ~</h2>
           <div className="pl-sub">{st.mode === 'list' ? 'выделенный фрагмент проигран' : 'эта ветка истории завершена'}</div>
           <div className="pl-btns">
-            <button type="button" className="pl-btn" onClick={() => backRef.current()}>← Назад</button>
-            <button type="button" className="pl-btn" onClick={() => restartRef.current()}>↺ Заново</button>
-            <button type="button" className="pl-btn" onClick={() => showRef.current()}>⌖ К ноде</button>
-            <button type="button" className="pl-btn accent" onClick={() => store.closeModal()}>✕ В редактор</button>
+            <button type="button" className="pl-btn" id="plEndBack" title="Вернуться на шаг назад (←)" onClick={() => backRef.current()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M10 19l-7-7 7-7" /><path d="M3 12h13a5 5 0 0 1 0 10h-3" /></svg>Назад
+            </button>
+            <button type="button" className="pl-btn" id="plEndRestart" data-hk-title="plRestart" data-hk-base="Сначала" onClick={() => restartRef.current()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Заново
+            </button>
+            <button type="button" className="pl-btn" id="plEndShow" data-hk-title="plShow" data-hk-base="Показать на холсте ноду текущего текста" title="Показать на холсте ноду текущего текста" onClick={() => showRef.current()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></svg>К ноде
+            </button>
+            <button type="button" className="pl-btn accent" id="plEndExit" onClick={() => store.closeModal()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>В редактор
+            </button>
           </div>
         </div>
       )}
@@ -891,12 +975,67 @@ function typeColor(t: string): string {
   return TYPE_COLORS[t] || '#8b929c';
 }
 
-function typeRu(x: VetviNode): string {
-  const map: Record<string, string> = {
-    scene: 'Сцена', quest: 'Квест', dialog: 'Диалог', skill: 'Навык', action: 'Действие',
-    branch: 'Развилка', varnode: 'Переменная', event: 'Событие', note: 'Заметка',
+/* имя типа для чипа главы — typeInfo(name) оригинала: встроенный → свой тип → «Заметка» */
+function typeNameOf(doc: Doc, n: VetviNode): string {
+  const t = TYPES[n.type];
+  if (t) return t.name;
+  for (const c of doc.customTypes || []) {
+    const ct = c as { id?: string; name?: string };
+    if (ct.id === n.type && ct.name) return ct.name;
+  }
+  return TYPES.note.name;
+}
+
+/* первый участник ноды — как plCastAv оригинала */
+function castAvCid(doc: Doc, n: VetviNode): string | null {
+  const parts = n.dialog ? n.dialog.participants || [] : (Array.isArray(n.participants) ? n.participants as string[] : []);
+  return parts.length ? (parts[0] as string) : null;
+}
+
+/* первая буква имени — charInitial оригинала */
+function charInitialOf(c: { name?: string } | null | undefined): string {
+  const nm = String((c && c.name) || '').trim();
+  return nm ? nm[0].toUpperCase() : '?';
+}
+
+/* условие на стрелке (старое поле cond) */
+function edgeCond(e: unknown): { vid: string; op: string; val: number | string } | null {
+  const c = (e as { cond?: { vid: string; op: string; val: number | string } | null }).cond;
+  return c || null;
+}
+
+/* текст подсказки после печати — как plAfterType/plListHint оригинала */
+function hintFor(doc: Doc, st: PlState, n: VetviNode | null): string {
+  const DURING = 'клик — далее ▸';
+  if (!n || st.typing || st.intro) return DURING;
+  const blocked = (e: VetviDoc['edges'][number]): string | null => {
+    const c0 = edgeCond(e);
+    const cw = c0 ? condWithOverride(doc, c0, n) : null;
+    return cw && !condMet(doc, cw, st.vars) ? 'путь закрыт: ' + condText(doc, cw) + ' · ← назад' : null;
   };
-  return map[x.type] || 'Нода';
+  if (n.type === 'dialog' && n.linear && st.seqIdx >= 0) return DURING;
+  if (st.replyId && n.type === 'dialog') {
+    const r = findReplyDeep(n.dialog?.replies || [], st.replyId);
+    if (r) {
+      if ((r as unknown as { loop?: boolean }).loop) return 'клик — повтор диалога ▸';
+      const kids = r.children || [];
+      if (kids.length >= 1) return DURING;
+      const ex = doc.edges.filter((e) => e.from === n.id && e.fromReply === r.id && e.tin !== 'var' && (st.mode !== 'list' || st.listSet.has(e.to)));
+      if (ex.length > 1) return DURING;
+      if (ex.length === 1) return blocked(ex[0]) || ('далее: ' + edgeLabel(doc, ex[0]) + ' ▸');
+      const nx = doc.edges.filter((e) => e.from === n.id && !e.fromReply && e.tin !== 'var' && (st.mode !== 'list' || st.listSet.has(e.to)));
+      if (nx.length > 1) return DURING;
+      if (nx.length === 1) return blocked(nx[0]) || ('далее: ' + edgeLabel(doc, nx[0]) + ' ▸');
+    }
+  }
+  const nx2 = doc.edges.filter((e) => e.from === n.id && !e.fromReply && e.tin !== 'var' && (st.mode !== 'list' || st.listSet.has(e.to)));
+  if (nx2.length > 1) return DURING;
+  if (nx2.length === 1) return blocked(nx2[0]) || ('далее: ' + edgeLabel(doc, nx2[0]) + ' ▸');
+  if (st.mode === 'list') {
+    const hasNext = st.list.some((id) => !st.visited.has(id) && !st.dead.has(id) && doc.nodes.some((x) => x.id === id));
+    return hasNext ? DURING : 'клик — конец ▸';
+  }
+  return 'клик — конец ▸';
 }
 
 function findReplyDeep(replies: VetviReply[], id: string): VetviReply | null {

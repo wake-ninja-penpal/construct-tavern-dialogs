@@ -7,9 +7,17 @@
  * менеджер проектов (открыть/создать/переименовать/удалить/импорт), настройки
  * (хаб + горячие клавиши с перезахватом + хранилище LS/IDB), подтверждение,
  * создание группы из выделения.
+ *
+ * Разметка — 1:1 с классической версией (ветви/index.html):
+ *  - generic-модалки (подтверждение, проекты, новая группа, sync-окна) —
+ *    .modal-wrap > .m-card(.wide) с <h3>, содержимым и .m-btns (.btn/.primary/.danger);
+ *  - «большие» окна — .dlg-modal(.sub).show > .dlg-modal-card (.log-card,
+ *    .patch-card, .search-card, .set-card) с .dlg-modal-head/.dlg-modal-body/
+ *    .dlg-modal-foot; поиск-бары — .search-bar (svg + input), футер-инфо —
+ *    .log-foot-info, подвалы настроек — .set-foot-row + .set-store-msg.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { APP_VERSION, PATCHNOTES, PATCH_TAGS } from '@/vetvi/core/patchnotes';
 import { SECTION_TITLES } from '@/vetvi/core/logdiff';
@@ -23,33 +31,68 @@ import type { LogEntry, VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
 import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RenameMeModal, RoomPassModal, ShareModal } from './SyncModals';
 
-/* ═══════════ общий каркас ═══════════ */
+/* ═══════════ иконки оригинала (ic(name,size): viewBox 24, stroke 1.7) ═══════════ */
+
+function Ic(props: { size?: number; children: React.ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={props.size || 15}
+      height={props.size || 15}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {props.children}
+    </svg>
+  );
+}
+
+const IC_PENCIL = (
+  <Ic size={14}><path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z" /><path d="M14.5 6.5l3 3" /></Ic>
+);
+const IC_TRASH = (
+  <Ic size={14}><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" /></Ic>
+);
+const IC_RBACK = (
+  <Ic size={12}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5v1" /><path d="M4 20h6" /></Ic>
+);
+const IC_TARGET = (
+  <Ic size={12}><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></Ic>
+);
+
+/* ═══════════ общий каркас (generic: #modalWrap > .m-card) ═══════════ */
 
 export function ModalShell(props: { title: string; onClose: () => void; children: React.ReactNode; foot?: React.ReactNode; wide?: boolean; cardClass?: string }) {
   return (
-    <div className="rn-modal show" onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }} role="dialog" aria-label={props.title}>
-      <div className={'rn-modal-card' + (props.wide ? ' wide' : '') + (props.cardClass ? ' ' + props.cardClass : '')}>
-        <div className="rn-modal-head">
-          <span className="rn-modal-title">{props.title}</span>
-          <button type="button" className="rn-modal-close" title="Закрыть" onClick={props.onClose}>×</button>
-        </div>
+    <div className="modal-wrap" onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }} role="dialog" aria-label={props.title}>
+      <div className={'m-card' + (props.wide ? ' wide' : '') + (props.cardClass ? ' ' + props.cardClass : '')}>
+        <h3>{props.title}</h3>
         {props.children}
-        {props.foot !== undefined ? (
-          <div className="rn-modal-foot">{props.foot}</div>
-        ) : (
-          <div className="rn-modal-foot">
-            <button type="button" className="rn-btn primary" onClick={props.onClose}>Закрыть</button>
-          </div>
-        )}
+        <div className="m-btns">
+          {props.foot !== undefined ? (
+            props.foot
+          ) : (
+            <button type="button" className="btn primary" onClick={props.onClose}>Закрыть</button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-export function SearchBar(props: { placeholder: string; onChange: (v: string) => void; autoFocus?: boolean; onEnter?: () => void; onEsc?: () => void }) {
+/* ── строка поиска .search-bar: лупа 15×15 (circle r7 + m21 21-4-4) ── */
+
+export function SearchBar(props: { placeholder: string; onChange: (v: string) => void; autoFocus?: boolean; onEnter?: () => void; onEsc?: () => void; className?: string }) {
   return (
-    <div className="rn-searchbar">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
+    <div className={'search-bar' + (props.className ? ' ' + props.className : '')}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m21 21-4-4" />
+      </svg>
       <input
         autoFocus={props.autoFocus}
         placeholder={props.placeholder}
@@ -66,6 +109,8 @@ export function SearchBar(props: { placeholder: string; onChange: (v: string) =>
   );
 }
 
+/* подсветка совпадения: <mark class="search-mark"> */
+
 function Mark({ text, q }: { text: string; q: string }) {
   if (!q) return <>{text}</>;
   const i = text.toLowerCase().indexOf(q.toLowerCase());
@@ -79,7 +124,7 @@ function Mark({ text, q }: { text: string; q: string }) {
   );
 }
 
-/* ═══════════ поиск по проекту ═══════════ */
+/* ═══════════ поиск по проекту (.dlg-modal > .search-card) ═══════════ */
 
 interface Hit { kind: string; frag: string; rid?: string }
 interface HitNode { n: VetviNode; hits: Hit[]; more: number }
@@ -146,7 +191,7 @@ const runSearch = (query: string) => {
       runSearch(q);
     }, 400);
     return () => clearTimeout(t);
-     
+
   }, [q]);
 
   const go = (nid: string, rid?: string) => {
@@ -156,45 +201,53 @@ const runSearch = (query: string) => {
     if (rid) store.requestFlash(nid, rid);
   };
 
+  const qs = applied.trim();
   return (
-    <ModalShell title="Поиск по проекту" onClose={() => store.closeModal()} wide>
-      <div className="rn-modal-body">
-        <SearchBar
-          autoFocus
-          placeholder="Найти в репликах, названиях, заметках, метках, исходах…"
-          onChange={setQ}
-          onEnter={() => {
-            const first = results[0];
-            if (first) go(first.n.id, first.hits[0]?.rid);
-          }}
-          onEsc={() => { if (q) setQ(''); else store.closeModal(); }}
-        />
-        <div className="rn-search-hint">{stats || 'Введите минимум два символа — поиск идёт по всем нодам проекта'}</div>
-        <div className="rn-search-results">
-          {results.map(({ n, hits, more }) => (
-            <div className="rn-hitnode" key={n.id}>
-              <button type="button" className="rn-hitnode-head" onClick={() => go(n.id)}>
-                <span className="rn-hit-ico" style={{ color: n.color || TYPES[n.type]?.color }}><TypeIcon type={n.type} /></span>
-                <span className="rn-hit-title">{n.title || TYPES[n.type]?.name}</span>
-                <span className="rn-hit-type">{TYPES[n.type]?.name || n.type}</span>
-              </button>
-              {hits.map((h, i) => (
-                <button type="button" className="rn-hit" key={i} onClick={() => go(n.id, h.rid)}>
-                  <span className="rn-hit-kind">{h.kind}</span>
-                  <span className="rn-hit-frag"><Mark text={h.frag} q={applied} /></span>
+    <div className="dlg-modal show" onClick={(e) => { if (e.target === e.currentTarget) store.closeModal(); }} role="dialog" aria-label="Поиск по проекту">
+      <div className="dlg-modal-card search-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Поиск по проекту</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="dlg-modal-body search-body">
+          <SearchBar
+            autoFocus
+            placeholder="Найти в репликах, названиях, заметках, метках, исходах…"
+            onChange={setQ}
+            onEnter={() => {
+              const first = results[0];
+              if (first) go(first.n.id, first.hits[0]?.rid);
+            }}
+            onEsc={() => { if (q) setQ(''); else store.closeModal(); }}
+          />
+          <div className="search-hint">{stats}</div>
+          <div className="search-results">
+            {results.map(({ n, hits, more }) => (
+              <div className="search-node-row" key={n.id}>
+                <button type="button" className="search-node-head" onClick={() => go(n.id)}>
+                  <span className="search-nico" style={{ color: n.color || TYPES[n.type]?.color }}><TypeIcon type={n.type} /></span>
+                  <span className="search-ntitle">{n.title || 'Без названия'}</span>
+                  <span className="search-ntype">{TYPES[n.type]?.name || n.type}</span>
                 </button>
-              ))}
-              {more > 0 && <div className="rn-hit-more">ещё совпадений: {more}</div>}
-            </div>
-          ))}
-          {applied.length >= 2 && !results.length && <div className="rn-pane-hint">Ничего не найдено по «{applied}»</div>}
+                {hits.map((h, i) => (
+                  <button type="button" className="search-hit" key={i} onClick={() => go(n.id, h.rid)}>
+                    <span className="search-kind">{h.kind}</span>
+                    <span className="search-frag"><Mark text={h.frag} q={applied} /></span>
+                  </button>
+                ))}
+                {more > 0 && <div className="search-more">ещё совпадений: {more}</div>}
+              </div>
+            ))}
+            {qs.length < 2 && !results.length && <div className="search-empty">Введите минимум два символа — поиск идёт по всем нодам проекта</div>}
+            {qs.length >= 2 && !results.length && <div className="search-empty">Ничего не найдено по «{qs}»</div>}
+          </div>
+        </div>
+        <div className="dlg-modal-foot">
+          <span className="log-foot-info">Enter — к первой находке · Esc — закрыть</span>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Закрыть</button>
         </div>
       </div>
-      <div className="rn-modal-foot">
-        <span className="rn-foot-info">Enter — к первой находке · Esc — закрыть</span>
-        <button type="button" className="rn-btn primary" onClick={() => store.closeModal()}>Закрыть</button>
-      </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -210,7 +263,20 @@ function fragOf(text: string, q: string): string {
   return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '');
 }
 
-/* ═══════════ журнал действий ═══════════ */
+/* ═══════════ журнал действий (.dlg-modal > .log-card) ═══════════ */
+
+/* префиксы пунктов деталей: добавленное — «+», удалённое — «−» (logDetSec оригинала) */
+const LOG_PREFIX: Record<string, string> = { nA: '+', nD: '−', eA: '+', eD: '−', gA: '+', gD: '−' };
+const LOG_RB_NO_SNAP = 'Снимок состояния для этой записи недоступен: запись старая, от другого участника, или снимок вытеснен более новыми.';
+
+/* значение поля: hex — цветной ромбик .ld-dot, иначе «текст» старым/новым классом */
+function LdSide({ val, cls }: { val: string; cls: string }) {
+  if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(val)) {
+    return <span className="ld-dot" style={{ background: val }} title={val} />;
+  }
+  if (val) return <span className={cls}>«{val}»</span>;
+  return null;
+}
 
 export function LogModal({ store }: { store: VetviStore }) {
   const [q, setQ] = useState('');
@@ -236,90 +302,142 @@ export function LogModal({ store }: { store: VetviStore }) {
     return hay.includes(applied.toLowerCase());
   });
 
-  const filterName = store.logFilterNode ? (store.nodeById(store.logFilterNode)?.title || '…') : store.logFilterGroup ? (store.groupById(store.logFilterGroup)?.name || '…') : null;
+  const fn = store.logFilterNode ? store.nodeById(store.logFilterNode) : null;
+  const fg = store.logFilterGroup ? store.groupById(store.logFilterGroup) : null;
+  const capTitle = store.logFilterNode
+    ? 'Журнал: «' + ((fn && fn.title) || 'нода удалена') + '»'
+    : store.logFilterGroup
+      ? 'Журнал: «' + ((fg && fg.name) || 'группа удалена') + '»'
+      : 'Журнал действий';
+  const gone = store.logFilterNode ? !fn : store.logFilterGroup ? !fg : false;
+
+  const closeAll = () => { store.setLogFilters(null, null); store.closeModal(); };
+
+  const showOnCanvas = (e: LogEntry) => {
+    const ids = (e.diff && e.diff.ids) || [];
+    if (ids.length && store.nodeById(ids[0])) {
+      store.closeModal();
+      store.selectOnly(ids[0]);
+      store.requestCenter(ids[0]);
+    } else {
+      store.toast('Объекты записи не найдены на холсте', 'warn');
+    }
+  };
+
+  const lq = applied.trim();
+  const emptyMsg = lq
+    ? 'По «' + lq + '» в журнале ничего нет'
+    : store.logFilterNode
+      ? 'Для этой ноды пока нет записей в журнале.'
+      : store.logFilterGroup
+        ? 'Для этой группы пока нет записей в журнале.'
+        : 'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.';
 
   return (
-    <ModalShell
-      title={filterName ? 'Журнал: «' + filterName + '»' : 'Журнал действий'}
-      onClose={() => { store.setLogFilters(null, null); store.closeModal(); }}
-      wide
-      cardClass="rn-log-card"
-      foot={
-        <>
-          <span className="rn-foot-info">записей: {filtered.length}{filterName ? ' · объект удалён' : ''}</span>
-          {filterName && (
-            <button type="button" className="rn-mini" onClick={() => store.setLogFilters(null, null)}>Все записи</button>
-          )}
-          <button type="button" className="rn-btn primary" onClick={() => { store.setLogFilters(null, null); store.closeModal(); }}>Готово</button>
-        </>
-      }
-    >
-      <div className="rn-modal-body">
-        <SearchBar
-          autoFocus
-          placeholder="Поиск по журналу: действие, автор, объект, дата…"
-          onChange={setQ}
-          onEsc={() => { if (q) setQ(''); else { store.setLogFilters(null, null); store.closeModal(); } }}
-        />
-        <div className="rn-log-list">
-          {filtered.map((e) => (
-            <div className="rn-log-row" key={e.id}>
-              <button type="button" className="rn-log-head" onClick={() => setOpenId(openId === e.id ? null : e.id)}>
-                <span className="rn-log-when">{fmtWhen(new Date(e.t).toISOString())}</span>
-                <span className="rn-log-dot" style={{ background: e.by?.color || '#8b929c' }} />
-                <span className="rn-log-who">{e.by?.name || '?'}</span>
-                <span className="rn-log-act"><Mark text={e.act} q={applied} /></span>
-              </button>
-              {openId === e.id && (
-                <div className="rn-log-det">
-                  {e.diff && e.diff.sections.map((sec) => (
-                    <div className="rn-log-sec" key={sec.key}>
-                      <div className="rn-log-sec-h">{SECTION_TITLES[sec.key] || sec.key}{sec.items.length > 1 ? ' (' + sec.items.length + ')' : ''}</div>
-                      {sec.items.slice(0, 8).map((it) => (
-                        <div className="rn-log-item" key={it.id}>
-                          <span className="rn-log-item-name">{it.name}</span>
-                          {it.fields.map((f, fi) => (
-                            <div className="rn-log-field" key={fi}>
-                              <i>{f.k}:</i>
-                              <s>{f.a || '—'}</s>
-                              <em>→</em>
-                              <b>{f.b || '—'}</b>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      {sec.items.length > 8 && <div className="rn-hit-more">… ещё {sec.items.length - 8}</div>}
+    <div className="dlg-modal show" role="dialog" aria-label={capTitle}>
+      <div className="dlg-modal-card log-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">{capTitle}</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={closeAll}>×</button>
+        </div>
+        <div className="log-tools">
+          <SearchBar
+            autoFocus
+            placeholder="Поиск по журналу: действие, автор, объект, дата…"
+            onChange={setQ}
+            onEsc={() => { if (q) setQ(''); else closeAll(); }}
+          />
+        </div>
+        <div className="dlg-modal-body">
+          {filtered.length ? (
+            <div className="log-list">
+              {filtered.map((e) => {
+                const c = (e.by && e.by.color) || '#8b929c';
+                const nm = (e.by && e.by.name) || '—';
+                return (
+                  <div
+                    className={'log-row' + (openId === e.id ? ' open' : '')}
+                    key={e.id}
+                    onClick={() => setOpenId(openId === e.id ? null : e.id)}
+                  >
+                    <div className="log-line">
+                      <span className="log-when"><Mark text={fmtWhen(new Date(e.t).toISOString())} q={applied} /></span>
+                      <span className="log-dot" style={{ background: c, color: c }} />
+                      <span className="log-who"><Mark text={nm} q={applied} /></span>
+                      <span className="log-act"><Mark text={e.act || ''} q={applied} /></span>
                     </div>
-                  ))}
-                  {!e.diff && <div className="rn-insp-hint">Детали недоступны для этой записи.</div>}
-                  <div className="rn-log-btns">
-                    <button type="button" className="rn-mini" onClick={() => {
-                      const ids = e.diff?.ids || [];
-                      if (ids.length && store.nodeById(ids[0])) {
-                        store.closeModal();
-                        store.selectOnly(ids[0]);
-                        store.requestCenter(ids[0]);
-                      } else {
-                        store.toast('Объекты записи не найдены на холсте', 'warn');
-                      }
-                    }}>Показать на холсте</button>
-                    {e.snap && (
-                      <button type="button" className="rn-mini" onClick={() => {
-                        store.rollbackToSnapshot(e.snap as string);
-                        store.toast('Проект откатлен к моменту записи', 'ok');
-                        store.closeModal();
-                      }}>Откатить проект к этому моменту</button>
+                    {openId === e.id && (
+                      <div className="log-det">
+                        {!e.diff ? (
+                          <div className="log-item log-fields">Детали этой записи недоступны</div>
+                        ) : (
+                          e.diff.sections.map((sec) => (
+                            <Fragment key={sec.key}>
+                              <div className="log-sec">{SECTION_TITLES[sec.key] || sec.key}</div>
+                              {sec.items.slice(0, 8).map((it) => (
+                                <div className="log-item" key={it.id}>
+                                  {LOG_PREFIX[sec.key] ? LOG_PREFIX[sec.key] + ' ' : ''}<b>{it.name}</b>
+                                  {!!it.fields.length && (
+                                    <div className="log-dtxt">
+                                      {it.fields.map((f, fi) => (
+                                        <div className="ld-row" key={fi}>
+                                          <span className="ld-k">{f.k}:</span>{' '}
+                                          <LdSide val={f.a} cls="ld-old" />
+                                          {f.a && f.b ? <span className="ld-arr"> → </span> : null}
+                                          <LdSide val={f.b} cls="ld-new" />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                              {sec.items.length > 8 && <div className="log-item log-fields">… ещё {sec.items.length - 8}</div>}
+                            </Fragment>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          className={'log-rb log-rb-proj' + (e.snap ? '' : ' dis')}
+                          title={e.snap
+                            ? 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').'
+                            : LOG_RB_NO_SNAP}
+                          disabled={!e.snap}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            if (!e.snap) return;
+                            store.rollbackToSnapshot(e.snap as string);
+                            store.toast('Проект откачен к моменту записи', 'ok');
+                            store.closeModal();
+                          }}
+                        >
+                          {IC_RBACK} Откатить проект к этому моменту
+                        </button>
+                        <button
+                          type="button"
+                          className="log-loc"
+                          onClick={(ev) => { ev.stopPropagation(); showOnCanvas(e); }}
+                        >
+                          {IC_TARGET} Показать на холсте
+                        </button>
+                      </div>
                     )}
-                    {!e.snap && <span className="rn-log-nosnap">Снимок состояния недоступен: запись старая, от другого участника, или снимок вытеснен более новыми.</span>}
                   </div>
-                </div>
-              )}
+                );
+              })}
             </div>
-          ))}
-          {!filtered.length && <div className="rn-pane-hint">{applied ? 'По «' + applied + '» в журнале ничего нет' : 'Журнал пуст — правьте холст, и записи появятся здесь.'}</div>}
+          ) : (
+            <div className="log-empty">{emptyMsg}</div>
+          )}
+        </div>
+        <div className="dlg-modal-foot">
+          <span className="log-foot-info">записей: {filtered.length}{gone ? ' · объект удалён' : ''}</span>
+          {(store.logFilterNode || store.logFilterGroup) && (
+            <button type="button" className="btn" title="Показать все записи" onClick={() => store.setLogFilters(null, null)}>Все записи</button>
+          )}
+          <button type="button" className="btn primary" onClick={closeAll}>Готово</button>
         </div>
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -353,7 +471,7 @@ export function bindLogHelpers(fn: (e: LogEntry, nid: string) => string | null):
   storeNodeName = fn;
 }
 
-/* ═══════════ патчноут ═══════════ */
+/* ═══════════ патчноут (.dlg-modal > .patch-card) ═══════════ */
 
 export function PatchModal({ store }: { store: VetviStore }) {
   const [q, setQ] = useState('');
@@ -372,93 +490,114 @@ export function PatchModal({ store }: { store: VetviStore }) {
   }).filter(({ v, items }) => !applied || items.length > 0 || v.ver.toLowerCase().startsWith(applied.toLowerCase()));
 
   return (
-    <ModalShell
-      title="Что нового — патчноут"
-      onClose={() => store.closeModal()}
-      cardClass="rn-patch-card"
-      foot={
-        <>
-          <span className="rn-foot-info">Текущая версия: v{APP_VERSION}</span>
-          <button type="button" className="rn-btn primary" onClick={() => store.closeModal()}>Закрыть</button>
-        </>
-      }
-    >
-      <div className="rn-modal-body">
-        <SearchBar placeholder="Фильтр журнала: текст записи или версия…" onChange={setQ} />
-        <div className="rn-patch-body">
+    <div className="dlg-modal show" onClick={(e) => { if (e.target === e.currentTarget) store.closeModal(); }} role="dialog" aria-label="Что нового — патчноут">
+      <div className="dlg-modal-card patch-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Что нового — патчноут</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="patch-tools">
+          <SearchBar placeholder="Фильтр журнала: текст записи или версия…" onChange={setQ} />
+        </div>
+        <div className="dlg-modal-body patch-body">
           {list.map(({ v, items }, i) => (
-            <div className="rn-patch-ver" key={v.ver}>
-              <div className="rn-patch-verhead">
-                <span className="rn-patch-v">v{v.ver}</span>
-                {i === 0 && !applied && <span className="rn-patch-latest">актуально</span>}
+            <div className="patch-ver" key={v.ver}>
+              <div className="patch-ver-head">
+                <span className="patch-ver-v">v{v.ver}</span>
+                {i === 0 && !applied && <span className="patch-latest">актуально</span>}
               </div>
               {items.map((it, k) => (
-                <div className="rn-patch-item" key={k}>
-                  <span className={'rn-patch-tag ' + it.k}>{PATCH_TAGS[it.k] || it.k}</span>
+                <div className="patch-item" key={k}>
+                  <span className={'patch-tag ' + it.k}>{PATCH_TAGS[it.k] || it.k}</span>
                   <span>{it.t}</span>
                 </div>
               ))}
-              {applied && !items.length && <div className="rn-patch-item"><span className="rn-patch-tag chg">версия</span><span>совпадений в этой версии нет</span></div>}
+              {applied && !items.length && (
+                <div className="patch-item"><span className="patch-tag chg">версия</span><span>совпадений в этой версии нет</span></div>
+              )}
             </div>
           ))}
-          {applied && !list.length && <div className="rn-pane-hint">По «{applied}» в журнале ничего нет</div>}
+          {applied && !list.length && <div className="patch-empty">По «{applied.trim()}» в журнале ничего нет</div>}
+        </div>
+        <div className="dlg-modal-foot">
+          <span className="log-foot-info">Текущая версия: v{APP_VERSION}</span>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Закрыть</button>
         </div>
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
-/* ═══════════ менеджер проектов ═══════════ */
+/* ═══════════ менеджер проектов (.m-card > .pj-list + .pj-foot) ═══════════ */
 
 export function ProjectsModal({ store }: { store: VetviStore }) {
   const [, tick] = useState(0);
   const cur = String(store.doc.meta.projectId || '');
   const impRef = useRef<HTMLInputElement>(null);
-  const renRef = useRef<{ id: string; val: string } | null>(null);
   const [ren, setRen] = useState<{ id: string; val: string } | null>(null);
 
   const list = projList();
   const refresh = () => tick((t) => t + 1);
+  const curFlag = (id: string) => id === cur && store.syncMode !== 'copy';
 
   return (
-    <ModalShell title="Мои проекты" onClose={() => store.closeModal()} wide>
-      <div className="rn-modal-body">
-        <div className="rn-proj-list">
-          {list.map((e) => (
-            <div className={'rn-proj-row' + (e.id === cur ? ' cur' : '')} key={e.id}>
-              {ren && ren.id === e.id ? (
-                <input
-                  autoFocus
-                  maxLength={80}
-                  value={ren.val}
-                  onChange={(ev) => setRen({ id: e.id, val: ev.target.value })}
-                  onKeyDown={(ev) => {
-                    if (ev.key === 'Enter') {
-                      store.renameProject(e.id, ren.val.trim() || e.name);
-                      setRen(null);
-                      refresh();
-                    }
-                    if (ev.key === 'Escape') setRen(null);
-                  }}
-                  onBlur={() => { store.renameProject(e.id, ren.val.trim() || e.name); setRen(null); refresh(); }}
-                  aria-label="Имя проекта"
-                />
-              ) : (
-                <button type="button" className="rn-proj-open" onClick={() => { store.openProject(e.id); store.closeModal(); }}>
-                  <span className="rn-proj-name">{e.name}{e.id === cur && store.syncMode !== 'copy' ? ' · текущий' : ''}</span>
-                  <span className="rn-proj-meta">{projFmtDate(e.modified || e.at)} · {e.nodes ?? 0} узл.{e.roomId ? ' · комната' : ''}</span>
-                </button>
-              )}
-              <button type="button" className="rn-proj-act" title="Переименовать" onClick={() => setRen({ id: e.id, val: e.name })}>✎</button>
+    <ModalShell title="Мои проекты" onClose={() => store.closeModal()}>
+      <div className="pj-list">
+        {list.map((e) => (
+          <div
+            className={'pj-row' + (e.id === cur ? ' cur' : '')}
+            key={e.id}
+            title="Открыть проект"
+            onClick={(ev) => {
+              const t = ev.target as HTMLElement | null;
+              if (t && t.closest && t.closest('.pj-ib')) return;
+              store.openProject(e.id);
+              store.closeModal();
+            }}
+          >
+            {ren && ren.id === e.id ? (
+              <input
+                className="inp"
+                autoFocus
+                maxLength={80}
+                value={ren.val}
+                onClick={(ev) => ev.stopPropagation()}
+                onChange={(ev) => setRen({ id: e.id, val: ev.target.value })}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter') {
+                    store.renameProject(e.id, ren.val.trim() || e.name);
+                    setRen(null);
+                    refresh();
+                  }
+                  if (ev.key === 'Escape') setRen(null);
+                }}
+                onBlur={() => { store.renameProject(e.id, ren.val.trim() || e.name); setRen(null); refresh(); }}
+                aria-label="Имя проекта"
+              />
+            ) : (
+              <div className="pj-main">
+                <div className="pj-name">
+                  {e.name || 'Без названия'}
+                  {curFlag(e.id) && <span style={{ color: 'var(--acc)', fontSize: '10px', whiteSpace: 'nowrap' }}> · текущий</span>}
+                </div>
+                <div className="pj-meta">{[projFmtDate(e.modified || e.at), (e.nodes ?? 0) + ' узл.'].filter(Boolean).join(' · ')}</div>
+              </div>
+            )}
+            {e.roomId ? <span className="pj-badge">комната</span> : null}
+            <div className="pj-acts">
+              <button type="button" className="pj-ib" title="Переименовать" onClick={(ev) => { ev.stopPropagation(); setRen({ id: e.id, val: e.name }); }}>
+                {IC_PENCIL}
+              </button>
               <button
                 type="button"
-                className="rn-proj-act danger"
+                className="pj-ib danger"
                 title="Удалить"
-                onClick={() => {
+                onClick={(ev) => {
+                  ev.stopPropagation();
                   const last = list.length <= 1;
                   store.confirmBox({
                     title: 'Удалить проект?',
-                    text: '<p>«' + e.name + '» будет удалён с этого устройства безвозвательно.</p>',
+                    text: '<p>«' + e.name + '» будет удалён с этого устройства безвозвратно.</p>',
                     buttons: [
                       { label: 'Отмена', primary: true },
                       { label: 'Удалить', danger: true, fn: () => { store.deleteProject(e.id); refresh(); } },
@@ -466,62 +605,59 @@ export function ProjectsModal({ store }: { store: VetviStore }) {
                   });
                   void last;
                 }}
-              >🗑</button>
+              >
+                {IC_TRASH}
+              </button>
             </div>
-          ))}
-          {!list.length && <div className="rn-pane-hint">Пока нет проектов — создайте первый.</div>}
-        </div>
-        <input
-          ref={impRef}
-          type="file"
-          accept=".json,application/json"
-          hidden
-          onChange={async (ev) => {
-            const f = ev.target.files?.[0];
-            if (!f) return;
-            try {
-              const parsed = await readJsonFile(f);
-              if (!looksLikeProject(parsed)) {
-                store.toast('Файл не похож на проект Ветвей', 'err');
-                return;
-              }
-              store.importProject(parsed, f.name);
-              store.closeModal();
-            } catch {
-              store.toast('Не удалось прочитать JSON', 'err');
+          </div>
+        ))}
+        {!list.length && <div className="pj-empty">Пока нет проектов — создайте первый</div>}
+      </div>
+      <div className="pj-foot">
+        <button type="button" className="btn" onClick={() => { store.createProject(); store.closeModal(); }}>+ Новый проект</button>
+        <button type="button" className="btn" onClick={() => impRef.current?.click()}>Импорт из файла…</button>
+      </div>
+      <input
+        ref={impRef}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={async (ev) => {
+          const f = ev.target.files?.[0];
+          if (!f) return;
+          try {
+            const parsed = await readJsonFile(f);
+            if (!looksLikeProject(parsed)) {
+              store.toast('Файл не похож на проект Ветвей', 'err');
+              return;
             }
-          }}
-        />
-      </div>
-      <div className="rn-modal-foot">
-        <button type="button" className="rn-btn" onClick={() => { store.createProject(); store.closeModal(); }}>+ Новый проект</button>
-        <button type="button" className="rn-btn" onClick={() => impRef.current?.click()}>Импорт из файла…</button>
-        <button type="button" className="rn-btn primary" onClick={() => store.closeModal()}>Закрыть</button>
-      </div>
+            store.importProject(parsed, f.name);
+            store.closeModal();
+          } catch {
+            store.toast('Не удалось прочитать JSON', 'err');
+          }
+        }}
+      />
     </ModalShell>
   );
 }
 
-/* ═══════════ подтверждение ═══════════ */
+/* ═══════════ подтверждение (.m-card + .m-btns) ═══════════ */
 
 export function ConfirmHost({ store }: { store: VetviStore }) {
   const cfg = store.confirm;
   if (!cfg) return null;
   return (
-    <div className="rn-modal show top" onClick={(e) => { if (e.target === e.currentTarget) store.closeConfirm(); }} role="alertdialog" aria-label={cfg.title}>
-      <div className={'rn-modal-card' + (cfg.wide ? ' wide' : '')}>
-        <div className="rn-modal-head">
-          <span className="rn-modal-title">{cfg.title}</span>
-        </div>
-        <div className="rn-modal-body">
-          {cfg.text && <div className="rn-confirm-text" dangerouslySetInnerHTML={{ __html: cfg.text }} />}
-        </div>
-        <div className="rn-modal-foot">
+    <div className="modal-wrap" onClick={(e) => { if (e.target === e.currentTarget) store.closeConfirm(); }} role="alertdialog" aria-label={cfg.title}>
+      <div className={'m-card' + (cfg.wide ? ' wide' : '')}>
+        <h3>{cfg.title}</h3>
+        {cfg.text && <div dangerouslySetInnerHTML={{ __html: cfg.text }} />}
+        <div className="m-btns">
           {(cfg.buttons || [{ label: 'Отмена', primary: true }]).map((b, i) => (
             <button
               key={i}
               type="button"
-              className={'rn-btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : '')}
+              className={'btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : '')}
               onClick={() => { store.closeConfirm(); if (b.fn) b.fn(); }}
             >
               {b.label}
@@ -533,72 +669,90 @@ export function ConfirmHost({ store }: { store: VetviStore }) {
   );
 }
 
-/* ═══════════ создание группы из выделения ═══════════ */
+/* ═══════════ создание группы из выделения (.m-card) ═══════════ */
 
 export function GroupCreateModal({ store }: { store: VetviStore }) {
   const [name, setName] = useState('Группа');
   return (
-    <ModalShell title="Сгруппировать выделение" onClose={() => store.closeModal()} foot={
+    <ModalShell title="Новая группа" onClose={() => store.closeModal()} foot={
       <>
-        <button type="button" className="rn-btn" onClick={() => store.closeModal()}>Отмена</button>
-        <button type="button" className="rn-btn primary" onClick={() => {
+        <button type="button" className="btn" onClick={() => store.closeModal()}>Отмена</button>
+        <button type="button" className="btn primary" onClick={() => {
           const gid = store.createGroupFromSel(name.trim());
           store.closeModal();
           if (gid) store.toast('Группа создана · элементов: ' + (store.membersOf(gid).length), 'ok');
         }}>Создать</button>
       </>
     }>
-      <div className="rn-modal-body">
-        <label className="rn-field">
-          <span>Название группы</span>
-          <input
-            autoFocus
-            value={name}
-            maxLength={60}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const gid = store.createGroupFromSel(name.trim());
-                store.closeModal();
-                if (gid) store.toast('Группа создана', 'ok');
-              }
-            }}
-            aria-label="Название группы"
-          />
-        </label>
-        <div className="rn-insp-hint">Выделенные группы станут вложенными; ноды вне выделенных групп войдут в новую.</div>
-      </div>
+      <p>Объектов в выделении: {store.sel.size} узлов, {store.selGroups.size} групп. Выделенные группы станут вложенными.</p>
+      <label className="i-lab">Название группы</label>
+      <input
+        className="inp"
+        autoFocus
+        value={name}
+        maxLength={60}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const gid = store.createGroupFromSel(name.trim());
+            store.closeModal();
+            if (gid) store.toast('Группа создана', 'ok');
+          }
+        }}
+        aria-label="Название группы"
+      />
     </ModalShell>
   );
 }
 
-/* ═══════════ настройки: хаб + горячие клавиши + хранилище ═══════════ */
+/* ═══════════ настройки: хаб + горячие клавиши + хранилище (.dlg-modal > .set-card) ═══════════ */
 
 export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' }) {
   if (section === 'hk') return <HkModal store={store} />;
   if (section === 'store') return <StoreModal store={store} />;
   return (
-    <ModalShell title="Настройки проекта" onClose={() => store.closeModal()}>
-      <div className="rn-modal-body">
-        <div className="rn-insp-hint">Каждый раздел открывается в отдельном окне — выберите нужный.</div>
-        <button type="button" className="rn-set-item" onClick={() => store.openModal('settingsStore')}>
-          <span className="rn-set-ico">🗄</span>
-          <span className="rn-set-info">
-            <span className="rn-set-name">Хранилище данных</span>
-            <span className="rn-set-desc">LocalStorage или IndexedDB: занятое место и переключение режима</span>
-          </span>
-          <span className="rn-set-go">→</span>
-        </button>
-        <button type="button" className="rn-set-item" onClick={() => store.openModal('settingsHk')}>
-          <span className="rn-set-ico">⌨</span>
-          <span className="rn-set-info">
-            <span className="rn-set-name">Горячие клавиши</span>
-            <span className="rn-set-desc">Список действий и переназначение сочетаний</span>
-          </span>
-          <span className="rn-set-go">→</span>
-        </button>
+    <div className="dlg-modal show" role="dialog" aria-label="Настройки проекта">
+      <div className="dlg-modal-card set-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Настройки проекта</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="dlg-modal-body">
+          <div className="set-hint">Каждый раздел открывается в отдельном окне — выберите нужный.</div>
+          <button type="button" className="set-item" onClick={() => store.openModal('settingsStore')}>
+            <span className="set-item-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" width="20" height="20" aria-hidden="true">
+                <ellipse cx="12" cy="5" rx="8" ry="3" />
+                <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+                <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" />
+              </svg>
+            </span>
+            <span className="set-item-info">
+              <span className="set-item-name">Хранилище данных</span>
+              <span className="set-item-desc">LocalStorage или IndexedDB: занятое место и переключение режима</span>
+            </span>
+            <span className="set-item-go">→</span>
+          </button>
+          <button type="button" className="set-item" onClick={() => store.openModal('settingsHk')}>
+            <span className="set-item-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" width="20" height="20" aria-hidden="true">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
+              </svg>
+            </span>
+            <span className="set-item-info">
+              <span className="set-item-name">Горячие клавиши</span>
+              <span className="set-item-desc">Список действий и переназначение сочетаний</span>
+            </span>
+            <span className="set-item-go">→</span>
+          </button>
+        </div>
+        <div className="dlg-modal-foot">
+          <span className="log-foot-info"></span>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>
+        </div>
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -643,7 +797,7 @@ function HkModal({ store }: { store: VetviStore }) {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-     
+
   }, [cap]);
 
   const list = HK_DEFS.filter((d) => {
@@ -653,51 +807,62 @@ function HkModal({ store }: { store: VetviStore }) {
   });
 
   return (
-    <ModalShell title="Настройки — Горячие клавиши" onClose={() => store.closeModal()} foot={
-      <>
-        <button type="button" className="rn-btn" onClick={() => store.openModal('settings')}>← Назад</button>
-        <button type="button" className="rn-btn primary" onClick={() => store.closeModal()}>Готово</button>
-      </>
-    }>
-      <div className="rn-modal-body">
-        <SearchBar autoFocus placeholder="Фильтр по названию действия или клавишам…" onChange={setFilter} />
-        <div className="rn-hk-list">
-          {list.map((d) => {
-            const isUser = !!hkUserOverrides()[d.id];
-            return (
-              <div className={'rn-hk-row' + (cap === d.id ? ' cap' : '')} key={d.id}>
-                <span className="rn-hk-name">{d.name}</span>
-                {cap === d.id ? (
-                  <span className="rn-hk-keys wait">нажмите сочетание…</span>
-                ) : (
-                  <span className="rn-hk-keys"><kbd>{hkHuman(hkText2(d.id))}</kbd>{isUser && <i className="rn-hk-flag" title="Значение изменено вручную">своё</i>}</span>
-                )}
-                <span className="rn-hk-acts">
-                  {cap !== d.id && (
+    <div className="dlg-modal sub show" role="dialog" aria-label="Настройки — Горячие клавиши">
+      <div className="dlg-modal-card set-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Настройки — Горячие клавиши</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="dlg-modal-body">
+          <div className="set-hint"></div>
+          <SearchBar autoFocus className="hk-search" placeholder="Фильтр по названию действия или клавишам…" onChange={setFilter} />
+          <div className="hk-list">
+            {list.map((d) => {
+              const isUser = !!hkUserOverrides()[d.id];
+              return (
+                <div className={'hk-row' + (cap === d.id ? ' cap' : '')} key={d.id}>
+                  <span className="hk-name">{d.name}</span>
+                  {cap === d.id ? (
                     <>
-                      <button type="button" className="rn-mini" onClick={() => { setCap(d.id); setMsg(null); }}>Изменить</button>
-                      {isUser && (
-                        <button type="button" className="rn-mini" title="Вернуть по умолчанию" onClick={() => {
-                          hkSetUser(d.id, null);
-                          setMsg({ t: '«' + d.name + '» — по умолчанию ' + hkHuman(d.def), cls: 'ok' });
-                          tick((t) => t + 1);
-                        }}>↺</button>
-                      )}
+                      <span className="hk-keys hk-wait">нажмите сочетание…</span>
+                      <span className="hk-acts">
+                        <button type="button" className="btn btn-xs" onClick={() => { setCap(null); setMsg({ t: 'Захват отменён', cls: '' }); }}>Отмена</button>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="hk-keys">
+                        <kbd>{hkHuman(hkText2(d.id))}</kbd>
+                        {isUser && <i className="hk-flag" title="Значение изменено вручную">своё</i>}
+                      </span>
+                      <span className="hk-acts">
+                        <button type="button" className="btn btn-xs" onClick={() => { setCap(d.id); setMsg(null); }}>Изменить</button>
+                        {isUser && (
+                          <button type="button" className="btn btn-xs" title="Вернуть по умолчанию" onClick={() => {
+                            hkSetUser(d.id, null);
+                            setMsg({ t: '«' + d.name + '» — по умолчанию ' + hkHuman(d.def), cls: 'ok' });
+                            tick((t) => t + 1);
+                          }}>↺</button>
+                        )}
+                      </span>
                     </>
                   )}
-                  {cap === d.id && <button type="button" className="rn-mini" onClick={() => { setCap(null); setMsg({ t: 'Захват отменён', cls: '' }); }}>Отмена</button>}
-                </span>
-              </div>
-            );
-          })}
-          {!list.length && <div className="rn-pane-hint">Ничего не найдено по «{filter.trim()}»</div>}
+                </div>
+              );
+            })}
+            {!list.length && <div className="hk-empty">Ничего не найдено по «{filter.trim()}»</div>}
+          </div>
+          <div className="set-foot-row">
+            <button type="button" className="btn btn-xs" onClick={() => { hkResetAll(); setMsg({ t: 'Все горячие клавиши возвращены к значениям по умолчанию', cls: 'ok' }); tick((t) => t + 1); }}>Сбросить все</button>
+            {msg && <span className={'set-store-msg' + (msg.cls ? ' ' + msg.cls : '')}>{msg.t}</span>}
+          </div>
         </div>
-        <div className="rn-foot-row">
-          <button type="button" className="rn-mini" onClick={() => { hkResetAll(); setMsg({ t: 'Все горячие клавиши возвращены к значениям по умолчанию', cls: 'ok' }); tick((t) => t + 1); }}>Сбросить все</button>
-          {msg && <span className={'rn-store-msg ' + msg.cls}>{msg.t}</span>}
+        <div className="dlg-modal-foot">
+          <button type="button" className="btn" onClick={() => store.openModal('settings')}>← Назад</button>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>
         </div>
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -721,7 +886,7 @@ function comboOf(e: KeyboardEvent): string {
 
 function StoreModal({ store }: { store: VetviStore }) {
   const [mode, setMode] = useState<'ls' | 'idb'>(storeMode());
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState<{ t: string; cls: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [idbSize, setIdbSize] = useState<number | null>(null);
   const [, tick] = useState(0);
@@ -740,51 +905,61 @@ function StoreModal({ store }: { store: VetviStore }) {
   const dataUsage = Object.entries(storeCollectData()).reduce((s, [k, v]) => s + storeSizeOf(k, v), 0);
 
   return (
-    <ModalShell title="Настройки — Хранилище данных" onClose={() => store.closeModal()} foot={
-      <>
-        <button type="button" className="rn-btn" onClick={() => store.openModal('settings')}>← Назад</button>
-        <button
-          type="button"
-          className="rn-btn primary"
-          disabled={busy || mode === storeMode()}
-          onClick={async () => {
-            setBusy(true);
-            setMsg('Копирую данные…');
-            const err = await storeSwitch(mode);
-            setBusy(false);
-            if (err) { setMsg(err); return; }
-            setMsg('Данные перенесены — страница перезагрузится…');
-            store.toast('Хранилище переключено', 'ok');
-            setTimeout(() => window.location.reload(), 800);
-          }}
-        >
-          {mode === storeMode() ? 'Сейчас используется этот вариант' : 'Переключить на ' + (mode === 'idb' ? 'IndexedDB' : 'LocalStorage')}
-        </button>
-      </>
-    }>
-      <div className="rn-modal-body">
-        <div className="rn-insp-hint">При переключении данные копируются в другое хранилище, и страница перезагружается.</div>
-        <button type="button" className={'rn-store-opt' + (mode === 'ls' ? ' sel' : '')} onClick={() => { setMode('ls'); tick((t) => t + 1); }}>
-          <span className="rn-radio" />
-          <span className="rn-store-info">
-            <span className="rn-store-name">LocalStorage{mode === 'ls' ? <em className="rn-cur"> — выбрано</em> : storeMode() === 'ls' ? <em className="rn-cur"> — текущий</em> : null}</span>
-            <span className="rn-store-desc">Классическое хранилище браузера. Ограничено ~5 МБ</span>
-            <span className="rn-store-size">Занято: {storeFmtSize(lsUsage)} из ~{storeFmtSize(LS_LIMITS.bytes)}{dataUsage ? ' · данных приложения: ' + storeFmtSize(dataUsage) : ''}</span>
-            <span className="rn-store-bar"><i style={{ width: Math.min(100, (lsUsage / LS_LIMITS.bytes) * 100) + '%', background: lsUsage / LS_LIMITS.bytes > 0.8 ? '#cf6d4f' : undefined }} /></span>
-          </span>
-        </button>
-        <button type="button" className={'rn-store-opt' + (mode === 'idb' ? ' sel' : '')} onClick={() => { setMode('idb'); tick((t) => t + 1); }}>
-          <span className="rn-radio" />
-          <span className="rn-store-info">
-            <span className="rn-store-name">IndexedDB{mode === 'idb' ? <em className="rn-cur"> — выбрано</em> : storeMode() === 'idb' ? <em className="rn-cur"> — текущий</em> : null}</span>
-            <span className="rn-store-desc">База данных браузера. Практически без ограничений по объёму — рекомендуется</span>
-            <span className="rn-store-size">{idbSize === null ? (storeMode() === 'ls' ? 'Занято: измеряем…' : '') : idbSize ? 'Занято: ' + storeFmtSize(idbSize) : 'Хранилище пока пустое'}</span>
-          </span>
-        </button>
-        {msg && <div className="rn-store-msg">{msg}</div>}
-        <div className="rn-insp-hint dim">Переносятся все ключи «vetvi-*» (проекты, автосейв, копии, личность). Настройки интерфейса остаются в LocalStorage.</div>
+    <div className="dlg-modal sub show" role="dialog" aria-label="Настройки — Хранилище данных">
+      <div className="dlg-modal-card set-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Настройки — Хранилище данных</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="dlg-modal-body">
+          <div className="set-hint">При переключении данные копируются в другое хранилище, и страница перезагружается.</div>
+          <div className={'set-store-opt' + (mode === 'ls' ? ' sel' : '')} role="button" tabIndex={0} onClick={() => { setMode('ls'); tick((t) => t + 1); }}>
+            <span className="set-radio" />
+            <span className="set-store-info">
+              <span className="set-store-name">LocalStorage{storeMode() === 'ls' ? <em className="set-cur">— текущий</em> : null}</span>
+              <span className="set-store-desc">Классическое хранилище браузера. Ограничено ~5 МБ</span>
+              <span className="set-store-size">Занято: {storeFmtSize(lsUsage)} из ~{storeFmtSize(LS_LIMITS.bytes)}{dataUsage ? ' · данных приложения: ' + storeFmtSize(dataUsage) : ''}</span>
+              <span className={'set-store-bar' + (lsUsage / LS_LIMITS.bytes > 0.8 ? ' warn' : '')}>
+                <i style={{ width: Math.min(100, (lsUsage / LS_LIMITS.bytes) * 100) + '%' }} />
+              </span>
+            </span>
+          </div>
+          <div className={'set-store-opt' + (mode === 'idb' ? ' sel' : '')} role="button" tabIndex={0} onClick={() => { setMode('idb'); tick((t) => t + 1); }}>
+            <span className="set-radio" />
+            <span className="set-store-info">
+              <span className="set-store-name">IndexedDB{storeMode() === 'idb' ? <em className="set-cur">— текущий</em> : null}</span>
+              <span className="set-store-desc">База данных браузера. Практически без ограничений по объёму — рекомендуется</span>
+              <span className="set-store-size">{idbSize === null ? (storeMode() === 'ls' ? 'Занято: измеряем…' : '') : idbSize ? 'Занято: ' + storeFmtSize(idbSize) : 'Хранилище пока пустое'}</span>
+            </span>
+          </div>
+          <div className="set-foot-row">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || mode === storeMode()}
+              onClick={async () => {
+                setBusy(true);
+                setMsg({ t: 'Копирую данные…', cls: '' });
+                const err = await storeSwitch(mode);
+                setBusy(false);
+                if (err) { setMsg({ t: err, cls: 'err' }); return; }
+                setMsg({ t: 'Данные перенесены — страница перезагрузится…', cls: 'ok' });
+                store.toast('Хранилище переключено', 'ok');
+                setTimeout(() => window.location.reload(), 800);
+              }}
+            >
+              {mode === storeMode() ? 'Сейчас используется этот вариант' : 'Переключить на ' + (mode === 'idb' ? 'IndexedDB' : 'LocalStorage')}
+            </button>
+            {msg && <span className={'set-store-msg' + (msg.cls ? ' ' + msg.cls : '')}>{msg.t}</span>}
+          </div>
+          <div className="set-reload-note">Переносятся все ключи «vetvi-*» (проекты, автосейв, копии, личность). Настройки интерфейса остаются в LocalStorage.</div>
+        </div>
+        <div className="dlg-modal-foot">
+          <button type="button" className="btn" onClick={() => store.openModal('settings')}>← Назад</button>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>
+        </div>
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -811,5 +986,3 @@ export function ModalHost({ store }: { store: VetviStore }) {
     default: return null;
   }
 }
-
-
