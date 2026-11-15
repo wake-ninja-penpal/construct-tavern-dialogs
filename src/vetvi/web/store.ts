@@ -11,17 +11,20 @@
  * Автосохранение — менеджер проектов классической версии через фасад LS/IDB.
  */
 
-import { AUTOSAVE_MS, HISTORY_LIMIT, TYPES } from '@/vetvi/core/constants';
+import { AUTOSAVE_MS, HISTORY_LIMIT, NODE_W, TYPES } from '@/vetvi/core/constants';
 import { docFromParsed, loadAutosave, saveAutosave, serializeDoc } from '@/vetvi/core/doc';
 import { defaultDoc, defaultViewport, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
 import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
+import { splitPtsAtHalf } from '@/vetvi/core/insert';
+import { pathPoint } from '@/vetvi/core/edgepath';
 import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
 import { projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
-import type { NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
-import { cleanupVarRefs, defValOf, varCastVal, varType } from '@/vetvi/core/vars';
+import type { EdgeGeom, NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
+import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
+import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import type { SyncClient } from './sync';
 
 type Listener = () => void;
@@ -33,6 +36,15 @@ export interface CtxItem { label?: string; head?: string; sep?: boolean; danger?
 export interface Toast { id: number; msg: string; kind: 'ok' | 'warn' | 'err' }
 export interface ConfirmBtn { label: string; primary?: boolean; danger?: boolean; fn?: () => void }
 export interface ConfirmCfg { title: string; text?: string; buttons?: ConfirmBtn[]; wide?: boolean }
+
+/** Цель анимации сдвига (animateShift оригинала): нода и её позиции from→to. */
+export interface ShiftTarget {
+  n: VetviNode;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+}
 
 export interface LogEntry {
   id: string;
@@ -108,6 +120,8 @@ export class VetviStore {
   sync: SyncClient | null = null;
   /** Активная группа/канвасный жест: при блокировке чужим локом откатываем его. */
   gestureRollback: (() => void) | null = null;
+  /** Идёт анимация автораздвижки (animateShift): удалённые снимки комнаты ждут, как при жесте. */
+  busyAnim = false;
 
   setSyncClient(c: SyncClient | null): void {
     this.sync = c;
@@ -235,6 +249,16 @@ export class VetviStore {
   pushHistory(label?: string): void {
     this.flushPendingLog();
     const pre = this.serialize();
+    this.pendingLog = { pre, t: Date.now(), label: label || null };
+    this.scheduleLogFlush();
+    this.past.push(pre);
+    if (this.past.length > HISTORY_LIMIT) this.past.shift();
+    this.future.length = 0;
+  }
+
+  /** pushHistory(s,label) оригинала: снимок уже посчитан вызывающим (performInsert). */
+  private pushHistoryPre(pre: string, label?: string | null): void {
+    this.flushPendingLog();
     this.pendingLog = { pre, t: Date.now(), label: label || null };
     this.scheduleLogFlush();
     this.past.push(pre);
@@ -928,6 +952,295 @@ export class VetviStore {
     this.deleteEdge(id);
     this.toast('Связь удалена', 'ok');
   }
+
+  /* ═══ встраивание в связь, автораздвижка (порт 7596–7709, 6488–6503 оригинала) ═══ */
+
+  dimsFn: ((id: string) => { w: number; h: number } | null) | null = null;
+
+  /** Колбэк измеренных размеров карточек (dims оригинала через nodeEls) — регистрирует CanvasBoard. */
+  registerDimsFn(fn: (id: string) => { w: number; h: number } | null): void {
+    this.dimsFn = fn;
+  }
+
+  edgeGeomFn: ((edgeId: string) => EdgeGeom | null) | null = null;
+
+  /** Колбэк геометрии связи (edgeGeom оригинала) — регистрирует CanvasBoard из items EdgeLayer. */
+  registerEdgeGeomFn(fn: ((edgeId: string) => EdgeGeom | null) | null): void {
+    this.edgeGeomFn = fn;
+  }
+
+  /** Размер карточки для расчётов (dims оригинала): измеренный или дефолт NODE_W/90. */
+  private dimsOf(id: string): { w: number; h: number } {
+    const m = this.dimsFn ? this.dimsFn(id) : null;
+    return m ? { w: m.w, h: m.h } : { w: NODE_W, h: 90 };
+  }
+
+  /**
+   * Встраивание ноды/клона в середину связи (performInsert оригинала, 7614–7632):
+   * история с готовым снимком pre, исходная связь удаляется, добавляются две новые
+   * (A→n с pts[0] и fromReply исхода, label:''; n→B с pts[1], label исходной,
+   * lt:0.5, lp:0), нода позиционируется в точке дропа (или середине пути),
+   * выделение связи снимается, затем автораздвижка с фиксированной новой нодой.
+   */
+  performInsert(n: VetviNode, edgeId: string, pre: string, isNew: boolean, pt?: { x: number; y: number } | null, g?: EdgeGeom | null): void {
+    const doc = this.doc;
+    const e = doc.edges.find((x) => x.id === edgeId);
+    if (!e) return;
+    this.pushHistoryPre(pre, 'Создание и подключение ноды');
+    const geom = g || (this.edgeGeomFn ? this.edgeGeomFn(edgeId) : null);
+    /* запасная геометрия свободных нод (edgeAnchors оригинала), если items её не дали */
+    let gm = geom;
+    if (!gm) {
+      const na = doc.nodes.find((x) => x.id === e.from);
+      const nb = doc.nodes.find((x) => x.id === e.to);
+      if (na && nb) {
+        const da = this.dimsOf(na.id);
+        const db = this.dimsOf(nb.id);
+        gm = { x1: na.x + da.w, y1: na.y + da.h / 2, x2: nb.x, y2: nb.y + db.h / 2, pts: (e.pts && e.pts.length ? e.pts : null) };
+      }
+    }
+    const sp = splitPtsAtHalf(e, gm);
+    const p = pt || (gm ? pathPoint(gm, 0.5) : null);
+    const A = e.from;
+    const B = e.to;
+    const kind = e.kind || 'flow';
+    const label = e.label || '';
+    const fromReplyA = e.fromReply || null;
+    doc.edges = doc.edges.filter((x) => x.id !== e.id);
+    if (isNew) doc.nodes.push(n);
+    const d0 = isNew ? null : this.dimsOf(n.id);
+    const hh = d0 ? d0.h : 96;
+    if (p) {
+      n.x = Math.round(p.x - (d0 ? d0.w : NODE_W) / 2);
+      n.y = Math.round(p.y - hh / 2);
+    }
+    doc.edges.push({ id: uid(), from: A, to: n.id, label: '', kind, pts: sp[0] || [], lt: 0.5, lp: 0, fromReply: fromReplyA, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    doc.edges.push({ id: uid(), from: n.id, to: B, label, kind, pts: sp[1] || [], lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    if (this.selEdges.has(e.id)) this.selEdges.clear();
+    this.emit();
+    this.resolveOverlaps(new Set([n.id]));
+    this.scheduleSave();
+    this.emit();
+  }
+
+  /**
+   * Создание ноды типа typeKey сразу встроенной в связь (insertNewAtEdge
+   * оригинала, 7633–7641): фабрика newNode (ensureDialog + varnode-дефолты),
+   * performInsert, toast «Элемент встроен в связь».
+   */
+  insertNewAtEdge(edgeId: string, typeKey: string, pt?: { x: number; y: number } | null, g?: EdgeGeom | null): void {
+    const e = this.edgeById(edgeId);
+    if (!e) return;
+    const pre = this.serialize();
+    const n = newNode(typeKey, 0, 0);
+    this.performInsert(n, edgeId, pre, true, pt || null, g);
+    this.toast('Элемент встроен в связь');
+  }
+
+  /**
+   * Копия одной ноды (cloneNode оригинала, 6488–6503): глубокая, новый id,
+   * gid сброшен, позиция округлена; varnode/branch — с валидацией полей.
+   */
+  cloneNodeAt(src: VetviNode, x: number, y: number): VetviNode {
+    const c = JSON.parse(JSON.stringify(src)) as VetviNode;
+    c.id = uid();
+    c.gid = null;
+    c.x = Math.round(x);
+    c.y = Math.round(y);
+    c.expand = (src.expand === 0 || src.expand === 1 || src.expand === 2) ? src.expand : 1;
+    c.color = src.color || null;
+    c.tint = src.tint || 0;
+    c.dlgWidth = src.dlgWidth || null;
+    c.notes = src.notes ? (JSON.parse(JSON.stringify(src.notes)) as NonNullable<VetviNode['notes']>) : [];
+    if (src.linear !== true) delete c.linear;
+    if (src.type === 'varnode') {
+      c.vid = src.vid || null;
+      c.varMode = src.varMode === 'get' ? 'get' : 'set';
+      c.varOp = VARS_OPS[src.varOp || '='] ? src.varOp : '=';
+      c.varVal = src.varVal;
+    }
+    if (src.type === 'branch' && Array.isArray(src.outcomes)) {
+      c.outcomes = (src.outcomes as VetviOutcome[]).map((o) => ({
+        id: o.id,
+        label: o.label || '',
+        cond: o.cond ? { vid: o.cond.vid, op: o.cond.op, val: o.cond.val } : null,
+      }));
+    }
+    return c;
+  }
+
+  /** Группа спрятана внутри свёрнутой (groupInsideCollapsed оригинала, 3028–3035). */
+  private groupInsideCollapsed(g: VetviGroup): boolean {
+    let cur = g.parent || null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      const p = this.groupById(cur);
+      if (!p) return false;
+      if ((p.fold === undefined ? 2 : p.fold) < 2) return true;
+      cur = p.parent || null;
+    }
+    return false;
+  }
+
+  /**
+   * Глубочайшая группа в мировой точке (deepestGroupAt оригинала, 3064–3076):
+   * fold=2 — по рамке, fold<2 — по карточке; размеры — измеренные (sizes/cardSizes
+   * из CanvasBoard, в оригинале offsetWidth/offsetHeight элементов).
+   */
+  deepestGroupAt(wx: number, wy: number, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): VetviGroup | null {
+    let best: VetviGroup | null = null;
+    let bestDepth = -1;
+    for (const g of this.doc.groups) {
+      if (this.groupInsideCollapsed(g)) continue;
+      const fold = g.fold === undefined ? 2 : g.fold;
+      let r: { x: number; y: number; w: number; h: number };
+      if (fold === 2) r = groupFrameRect(this.doc, g, sizes, cardSizes);
+      else {
+        const cr = groupCardRect(this.doc, g, cardSizes);
+        r = { x: g.x || 0, y: g.y || 0, w: cr.w, h: cr.h };
+      }
+      if (wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h) {
+        const d = groupDepth(this.doc, g.id);
+        if (d > bestDepth) { bestDepth = d; best = g; }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Бросок из палитры НА ноду (attachNewTo оригинала, 9177–9199): новая нода или
+   * клон справа от цели (nx=+NODE_W+70, snap), gid — глубочайшая группа в точке
+   * (если цель не внутри свёрнутой), связь target→n, автораздвижка, выделение.
+   */
+  attachNewTo(targetId: string, typeKey: string | null, cloneId: string | null, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): void {
+    const target = this.nodeById(targetId);
+    if (!target) return;
+    const nx = snapVal(target.x + NODE_W + 70, this.snapOn);
+    const ny = snapVal(target.y, this.snapOn);
+    let n: VetviNode;
+    if (cloneId) {
+      const src = this.nodeById(cloneId);
+      if (!src) return;
+      n = this.cloneNodeAt(src, nx, ny);
+    } else {
+      n = newNode(typeKey || 'note', nx, ny);
+    }
+    const tgtGroup = collapsedAncestorOf(this.doc, target.id) ? null : this.deepestGroupAt(target.x + NODE_W / 2, target.y + 40, sizes, cardSizes);
+    n.gid = tgtGroup ? tgtGroup.id : null;
+    const eid = uid();
+    this.mutate((doc) => {
+      doc.nodes.push(n);
+      doc.edges.push({ id: eid, from: target.id, to: n.id, label: '', kind: 'flow', pts: [], lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    });
+    this.resolveOverlaps(new Set([n.id]));
+    this.selectOnly(n.id);
+  }
+
+  /**
+   * Автораздвижка наезжающих карточек (resolveOverlaps оригинала, 7642–7691):
+   * pad=18, до 60 итераций, ноды внутри свёрнутых групп не участвуют, разводим
+   * по горизонтали (ox<=oy) или вертикали, fixed-ноды стоят на месте, snap
+   * не-fixed, затем анимация сдвига от старых позиций к новым.
+   */
+  resolveOverlaps(fixedIds: Set<string>): void {
+    const pad = 18;
+    const doc = this.doc;
+    const dims = (n: VetviNode) => this.dimsOf(n.id);
+    const oldPos = new Map<string, { x: number; y: number }>();
+    for (const n of doc.nodes) oldPos.set(n.id, { x: n.x, y: n.y });
+    /* ноды внутри свёрнутых групп не участвуют (collapsedAncestorOf оригинала) —
+       считаем один раз, чтобы не искать предков на каждую пару */
+    const collapsed = new Set<string>();
+    for (const n of doc.nodes) {
+      if (collapsedAncestorOf(doc, n.id)) collapsed.add(n.id);
+    }
+    let changed = false;
+    for (let it = 0; it < 60; it++) {
+      let moved = false;
+      for (let i = 0; i < doc.nodes.length; i++) {
+        if (collapsed.has(doc.nodes[i].id)) continue;
+        for (let j = i + 1; j < doc.nodes.length; j++) {
+          if (collapsed.has(doc.nodes[j].id)) continue;
+          const a = doc.nodes[i];
+          const b = doc.nodes[j];
+          const da = dims(a);
+          const db = dims(b);
+          const acx = a.x + da.w / 2;
+          const acy = a.y + da.h / 2;
+          const bcx = b.x + db.w / 2;
+          const bcy = b.y + db.h / 2;
+          const ox = (da.w + db.w) / 2 + pad - Math.abs(acx - bcx);
+          const oy = (da.h + db.h) / 2 + pad - Math.abs(acy - bcy);
+          if (ox > 0 && oy > 0) {
+            moved = true;
+            changed = true;
+            const fx = fixedIds.has(a.id);
+            const fy = fixedIds.has(b.id);
+            if (ox <= oy) {
+              const ax = acx <= bcx ? -1 : 1;
+              if (fx && !fy) b.x -= ax * ox;
+              else if (fy && !fx) a.x += ax * ox;
+              else { a.x += ax * ox / 2; b.x -= ax * ox / 2; }
+            } else {
+              const ay = acy <= bcy ? -1 : 1;
+              if (fx && !fy) b.y -= ay * oy;
+              else if (fy && !fx) a.y += ay * oy;
+              else { a.y += ay * oy / 2; b.y -= ay * oy / 2; }
+            }
+          }
+        }
+      }
+      if (!moved) break;
+    }
+    if (!changed) return;
+    if (this.snapOn) {
+      for (const n of doc.nodes) {
+        if (!fixedIds.has(n.id)) { n.x = snapVal(n.x, true); n.y = snapVal(n.y, true); }
+      }
+    }
+    const targets: ShiftTarget[] = [];
+    for (const n of doc.nodes) {
+      const o = oldPos.get(n.id) as { x: number; y: number };
+      if (o.x !== n.x || o.y !== n.y) {
+        targets.push({ n, fromX: o.x, fromY: o.y, toX: n.x, toY: n.y });
+        n.x = o.x;
+        n.y = o.y;
+      }
+    }
+    if (targets.length) this.animateShift(targets);
+    /* refreshGroupFrames() оригинала не нужен: рамки групп пересчитываются декларативно по emit() */
+  }
+
+  /**
+   * Анимация сдвига (animateShift оригинала, 7692–7708): rAF 340ms, ease-out
+   * cubic (e2=1-(1-k)^3), позиции нод обновляются в doc напрямую + emit() каждый
+   * кадр (React перерисовывает ноды/связи/рамки по doc — updateEdgesFor не нужен).
+   * На время анимации busyAnim=true: удалённые снимки комнаты не врываются.
+   */
+  animateShift(targets: ShiftTarget[]): void {
+    const t0 = performance.now();
+    const dur = 340;
+    this.busyAnim = true;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / dur);
+      const e2 = 1 - Math.pow(1 - k, 3);
+      for (const g of targets) {
+        g.n.x = g.fromX + (g.toX - g.fromX) * e2;
+        g.n.y = g.fromY + (g.toY - g.fromY) * e2;
+      }
+      this.emit();
+      if (k < 1) {
+        requestAnimationFrame(step);
+      } else {
+        this.busyAnim = false;
+        this.scheduleSave();
+        this.emit();
+      }
+    };
+    requestAnimationFrame(step);
+  }
+
 
   /* ── реплики диалога ── */
 
@@ -1747,11 +2060,11 @@ export class VetviStore {
 
   /* ── совместное редактирование: помощь SyncClient ── */
 
-  /** Активный ввод/модалка/жест: в комнате удалённые снимки ждут (pendingRemote). */
+  /** Активный ввод/модалка/жест/анимация: в комнате удалённые снимки ждут (pendingRemote). */
   busyNow(): boolean {
     const t = typeof document !== 'undefined' ? document.activeElement : null;
     const typing = !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
-    return typing || this.modal != null || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag;
+    return typing || this.modal != null || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag || this.busyAnim;
   }
 
   /** Снимок проекта для комнаты (syncDocObj оригинала). */

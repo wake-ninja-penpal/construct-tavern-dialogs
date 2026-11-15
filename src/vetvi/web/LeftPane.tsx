@@ -9,7 +9,7 @@
  * Классы, id и структура DOM совпадают с оригиналом — стили vetvi.css применяются как есть.
  */
 
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useCallback, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { NODE_W, PALETTE_COLORS, STATUS_RU, TYPES } from '@/vetvi/core/constants';
@@ -19,6 +19,7 @@ import type { VetviChar, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vet
 import { condOpsFor, varById } from '@/vetvi/core/vars';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
+import { CropModal, type CropReq } from './CropModal';
 
 /* ── иконки (копия ALLICONS оригинала) ── */
 const P_FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>';
@@ -46,6 +47,81 @@ export function LeftPane(props: { store: VetviStore }) {
 
   const tabs = [['pal', 'Элементы'], ['list', 'Обзор'], ['vars', 'Переменные'], ['chars', 'Персонажи']] as const;
 
+  /* кадрирование аватара: {src, onDone, onCancel} | null — модалка #cropWrap оригинала */
+  const [crop, setCrop] = useState<CropReq | null>(null);
+  const closeCrop = useCallback(() => setCrop(null), []);
+
+  /* открытие кадрирования для ОБОИХ загрузок аватара (c-av-pick и ce-av-file):
+     файл → FileReader → dataURL → CropModal; по «Применить» — сжатие и сохранение
+     (charApplyFile → fileToAvatar(useCrop) → openAvatarCrop(dataUrl, cb) оригинала) */
+  const onFile = (cid: string, file: File | null) => {
+    if (!file || !/^image\//.test(file.type || '')) {
+      store.toast('Нужен файл изображения', 'warn');
+      return;
+    }
+    const fr = new FileReader();
+    fr.onload = () => {
+      setCrop({
+        src: String(fr.result),
+        onDone: (dataUrl) => {
+          imageFromUrl(
+            dataUrl,
+            (img) => {
+              compressAvatar(img, (out) => {
+                /* проверка avCompressCrop оригинала: data:image/ и ≤60К символов,
+                   иначе тост и модалка остаётся открытой (cb не вызывается) */
+                if (!out || !/^data:image\//.test(out) || out.length > 60000) {
+                  store.toast('Картинка слишком велика для аватара', 'warn');
+                  return;
+                }
+                setCrop(null); /* closeAvatarCrop перед сохранением — как в cropApply оригинала */
+                store.updateChar(cid, { av: out }, { label: 'Аватар персонажа' });
+                store.toast('Аватар обновлён', 'ok');
+              });
+            },
+            () => store.toast('Не удалось прочитать изображение', 'warn'),
+          );
+        },
+        onCancel: () => { /* Отмена — ничего не сохранять */ },
+      });
+    };
+    fr.onerror = () => {
+      store.toast('Не удалось прочитать файл', 'warn');
+    };
+    fr.readAsDataURL(file);
+  };
+
+  /* перекадрирование уже установленного аватара (ce-av-crop оригинала, 5813):
+     текущий аватар → CropModal → сохранение кадра с тостом «Аватар перекадрирован» */
+  const onRecrop = (cid: string) => {
+    const c = store.charById(cid);
+    if (!c || !c.av) {
+      store.toast('Аватар ещё не задан', 'warn');
+      return;
+    }
+    setCrop({
+      src: String(c.av),
+      onDone: (dataUrl) => {
+        imageFromUrl(
+          dataUrl,
+          (img) => {
+            compressAvatar(img, (out) => {
+              if (!out || !/^data:image\//.test(out) || out.length > 60000) {
+                store.toast('Картинка слишком велика для аватара', 'warn');
+                return;
+              }
+              setCrop(null);
+              store.updateChar(cid, { av: out }, { label: 'Аватар персонажа' });
+              store.toast('Аватар перекадрирован', 'ok');
+            });
+          },
+          () => store.toast('Не удалось прочитать изображение', 'warn'),
+        );
+      },
+      onCancel: () => { /* Отмена — ничего не сохранять */ },
+    });
+  };
+
   return (
     <aside id="left" style={{ width: store.leftWidth }} aria-label="Панель проекта">
       <nav className="ltabs" role="tablist">
@@ -69,7 +145,8 @@ export function LeftPane(props: { store: VetviStore }) {
       <PalettePane store={store} active={tab === 'pal'} />
       <ListPane store={store} active={tab === 'list'} />
       <VarsPane store={store} active={tab === 'vars'} />
-      <CharsPane store={store} active={tab === 'chars'} />
+      <CharsPane store={store} active={tab === 'chars'} onFile={onFile} onRecrop={onRecrop} />
+      {crop && <CropModal store={store} req={crop} onClose={closeCrop} />}
     </aside>
   );
 }
@@ -578,7 +655,7 @@ function varUseText(store: VetviStore, vid: string): string {
 }
 
 /* ── Персонажи ── */
-function CharsPane({ store, active }: { store: VetviStore; active: boolean }) {
+function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; active: boolean; onFile: (cid: string, file: File | null) => void; onRecrop: (cid: string) => void }) {
   const chars = store.doc.chars || [];
   const [open, setOpen] = useState<Set<string>>(new Set());
   const editPreRef = useRef<string | null>(null);
@@ -588,14 +665,6 @@ function CharsPane({ store, active }: { store: VetviStore; active: boolean }) {
     if (s.has(id)) s.delete(id);
     else s.add(id);
     setOpen(s);
-  };
-
-  const onFile = (cid: string, file: File | null) => {
-    if (!file || !/^image\//.test(file.type)) return;
-    fileToAvatar(file, (dataUrl) => {
-      store.updateChar(cid, { av: dataUrl }, { label: 'Аватар персонажа' });
-      store.toast('Аватар обновлён', 'ok');
-    });
   };
 
   const nameFocus = () => { editPreRef.current = store.beginEdit(); };
@@ -629,7 +698,7 @@ function CharsPane({ store, active }: { store: VetviStore; active: boolean }) {
                   <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' row'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
                     {c.av ? <img src={String(c.av)} alt={'Аватар: ' + c.name} /> : (c.name || '?')[0].toUpperCase()}
                   </span>
-                  <input type="file" className="c-av-pick" accept="image/*" hidden onChange={(e) => onFile(c.id, e.target.files?.[0] || null)} />
+                  <input type="file" className="c-av-pick" accept="image/*" hidden onChange={(e) => { const el = e.currentTarget; onFile(c.id, el.files?.[0] || null); el.value = ''; }} />
                 </label>
                 <input
                   className="inp v-name c-name"
@@ -655,8 +724,11 @@ function CharsPane({ store, active }: { store: VetviStore; active: boolean }) {
                       <div className="ce-avbtns">
                         <label className="ce-av-up" title="Загрузить картинку — откроется кадрирование">
                           Загрузить…
-                          <input type="file" className="ce-av-file" accept="image/*" hidden onChange={(e) => onFile(c.id, e.target.files?.[0] || null)} />
+                          <input type="file" className="ce-av-file" accept="image/*" hidden onChange={(e) => { const el = e.currentTarget; onFile(c.id, el.files?.[0] || null); el.value = ''; }} />
                         </label>
+                        {!!c.av && (
+                          <button type="button" className="ce-av-crop" title="Открыть текущий аватар и кадрировать заново" onClick={() => onRecrop(c.id)}>Кадрировать</button>
+                        )}
                         {!!c.av && (
                           <button type="button" className="ce-av-rm" title="Убрать аватар" onClick={() => store.updateChar(c.id, { av: null }, { label: 'Убрать аватар' })}>Убрать</button>
                         )}
@@ -741,31 +813,33 @@ function charUseText(store: VetviStore, cid: string): string {
   return 'используется — диалогов: ' + dialogs + ' · реплик: ' + replies + (nodes ? ' · узлов: ' + nodes : '');
 }
 
-/** Сжатие аватара в dataURL (avCompressCrop оригинала: 192px webp → 128px jpeg). */
-export function fileToAvatar(file: File, cb: (dataUrl: string) => void): void {
-  const reader = new FileReader();
-  reader.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      const side = Math.min(img.width, img.height);
-      const sx = (img.width - side) / 2;
-      const sy = (img.height - side) / 2;
-      const put = (size: number, mime: string, q: number) => {
-        const cv = document.createElement('canvas');
-        cv.width = size;
-        cv.height = size;
-        const ctx = cv.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
-        return cv.toDataURL(mime, q);
-      };
-      let out = put(192, 'image/webp', 0.85) || '';
-      if (!out || out.length > 60000) out = put(128, 'image/jpeg', 0.8) || out;
-      cb(out);
-    };
-    img.src = String(reader.result);
+/** dataURL → Image: загрузка готового кадра перед сжатием (readAsDataURL-часть fileToAvatar оригинала). */
+function imageFromUrl(src: string, ok: (img: HTMLImageElement) => void, fail: () => void): void {
+  const img = new Image();
+  if (/^https?:\/\//i.test(src)) img.crossOrigin = 'anonymous';
+  img.onload = () => ok(img);
+  img.onerror = fail;
+  img.src = src;
+}
+
+/** Сжатие квадрата-исходника в dataURL аватара — код прежнего fileToAvatar (avCompressCrop
+ *  оригинала: 192px webp 0.85 → если >60К символов, 128px jpeg 0.8). */
+export function compressAvatar(img: HTMLImageElement, cb: (dataUrl: string) => void): void {
+  const side = Math.min(img.width, img.height);
+  const sx = (img.width - side) / 2;
+  const sy = (img.height - side) / 2;
+  const put = (size: number, mime: string, q: number) => {
+    const cv = document.createElement('canvas');
+    cv.width = size;
+    cv.height = size;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+    return cv.toDataURL(mime, q);
   };
-  reader.readAsDataURL(file);
+  let out = put(192, 'image/webp', 0.85) || '';
+  if (!out || out.length > 60000) out = put(128, 'image/jpeg', 0.8) || out;
+  cb(out);
 }
 
 /* helpers used by pane */

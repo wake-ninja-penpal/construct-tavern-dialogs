@@ -161,6 +161,25 @@ const runSearch = (query: string) => {
     add('Название', n.title);
     add('Текст', n.text);
     for (const t of Array.isArray(n.tags) ? n.tags as string[] : []) add('Метка', t);
+    /* заметки: заголовок + html-текст (как searchPlainHtml оригинала — теги в пробел) */
+    const notes = Array.isArray(n.notes) ? n.notes as { title?: string; html?: string; hidden?: boolean }[] : [];
+    for (const nt of notes) {
+      if (!nt) continue;
+      if (nt.title) add('Заметка', nt.title);
+      if (nt.html) {
+        const plain = String(nt.html)
+          .replace(/<br\s*\/?>/gi, ' ')
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&amp;/gi, '&')
+          .replace(/&lt;/gi, '<')
+          .replace(/&gt;/gi, '>')
+          .replace(/&quot;/gi, '"')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (plain) add('Заметка', plain);
+      }
+    }
     if (n.dialog) {
       add('Описание', n.dialog.description);
       for (const p of n.dialog.participants || []) add('Участник', store.charName(p));

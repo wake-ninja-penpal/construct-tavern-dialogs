@@ -18,6 +18,7 @@ import type { VetviNode, VetviReply, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
 import type { MeasureSink } from './measure';
 import { ctxMenus } from './ctxMenus';
+import { noteBus } from './NoteModals';
 
 const STATUS_TITLE: Record<string, string> = { idea: 'Идея', draft: 'В работе', done: 'Готово' };
 
@@ -36,6 +37,17 @@ const VAR_D = 'M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5M5 12.5h14M5 17c2.6 5 5.4
 
 const MAX_DLG_DEPTH = 10;
 const DLG_REPLY_INDENT = 23;
+
+/** Иконка заметки на карточке (noteIconSvg оригинала, size 18). */
+function NoteIc({ size }: { size: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M15 3v4h4" />
+      <path d="M9 12h7M9 15.5h7M9 8.5h3" />
+    </svg>
+  );
+}
 
 /** Одиночная иконка оригинала (ic(): stroke 1.7, currentColor). */
 function Ic({ d, size }: { d: string; size: number }) {
@@ -195,6 +207,10 @@ export function NodeCard(props: {
   const ovIn = branchVarOverride(store.doc, n);
   const tags = Array.isArray(n.tags) ? n.tags : [];
   const txt = textOf(n);
+
+  /* заметки элемента: видимые стикеры с индексом в n.notes (renderNodeNotes) */
+  const notesArr = Array.isArray(n.notes) ? n.notes : [];
+  const visNotes = notesArr.map((note, ni) => ({ note, ni })).filter((x) => !x.note.hidden);
 
   const poutTitle =
     (isDlg ? 'выход диалога (правая грань, внизу)' : n.type === 'action' || n.type === 'branch' ? 'выход (правая грань, внизу)' : 'выход — тяните к другому узлу') +
@@ -505,6 +521,23 @@ export function NodeCard(props: {
         title={poutTitle}
         onMouseDown={(e) => { e.stopPropagation(); if (e.ctrlKey || e.metaKey) props.onPinReattach(e, n.id); else props.onPinDown(e, n.id, null, null); }}
       />
+      {visNotes.length > 0 && (
+        <div className="node-notes">
+          {visNotes.map(({ note, ni }) => (
+            <button
+              key={ni}
+              type="button"
+              className="node-note-ico"
+              title={note.title || 'Заметка'}
+              data-nodrag
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); noteBus.openView(n.id, ni); }}
+            >
+              <NoteIc size={18} />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

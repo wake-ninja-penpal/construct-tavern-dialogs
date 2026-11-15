@@ -5,17 +5,20 @@
  * рамка выделения, «нож» (Alt), рисование групп (Ctrl+Shift), перенос нод
  * и групп, создание связей от пинов (включая реплики/исходы/вход переменной),
  * перенос существующих стрелок (Ctrl+пин), изгибы, подписи, мосты,
- * ширина диалога, перенос дубликата за курсором.
+ * ширина диалога, перенос дубликата за курсором,
+ * drag&drop из палитры: на ноду (attachNewTo), на связь (встраивание),
+ * в пустоту, нода переменной + подсветки drop-hover/drop-target и автораздвижка.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { snapVal } from '@/vetvi/core/factory';
+import { snapVal, newNode } from '@/vetvi/core/factory';
 import { GRID, NODE_W } from '@/vetvi/core/constants';
 import { clamp, clampZoom, nodeColor, nodeWidth, screenToWorld, typeInfo } from '@/vetvi/core/geometry';
+import { isBridge, nearestEdgeIn } from '@/vetvi/core/insert';
 import { nearestSegPoint } from '@/vetvi/core/edgepath';
 import { getMe } from '@/vetvi/core/identity';
-import { varById } from '@/vetvi/core/vars';
+import { defValOf, varById } from '@/vetvi/core/vars';
 import type { NodeSize, VetviDoc, VetviGroup, VetviNode, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
@@ -845,53 +848,153 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return () => { document.body.classList.remove('carry'); };
   }, [store.carry]);
 
-  /* ── drag&drop из палитры на холст: dropready + создание ноды в точке ── */
+  /* ── drag&drop из палитры на холст (порт 9148–9267 оригинала) ──
+     dropready — рамка на #canvas; dropping — на document.body (body.dropping .port в CSS);
+     drop-hover — карточка ноды под курсором (palHover); drop-target — связь-цель
+     (setDropEdge оригинала вешает класс на g.edge, React — императивно тот же элемент) */
   const hasPalData = (e: React.DragEvent): boolean => {
     const types = e.dataTransfer ? Array.from(e.dataTransfer.types) : [];
     return types.indexOf('text/vetvi-type') >= 0 || types.indexOf('text/vetvi-clone') >= 0 || types.indexOf('text/vetvi-var') >= 0;
   };
+  const palHoverRef = useRef<HTMLElement | null>(null);
+  const dropEdgeRef = useRef<string | null>(null);
+  /* setDropEdge оригинала (4284–4288): класс drop-target на g.edge[data-id] */
+  const setDropEdge = useCallback((id: string | null) => {
+    if (dropEdgeRef.current === id) return;
+    if (dropEdgeRef.current) {
+      const prev = document.querySelector('#edges g.edge[data-id="' + dropEdgeRef.current + '"]');
+      if (prev) prev.classList.remove('drop-target');
+    }
+    dropEdgeRef.current = id;
+    if (id) {
+      const next = document.querySelector('#edges g.edge[data-id="' + id + '"]');
+      if (next) next.classList.add('drop-target');
+    }
+  }, []);
   const clearDropVisuals = useCallback(() => {
     setDropReady(false);
     document.body.classList.remove('dropping');
-  }, []);
+    setDropEdge(null);
+    if (palHoverRef.current) { palHoverRef.current.classList.remove('drop-hover'); palHoverRef.current = null; }
+  }, [setDropEdge]);
   const onDragOver = useCallback((e: React.DragEvent) => {
     if (!hasPalData(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     setDropReady(true);
     document.body.classList.add('dropping');
-  }, []);
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    if (!hasPalData(e)) return;
+    /* нода под курсором (elpp оригинала): closest('.node') */
+    const elp = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const nodeEl = elp ? (elp.closest('.node') as HTMLElement | null) : null;
+    const under = nodeEl && nodeEl.style.display !== 'none' ? nodeEl : null;
+    if (palHoverRef.current && palHoverRef.current !== under) palHoverRef.current.classList.remove('drop-hover');
+    palHoverRef.current = under;
+    if (under) {
+      under.classList.add('drop-hover');
+      setDropEdge(null);
+    } else {
+      /* хит-тест связи (nearestEdgeAt оригинала): 16/vp.z, мосты не подсвечиваем */
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
+      let hovId = nearestEdgeIn(items, w.x, w.y, 16 / (store.vp.z || 1), null);
+      if (hovId) {
+        const hovE = store.edgeById(hovId);
+        if (hovE && isBridge(hovE)) hovId = null;
+      }
+      setDropEdge(hovId);
+    }
+  }, [store, items, setDropEdge]);
+  const onDragLeave = useCallback(() => {
     clearDropVisuals();
+  }, [clearDropVisuals]);
+  /* dragend на window — снятие подсветок при отмене перетаскивания (9176 оригинала) */
+  useEffect(() => {
+    const de = () => clearDropVisuals();
+    window.addEventListener('dragend', de);
+    return () => window.removeEventListener('dragend', de);
   }, [clearDropVisuals]);
   const onDrop = useCallback((e: React.DragEvent) => {
     const dt = e.dataTransfer;
-    const type = dt ? dt.getData('text/vetvi-type') : '';
-    const vid = dt ? dt.getData('text/vetvi-var') : '';
-    clearDropVisuals();
-    if (!type && !vid) return;
+    const t = dt ? dt.getData('text/vetvi-type') : '';
+    const cl = dt ? dt.getData('text/vetvi-clone') : '';
+    const vr = dt ? dt.getData('text/vetvi-var') : '';
+    if (!t && !cl && !vr) { clearDropVisuals(); return; }
     e.preventDefault();
+    const eid = dropEdgeRef.current;
+    const hoverNode = palHoverRef.current;
+    clearDropVisuals();
     const rect = canvasRef.current?.getBoundingClientRect();
     const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
-    if (type) {
-      store.addNodeAt(type, w.x - NODE_W / 2, w.y - 20);
+    /* переменная, перетащенная из вкладки «Переменные» → нода переменной (9210–9223) */
+    if (vr && !t && !cl) {
+      const vv = varById(store.doc, vr);
+      if (vv) {
+        const vn = newNode('varnode', Math.round(w.x - NODE_W / 2), Math.round(w.y - 20));
+        vn.title = vv.name;
+        vn.varMode = 'set';
+        vn.varOp = '=';
+        vn.varVal = defValOf(vv);
+        vn.vid = vr;
+        const tgV = store.deepestGroupAt(w.x, w.y, sizesMap, cardSizes);
+        vn.gid = tgV ? tgV.id : null;
+        store.mutate((d) => { d.nodes.push(vn); }, { label: 'Создание ноды переменной' });
+        store.resolveOverlaps(new Set([vn.id]));
+        store.selectOnly(vn.id);
+        store.toast('Нода переменной «' + vv.name + '» создана. Режим «изменение» можно переключить на «чтение» в инспекторе.');
+      }
       return;
     }
-    /* переменная из вкладки «Переменные» → нода переменной */
-    const v = varById(store.doc, vid);
-    if (!v) return;
-    const pre = store.beginEdit();
-    const vn = store.addNodeAtRaw('varnode', w.x - NODE_W / 2, w.y - 20);
-    if (vn) {
-      vn.varMode = 'set';
-      vn.varOp = '=';
-      vn.varVal = typeof v.val === 'number' ? v.val : 0;
-      vn.vid = vid;
-      store.selectOnly(vn.id);
+    /* тип/клон НА связь → встраивание (9224–9237) */
+    const edge = eid ? store.edgeById(eid) : null;
+    if (edge) {
+      if (isBridge(edge)) { store.toast('В мост нельзя вставить элемент', 'warn'); return; }
+      const it0 = items.find((x) => x.e.id === edge.id);
+      const g0 = it0 ? it0.g : null;
+      if (t) {
+        store.insertNewAtEdge(edge.id, t, null, g0);
+      } else {
+        const src0 = store.nodeById(cl);
+        if (src0) {
+          const pre = store.serialize();
+          const cn0 = store.cloneNodeAt(src0, w.x - NODE_W / 2, w.y - 20);
+          store.performInsert(cn0, edge.id, pre, true, null, g0);
+        }
+      }
+      return;
     }
-    store.commitEdit(pre, 'Нода переменной');
-  }, [store, clearDropVisuals]);
+    /* тип/клон НА ноду → справа и подключить (attachNewTo; свой клон на себя — в точку курсора) */
+    if (hoverNode) {
+      const tid = hoverNode.getAttribute('data-node-id');
+      const target = tid ? store.nodeById(tid) : null;
+      if (target) {
+        if (cl && cl === target.id) {
+          const srcX = store.nodeById(cl);
+          if (srcX) {
+            const cnX = store.cloneNodeAt(srcX, w.x - NODE_W / 2, w.y - 20);
+            store.mutate((d) => { d.nodes.push(cnX); }, { label: 'Создание и подключение' });
+            store.selectOnly(cnX.id);
+          }
+          return;
+        }
+        store.attachNewTo(target.id, t || null, cl || null, sizesMap, cardSizes);
+        return;
+      }
+    }
+    /* в пустоту: тип → addNode + группа в точке; клон → cloneNode + группа (9254–9266) */
+    const ng = store.deepestGroupAt(w.x, w.y, sizesMap, cardSizes);
+    if (t) {
+      const nn = store.addNodeAt(t, w.x - NODE_W / 2, w.y - 20);
+      if (nn && ng) store.updateNode(nn.id, { gid: ng.id }, { history: false });
+      return;
+    }
+    const src = store.nodeById(cl);
+    if (src) {
+      const cn2 = store.cloneNodeAt(src, w.x - NODE_W / 2, w.y - 20);
+      if (ng) cn2.gid = ng.id;
+      store.mutate((d) => { d.nodes.push(cn2); }, { label: 'Создание и подключение' });
+      store.selectOnly(cn2.id);
+    }
+  }, [store, items, sizesMap, cardSizes, clearDropVisuals]);
 
   /* отслеживание ноды под курсором (для старта плеера по P) */
   const lastPtr = useRef({ x: 0, y: 0 });
@@ -914,6 +1017,17 @@ export function CanvasBoard(props: { store: VetviStore }) {
       return null;
     });
   }, [store]);
+
+  /* ── колбэки для встраивания в связь и автораздвижки (порт resolveOverlaps/performInsert) ──
+     dims — измеренные карточки (dims оригинала через nodeEls; нет измерения → дефолт NODE_W/90);
+     edgeGeom — геометрия связи из items EdgeLayer (аналог edgeGeom(e) оригинала) */
+  useEffect(() => {
+    store.registerDimsFn((id) => sizesMap.get(id) || null);
+    store.registerEdgeGeomFn((eid) => {
+      const it = items.find((x) => x.e.id === eid);
+      return it ? it.g : null;
+    });
+  }, [store, sizesMap, items]);
 
   /* ПКМ по холсту/нодам/связям/группам → контекстные меню */
   const onCtx = useCallback((e: React.MouseEvent) => {

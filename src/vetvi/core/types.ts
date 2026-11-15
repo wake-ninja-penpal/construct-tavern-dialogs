@@ -28,6 +28,13 @@ export interface VetviOutcome {
   [k: string]: unknown;
 }
 
+/** Заметка элемента — «стикер» на ноде (NOTE_MAX=3, HTML после sanitize). */
+export interface VetviNote {
+  title: string;
+  html: string;
+  hidden?: boolean;
+}
+
 /** Данные диалоговой ноды. */
 export interface VetviDialog {
   participants: string[];
@@ -53,7 +60,7 @@ export interface VetviNode {
   dlgWidth: number | null;
   dialog?: VetviDialog;
   outcomes?: VetviOutcome[];
-  notes?: unknown[];
+  notes?: VetviNote[];
   varMode?: string;
   varOp?: string;
   varVal?: unknown;
