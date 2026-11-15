@@ -12,17 +12,14 @@
 import { Fragment, useCallback, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
-import { NODE_W, PALETTE_COLORS, STATUS_RU, TYPES, customTypesOfDoc, typeInfoOf } from '@/vetvi/core/constants';
-import type { CustomTypeRec } from '@/vetvi/core/constants';
-import { nodeColor } from '@/vetvi/core/geometry';
-import { newNode, snapVal } from '@/vetvi/core/factory';
+import { NODE_W, PALETTE_COLORS, STATUS_RU, TYPES } from '@/vetvi/core/constants';
+import { nodeColor, typeInfo } from '@/vetvi/core/geometry';
 import { opsForType, VAR_TYPES, varCastVal, varType, isTrueVal } from '@/vetvi/core/vars';
 import type { VetviChar, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vetvi/core/types';
 import { condOpsFor, varById } from '@/vetvi/core/vars';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
 import { CropModal, type CropReq } from './CropModal';
-import { CustomTypeModal, deleteCustomTypeOf } from './CustomTypeModal';
 
 /* ── иконки (копия ALLICONS оригинала) ── */
 const P_FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>';
@@ -32,9 +29,9 @@ const P_CHAR = '<circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c1.1-3.4 3.9-5
 const P_CHEV = '<path d="m6 9 6 6 6-6"/>';
 const P_X = '<path d="M6 6l12 12M18 6 6 18"/>';
 const P_GRIP = '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>';
-const P_PENCIL = '<path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>';
 const P_EYE = '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
 const P_EYE_OFF = '<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>';
+const P_PENCIL = '<path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>';
 
 /** ic(name,size) оригинала — svg-обёртка над путём иконки. */
 function Ic(props: { d: string; size?: number }) {
@@ -52,15 +49,6 @@ export function LeftPane(props: { store: VetviStore }) {
   void store.revision;
 
   const tabs = [['pal', 'Элементы'], ['list', 'Обзор'], ['vars', 'Переменные'], ['chars', 'Персонажи']] as const;
-
-  /* редактор своих типов (openTypeEditor оригинала): rec:null — новый тип, rec — правка */
-  const [typeEd, setTypeEd] = useState<{ rec: CustomTypeRec | null } | null>(null);
-  const closeTypeEd = useCallback(() => setTypeEd(null), []);
-  const openNewType = useCallback(() => setTypeEd({ rec: null }), []);
-  const openEditType = useCallback((id: string) => {
-    const c = customTypesOfDoc(store.doc).find((x) => x.id === id);
-    if (c) setTypeEd({ rec: c });
-  }, [store]);
 
   /* кадрирование аватара: {src, onDone, onCancel} | null — модалка #cropWrap оригинала */
   const [crop, setCrop] = useState<CropReq | null>(null);
@@ -157,33 +145,45 @@ export function LeftPane(props: { store: VetviStore }) {
           </button>
         ))}
       </nav>
-      <PalettePane store={store} active={tab === 'pal'} onAddType={openNewType} onEditType={openEditType} />
+      <PalettePane store={store} active={tab === 'pal'} onEditType={(id) => store.openModal('typeEditor', id)} onNewType={() => store.openModal('typeEditor', null)} />
       <ListPane store={store} active={tab === 'list'} />
       <VarsPane store={store} active={tab === 'vars'} />
       <CharsPane store={store} active={tab === 'chars'} onFile={onFile} onRecrop={onRecrop} />
       {crop && <CropModal store={store} req={crop} onClose={closeCrop} />}
-      {typeEd && <CustomTypeModal store={store} existing={typeEd.rec} onClose={closeTypeEd} />}
     </aside>
   );
 }
 
-/* ── свой тип из документа (customTypes оригинала) ── */
+/* ── свой тип из документа (customTypes оригинала; отображение без редактора) ── */
+interface CustomTypeRec { id: string; name: string; color: string; icon: string }
 
-/** addNode оригинала (строка 6479): дефолты newNode; у ноды своего типа
-    заголовок = имя типа (typeInfo(typeKey).name). Возвращает id созданной ноды. */
-function addNodeOf(store: VetviStore, key: string, x: number, y: number): string {
-  let nid = '';
-  store.mutate((doc) => {
-    const n = newNode(key, snapVal(x, store.snapOn), snapVal(y, store.snapOn));
-    if (!TYPES[key]) {
-      const c = customTypesOfDoc(doc).find((x2) => x2.id === key);
-      if (c) n.title = c.name;
-    }
-    doc.nodes.push(n);
-    nid = n.id;
-  }, { label: 'Создание ноды «' + typeInfoOf(store.doc, key).name + '»' });
-  if (nid) store.selectOnly(nid);
-  return nid;
+function customTypesOf(doc: VetviDoc): CustomTypeRec[] {
+  const arr: unknown[] = Array.isArray(doc.customTypes) ? (doc.customTypes as unknown[]) : [];
+  const out: CustomTypeRec[] = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== 'object') continue;
+    const c = raw as Record<string, unknown>;
+    if (typeof c.id !== 'string' || !c.id) continue;
+    out.push({
+      id: c.id,
+      name: typeof c.name === 'string' && c.name ? c.name : 'Свой тип',
+      color: typeof c.color === 'string' && c.color ? c.color : '#8b929c',
+      icon: typeof c.icon === 'string' && c.icon ? c.icon : 'star',
+    });
+  }
+  return out;
+}
+
+function typeInfoEx(doc: VetviDoc, key: string): { name: string; color: string; icon: string } {
+  if (TYPES[key]) {
+    const icons: Record<string, string> = {
+      scene: 'scene', quest: 'quest', dialog: 'dialog', skill: 'skill', action: 'action',
+      branch: 'branch', varnode: 'variable', event: 'event', note: 'note',
+    };
+    return { name: TYPES[key].name, color: TYPES[key].color, icon: icons[key] || 'star' };
+  }
+  const c = customTypesOf(doc).find((x) => x.id === key);
+  return c ? { name: c.name, color: c.color, icon: c.icon } : { name: 'Заметка', color: '#8b929c', icon: 'note' };
 }
 
 /** listHidden(key) оригинала: в классике — массив, в ядре — record. */
@@ -209,12 +209,12 @@ function allDescNodes(store: VetviStore, gid: string, visited?: Set<string>): Ve
   return out;
 }
 
-/* ── Элементы (палитра с перетаскиванием) ── */
-function PalettePane({ store, active, onAddType, onEditType }: {
+/* ── Элементы (палитра с перетаскиванием; eye/pencil/x — ориг. 4298–4307, 4355–4363) ── */
+function PalettePane({ store, active, onEditType, onNewType }: {
   store: VetviStore;
   active: boolean;
-  onAddType: () => void;
   onEditType: (id: string) => void;
+  onNewType: () => void;
 }) {
   const [palFold, setPalFold] = useState<Record<string, boolean>>({});
 
@@ -228,32 +228,11 @@ function PalettePane({ store, active, onAddType, onEditType }: {
       x: (e.clientX - r.left - store.vp.x) / store.vp.z - NODE_W / 2,
       y: (e.clientY - r.top - store.vp.y) / store.vp.z - 20,
     };
-    addNodeOf(store, type, w.x, w.y);
-  };
-
-  /* toggleListVis оригинала (2964–2970): переключить listHidden + тост (без записи в историю) */
-  const toggleListVis = (key: string) => {
-    store.mutate((doc) => {
-      const lh: unknown = doc.listHidden;
-      if (Array.isArray(lh)) {
-        const i = lh.indexOf(key);
-        if (i >= 0) lh.splice(i, 1);
-        else lh.push(key);
-      } else if (lh && typeof lh === 'object') {
-        const rec = lh as Record<string, unknown>;
-        if (rec[key]) delete rec[key];
-        else rec[key] = true;
-      } else {
-        doc.listHidden = { [key]: true };
-      }
-    }, { history: false });
-    store.toast(listHiddenAt(store.doc, key)
-      ? 'Тип убран из раздела «На холсте»'
-      : 'Тип возвращён в раздел «На холсте»');
+    store.addNodeAt(type, w.x, w.y);
   };
 
   const isHidden = (key: string) => listHiddenAt(store.doc, key);
-  const typeKeys = Object.keys(TYPES).concat(customTypesOfDoc(store.doc).map((c) => c.id));
+  const typeKeys = Object.keys(TYPES).concat(customTypesOf(store.doc).map((c) => c.id));
   const canvasGroups = typeKeys
     .filter((key) => !isHidden(key))
     .map((key) => ({ key, list: store.doc.nodes.filter((n) => n.type === key) }))
@@ -263,12 +242,13 @@ function PalettePane({ store, active, onAddType, onEditType }: {
     <div className={'tabpane' + (active ? ' active' : '')} id="panePal" onDragOver={(e) => e.preventDefault()} onDrop={drop}>
       <div className="v-head" style={{ margin: '2px 10px 8px' }}>
         <span>Элементы</span>
-        {/* bAddType оригинала (строка 1135) */}
-        <button type="button" className="btn primary" id="bAddType" title="Создать свой тип элемента" onClick={onAddType}>+ Свой тип</button>
+        <button type="button" className="btn primary" id="bAddType" title="Создать свой тип элемента" onClick={onNewType}>
+          + Свой тип
+        </button>
       </div>
       <div id="palList">
         {typeKeys.map((key) => {
-          const info = typeInfoOf(store.doc, key);
+          const info = typeInfoEx(store.doc, key);
           const isCustom = !TYPES[key];
           const off = isHidden(key);
           const cnt = store.doc.nodes.filter((n) => n.type === key).length;
@@ -288,42 +268,28 @@ function PalettePane({ store, active, onAddType, onEditType }: {
                 const el = document.querySelector('.rn-canvas');
                 const r = el ? el.getBoundingClientRect() : { width: 800, height: 600 };
                 const wx = (r.width / 2 - store.vp.x) / store.vp.z - NODE_W / 2;
-                const wy = (r.height / 2 - store.vp.y) / store.vp.z - 46;
-                addNodeOf(store, key, wx, wy);
+                const wy = (r.height / 2 - store.vp.y) / store.vp.z - 40;
+                store.addNodeAt(key, wx, wy);
               }}
             >
-              <span className="pal-ico"><TypeIcon type={key} size={16} icon={info.icon} /></span>
+              <span className="pal-ico"><TypeIcon type={key} size={16} icon={isCustom ? info.icon : null} /></span>
               <span className="pal-name">{info.name}</span>
               <span className="pal-cnt">{cnt}</span>
-              {/* глазик видимости в разделе «на холсте» — у каждого типа (data-eye 4355) */}
               <button
                 type="button"
                 className={'mini-btn eye' + (off ? ' off' : '')}
                 data-eye={key}
                 title={off ? 'Вернуть тип в раздел «На холсте»' : 'Убрать тип из раздела «На холсте»'}
-                onClick={(e) => { e.stopPropagation(); toggleListVis(key); }}
+                onClick={(e) => { e.stopPropagation(); store.toggleListVis(key); }}
               >
                 <Ic d={off ? P_EYE_OFF : P_EYE} size={13} />
               </button>
-              {/* карандаш/крестик только у своих типов (item-acts 4285–4312) */}
               {isCustom && (
                 <span className="item-acts">
-                  <button
-                    type="button"
-                    className="mini-btn"
-                    data-edit={key}
-                    title="Редактировать"
-                    onClick={(e) => { e.stopPropagation(); onEditType(key); }}
-                  >
+                  <button type="button" className="mini-btn" data-edit={key} title="Редактировать" onClick={(e) => { e.stopPropagation(); onEditType(key); }}>
                     <Ic d={P_PENCIL} size={12} />
                   </button>
-                  <button
-                    type="button"
-                    className="mini-btn del"
-                    data-del={key}
-                    title="Удалить тип"
-                    onClick={(e) => { e.stopPropagation(); deleteCustomTypeOf(store, key); }}
-                  >
+                  <button type="button" className="mini-btn del" data-del={key} title="Удалить тип" onClick={(e) => { e.stopPropagation(); store.deleteCustomType(key); }}>
                     <Ic d={P_X} size={12} />
                   </button>
                 </span>
@@ -339,7 +305,7 @@ function PalettePane({ store, active, onAddType, onEditType }: {
           <div className="pal-hint" style={{ textAlign: 'center' }}>Все типы убраны глазиками выше.</div>
         )}
         {canvasGroups.map(({ key, list }) => {
-          const info = typeInfoOf(store.doc, key);
+          const info = typeInfoEx(store.doc, key);
           const isCustom = !TYPES[key];
           const fk = 'cv:' + key;
           const folded = !!palFold[fk];
@@ -365,7 +331,7 @@ function PalettePane({ store, active, onAddType, onEditType }: {
                     className="pal-item cv-card"
                     draggable
                     data-node={n.id}
-                    style={{ '--c': n.color ? nodeColor(n) : typeInfoOf(store.doc, n.type).color } as CSSProperties}
+                    style={{ '--c': nodeColor(n, store.doc.customTypes) } as CSSProperties}
                     title="Клик — перейти · перетащите, чтобы создать копию"
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/vetvi-clone', n.id);
@@ -373,7 +339,7 @@ function PalettePane({ store, active, onAddType, onEditType }: {
                     }}
                     onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
                   >
-                    <span className="pal-ico"><TypeIcon type={n.type} size={16} icon={typeInfoOf(store.doc, n.type).icon} /></span>
+                    <span className="pal-ico"><TypeIcon type={n.type} size={16} /></span>
                     <span className="cv-info">
                       <span className="pal-name">{n.title}</span>
                       <span className="cv-desc">{desc}</span>
@@ -423,24 +389,19 @@ function ListPane({ store, active }: { store: VetviStore; active: boolean }) {
     });
   };
 
-  const nodeRow = (n: VetviNode, indent: number | null): ReactNode => {
-    /* vis оригинала (nodeVisual): имя/цвет типа — в т.ч. своего */
-    const ti = typeInfoOf(store.doc, n.type);
-    const rowColor = n.color ? nodeColor(n) : ti.color;
-    return (
-      <div
-        key={n.id}
-        className={'nli' + (store.sel.has(n.id) ? ' sel' : '')}
-        data-id={n.id}
-        style={indent == null ? undefined : { paddingLeft: indent }}
-        onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
-      >
-        <span className="dot" style={{ background: rowColor, color: rowColor }} />
-        <span className="t">{n.title}</span>
-        <span className="k">{ti.name}</span>
-      </div>
-    );
-  };
+  const nodeRow = (n: VetviNode, indent: number | null): ReactNode => (
+    <div
+      key={n.id}
+      className={'nli' + (store.sel.has(n.id) ? ' sel' : '')}
+      data-id={n.id}
+      style={indent == null ? undefined : { paddingLeft: indent }}
+      onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
+    >
+      <span className="dot" style={{ background: nodeColor(n, store.doc.customTypes), color: nodeColor(n, store.doc.customTypes) }} />
+      <span className="t">{n.title}</span>
+      <span className="k">{typeInfo(n.type).name}</span>
+    </div>
+  );
 
   const groupRows = (g: VetviGroup, depth: number, out: ReactNode[]) => {
     const desc = allDescNodes(store, g.id);

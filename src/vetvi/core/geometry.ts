@@ -15,13 +15,29 @@ export function clampZoom(z: number): number {
   return clamp(z, ZOOM_MIN, ZOOM_MAX);
 }
 
-export function typeInfo(type: string): { name: string; color: string } {
-  return TYPES[type] || { name: 'Нода', color: '#8b929c' };
+/**
+ * typeInfo(key) оригинала (2926): встроенный → свой тип (customTypes проекта)
+ * → заметка. customTypes — pass-through список документа.
+ */
+export function typeInfo(type: string, customTypes?: unknown): { name: string; color: string } {
+  if (TYPES[type]) return TYPES[type];
+  if (Array.isArray(customTypes)) {
+    for (const raw of customTypes) {
+      if (!raw || typeof raw !== 'object') continue;
+      const c = raw as Record<string, unknown>;
+      if (c.id !== type) continue;
+      return {
+        name: (typeof c.name === 'string' && c.name) ? c.name : 'Свой тип',
+        color: (typeof c.color === 'string' && c.color) ? c.color : '#8b929c',
+      };
+    }
+  }
+  return TYPES.note;
 }
 
 /** Цвет ноды с учётом своего цвета и яркости (nodePaint оригинала). */
-export function nodeColor(n: VetviNode): string {
-  const base = n.color || typeInfo(n.type).color;
+export function nodeColor(n: VetviNode, customTypes?: unknown): string {
+  const base = n.color || typeInfo(n.type, customTypes).color;
   return shadeHex(base, clamp(Number(n.tint ?? 0), -60, 60));
 }
 

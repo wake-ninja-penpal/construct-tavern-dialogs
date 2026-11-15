@@ -10,9 +10,10 @@
 
 import { useLayoutEffect, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
-import { NODE_W, STATUS_RU, iconPath, typeInfoOf } from '@/vetvi/core/constants';
+import { NODE_W, STATUS_RU } from '@/vetvi/core/constants';
+import { ALL_ICONS } from '@/vetvi/core/icons';
 import { getMe } from '@/vetvi/core/identity';
-import { nodeColor, shadeHex } from '@/vetvi/core/geometry';
+import { nodeColor, shadeHex, typeInfo } from '@/vetvi/core/geometry';
 import { branchVarOverride, condText, varName, varNodeChipText } from '@/vetvi/core/vars';
 import type { VetviNode, VetviReply, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
@@ -70,9 +71,11 @@ export function TypeIcon({ type, size = 13, icon }: { type: string; size?: numbe
     event: '<path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21M6 6l2.4 2.4M15.6 15.6 18 18M18 6l-2.4 2.4M8.4 15.6 6 18"/>',
     note: '<path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/>',
   };
-  /* icon оригинала: у ноды своего типа — custom.icon из ALLICONS (fallback star);
-     без icon — базовые пути по ключу типа (совместимость с прежними вызовами) */
-  const d = icon ? iconPath(icon) : (paths[type] || paths.scene);
+  /* ic(name) оригинала: явная иконка (свой тип) → ALL_ICONS → fallback star */
+  const d = (icon ? (ALL_ICONS[icon] || ALL_ICONS.star) : null)
+    || paths[type]
+    || ALL_ICONS[type]
+    || ALL_ICONS.star;
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <g dangerouslySetInnerHTML={{ __html: d }} />
@@ -176,8 +179,7 @@ export function NodeCard(props: {
   }, [renaming]);
 
   const isDlg = n.type === 'dialog';
-  /* typeInfo оригинала (2926–2931): у ноды своего типа — имя/цвет/иконка из customTypes */
-  const info = typeInfoOf(store.doc, n.type);
+  const info = typeInfo(n.type, store.doc.customTypes);
   const ex = (n.expand === 0 || n.expand === 1 || n.expand === 2) ? n.expand : 1;
   const status = STATUS_RU[n.status] ? n.status : 'idea';
   const isFlash = !!(flash && flash.nodeId === n.id);
@@ -194,7 +196,7 @@ export function NodeCard(props: {
   /* краска карточки: участники → цвет персонажа, иначе своя краска/цвет типа (renderWorld) */
   const castPs = (!isDlg && Array.isArray(n.participants)) ? (n.participants as string[]) : [];
   const cc = castPs.length ? store.charColor(castPs[0]) : null;
-  const paint = (!cc && n.color) ? nodeColor(n) : null;
+  const paint = (!cc && n.color) ? nodeColor(n, store.doc.customTypes) : null;
 
   const dlgReplies: VetviReply[] = (isDlg && n.dialog && Array.isArray(n.dialog.replies)) ? n.dialog.replies : [];
   const dlgParticipants = (isDlg && n.dialog && Array.isArray(n.dialog.participants)) ? n.dialog.participants : [];
@@ -319,7 +321,7 @@ export function NodeCard(props: {
       }}
     >
       <div className="n-head">
-        <span className="n-ico"><TypeIcon type={n.type} size={15} icon={info.icon} /></span>
+        <span className="n-ico"><TypeIcon type={n.type} size={15} /></span>
         {renaming ? (
           <input
             ref={renameRef}

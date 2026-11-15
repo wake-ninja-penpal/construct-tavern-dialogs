@@ -71,7 +71,7 @@ function mmNodeColor(store: VetviStore, n: VetviNode, depth = 0): string {
       if (sub) return sub;
     }
   }
-  return n.color ? nodeColor(n) : (typeInfo(n.type).color || '#8b929c');
+  return n.color ? nodeColor(n, store.doc.customTypes) : (typeInfo(n.type, store.doc.customTypes).color || '#8b929c');
 }
 
 /* groupRectWorld оригинала (3050): fold=2 — рамка, fold<2 — карточка (GCARD_W/QCARD_W) */
@@ -204,11 +204,6 @@ export function CanvasBoard(props: { store: VetviStore }) {
     };
     return () => { canvasApi.current = null; };
   }, [store, sizesMap]);
-
-  /* #stage — родитель холста (для placeDstWinDefault и драга окна: кламп в stage) */
-  const getStage = useCallback((): HTMLElement | null => {
-    return canvasRef.current ? (canvasRef.current.closest('#stage') as HTMLElement | null) : null;
-  }, []);
 
   /* ── центрирование по запросу (с анимацией вида — animateView оригинала) ── */
   useEffect(() => {
@@ -1130,23 +1125,6 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   }, []);
 
-  /* ── Escape закрывает окно «Распределить по строкам» (каскад оригинала 10009–10012:
-        после carryS/gcreateS, до closeModal/clearSel; курсор в поле ввода —
-        Escape лишь снимает фокус (9974), окно не трогаем) ── */
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !store.dst.ids) return;
-      if (isTyping()) return;
-      if (store.carry) return;
-      if (gestRef.current?.mode === 'gcreate') return;
-      e.preventDefault();
-      e.stopPropagation();
-      store.closeDstWin();
-    };
-    window.addEventListener('keydown', onEsc, true);
-    return () => window.removeEventListener('keydown', onEsc, true);
-  }, [store]);
-
   /* курсор copy при переносе дубликата (body.carry оригинала) */
   useEffect(() => {
     document.body.classList.toggle('carry', !!store.carry);
@@ -1772,124 +1750,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       </svg>
       <i className="mm-resize" id="mmResize" title="Потяни за угол, чтобы изменить размер карты" onPointerDown={onMmResizeDown} />
     </div>
-    {/* ═══ плавающее окно «Распределить по строкам» (#dstWin, 1246–1258 оригинала) ═══ */}
-    <DstWin store={store} getStage={getStage} />
     </>
-  );
-}
-
-/* ═══ #dstWin: плавающее окно «Распределить по строкам» ═══
-   Порт 1246–1258 (HTML) + 6746–6831 (placeDstWinDefault/драг за шапку/контролы).
-   Окно живёт, пока store.dst.ids не null; позиция и значение поля — императивно
-   в DOM (как в оригинале: w.style.left/top, inp.value=nk), без React-состояния.
-   Escape закрывает (каскад в CanvasBoard). */
-function DstWin(props: { store: VetviStore; getStage: () => HTMLElement | null }) {
-  const { store, getStage } = props;
-  const winRef = useRef<HTMLDivElement>(null);
-  const valRef = useRef<HTMLInputElement>(null);
-  const placedRef = useRef(false);
-  const open = !!store.dst.ids;
-
-  /* placeDstWinDefault (6746–6756) один раз при открытии: правый край stage,
-     top+40, с клампом в границы; поле получает dstState.k (6789) */
-  useEffect(() => {
-    if (!open) {
-      placedRef.current = false;
-      return;
-    }
-    if (placedRef.current) return;
-    placedRef.current = true;
-    const w = winRef.current;
-    const st = getStage();
-    if (!w || !st) return;
-    const r = st.getBoundingClientRect();
-    const ww = w.offsetWidth || 170;
-    const wh = w.offsetHeight || 150;
-    let left = r.right - ww - 24;
-    let top = r.top + 40;
-    left = Math.max(r.left + 8, Math.min(left, r.right - ww - 8));
-    top = Math.max(r.top + 8, Math.min(top, r.bottom - wh - 8));
-    w.style.left = left + 'px';
-    w.style.top = top + 'px';
-    if (valRef.current) valRef.current.value = String(store.dst.k);
-  }, [open, getStage, store]);
-
-  /* dstSetK + синхронизация поля (dstSetK оригинала 6739–6745: inp.value=nk) */
-  const dstSet = (v: number) => {
-    store.dstSetK(v);
-    if (valRef.current) valRef.current.value = String(store.dst.k);
-  };
-
-  /* драг окна за шапку (pointerdown #dstWinHead, 6810–6831): кламп в границы stage */
-  const onHeadDown = (e: React.PointerEvent) => {
-    const t = e.target as Element;
-    if (t.closest && t.closest('.dst-win-close')) return;
-    e.preventDefault();
-    const w = winRef.current;
-    if (!w) return;
-    const r = w.getBoundingClientRect();
-    const ox = e.clientX - r.left;
-    const oy = e.clientY - r.top;
-    const mv = (ev: PointerEvent) => {
-      const st = getStage();
-      const w2 = winRef.current;
-      if (!st || !w2) return;
-      const s = st.getBoundingClientRect();
-      const ww = w2.offsetWidth;
-      const wh = w2.offsetHeight;
-      const L = Math.max(s.left + 4, Math.min(ev.clientX - ox, s.right - ww - 4));
-      const T = Math.max(s.top + 4, Math.min(ev.clientY - oy, s.bottom - wh - 4));
-      w2.style.left = L + 'px';
-      w2.style.top = T + 'px';
-    };
-    const up = () => {
-      window.removeEventListener('pointermove', mv);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', mv);
-    window.addEventListener('pointerup', up);
-  };
-
-  /* input #dstVal (6797–6803): мусор не применяется, кламп 1..ids.length */
-  const onValInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = parseInt(e.target.value, 10);
-    if (isNaN(v)) return;
-    const c = store.dstClamp(v);
-    if (c !== v) e.target.value = String(c);
-    if (c !== store.dst.k) store.dstSetK(c);
-  };
-  /* blur #dstVal (6804): поле всегда показывает dstState.k */
-  const onValBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    e.target.value = String(store.dst.k);
-  };
-  const onValKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') e.currentTarget.blur();
-    else if (e.key === 'ArrowUp') { e.preventDefault(); dstSet(store.dst.k + 1); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); dstSet(store.dst.k - 1); }
-  };
-
-  return (
-    <div
-      id="dstWin"
-      ref={winRef}
-      className={'dst-win' + (open ? ' show' : '')}
-    >
-      <div className="dst-win-head" id="dstWinHead" onPointerDown={onHeadDown}>
-        <span className="dst-win-title">Распределить по строкам</span>
-        <button type="button" className="dst-win-close" id="dstWinClose" title="Закрыть" onClick={() => store.closeDstWin()}>×</button>
-      </div>
-      <div className="dst-win-body">
-        <button type="button" className="btn ibtn" id="dstUp" title="Больше элементов в строке" onClick={() => dstSet(store.dst.k + 1)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 15 6-6 6 6" /></svg>
-        </button>
-        <input ref={valRef} id="dstVal" className="dst-val" defaultValue={4} inputMode="numeric" maxLength={3} aria-label="Элементов в строке" onChange={onValInput} onBlur={onValBlur} onKeyDown={onValKey} />
-        <button type="button" className="btn ibtn" id="dstDown" title="Меньше элементов в строке" onClick={() => dstSet(store.dst.k - 1)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-        </button>
-        <div className="dst-hint">элементов в строке</div>
-        <button type="button" className="btn primary" id="dstDone" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} onClick={() => store.closeDstWin()}>Готово</button>
-      </div>
-    </div>
   );
 }
 
@@ -1929,7 +1790,7 @@ function groupInsideCollapsed(doc: VetviDoc, g: VetviGroup): boolean {
   return false;
 }
 
-export function isTyping(): boolean {
+function isTyping(): boolean {
   const a = document.activeElement as HTMLElement | null;
   if (a && !a.isConnected) return false;
   return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable);

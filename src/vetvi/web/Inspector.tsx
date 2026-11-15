@@ -85,8 +85,8 @@ function castInspVal(raw: unknown): string {
   return String(raw == null ? '' : raw).trim().slice(0, 200);
 }
 
-function customTypesOf(doc: VetviDoc): { id: string; name: string; color?: string; icon?: string }[] {
-  return Array.isArray(doc.customTypes) ? (doc.customTypes as { id: string; name: string; color?: string; icon?: string }[]) : [];
+function customTypesOf(doc: VetviDoc): { id: string; name: string; color?: string }[] {
+  return Array.isArray(doc.customTypes) ? (doc.customTypes as { id: string; name: string; color?: string }[]) : [];
 }
 
 /** paletteAdd оригинала: свой цвет в начало project.palette (≤24, без дублей). */
@@ -313,7 +313,7 @@ function NotesSection({ store, n }: { store: VetviStore; n: VetviNode }) {
 
 /* ═══ палитра: paletteCoreHtml + bindPalette + toggleSwatches ═══ */
 
-function Swatches({ cur, doc, extraFirst, onPick, children, id }: {
+export function Swatches({ cur, doc, extraFirst, onPick, children, id }: {
   cur: string | null | undefined;
   doc: VetviDoc;
   extraFirst?: string[];
@@ -549,8 +549,7 @@ function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; e
   const typehead = (
     <div className="i-typehead" id="iTypeWrap">
       <span className="i-typeico" style={{ color: typeColor, background: 'rgba(255,255,255,.05)' }}>
-        {/* у ноды своего типа — иконка custom.icon (nodeVisual оригинала, fallback note) */}
-        <TypeIcon type={n.type} size={18} icon={isCustom ? ((cst && cst.icon) ? cst.icon : 'note') : null} />
+        <TypeIcon type={n.type} size={18} />
       </span>
       <select className="inp" id="iType" value={n.type} onChange={(ev) => changeType(ev.target.value)}>
         {Object.keys(TYPES).map((t) => <option key={t} value={t}>{TYPES[t].name}</option>)}

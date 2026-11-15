@@ -4,240 +4,22 @@
  * Ветви — тулбар: 1:1 порт шапки оригинала (header#topbar, index.html 1082–1125).
  * Оригинальные классы/ids/иконки (.brand, .vsep, .btn, .ibtn, .save-wrap,
  * .save-menu, .sm-i, .collab-chip, .cc-dot, .m-badge, .spacer) + логика React.
- * Пункты меню сохранения txjson/txsel/tximp — «Лёгкий JSON текстов»
- * (10328–10600): экспорт текстов, экспорт выделенных, модалка импорта
- * (openTextsImport/textsImpStep2 оригинала, 10473–10528).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { hkText } from '@/vetvi/core/hotkeys';
 import { TYPES } from '@/vetvi/core/constants';
-import { textsImpPreview, type TxImpData } from '@/vetvi/core/texts';
+import { hkText } from '@/vetvi/core/hotkeys';
 import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
-import { ModalShell } from './Modals';
-import { isTyping } from './CanvasBoard';
-
-/* ═══ Импорт текстов из JSON (openTextsImport/textsImpStep2 оригинала) ═══ */
-
-type TxImpState = { step: 1; keep: string } | { step: 2; d: TxImpData; fname?: string };
-
-/** Шаг 1 — вставка JSON/выбор файла (openTextsImport, 10473–10487). */
-function TxImpStep1(props: {
-  store: VetviStore;
-  keep: string;
-  close: () => void;
-  reopen: (keep: string) => void;
-  toStep2: (d: TxImpData, fname?: string) => void;
-}) {
-  const { store, keep, close, reopen, toStep2 } = props;
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [val, setVal] = useState(keep);
-
-  /* автофокус пустого поля через 60 мс (10486) */
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (taRef.current && !taRef.current.value) taRef.current.focus();
-    }, 60);
-    return () => clearTimeout(t);
-  }, []);
-
-  const parse = (s: string): void => {
-    const r = store.textsImpParse(s);
-    if ('err' in r) {
-      store.toast(r.err, 'err');
-      reopen(s); /* openTextsImport(keep) — окно открывается с введённым текстом */
-      return;
-    }
-    toStep2(r.data);
-  };
-
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    const rd = new FileReader();
-    rd.onload = () => parse(String(rd.result));
-    rd.readAsText(f);
-  };
-
-  return (
-    <ModalShell
-      title="Импорт текстов из JSON"
-      onClose={close}
-      foot={
-        <>
-          <button type="button" className="btn primary" onClick={() => parse(taRef.current ? taRef.current.value : '')}>Проверить</button>
-          <button type="button" className="btn" onClick={close}>Отмена</button>
-        </>
-      }
-    >
-      <p style={{ margin: '2px 0 9px', fontSize: 12.5, color: 'var(--tx2)' }}>
-        Вставьте JSON с текстами нод: массив <b style={{ color: 'var(--acc2)' }}>texts</b> — пары{' '}
-        <b style={{ color: 'var(--acc2)' }}>{'{id, text}'}</b> (каждая строка встаёт по своему id, порядок не важен) — и служебный блок{' '}
-        <b style={{ color: 'var(--acc2)' }}>service</b>. Ноды сопоставляются по <b>id</b>: совпавшие — обновятся, отсутствующие — можно создать.
-      </p>
-      <textarea
-        id="txImpTa"
-        ref={taRef}
-        className="tx-imp-ta"
-        spellCheck={false}
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        placeholder={'{ "texts": [ { "id": "…", "text": "…" } ], "service": { "format": "vetvi-texts-v3", "nodes": [ … ], "links": [ … ] } }'}
-      />
-      <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="btn"
-          id="txImpFile"
-          onClick={() => {
-            if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); }
-          }}
-        >
-          Выбрать файл…
-        </button>
-        <span style={{ fontSize: 11, color: 'var(--tx3)' }}>файл — из меню «Сохранить» → «Тексты (JSON)» или «Тексты выделенных нод (JSON)»: ноды из него вернутся в проект</span>
-      </div>
-      <input ref={fileRef} type="file" id="txtFileInput" accept=".json,.txt,application/json,text/plain" hidden onChange={onFile} />
-    </ModalShell>
-  );
-}
-
-/** Шаг 2 — проверка и опции (textsImpStep2, 10498–10528). */
-function TxImpStep2(props: { store: VetviStore; d: TxImpData; fname?: string; close: () => void }) {
-  const { store, d, fname, close } = props;
-  const pv = useMemo(() => textsImpPreview(store.doc, d), [store, d]);
-  const [upd, setUpd] = useState(pv.matched.length > 0);
-  const [cre, setCre] = useState(pv.fresh.length > 0);
-  const [med, setMed] = useState(true);
-  const [lnk, setLnk] = useState(true);
-
-  const rows: React.ReactNode[] = [];
-  let shown = 0;
-  pv.matched.slice(0, 24).forEach((en) => {
-    shown++;
-    rows.push(
-      <div key={'u:' + en.id} className="tx-imp-row up">
-        <span className="mk">✎</span>
-        <span className="tt">{en.title || '(без названия)'}</span>
-        <span className="sub">{en.id}</span>
-      </div>,
-    );
-  });
-  pv.fresh.slice(0, 24).forEach((en) => {
-    shown++;
-    rows.push(
-      <div key={'n:' + en.id} className="tx-imp-row new">
-        <span className="mk">＋</span>
-        <span className="tt">{en.title || '(без названия)'}</span>
-        <span className="sub">{en.id}</span>
-      </div>,
-    );
-  });
-  if (d.nodes.length - shown > 0) {
-    rows.push(<div key="more" className="tx-imp-row"><span className="sub">и ещё {d.nodes.length - shown}…</span></div>);
-  }
-
-  return (
-    <ModalShell
-      title="Импорт текстов — проверка"
-      onClose={close}
-      foot={
-        <>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => {
-              store.textsImpApply(d, { upd, cre, med, lnk });
-              close();
-            }}
-          >
-            Импортировать
-          </button>
-          <button type="button" className="btn" onClick={close}>Отмена</button>
-        </>
-      }
-    >
-      <div className="tx-imp-sum">
-        {d.fmt ? <b>{d.fmt}</b> : null}{d.fmt ? ' · ' : ''}
-        {d.srcName ? '«' + d.srcName + '» · ' : ''}
-        {fname ? fname + ' · ' : ''}
-        в файле: текстов — <b>{typeof d.tx === 'number' ? d.tx : '—'}</b>, нод — <b>{d.nodes.length}</b>, связей — <b>{d.links.length}</b>
-        {d.skip ? ', без id пропущено — ' + d.skip : ''}
-        <br />
-        в проекте совпадают по id: <b>{pv.matched.length}</b>, новых: <b>{pv.fresh.length}</b>
-      </div>
-      <div className="tx-imp-list">{rows}</div>
-      <div className="tx-imp-chk">
-        <label>
-          <input type="checkbox" checked={upd} disabled={!pv.matched.length} onChange={(e) => setUpd(e.target.checked)} />
-          <span>Обновить тексты и заголовки совпавших нод<span className="hint">совпадений по id: {pv.matched.length}</span></span>
-        </label>
-        <label>
-          <input type="checkbox" checked={cre} disabled={!pv.fresh.length} onChange={(e) => setCre(e.target.checked)} />
-          <span>Создать ноды, которых нет в проекте<span className="hint">новых: {pv.fresh.length} — разместятся сеткой на свободном месте</span></span>
-        </label>
-        {(pv.hasRep || pv.hasOut) && (
-          <label>
-            <input type="checkbox" checked={med} onChange={(e) => setMed(e.target.checked)} />
-            <span>Обновить реплики диалогов{pv.hasOut ? ' и подписи вариантов развилок' : ''}<span className="hint">реплики заменяются списком из файла целиком</span></span>
-          </label>
-        )}
-        <label>
-          <input type="checkbox" checked={lnk} onChange={(e) => setLnk(e.target.checked)} />
-          <span>Синхронизировать связи<span className="hint">подписи существующих связей обновятся, недостающие — добавятся</span></span>
-        </label>
-      </div>
-    </ModalShell>
-  );
-}
-
-/** Оболочка модалки импорта: шаг 1/2 + Escape-каскад (closeModal оригинала, 10017). */
-function TextsImportModal(props: {
-  store: VetviStore;
-  st: TxImpState;
-  close: () => void;
-  reopen: (keep: string) => void;
-  toStep2: (d: TxImpData, fname?: string) => void;
-}) {
-  const { store, st, close, reopen, toStep2 } = props;
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (isTyping()) return; /* курсор в поле — Escape лишь снимает фокус (9974) */
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    };
-    window.addEventListener('keydown', onEsc, true);
-    return () => window.removeEventListener('keydown', onEsc, true);
-  }, [close]);
-  if (st.step === 2) return <TxImpStep2 store={store} d={st.d} fname={st.fname} close={close} />;
-  return <TxImpStep1 store={store} keep={st.keep} close={close} reopen={reopen} toStep2={toStep2} />;
-}
 
 export function TopBar(props: { store: VetviStore }) {
   const { store } = props;
   const [menuOpen, setMenuOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
-  /* модалка «Импорт текстов (JSON)…» — два шага (openTextsImport/textsImpStep2) */
-  const [txImp, setTxImp] = useState<TxImpState | null>(null);
-  const [txImpSeq, setTxImpSeq] = useState(0);
   const addRef = useRef<HTMLDivElement>(null);
   const saveRef = useRef<HTMLDivElement>(null);
   void store.revision;
-
-  const openTxImp = useCallback((keep = '') => {
-    setTxImp({ step: 1, keep });
-    setTxImpSeq((s) => s + 1);
-  }, []);
-  const closeTxImp = useCallback(() => setTxImp(null), []);
-  const txImpToStep2 = useCallback((d: TxImpData, fname?: string) => {
-    setTxImp({ step: 2, d, fname });
-    setTxImpSeq((s) => s + 1); /* перемонтировать — чекбоксы по свежему превью */
-  }, []);
 
   useEffect(() => {
     if (!menuOpen && !saveOpen) return;
@@ -306,7 +88,6 @@ export function TopBar(props: { store: VetviStore }) {
   })();
 
   return (
-    <>
     <header id="topbar" role="banner">
       <div className="brand">
         <svg viewBox="0 0 24 24" fill="none">
@@ -400,33 +181,22 @@ export function TopBar(props: { store: VetviStore }) {
             Сохранить как… (JSON)
             <kbd>{hkText('saveAs')}</kbd>
           </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); if (store.sel.size) store.exportSelection(); else store.toast('Выделите ноды для экспорта', 'warn'); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
-            Экспорт выделенных нод
-            <kbd>{hkText('exportSel')}</kbd>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTxtFile(); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
+            Текстовый файл (.txt)
           </div>
-          {/* ═══ Лёгкий JSON текстов: txjson/txsel/tximp (1098–1100 оригинала) ═══ */}
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.textsExport(false); }}>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(false); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h6M9 16h6M9 9h2" /></svg>
             Тексты (JSON)
           </div>
-          <div
-            className="sm-i"
-            role="menuitem"
-            title={'Экспортировать только выделенные ноды: клик по карточке, Shift+клик — добавить, рамкой или группой. Файл того же формата «Текстов (JSON)» — подходит для «Импорт текстов (JSON)»: совпавшие ноды обновятся, отсутствующие создадутся. Также доступно по ' + hkText('exportSel') + ' и из контекстного меню ноды, группы или цепочки (правый клик)'}
-            onClick={() => { setSaveOpen(false); store.textsExport(true); }}
-          >
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(true); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
             Тексты выделенных нод (JSON)
+            <kbd>{hkText('exportSel')}</kbd>
           </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); openTxImp(); }}>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openTextsImport(); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
             Импорт текстов (JSON)…
-          </div>
-          <div className="ctx-sep" />
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openModal('projects'); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
-            Импорт из файла…
           </div>
         </div>
       </div>
@@ -533,17 +303,5 @@ export function TopBar(props: { store: VetviStore }) {
         ?
       </button>
     </header>
-    {/* модалка «Импорт текстов (JSON)…»: шаг 1 (ввод) / шаг 2 (проверка) */}
-    {txImp && (
-      <TextsImportModal
-        key={txImpSeq}
-        store={store}
-        st={txImp}
-        close={closeTxImp}
-        reopen={openTxImp}
-        toStep2={txImpToStep2}
-      />
-    )}
-    </>
   );
 }

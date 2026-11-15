@@ -156,13 +156,18 @@ export function projFmtDate(iso: string | undefined): string {
   }
 }
 
-/** Скачивание JSON проекта (экспорт текущего, выделенных нод или текстов). */
-export function downloadJson(filename: string, data: unknown, mime = 'application/json'): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: mime });
+/** Скачивание JSON проекта (экспорт текущего или выделенных нод). */
+export function downloadJson(filename: string, data: unknown): void {
+  downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
+}
+
+/** Скачивание файла с готовым содержимым (download оригинала, 10160–10165). */
+export function downloadFile(content: string, name: string, mime?: string): void {
+  const blob = new Blob([content], { type: mime || 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => {

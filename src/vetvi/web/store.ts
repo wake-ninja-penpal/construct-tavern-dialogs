@@ -12,6 +12,8 @@
  */
 
 import { AUTOSAVE_MS, GRID, HISTORY_LIMIT, NODE_W, TYPES } from '@/vetvi/core/constants';
+import { buildTxtExport, slugOf } from '@/vetvi/core/exportTxt';
+import { buildTextsPayload, textsImpParse, type ImpData } from '@/vetvi/core/textsjson';
 import {
   stackableType,
   stackChainEdgeObj,
@@ -22,26 +24,20 @@ import {
   stackSyncParks,
 } from '@/vetvi/core/chains';
 import { docFromParsed, loadAutosave, saveAutosave, serializeDoc } from '@/vetvi/core/doc';
-import { dlgMaxDepth } from '@/vetvi/core/dialog';
-import { defaultDoc, defaultViewport, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
-import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
+import { dlgMaxDepth, findReply } from '@/vetvi/core/dialog';
 import { isBridge, splitPtsAtHalf } from '@/vetvi/core/insert';
+import { defaultDoc, defaultViewport, ensureDialog, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
+import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
 import { pathPoint } from '@/vetvi/core/edgepath';
 import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
-import { downloadJson, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
+import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
-import { buildTextsExport, slug, textsImpApply as textsImpApplyDoc, textsImpParse as textsImpParseDoc, type TxImpData, type TxImpOpt } from '@/vetvi/core/texts';
 import type { EdgeGeom, NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import type { SyncClient } from './sync';
-
-/** dlgNodeWidth оригинала (1699): ширина диалога + отступы вложенности реплик. */
-function dlgNodeWidthOf(n: VetviNode): number {
-  return (n.dlgWidth || NODE_W) + dlgMaxDepth((n.dialog && n.dialog.replies) || [], 0) * 23;
-}
 
 type Listener = () => void;
 
@@ -61,6 +57,9 @@ export interface ShiftTarget {
   toX: number;
   toY: number;
 }
+
+/** Запись своих типов (customTypes оригинала). */
+export interface CustomTypeRec { id: string; name: string; color: string; icon: string }
 
 export interface LogEntry {
   id: string;
@@ -115,9 +114,13 @@ export class VetviStore {
   ctrlDown = false;
   saveMenuOpen = false;
 
-  /* ── «Распределить по строкам» (dstState оригинала, строка 6725) ── */
-  /** ids — строки для раскладки (окно #dstWin открыто, пока не null), k — элементов в строке. */
-  dst: { ids: string[] | null; k: number } = { ids: null, k: 4 };
+  /* ── импорт текстов (окно 2-шаговое: окно → сверка) ── */
+  /** Сохранённый текст после ошибки парсинга (keep в openTextsImport оригинала). */
+  textsKeep: string | null = null;
+  /** Распознанные данные импорта — показывают второй шаг (textsImpStep2). */
+  textsImp: ImpData | null = null;
+  /** Имя файла импорта (если импорт из файла, а не из textarea). */
+  textsImpFname: string | null = null;
 
   /* ── совместное редактирование (заполняет SyncClient) ── */
   syncStatus: 'off' | 'conn' | 'on' | 'err' | 'lost' | 'copy' = 'off';
@@ -584,7 +587,9 @@ export class VetviStore {
 
   addNodeAt(type: string, wx: number, wy: number): VetviNode {
     const n = newNode(type, snapVal(wx, this.snapOn), snapVal(wy, this.snapOn));
-    this.mutate((doc) => { doc.nodes.push(n); }, { label: 'Создание ноды «' + (TYPES[type]?.name || type) + '»' });
+    /* addNode оригинала (6480): заголовок из typeInfo — у своего типа это его имя */
+    if (!TYPES[type]) n.title = this.typeInfoOf(type).name;
+    this.mutate((doc) => { doc.nodes.push(n); }, { label: 'Создание ноды «' + (this.typeInfoOf(type).name || type) + '»' });
     this.selectOnly(n.id);
     return n;
   }
@@ -592,6 +597,7 @@ export class VetviStore {
   /** Добавление ноды без записи в историю (история пишется вызывающим commitEdit). */
   addNodeAtRaw(type: string, wx: number, wy: number): VetviNode | null {
     const n = newNode(type, Math.round(wx), Math.round(wy));
+    if (!TYPES[type]) n.title = this.typeInfoOf(type).name;
     this.doc.nodes.push(n);
     return n;
   }
@@ -790,206 +796,6 @@ export class VetviStore {
     this.mutate((doc) => {
       for (const n of doc.nodes) if (this.sel.has(n.id)) { n.x = x; n.y = snapVal(n.y, true); }
     }, { label: 'Выровнять в столбец' });
-  }
-
-  /* ═══ распределение выделения в строки с мостами (порт 6671–6831 оригинала) ═══ */
-
-  /** allDescNodes оригинала (3000): ноды группы + всей вложенности (с защитой от циклов). */
-  private allDescNodes(gid: string, visited?: Set<string>): VetviNode[] {
-    const seen = visited || new Set<string>();
-    if (seen.has(gid)) return [];
-    seen.add(gid);
-    const out: VetviNode[] = [];
-    for (const n of this.doc.nodes) if (n.gid === gid) out.push(n);
-    for (const cg of this.doc.groups) {
-      if (cg.parent === gid) out.push(...this.allDescNodes(cg.id, seen));
-    }
-    return out;
-  }
-
-  /**
-   * plSelectionIds оригинала (12730): выделенные ноды + содержимое выделенных групп.
-   * Возвращает id (null, если выделения нет) — источник для экспорта/импорта текстов.
-   */
-  plSelectionIds(): string[] | null {
-    if (!this.sel.size && !this.selGroups.size) return null;
-    const seen = new Set<string>();
-    const out: string[] = [];
-    const add = (n: VetviNode | undefined) => {
-      if (n && !seen.has(n.id)) { seen.add(n.id); out.push(n.id); }
-    };
-    this.sel.forEach((id) => add(this.nodeById(id)));
-    this.selGroups.forEach((gid) => this.allDescNodes(gid).forEach((n) => add(n)));
-    return out;
-  }
-
-  /**
-   * layoutRows оригинала (6672–6703): раскладка по k в строке (шаг colStep=maxW+70,
-   * rowStep=maxH+120) от левого верхнего угла выделения (mnX/mnY со снапом);
-   * мосты внутри выделения конвертируются в flow, между концом строки и началом
-   * следующей ставится мост (существующая связь → kind='bridge'+bd, иначе новая).
-   * Историю пишет вызывающий — как pushHistory перед вызовом в оригинале.
-   */
-  layoutRows(ids: string[], k: number): void {
-    const rows: string[][] = [];
-    for (let i = 0; i < ids.length; i += k) rows.push(ids.slice(i, i + k));
-    let maxW = 0;
-    let maxH = 0;
-    ids.forEach((id) => {
-      const n = this.nodeById(id);
-      if (!n) return;
-      const m = this.dimsFn ? this.dimsFn(id) : null;
-      maxW = Math.max(maxW, m ? m.w : dlgNodeWidthOf(n));
-      maxH = Math.max(maxH, m ? m.h : 90);
-    });
-    const colStep = maxW + 70;
-    const rowStep = maxH + 120;
-    let mnX = 1e9;
-    let mnY = 1e9;
-    ids.forEach((id) => {
-      const n = this.nodeById(id);
-      if (!n) return;
-      mnX = Math.min(mnX, n.x);
-      mnY = Math.min(mnY, n.y);
-    });
-    if (mnX === 1e9) return;
-    if (this.snapOn) { mnX = Math.round(mnX / GRID) * GRID; mnY = Math.round(mnY / GRID) * GRID; }
-    rows.forEach((row, i) => {
-      row.forEach((id, j) => {
-        const n = this.nodeById(id);
-        if (!n) return;
-        n.x = Math.round(mnX + j * colStep);
-        n.y = Math.round(mnY + i * rowStep);
-      });
-    });
-    const idSet = new Set(ids);
-    for (const e of this.doc.edges) {
-      if (idSet.has(e.from) && idSet.has(e.to) && isBridge(e)) e.kind = 'flow';
-    }
-    for (let ri = 0; ri < rows.length - 1; ri++) {
-      const U = this.nodeById(rows[ri][rows[ri].length - 1]);
-      const L = this.nodeById(rows[ri + 1][0]);
-      if (!U || !L) continue;
-      const ex = this.doc.edges.find((e) => e.from === U.id && e.to === L.id);
-      if (ex) { ex.kind = 'bridge'; if (!ex.bd) ex.bd = { dl: 0, dy: 0, dr: 0 }; }
-      else {
-        this.doc.edges.push({ id: uid(), from: U.id, to: L.id, label: '', kind: 'bridge', pts: [], lt: 0.5, lp: 0, fromReply: null, bd: { dl: 0, dy: 0, dr: 0 } });
-      }
-    }
-  }
-
-  /** dstApply оригинала (6726–6731): раскладка по текущему dstState + сохранение. */
-  private dstApply(): void {
-    if (!this.dst.ids) return;
-    this.layoutRows(this.dst.ids, this.dst.k);
-    this.scheduleSave();
-    this.emit();
-  }
-
-  /** dstClamp оригинала (6732–6738): 1..числа раскладываемых нод. */
-  dstClamp(v: number): number {
-    const m = this.dst.ids ? this.dst.ids.length : 1;
-    if (isNaN(v)) v = 1;
-    if (v < 1) v = 1;
-    if (v > m) v = m;
-    return v;
-  }
-
-  /** dstSetK оригинала (6739–6745): новый k (с клампом) + немедленная раскладка. */
-  dstSetK(v: number): void {
-    const nk = this.dstClamp(v);
-    this.dst.k = nk;
-    this.dstApply();
-    this.emit();
-  }
-
-  /** closeDstWin оригинала (6757–6760): окно закрывается, ids сбрасывается (k остаётся). */
-  closeDstWin(): void {
-    this.dst.ids = null;
-    this.emit();
-  }
-
-  /**
-   * openDistributeModal оригинала (6761–6792): минимум 2 элемента, сортировка
-   * по раскладке (horizontal=(maxX-minX)>=(maxY-minY)); при 2 нодах — сразу
-   * layoutRows(ids,1) «Растягивание в строку» + тост; иначе dstState={ids,k:4},
-   * pushHistory «Распределение по строкам», раскладка и плавающее окно #dstWin.
-   */
-  alignRowsSel(): void {
-    const ids: string[] = [];
-    this.sel.forEach((id) => { if (this.nodeById(id)) ids.push(id); });
-    if (ids.length < 2) { this.toast('Выделите минимум два элемента', 'warn'); return; }
-    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
-    ids.forEach((id) => {
-      const n = this.nodeById(id)!;
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + NODE_W);
-      maxY = Math.max(maxY, n.y + 90);
-    });
-    const horizontal = (maxX - minX) >= (maxY - minY);
-    ids.sort((a, b) => {
-      const na = this.nodeById(a)!;
-      const nb = this.nodeById(b)!;
-      if (horizontal) return (na.x - nb.x) || (na.y - nb.y);
-      return (na.y - nb.y) || (na.x - nb.x);
-    });
-    if (ids.length === 2) {
-      this.pushHistory('Растягивание в строку');
-      this.layoutRows(ids, 1);
-      this.scheduleSave();
-      this.emit();
-      this.toast('Две строки по одному элементу, стык соединён мостом');
-      return;
-    }
-    this.dst = { ids, k: this.dstClamp(4) };
-    this.pushHistory('Распределение по строкам');
-    this.dstApply();
-    this.emit(); /* показать #dstWin (CanvasBoard) и поставить его в угол stage */
-  }
-
-  /** Псевдоним для пункта меню «Распределить по строкам…» (openDistributeModal). */
-  openDistribute(): void {
-    this.alignRowsSel();
-  }
-
-  /** bridgePairCandidate оригинала (6704–6714): пара выделенных без исходящих у a
-   *  и входящих у b — иначе наоборот; не пара и есть циклы — null. */
-  bridgePairCandidate(): { a: string; b: string } | null {
-    if (this.sel.size !== 2 || this.selGroups.size !== 0) return null;
-    const it = this.sel.values();
-    const aId = it.next().value as string;
-    const bId = it.next().value as string;
-    const a = this.nodeById(aId);
-    const b = this.nodeById(bId);
-    if (!a || !b) return null;
-    const hasOut = (n: VetviNode) => this.doc.edges.some((e) => e.from === n.id);
-    const hasIn = (n: VetviNode) => this.doc.edges.some((e) => e.to === n.id);
-    if (!hasOut(a) && !hasIn(b)) return { a: a.id, b: b.id };
-    if (!hasOut(b) && !hasIn(a)) return { a: b.id, b: a.id };
-    return null;
-  }
-
-  /** createBridgeBetween оригинала (6715–6724): существующая связь a→b становится
-   *  мостом, иначе создаётся новая; тост «Мост создан». */
-  createBridgeBetween(srcId: string, dstId: string): void {
-    this.pushHistory('Создание моста');
-    const doc = this.doc;
-    const ex = doc.edges.find((e) => e.from === srcId && e.to === dstId);
-    if (ex) { ex.kind = 'bridge'; if (!ex.bd) ex.bd = { dl: 0, dy: 0, dr: 0 }; }
-    else {
-      doc.edges.push({ id: uid(), from: srcId, to: dstId, label: '', kind: 'bridge', pts: [], lt: 0.5, lp: 0, fromReply: null, bd: { dl: 0, dy: 0, dr: 0 } });
-    }
-    this.scheduleSave();
-    this.emit();
-    this.toast('Мост создан');
-  }
-
-  /** Готовый хендлер для контекстного меню «Создать мост» (9444–9447):
-   *  пара определяется bridgePairCandidate на момент клика. */
-  createBridgeForPair(): void {
-    const bp = this.bridgePairCandidate();
-    if (bp) this.createBridgeBetween(bp.a, bp.b);
   }
 
   /* ── связи ── */
@@ -2604,63 +2410,175 @@ export class VetviStore {
   }
 
   exportSelection(): void {
-    if (!this.sel.size) return;
-    const ids = new Set(this.sel);
-    const nodes = this.doc.nodes.filter((n) => ids.has(n.id));
-    const edges = this.doc.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-    import('@/vetvi/core/projects').then((m) => {
-      m.downloadJson('vetvi-nodes.json', {
-        app: 'vetvi-export',
-        version: 1,
-        nodes,
-        edges,
-        groups: this.doc.groups.filter((g) => ids.has(g.id)),
-      });
-      this.logManual('Экспорт выделенных нод');
-    });
+    /* 1:1 с оригиналом (9426): «Экспорт выделенных в JSON» — это «Тексты (JSON)»
+       выделения, а не отдельный формат. */
+    this.exportTextsJson(true);
   }
 
-  /* ═══ лёгкий JSON текстов: экспорт/импорт (порт 10328–10600 оригинала) ═══ */
+  /* ── лёгкий JSON текстов (exportTextsJson/textsImp оригинала, 10328–10600) ── */
 
-  /**
-   * exportTextsJson оригинала (10344–10397): файл «Текстов (JSON)» v3.
-   * onlySel — только выделенные (plSelectionIds: выделение + содержимое
-   * выделенных групп); пустое выделение — warn-тост, файл не строится.
-   */
-  textsExport(onlySel: boolean): void {
+  /** Узлы выделения + содержимое выделенных групп (plSelectionIds, 12730). */
+  plSelectionIds(): Set<string> | null {
+    if (!this.sel.size && !this.selGroups.size) return null;
+    const seen = new Set<string>();
+    const out = new Set<string>();
+    const add = (n: VetviNode | null | undefined) => {
+      if (n && !seen.has(n.id)) { seen.add(n.id); out.add(n.id); }
+    };
+    this.sel.forEach((id) => add(this.nodeById(id)));
+    this.selGroups.forEach((gid) => {
+      const seen = new Set<string>();
+      const walk = (g: string) => {
+        if (seen.has(g)) return;
+        seen.add(g);
+        this.doc.nodes.forEach((n) => { if (n.gid === g) add(n); });
+        this.doc.groups.forEach((cg) => { if (cg.parent === g) walk(cg.id); });
+      };
+      walk(gid);
+    });
+    return out;
+  }
+
+  /** Экспорт «Тексты (JSON)» (exportTextsJson оригинала, 10344–10397). */
+  exportTextsJson(onlySel: boolean): void {
     let selIds: Set<string> | null = null;
     if (onlySel) {
       const pl = this.plSelectionIds();
-      if (!pl || !pl.length) {
+      if (!pl || !pl.size) {
         this.toast('Сначала выделите ноды на холсте: клик по карточке, Shift+клик — добавить, рамкой или группой', 'warn');
         return;
       }
-      selIds = new Set(pl);
+      selIds = pl;
     }
-    const r = buildTextsExport(this.doc, selIds);
-    const fname = slug(this.doc.meta.name || '') + (selIds ? '-teksty-vydel' : '-teksty') + '.json';
-    downloadJson(fname, r.out, 'application/json;charset=utf-8');
+    const { payload, nRep } = buildTextsPayload(this.doc, selIds);
+    const fname = slugOf(this.doc.meta.name || '') + (selIds ? '-teksty-vydel' : '-teksty') + '.json';
+    downloadFile(JSON.stringify(payload, null, 2), fname, 'application/json;charset=utf-8');
     this.toast(
       selIds
-        ? ('Экспортировано выделенных: нод ' + r.stat.nodes + ', текстов ' + r.stat.texts + (r.stat.nRep ? ', реплик ' + r.stat.nRep : '') + ' — вернуть в проект можно через «Импорт текстов (JSON)»')
-        : ('Экспортировано: текстов ' + r.stat.texts + ', нод ' + r.stat.nodes + (r.stat.nRep ? ', реплик ' + r.stat.nRep : '') + ' — связи в блоке service'),
+        ? ('Экспортировано выделенных: нод ' + payload.service.nodes.length + ', текстов ' + payload.texts.length + (nRep ? ', реплик ' + nRep : '') + ' — вернуть в проект можно через «Импорт текстов (JSON)»')
+        : ('Экспортировано: текстов ' + payload.texts.length + ', нод ' + payload.service.nodes.length + (nRep ? ', реплик ' + nRep : '') + ' — связи в блоке service'),
+      'ok',
     );
   }
 
-  /** textsImpParse оригинала (10398–10472): разбор строки файла (v3/v2/v1). */
-  textsImpParse(str: string): { err: string } | { data: TxImpData } {
-    return textsImpParseDoc(str);
+  /** Экспорт в текстовый файл (.txt) — exportTXT оригинала (10255–10327). */
+  exportTxtFile(): void {
+    downloadFile(buildTxtExport(this.doc), slugOf(this.doc.meta.name || '') + '.txt', 'text/plain;charset=utf-8');
+    this.logManual('Экспорт в текстовый файл');
+    this.toast('Экспортировано в текстовый файл', 'ok');
   }
 
-  /**
-   * textsImpApply оригинала (10530–10600): merge-логика импорта с историей
-   * «Импорт текстов из JSON» и итоговым тостом (обновлено/создано/связи…).
-   */
-  textsImpApply(d: TxImpData, opt: TxImpOpt): void {
-    let stat = { upd: 0, cre: 0, rep: 0, out: 0, lnkUp: 0, lnkNew: 0, lnkSkip: 0 };
-    this.mutate((doc) => {
-      stat = textsImpApplyDoc(doc, d, opt).stat;
-    }, { label: 'Импорт текстов из JSON' });
+  /** Открыть окно «Импорт текстов (JSON)» (openTextsImport, 10473): keep — текст после ошибки. */
+  openTextsImport(keep?: string): void {
+    this.textsKeep = keep ?? null;
+    this.openModal('textsImport');
+  }
+
+  /** «Проверить» в окне импорта: парсинг и переход к шагу сверки (textsImpStep2, 10498). */
+  textsImportCheck(str: string, fname?: string): void {
+    const r = textsImpParse(str);
+    if ('err' in r) {
+      this.toast(r.err, 'err');
+      this.openTextsImport(str);
+      return;
+    }
+    this.textsImp = r.data;
+    this.textsImpFname = fname || null;
+    this.emit();
+  }
+
+  /** Применение импорта с выбранными флажками (textsImpApply оригинала, 10530–10600). */
+  textsImportApply(opt: { upd: boolean; cre: boolean; med: boolean; lnk: boolean }): void {
+    const d = this.textsImp;
+    if (!d) return;
+    const pre = this.beginEdit();
+    const stat = { upd: 0, cre: 0, rep: 0, out: 0, lnkUp: 0, lnkNew: 0, lnkSkip: 0 };
+    const newIds: string[] = [];
+    const byId: Record<string, VetviNode> = {};
+    const have: Record<string, boolean> = {};
+    this.doc.nodes.forEach((n) => { byId[n.id] = n; have[n.id] = true; });
+    let bx = 1e9, by = 1e9;
+    this.doc.nodes.forEach((n) => { if (n.x < bx) bx = n.x; if (n.y < by) by = n.y; });
+    if (bx > 1e8) { bx = 100; by = 100; }
+    let col = 0, row = 0;
+    d.nodes.forEach((en) => {
+      const n = byId[en.id];
+      if (n) {
+        if (opt.upd) {
+          let ch = false;
+          if (en.title !== null && n.title !== en.title) { n.title = en.title; ch = true; }
+          if (en.text !== null) {
+            if (n.type === 'dialog') {
+              ensureDialog(n);
+              if (n.dialog!.description !== en.text || n.text !== en.text) { n.dialog!.description = en.text; n.text = en.text; ch = true; }
+            } else if (n.text !== en.text) { n.text = en.text; ch = true; }
+          }
+          if (opt.med) {
+            if (en.replies && n.type === 'dialog') { ensureDialog(n); n.dialog!.replies = en.replies as unknown as VetviReply[]; stat.rep++; ch = true; }
+            if (en.outcomes && n.type === 'branch' && Array.isArray(n.outcomes)) {
+              en.outcomes.forEach((oo) => {
+                let hit: { id: string; label: string; cond?: unknown } | null = null;
+                n.outcomes!.forEach((x) => { if (x && x.id === oo.id) hit = x as { id: string; label: string; cond?: unknown }; });
+                const h = hit as { id: string; label: string } | null;
+                if (h) { if (h.label !== oo.label) { h.label = oo.label; ch = true; } }
+                else {
+                  n.outcomes!.push({ id: oo.id ? oo.id.slice(0, 40) : uid(), label: oo.label, cond: null });
+                  if (n.outcomes!.length > 24) n.outcomes!.length = 24;
+                  ch = true;
+                }
+              });
+              stat.out++;
+            }
+          }
+          if (ch) stat.upd++;
+        }
+        return;
+      }
+      if (!opt.cre) return;
+      const t = (en.type && TYPES[en.type]) ? en.type : 'note';
+      const nn: VetviNode = {
+        id: en.id, type: t, gid: null,
+        x: Math.round(bx + col * 300 + (row % 2) * 60), y: Math.round(by + 170 + row * 210),
+        title: (en.title !== null) ? en.title : (TYPES[t] ? TYPES[t].name : 'Заметка'),
+        text: '', status: 'idea', tags: [], expand: 1, color: null, tint: -60, dlgWidth: null,
+      };
+      if (t === 'dialog') {
+        ensureDialog(nn);
+        if (en.text !== null) { nn.dialog!.description = en.text; nn.text = en.text; }
+        if (opt.med && en.replies) nn.dialog!.replies = en.replies as unknown as VetviReply[];
+      } else if (en.text !== null) nn.text = en.text;
+      if (t === 'branch' && opt.med && en.outcomes) nn.outcomes = en.outcomes.map((oo) => ({ id: oo.id, label: oo.label, cond: null })) as typeof nn.outcomes;
+      this.doc.nodes.push(nn); byId[nn.id] = nn; have[nn.id] = true; newIds.push(nn.id);
+      col++; if (col >= 4) { col = 0; row++; }
+      stat.cre++;
+    });
+    if (opt.lnk) {
+      d.links.forEach((l) => {
+        if (!have[l.from] || !have[l.to] || l.from === l.to) { stat.lnkSkip++; return; }
+        let fr = l.fromReply, fo = l.fromOut;
+        const fnode = byId[l.from];
+        if (fo && !(fnode && fnode.type === 'branch' && Array.isArray(fnode.outcomes) && fnode.outcomes.some((o) => o && o.id === fo))) fo = null;
+        if (fr && !(fnode && fnode.type === 'dialog' && findReply((fnode.dialog && fnode.dialog.replies) || [], fr))) fr = null;
+        let hit: VetviEdge | null = null;
+        this.doc.edges.forEach((e) => { if (e.from === l.from && e.to === l.to && (e.fromReply || null) === fr && (e.fromOut || null) === fo) hit = e; });
+        if (hit) {
+          if (l.label !== null && (hit as VetviEdge).label !== l.label) { (hit as VetviEdge).label = l.label; stat.lnkUp++; }
+        } else {
+          this.doc.edges.push({
+            id: uid(), from: l.from, to: l.to, label: (l.label !== null) ? l.label : '', kind: 'flow', pts: [],
+            lt: 0.5, lp: 0, fromReply: fr, fromOut: fo, tin: null, bd: { dl: 0, dy: 0, dr: 0 }, cond: null, q: 1,
+          });
+          stat.lnkNew++;
+        }
+      });
+    }
+    this.textsImp = null;
+    this.textsImpFname = null;
+    this.closeModal();
+    if (pre !== this.serialize()) {
+      this.commitEdit(pre, 'Импорт текстов из JSON');
+      this.logUndoRedo(pre, 'Импорт текстов из JSON');
+    }
     const parts: string[] = [];
     if (stat.upd) parts.push('обновлено нод: ' + stat.upd);
     if (stat.cre) parts.push('создано нод: ' + stat.cre);
@@ -2669,8 +2587,228 @@ export class VetviStore {
     if (stat.lnkUp) parts.push('связей исправлено: ' + stat.lnkUp);
     if (stat.lnkNew) parts.push('связей добавлено: ' + stat.lnkNew);
     if (stat.lnkSkip) parts.push('связей пропущено: ' + stat.lnkSkip);
-    this.toast(parts.length ? 'Импорт завершён — ' + parts.join(', ') : 'Импорт: тексты уже совпадают');
+    this.toast(parts.length ? 'Импорт завершён — ' + parts.join(', ') : 'Импорт: тексты уже совпадают', 'ok');
   }
+
+  /* ── распределение по строкам (layoutRows/dstState оригинала, 6672–6831) ── */
+
+  dstState: { ids: string[] | null; k: number } = { ids: null, k: 4 };
+
+  /** layoutRows оригинала (6672): сетка по измеренным размерам, мосты на стыках строк. */
+  private layoutRows(ids: string[], k: number): void {
+    const rows: string[][] = [];
+    for (let i = 0; i < ids.length; i += k) rows.push(ids.slice(i, i + k));
+    let maxW = 0, maxH = 0;
+    ids.forEach((id) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      const el = this.dimsFn ? this.dimsFn(id) : null;
+      maxW = Math.max(maxW, el ? el.w : this.dlgNodeWidthOf(n));
+      maxH = Math.max(maxH, el ? el.h : 90);
+    });
+    const colStep = maxW + 70, rowStep = maxH + 120;
+    let mnX = 1e9, mnY = 1e9;
+    ids.forEach((id) => { const n = this.nodeById(id); if (n) { mnX = Math.min(mnX, n.x); mnY = Math.min(mnY, n.y); } });
+    if (this.snapOn) { mnX = Math.round(mnX / GRID) * GRID; mnY = Math.round(mnY / GRID) * GRID; }
+    rows.forEach((rw, i) => {
+      rw.forEach((id, j) => {
+        const n = this.nodeById(id);
+        if (!n) return;
+        n.x = Math.round(mnX + j * colStep);
+        n.y = Math.round(mnY + i * rowStep);
+      });
+    });
+    const idSet = new Set(ids);
+    this.doc.edges.forEach((e) => { if (idSet.has(e.from) && idSet.has(e.to) && isBridge(e)) e.kind = 'flow'; });
+    for (let ri = 0; ri < rows.length - 1; ri++) {
+      const U = this.nodeById(rows[ri][rows[ri].length - 1]);
+      const L = this.nodeById(rows[ri + 1][0]);
+      if (!U || !L) continue;
+      const ex = this.doc.edges.find((e) => e.from === U.id && e.to === L.id) || null;
+      if (ex) { ex.kind = 'bridge'; if (!ex.bd) ex.bd = { dl: 0, dy: 0, dr: 0 }; }
+      else {
+        this.doc.edges.push({ id: uid(), from: U.id, to: L.id, label: '', kind: 'bridge', pts: [], lt: 0.5, lp: 0, fromReply: null, bd: { dl: 0, dy: 0, dr: 0 } });
+      }
+    }
+  }
+
+  /** Размер карточки диалога для расчётов (dlgNodeWidth оригинала). */
+  private dlgNodeWidthOf(n: VetviNode): number {
+    return (n.dlgWidth || NODE_W) + (n.dialog ? dlgMaxDepth(n.dialog.replies, 1) * 23 : 0);
+  }
+
+  private dstApply(): void {
+    if (!this.dstState.ids) return;
+    this.layoutRows(this.dstState.ids, this.dstState.k);
+    this.scheduleSave();
+    this.emit();
+  }
+
+  private dstClamp(v: number): number {
+    const m = this.dstState.ids ? this.dstState.ids.length : 1;
+    if (isNaN(v)) v = 1;
+    if (v < 1) v = 1;
+    if (v > m) v = m;
+    return v;
+  }
+
+  /** dstSetK оригинала (6739). */
+  dstSetK(v: number): void {
+    const nk = this.dstClamp(v);
+    this.dstState.k = nk;
+    this.dstApply();
+  }
+
+  /** closeDstWin оригинала (6757). */
+  closeDstWin(): void {
+    this.dstState.ids = null;
+    this.emit();
+  }
+
+  /** openDistributeModal оригинала (6761–6792). */
+  openDistribute(): void {
+    const ids: string[] = [];
+    this.sel.forEach((id) => { if (this.nodeById(id)) ids.push(id); });
+    if (ids.length < 2) { this.toast('Выделите минимум два элемента', 'warn'); return; }
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    ids.forEach((id) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + NODE_W); maxY = Math.max(maxY, n.y + 90);
+    });
+    const horizontal = (maxX - minX) >= (maxY - minY);
+    ids.sort((a, b) => {
+      const na = this.nodeById(a), nb = this.nodeById(b);
+      if (!na || !nb) return 0;
+      if (horizontal) return (na.x - nb.x) || (na.y - nb.y);
+      return (na.y - nb.y) || (na.x - nb.x);
+    });
+    if (ids.length === 2) {
+      const pre = this.beginEdit();
+      this.layoutRows(ids, 1);
+      this.commitEdit(pre, 'Растягивание в строку');
+      this.toast('Две строки по одному элементу, стык соединён мостом', 'ok');
+      return;
+    }
+    this.dstState.ids = ids;
+    this.dstState.k = Math.min(4, ids.length);
+    const pre = this.beginEdit();
+    this.dstApply();
+    this.commitEdit(pre, 'Распределение по строкам');
+    this.emit();
+  }
+
+  /** bridgePairCandidate оригинала (6704): пара без связи для «Создать мост». */
+  bridgePairCandidate(): { a: string; b: string } | null {
+    if (this.sel.size !== 2 || this.selGroups.size !== 0) return null;
+    const ids = [...this.sel];
+    const a = this.nodeById(ids[0]);
+    const b = this.nodeById(ids[1]);
+    if (!a || !b) return null;
+    const hasOut = (n: VetviNode) => this.doc.edges.some((e) => e.from === n.id);
+    const hasIn = (n: VetviNode) => this.doc.edges.some((e) => e.to === n.id);
+    if (!hasOut(a) && !hasIn(b)) return { a: a.id, b: b.id };
+    if (!hasOut(b) && !hasIn(a)) return { a: b.id, b: a.id };
+    return null;
+  }
+
+  /* ── свои типы нод (customTypes оригинала, 2914–2963 + 10076–10151) ── */
+
+  customTypesRecs(): CustomTypeRec[] {
+    const arr: unknown[] = Array.isArray(this.doc.customTypes) ? (this.doc.customTypes as unknown[]) : [];
+    const out: CustomTypeRec[] = [];
+    for (const raw of arr) {
+      if (!raw || typeof raw !== 'object') continue;
+      const c = raw as Record<string, unknown>;
+      if (typeof c.id !== 'string' || !c.id) continue;
+      out.push({
+        id: c.id,
+        name: typeof c.name === 'string' && c.name ? c.name : 'Свой тип',
+        color: typeof c.color === 'string' && c.color ? c.color : '#8b929c',
+        icon: typeof c.icon === 'string' && c.icon ? c.icon : 'star',
+      });
+    }
+    return out;
+  }
+
+  customById(id: string): CustomTypeRec | null {
+    return this.customTypesRecs().find((c) => c.id === id) || null;
+  }
+
+  /** typeInfo(key) оригинала (2926): встроенный → свой тип → заметка. */
+  typeInfoOf(key: string): { name: string; color: string; icon: string } {
+    const t = TYPES[key];
+    if (t) {
+      const icons: Record<string, string> = {
+        scene: 'scene', quest: 'quest', dialog: 'dialog', skill: 'skill', action: 'action',
+        branch: 'branch', varnode: 'variable', event: 'event', note: 'note',
+      };
+      return { name: t.name, color: t.color, icon: icons[key] || 'star' };
+    }
+    const c = this.customById(key);
+    if (c) return { name: c.name, color: c.color, icon: c.icon || 'star' };
+    return { name: TYPES.note.name, color: TYPES.note.color, icon: 'note' };
+  }
+
+  /** allTypeKeys() оригинала (2963). */
+  allTypeKeys(): string[] {
+    return Object.keys(TYPES).concat(this.customTypesRecs().map((c) => c.id));
+  }
+
+  /** listHidden(key) оригинала: record в ядре, массив в старых данных. */
+  listHiddenAt(key: string): boolean {
+    const lh: unknown = this.doc.listHidden;
+    if (Array.isArray(lh)) return (lh as unknown[]).indexOf(key) >= 0;
+    if (lh && typeof lh === 'object') return Boolean((lh as Record<string, unknown>)[key]);
+    return false;
+  }
+
+  /** toggleListVis(key) оригинала (2965–2971). */
+  toggleListVis(key: string): void {
+    const was = this.listHiddenAt(key);
+    this.mutate(() => {
+      const lh = this.doc.listHidden as Record<string, unknown>;
+      if (was) delete lh[key];
+      else lh[key] = true;
+    }, { label: 'Видимость типа в списке' });
+    this.toast(was ? 'Тип возвращён в раздел «На холсте»' : 'Тип убран из раздела «На холсте»', 'ok');
+  }
+
+  /** Сохранение редактора своих типов (10103–10114): новый или правка существующего. */
+  saveCustomType(id: string | null, name: string, color: string, icon: string): void {
+    const nm = (name || '').trim() || 'Элемент';
+    if (id) {
+      const exists = this.customById(id);
+      if (!exists) return;
+      this.mutate(() => {
+        const arr = (this.doc.customTypes || []) as Record<string, unknown>[];
+        const c = arr.find((x) => x && x.id === id);
+        if (c) { c.name = nm; c.color = color; c.icon = icon; }
+      }, { label: 'Правка своих типов' });
+      this.toast('Тип «' + nm + '» обновлён', 'ok');
+    } else {
+      this.mutate(() => {
+        if (!Array.isArray(this.doc.customTypes)) this.doc.customTypes = [];
+        (this.doc.customTypes as unknown[]).push({ id: uid(), name: nm, color, icon });
+      }, { label: 'Правка своих типов' });
+      this.toast('Тип «' + nm + '» создан', 'ok');
+    }
+  }
+
+  /** deleteCustomType(id) оригинала (10142–10151): узлы типа становятся заметками. */
+  deleteCustomType(id: string): void {
+    const c = this.customById(id);
+    if (!c) return;
+    this.mutate((doc) => {
+      doc.customTypes = ((doc.customTypes || []) as unknown[]).filter((x) => (x as { id?: string }).id !== id);
+      doc.nodes.forEach((n) => { if (n.type === id) n.type = 'note'; });
+      const lh = doc.listHidden as Record<string, unknown>;
+      delete lh[id];
+    }, { label: 'Удаление своего типа' });
+    this.toast('Тип «' + c.name + '» удалён (его узлы стали заметками)', 'warn');
+  }
+
 
   importProject(parsed: unknown, filename?: string): void {
     const doc = docFromParsed(parsed);
