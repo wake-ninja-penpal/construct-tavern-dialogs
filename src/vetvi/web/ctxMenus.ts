@@ -48,6 +48,8 @@ export function ctxMenus(store: VetviStore) {
         items.push({ label: 'Разбить на реплики (' + n.dialog.replies.length + ')', fn: () => store.splitDialogNode(id, false) });
       }
       if (allDialogs) items.push({ label: 'Объединить в один диалог', fn: () => store.mergeDialogNodes() });
+      /* собрать выделенные stackable-ноды в цепочку (9437) */
+      if (selCount >= 2 && store.selAllStackable()) items.push({ label: 'Собрать в цепочку', fn: () => store.stackFromSelection() });
       if (selCount > 1) {
         items.push({ sep: true });
         items.push({ label: 'Выровнять в ряд (' + hkText('alignH') + ')', fn: () => store.alignH() });
@@ -82,6 +84,28 @@ export function ctxMenus(store: VetviStore) {
       if (!g) return [{ label: 'Группа не найдена', fn: () => undefined }];
       const fold = g.fold === undefined ? 2 : g.fold;
       const items: CtxItem[] = [];
+      /* цепочка: отдельное меню — без сворачивания/разворачивания (9485–9501) */
+      if (g.stack === true) {
+        items.push({ label: 'Переименовать / настроить', fn: () => store.selectGroupOnly(gid) });
+        items.push({ label: 'Журнал изменений', fn: () => { store.setLogFilters(null, gid); store.openModal('log'); } });
+        items.push({ label: 'Экспорт цепочки в JSON', fn: () => {
+          const nodes = store.membersOf(gid);
+          const ids = new Set(nodes.map((n) => n.id));
+          import('@/vetvi/core/projects').then((m) => {
+            m.downloadJson('vetvi-group.json', {
+              app: 'vetvi-export', version: 1,
+              nodes,
+              edges: store.doc.edges.filter((e) => ids.has(e.from) && ids.has(e.to)),
+              groups: [g],
+            });
+          });
+        } });
+        items.push({ label: 'Преобразовать в группу', fn: () => store.stackToGroup(gid) });
+        if (g.parent) items.push({ label: 'Вынуть из родителя', fn: () => store.updateGroup(gid, { parent: null }, { label: 'Вложенность группы' }) });
+        items.push({ sep: true });
+        items.push({ danger: true, label: 'Разобрать цепочку', fn: () => store.dissolveGroup(gid) });
+        return items;
+      }
       items.push({ label: fold === 2 ? 'Свернуть в список' : fold === 1 ? 'Сжать в компакта' : 'Развернуть группу', fn: () => {
         const next = fold === 2 ? 1 : fold === 1 ? 0 : 2;
         store.updateGroup(gid, { fold: next }, { label: 'Вид группы' });
@@ -101,6 +125,8 @@ export function ctxMenus(store: VetviStore) {
           });
         });
       } });
+      /* преобразование группы в цепочку (9513) */
+      if (store.membersOf(gid).length >= 2) items.push({ label: 'Преобразовать в цепочку', fn: () => store.groupToStack(gid) });
       if (g.parent) items.push({ label: 'Вынуть из родителя', fn: () => store.updateGroup(gid, { parent: null }, { label: 'Вложенность группы' }) });
       items.push({ sep: true });
       items.push({ danger: true, label: 'Распустить группу', fn: () => store.dissolveGroup(gid) });

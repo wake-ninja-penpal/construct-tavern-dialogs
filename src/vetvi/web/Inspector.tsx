@@ -56,6 +56,7 @@ const ICONS: Record<string, string> = {
   grip: '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>',
   eye: '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
   eyeOff: '<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>',
+  queue: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.1"/><circle cx="3.7" cy="12" r="1.1"/><circle cx="3.7" cy="18" r="1.1"/>',
 };
 
 function Ico({ name, size = 15 }: { name: string; size?: number }) {
@@ -1332,6 +1333,11 @@ function GroupBody({ store, gid, editPreRef }: { store: VetviStore; gid: string;
         >
           <Ico name="target" />Выделить все ноды
         </button>
+        {store.membersOf(gid).length >= 2 && (
+          <button type="button" className="btn" id="igToQ" onClick={() => store.groupToStack(gid)}>
+            <Ico name="queue" />Преобразовать в цепочку
+          </button>
+        )}
         <button type="button" className="btn danger" id="igUng" onClick={() => store.dissolveGroup(gid)}>
           <Ico name="x" />Распустить
         </button>
@@ -1433,6 +1439,9 @@ function StackBody({ store, g, editPreRef }: { store: VetviStore; g: VetviGroup;
         })}
       </div>
       <div className="i-actions">
+        <button type="button" className="btn" id="igToGrp" onClick={() => store.stackToGroup(g.id)}>
+          <Ico name="expand" />Преобразовать в группу
+        </button>
         <button type="button" className="btn danger" id="igUng" onClick={() => store.dissolveGroup(g.id)}>
           <Ico name="x" />Разобрать цепочку
         </button>
@@ -1475,6 +1484,11 @@ function MultiBody({ store }: { store: VetviStore }) {
       {allDialogs && (
         <button type="button" className="btn primary" id="mgMerge" style={{ width: '100%', marginTop: 8 }} onClick={() => store.mergeDialogNodes()}>
           <Ico name="dialog" size={14} />Объединить в один диалог
+        </button>
+      )}
+      {store.sel.size >= 2 && store.selAllStackable() && (
+        <button type="button" className="btn" id="mgQueue" style={{ width: '100%', marginTop: 8 }} onClick={() => store.stackFromSelection()}>
+          <Ico name="queue" size={14} />Собрать в цепочку (по порядку выделения)
         </button>
       )}
       <div className="i-actions">

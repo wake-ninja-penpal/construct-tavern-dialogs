@@ -23,6 +23,72 @@
    рабочим на протяжении всего порта; React-версия догоняет по функциям,
    затем классическая уходит в архив.
 
+## Статус (этап 6-a — этот коммит)
+
+Этап 6-a завершён: **цепочки нод (стек-карточки)** — самый крупный оставшийся
+модуль оригинала. Готово:
+
+- Ядро `core/chains.ts` (ориг. 7178–7208): stackableType, stackOrderIds
+  (g.order + догонка), stackChainEdgeObj (q:1 + все поля), stackDetachEdges
+  (tin==='var' не трогаем), stackRebuildChains, stackParkPos
+  (x=g.x+QCARD_W+36, y=g.y+14+idx*40), stackSyncParks, queueEntryId/ExitId;
+  константа QCARD_W=300; типы g.stack/g.order/e.q (pass-through в doc.ts).
+- Стор (ориг. 7022–7462): stackDropCreate (нода на ноду — новая цепочка
+  {fold:1, alpha:0.55, stack:true} или добавление в конец, тосты 1:1),
+  stackAppend, stackFromSelection («Сборка цепочки из выделения»,
+  первая — якорь с сохранением связей), stackToGroup («Цепочка → группа»:
+  колонка по порядку + замер реальных высот + resolveOverlaps + fold=2/auto),
+  groupToStack («Группа → цепочка»: сортировка по раскладке, запреты
+  char/note/вложенных групп, park, чистка и создание q-связей),
+  reorderStackRows (qRowApply, «Перестановка строк цепочки» + stackSyncParks),
+  extractStackRow (qExtractRow: склейка prev→next, gid=g.parent||null,
+  удаление пустой цепочки, позиция в точке отпускания + dlgNodeWidth),
+  роспуск цепочки с сохранением q-связей («Цепочка разобрана — авто-связи
+  „кто за кем“ сохранены»), guards splitDialogNode (реплики в цепочку на
+  место исходной) и mergeDialogNodes (запрет с тостом).
+- GroupLayer: .qcard 1:1 (qport.in/out, .q-head + ic('queue'), .q-name
+  «Очередь»→«Цепочка», .q-cnt, строки .q-item с gc-pin/.q-num/.q-body
+  (qNodeContentHtml: описание/.desc, «— реплика», текст, «→ исход», max 4,
+  slice 140)/.q-x, .q-link с .q-tag «если: …»/label и title=qLinkTitle,
+  svg.q-svg), applyQueueStyle (--qc/--qcb/--qcbg/--qchov/--qrow + градиент
+  shadeHex), qRedrawConnectors в useLayoutEffect (кривая edgePathD smooth,
+  dx=clamp((x1-x2)*0.5+60,70,240), q-arr, q-edge-hit с data-eid/title),
+  qRowDrag (порог 6px → .q-src, ±8px → outMode+.q-out+#qGhost, qRowMark
+  .q-ins-above/.q-ins-below, up: extract/reorder/selectOnly, pointercancel),
+  .q-x → leaveGroup, .q-link/.q-edge-hit → selectEdgeOnly, gc-pin.out строки
+  → startRowConnect (ЛКМ — новая связь от строки, Ctrl — перенос исходящих).
+- CanvasBoard: жесты портов цепочки (qport.in — перенос входящих первой
+  ноды, qport.out — новая связь от выхода с якорем qCardPortAnchor,
+  elemTargetNodeId/ExitNodeId — цели через вход/выход цепочки, запрет
+  броска в свою цепочку), drag одиночной ноды — stackDropTargetAt
+  (|dx|+|dy|) → drop-hover → stackDropCreate, drag ноды на связь →
+  nearestEdgeIn → performInsert(n, ed, pre, false) — вставка существующей
+  ноды (хвост этапа 5), захват ноды после переноса в цепочку
+  (stackAppend), перенос карточки + stackSyncParks в pointerup,
+  groupBounds: maxX=g.x+QCARD_W.
+- Inspector: инспектор цепочки (имя/цвет/яркость, «Порядок», «Преобразовать
+  в группу», «Разобрать цепочку»), у группы «Преобразовать в цепочку»
+  (members>=2), в мульти-выделении «Собрать в цепочку (по порядку
+  выделения)».
+- ctxMenus: ветка цепочки (Переименовать/Журнал/Экспорт/Преобразовать в
+  группу/Вынуть из родителя/Разобрать цепочку), «Преобразовать в цепочку»
+  в меню группы, «Собрать в цепочку» в меню ноды.
+- Патчноут 1.6.0 (4 записи).
+
+Проверено в браузере: сборка цепочки drag-жестом (drop-hover, q-связь,
+park-слоты 1:1: 78,52/414,106), карточка цепочки (строки/порты/связи),
+инспектор «ЦЕПОЧКА», перестановка строк drag-жестом (.q-src, место
+вставки, порядок изменился), вывод строки наружу (#qGhost с текстом
+оригинала, склейка связей q 1→0), цепочка → группа (колонка, fold=2),
+группа с 1 членом без кнопки «Преобразовать в цепочку» (как в оригинале),
+«Собрать в цепочку» из мульти-выделения (порядок = выделение);
+совместимость данных: тот же проект с цепочкой открывается в классической
+версии /vetvi/index.html (qcard, строки, позиции совпадают); ESLint 0,
+tsc чисто.
+
+Дальше (этап 6-b): редактор своих типов, лёгкий JSON текстов (экспорт/
+импорт v3), «Распределить по строкам», демо-проект, ресайз левой панели.
+
 ## Статус (этап 5 — этот коммит)
 
 Этап 5 завершён: **заметки нод, встраивание в связь, DnD-цели, кадрирование

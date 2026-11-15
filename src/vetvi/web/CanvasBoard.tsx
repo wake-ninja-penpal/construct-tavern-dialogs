@@ -13,10 +13,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { snapVal, newNode } from '@/vetvi/core/factory';
-import { GRID, NODE_W } from '@/vetvi/core/constants';
+import { GRID, NODE_W, QCARD_W } from '@/vetvi/core/constants';
 import { clamp, clampZoom, nodeColor, nodeWidth, screenToWorld, typeInfo } from '@/vetvi/core/geometry';
 import { isBridge, nearestEdgeIn } from '@/vetvi/core/insert';
 import { nearestSegPoint } from '@/vetvi/core/edgepath';
+import { queueEntryId, queueExitId, stackableType, stackSyncParks } from '@/vetvi/core/chains';
 import { getMe } from '@/vetvi/core/identity';
 import { defValOf, varById } from '@/vetvi/core/vars';
 import type { NodeSize, VetviDoc, VetviGroup, VetviNode, VetviViewport } from '@/vetvi/core/types';
@@ -33,7 +34,7 @@ type Gest =
   | { mode: 'marquee'; sx: number; sy: number; add: boolean; preN: Set<string>; preG: Set<string> }
   | { mode: 'gcreate'; sx: number; sy: number; cx: number; cy: number }
   | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number; wx: number; wy: number }
-  | { mode: 'node'; lx: number; ly: number }
+  | { mode: 'node'; lx: number; ly: number; stackHl: string | null; dropEdge: string | null }
   | { mode: 'group'; gid: string; lx: number; ly: number; base: Map<string, { x: number; y: number }> }
   | { mode: 'gresize'; gid: string; dir: 'r' | 'b' | 'br'; sx: number; sy: number; fw: number; fh: number }
   | { mode: 'link'; from: string; out: string | null; reply: string | null; wx: number; wy: number; sx: number; sy: number; target: string | null; varin: boolean }
@@ -79,6 +80,37 @@ function mmGroupWorldRect(doc: VetviDoc, g: VetviGroup, sizes: Map<string, NodeS
   if (fold === 2) return groupFrameRect(doc, g, sizes, cardSizes);
   const cr = groupCardRect(doc, g, cardSizes);
   return { x: g.x || 0, y: g.y || 0, w: cr.w, h: cr.h };
+}
+
+/**
+ * stackDropTargetAt оригинала (7219–7238): цель сброса перетаскиваемой ноды —
+ * stackable-нода под курсором (по центрам, расстояние |dx|+|dy|), вне цепочек.
+ * Скрытые ноды (внутри свёрнутых групп/цепочек) не участвуют — как display:none в оригинале.
+ */
+function stackDropTargetAt(
+  store: { doc: VetviDoc; nodeById(id: string): VetviNode | undefined; stackGroupOf(n: VetviNode): VetviGroup | null },
+  dragId: string,
+  wp: { x: number; y: number },
+  sizes: Map<string, NodeSize>,
+): VetviNode | null {
+  const dn = store.nodeById(dragId);
+  if (!dn || !stackableType(dn.type) || store.stackGroupOf(dn)) return null;
+  const cx = wp.x;
+  const cy = wp.y;
+  let best: VetviNode | null = null;
+  let bestD = 1e9;
+  for (const o of store.doc.nodes) {
+    if (o.id === dragId || !stackableType(o.type)) continue;
+    if (collapsedAncestorOf(store.doc, o.id)) continue;
+    const s = sizes.get(o.id);
+    const ow = s ? s.w : NODE_W;
+    const oh = s ? s.h : 90;
+    if (cx >= o.x && cx <= o.x + ow && cy >= o.y && cy <= o.y + oh) {
+      const d = Math.abs(o.x + ow / 2 - cx) + Math.abs(o.y + oh / 2 - cy);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+  }
+  return best;
 }
 
 /* mmBBox оригинала: границы видимых нод и групп (свёрнутое пропускается) */
@@ -193,20 +225,20 @@ export function CanvasBoard(props: { store: VetviStore }) {
     [doc, doc.edges, sizesMap, portsMap, cardSizes, store.bend, store.revision, tick],
   );
 
-  /* ── скрытые ноды (внутри свёрнутых групп) ── */
+  /* ── скрытые группы (внутри свёрнутых предков — groupInsideCollapsed оригинала 3028):
+       сами свёрнутые группы рендерятся карточками/рамками, прячутся только их потомки ── */
   const hiddenGids = (() => {
     const set = new Set<string>();
     for (const g of doc.groups) {
       if ((g.fold === undefined ? 2 : g.fold) < 2) {
-        // сам g и его предки — скрыты из рендера как рамки
-        set.add(g.id);
+        // предки свёрнутой группы скрыты из рендера как рамки
         let p: string | null | undefined = g.parent;
         const seen = new Set<string>();
         while (p && !seen.has(p)) { seen.add(p); set.add(p); p = store.groupById(p)?.parent || null; }
       }
     }
     return set;
-     
+
     })();
 
   const visibleNodes = doc.nodes.filter((n) => !collapsedAncestorOf(doc, n.id));
@@ -265,7 +297,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
   /* ── ноды ── */
   const onNodeDragStart = useCallback((e: React.MouseEvent, id: string) => {
     if (store.carry) return;
-    gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY };
+    gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY, stackHl: null, dropEdge: null };
     store.dragBegin();
     /* soft-lock: захват выделенных нод на время жеста */
     if (store.sync && store.sync.enabled) { store.sync.lockTake([...store.sel]); store.setGestureRollback(null); }
@@ -277,6 +309,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (e.button !== 0) return;
     const t = e.target as HTMLElement;
     if (t.closest('[data-nodrag]')) return;
+    // выделение группы при захвате (selectGroup, 8251–8261): shift — добавить/убрать
+    if (e.shiftKey) store.toggleGroup(gid);
+    else store.selectGroupOnly(gid);
     // если кликнули по строке ноды в карточке — та нода уже выделена; тянем группу
     const base = new Map<string, { x: number; y: number }>();
     const g = store.groupById(gid);
@@ -335,6 +370,80 @@ export function CanvasBoard(props: { store: VetviStore }) {
     gestRef.current = { mode: 'reattachOut', from: id, lx: e.clientX, ly: e.clientY, target: null };
     e.preventDefault();
   }, []);
+
+  /* ── порты цепочки (qport.in/out, 8124–8136 → 7870–7921) ── */
+  const onQPortDown = useCallback((ev: React.MouseEvent, gid: string, isIn: boolean) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    if (ev.button !== 0) return;
+    const g = store.groupById(gid);
+    if (!g || g.stack !== true || (g.fold === undefined ? 2 : g.fold) >= 2) return;
+    const modK = ev.ctrlKey || ev.metaKey;
+    if (isIn) {
+      /* вход цепочки — перенос входящих стрелок первой ноды (startQueuePinDrag, 7884) */
+      const nid = queueEntryId(store.doc, g);
+      if (!nid) { store.toast('Цепочка пуста', 'warn'); return; }
+      const inc = store.doc.edges.filter((ed) => ed.to === nid);
+      if (!inc.length) { store.toast('У цепочки нет входящих стрелок — вход свободен', 'warn'); return; }
+      const lk = store.lockBlockedBy([nid]);
+      if (lk) { store.showLockTip(ev.clientX, ev.clientY, lk); return; }
+      if (store.sync && store.sync.enabled) store.sync.lockTake([nid]);
+      store.selectGroupOnly(g.id);
+      gestRef.current = { mode: 'reattachIn', to: nid, lx: ev.clientX, ly: ev.clientY, target: null };
+      return;
+    }
+    if (modK) {
+      /* Ctrl+вход выхода — перенос исходящих стрелок последней ноды (startQueueOutDrag, 7903) */
+      const nid = queueExitId(store.doc, g);
+      if (!nid) { store.toast('Цепочка пуста', 'warn'); return; }
+      const outs = store.doc.edges.filter((ed) => ed.from === nid && !ed.fromReply && !ed.fromOut);
+      if (!outs.length) { store.toast('У цепочки нет исходящих стрелок', 'warn'); return; }
+      const lk = store.lockBlockedBy([nid]);
+      if (lk) { store.showLockTip(ev.clientX, ev.clientY, lk); return; }
+      if (store.sync && store.sync.enabled) store.sync.lockTake([nid]);
+      store.selectGroupOnly(g.id);
+      gestRef.current = { mode: 'reattachOut', from: nid, lx: ev.clientX, ly: ev.clientY, target: null };
+      return;
+    }
+    /* выход цепочки — новая связь от последней ноды (startQueueConnect, 7870) */
+    const nid2 = queueExitId(store.doc, g);
+    if (!nid2) { store.toast('Цепочка пуста', 'warn'); return; }
+    const lk2 = store.lockBlockedBy([nid2]);
+    if (lk2) { store.showLockTip(ev.clientX, ev.clientY, lk2); return; }
+    if (store.sync && store.sync.enabled) store.sync.lockTake([nid2]);
+    store.selectGroupOnly(g.id);
+    const cr = groupCardRect(store.doc, g, cardSizes);
+    const ax = (g.x || 0) + (cr.w || QCARD_W); /* qCardPortAnchor, 7842–7845 */
+    const ay = (g.y || 0) + 17;
+    gestRef.current = { mode: 'link', from: nid2, out: null, reply: null, wx: ax, wy: ay, sx: ax, sy: ay, target: null, varin: false };
+    setPendingLink({ from: nid2, out: null, reply: null, x: ax, y: ay, startX: ax, startY: ay });
+  }, [store, cardSizes]);
+
+  /* ── выход строки цепочки (startRowConnect, 7924–7944) ── */
+  const onRowPinDown = useCallback((ev: React.MouseEvent, nid: string) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    if (ev.button !== undefined && ev.button !== 0) return;
+    const n = store.nodeById(nid);
+    if (!n) return;
+    const g = store.stackGroupOf(n);
+    if (!g) return;
+    const lk = store.lockBlockedBy([nid]);
+    if (lk) { store.showLockTip(ev.clientX, ev.clientY, lk); return; }
+    if (store.sync && store.sync.enabled) store.sync.lockTake([nid]);
+    if (ev.ctrlKey || ev.metaKey) {
+      /* Ctrl+ЛКМ — перенести исходящие стрелки ноды строки (7936) */
+      gestRef.current = { mode: 'reattachOut', from: nid, lx: ev.clientX, ly: ev.clientY, target: null };
+      return;
+    }
+    const row = (ev.currentTarget as HTMLElement).closest('.q-item') as HTMLElement | null;
+    if (!row) return;
+    const x1 = (g.x || 0) + row.offsetLeft + row.offsetWidth + 2;
+    const y1 = (g.y || 0) + row.offsetTop + row.offsetHeight / 2;
+    store.selectOnly(nid);
+    gestRef.current = { mode: 'link', from: nid, out: null, reply: null, wx: x1, wy: y1, sx: x1, sy: y1, target: null, varin: false };
+    setPendingLink({ from: nid, out: null, reply: null, x: x1, y: y1, startX: x1, startY: y1 });
+  }, [store]);
 
   const onResizeDown = useCallback((e: React.MouseEvent, id: string) => {
     const n = store.nodeById(id);
@@ -419,6 +528,29 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return m;
     })();
 
+  /* setDropEdge оригинала (4284–4288): класс drop-target на g.edge[data-id] */
+  const dropEdgeRef = useRef<string | null>(null);
+  const setDropEdge = useCallback((id: string | null) => {
+    if (dropEdgeRef.current === id) return;
+    if (dropEdgeRef.current) {
+      const prev = document.querySelector('#edges g.edge[data-id="' + dropEdgeRef.current + '"]');
+      if (prev) prev.classList.remove('drop-target');
+    }
+    dropEdgeRef.current = id;
+    if (id) {
+      const next = document.querySelector('#edges g.edge[data-id="' + id + '"]');
+      if (next) next.classList.add('drop-target');
+    }
+  }, []);
+  /* подсветка карточки цепочки как цели сброса (drop-hover, 8021/8382) — императивно */
+  const qCardHlRef = useRef<HTMLElement | null>(null);
+  const setQCardHl = useCallback((el: HTMLElement | null) => {
+    if (qCardHlRef.current === el) return;
+    if (qCardHlRef.current) qCardHlRef.current.classList.remove('drop-hover');
+    qCardHlRef.current = el;
+    if (el) el.classList.add('drop-hover');
+  }, []);
+
   /* ── глобальные обработчики жеста ── */
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -462,6 +594,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             const ids: string[] = [];
             const gids: string[] = [];
             for (const n of doc.nodes) {
+              if (collapsedAncestorOf(doc, n.id)) continue; /* скрытые ноды не выделяются (8649) */
               const s = sizesMap.get(n.id);
               const nw = s ? s.w : 216;
               const nh = s ? s.h : 90;
@@ -495,6 +628,34 @@ export function CanvasBoard(props: { store: VetviStore }) {
           store.dragMoveBy((e.clientX - g.lx) / z, (e.clientY - g.ly) / z);
           g.lx = e.clientX;
           g.ly = e.clientY;
+          if (!store.dragMoved) break;
+          /* цели сброса перетаскиваемой ноды (8602–8632): цепочка → нода-цель,
+             иначе связь (встраивание существующей ноды) */
+          const rect = canvasRef.current?.getBoundingClientRect();
+          const wp = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
+          const stT = (store.sel.size === 1) ? stackDropTargetAt(store, [...store.sel][0], wp, sizesMap) : null;
+          if (g.stackHl && (!stT || stT.id !== g.stackHl)) {
+            const shl = document.querySelector('.node[data-node-id="' + g.stackHl + '"]');
+            if (shl) shl.classList.remove('drop-hover');
+            g.stackHl = null;
+          }
+          if (stT && g.stackHl !== stT.id) {
+            const shl2 = document.querySelector('.node[data-node-id="' + stT.id + '"]');
+            if (shl2) shl2.classList.add('drop-hover');
+            g.stackHl = stT.id;
+          }
+          if (stT) {
+            setDropEdge(null);
+            g.dropEdge = null;
+          } else if (store.sel.size === 1) {
+            let deId = nearestEdgeIn(items, wp.x, wp.y, 16 / (store.vp.z || 1), store.sel);
+            if (deId) {
+              const de = store.edgeById(deId);
+              if (de && isBridge(de)) deId = null;
+            }
+            g.dropEdge = deId;
+            setDropEdge(deId);
+          }
           break;
         }
         case 'group': {
@@ -512,6 +673,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
               if (n) { n.x += dx; n.y += dy; }
             }
           }
+          /* карточка/цепочка (fold<2) едет вместе с содержимым (8556–8560) */
+          const gc = store.groupById(g.gid);
+          if (gc && (gc.fold === undefined ? 2 : gc.fold) < 2) { gc.x += dx; gc.y += dy; }
           store.emit();
           /* живые перетаскивания: члены группы + рамки (включая подгруппы) */
           if (store.sync) {
@@ -546,11 +710,24 @@ export function CanvasBoard(props: { store: VetviStore }) {
           setPendingLink({ from: g.from, out: g.out, reply: g.reply, x: w.x, y: w.y, startX: g.sx, startY: g.sy });
           const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
           const node = el ? el.closest('[data-node-id]') : null;
+          let target = node ? node.getAttribute('data-node-id') : null;
           const varin = !!(el && el.closest('[data-pin="varin"]'));
-          const target = node ? node.getAttribute('data-node-id') : null;
-          g.target = target && target !== g.from ? target : null;
+          /* карточка цепочки под курсором → её вход (elemTargetNodeId, 7847–7854) */
+          const qEl = (!target && el) ? (el.closest('.qcard') as HTMLElement | null) : null;
+          let qHl: HTMLElement | null = null;
+          if (!target && qEl) {
+            const gq = store.groupById(qEl.getAttribute('data-gid') || '');
+            const qid = gq ? queueEntryId(store.doc, gq) : null;
+            const srcN = store.nodeById(g.from);
+            const srcQ = srcN ? store.stackGroupOf(srcN) : null;
+            /* свою цепочку подсвечивать нельзя (8377–8381) */
+            if (qid && (!srcQ || srcQ.id !== gq!.id)) { target = qid; qHl = qEl; }
+            else target = null;
+          }
+          g.target = target && target !== g.from ? target : (target === g.from && g.reply ? target : null);
           g.varin = varin && !!g.target;
           setHoverTarget(g.target);
+          setQCardHl(qHl);
           break;
         }
         case 'reattachOut': {
@@ -558,8 +735,20 @@ export function CanvasBoard(props: { store: VetviStore }) {
           g.ly = e.clientY;
           const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
           const node = el ? el.closest('[data-node-id]') : null;
-          g.target = node ? node.getAttribute('data-node-id') : null;
+          let target = node ? node.getAttribute('data-node-id') : null;
+          /* карточка цепочки → выход цепочки (elemTargetExitNodeId, 7856–7863) */
+          let qHl: HTMLElement | null = null;
+          if (!target && el) {
+            const q = el.closest('.qcard') as HTMLElement | null;
+            if (q) {
+              const gq = store.groupById(q.getAttribute('data-gid') || '');
+              const qid = gq ? queueExitId(store.doc, gq) : null;
+              if (qid) { target = qid; qHl = q; }
+            }
+          }
+          g.target = target && target !== g.from ? target : null;
           setHoverTarget(g.target);
+          setQCardHl(qHl);
           break;
         }
         case 'reattachIn': {
@@ -567,8 +756,20 @@ export function CanvasBoard(props: { store: VetviStore }) {
           g.ly = e.clientY;
           const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
           const node = el ? el.closest('[data-node-id]') : null;
-          g.target = node ? node.getAttribute('data-node-id') : null;
+          let target = node ? node.getAttribute('data-node-id') : null;
+          /* карточка цепочки → вход цепочки (elemTargetNodeId, 7847–7854) */
+          let qHl: HTMLElement | null = null;
+          if (!target && el) {
+            const q = el.closest('.qcard') as HTMLElement | null;
+            if (q) {
+              const gq = store.groupById(q.getAttribute('data-gid') || '');
+              const qid = gq ? queueEntryId(store.doc, gq) : null;
+              if (qid) { target = qid; qHl = q; }
+            }
+          }
+          g.target = target && target !== g.to ? target : null;
           setHoverTarget(g.target);
+          setQCardHl(qHl);
           break;
         }
         case 'wp': {
@@ -625,7 +826,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
         }
       }
     };
-    const up = () => {
+    const up = (e: MouseEvent) => {
       const g = gestRef.current;
       gestRef.current = null;
       store.syncBusyFlag = false;
@@ -633,6 +834,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       if (store.sync && store.sync.enabled) store.sync.lockGiveAll();
       if (g && g.mode === 'pan') { setPanning(false); document.body.classList.remove('panning'); }
       if (!g) return;
+      setQCardHl(null);
       switch (g.mode) {
         case 'pan': store.panEnd(); break;
         case 'marquee': setMarquee(null); break;
@@ -686,6 +888,61 @@ export function CanvasBoard(props: { store: VetviStore }) {
           break;
         }
         case 'node': {
+          /* подсветки сброса (8941–8945) */
+          if (g.stackHl) {
+            const shl = document.querySelector('.node[data-node-id="' + g.stackHl + '"]');
+            if (shl) shl.classList.remove('drop-hover');
+          }
+          setDropEdge(null);
+          const movedN = store.dragMoved;
+          const preN = store.dragStartSnapshot || store.serialize();
+          const dragId = store.sel.size === 1 ? [...store.sel][0] : null;
+          const rectN = canvasRef.current?.getBoundingClientRect();
+          const wpUp = rectN ? screenToWorld(store.vp, e.clientX - rectN.left, e.clientY - rectN.top) : null;
+          /* нода брошена на stackable-ноду → сборка/пополнение цепочки (8946–8951) */
+          if (movedN && dragId && wpUp) {
+            const stT = stackDropTargetAt(store, dragId, wpUp, sizesMap);
+            if (stT) {
+              store.stackDropCreate(dragId, stT.id, preN);
+              store.finishGestureDrag();
+              break;
+            }
+          }
+          /* нода брошена на связь → встраивание существующей ноды (8952–8956) */
+          if (movedN && dragId && g.dropEdge) {
+            const nIns = store.nodeById(dragId);
+            const edIns = store.edgeById(g.dropEdge);
+            if (nIns && edIns && !isBridge(edIns)) store.performInsert(nIns, edIns.id, preN, false);
+            else if (nIns && edIns) store.toast('В мост нельзя вставить элемент', 'warn');
+            store.finishGestureDrag();
+            break;
+          }
+          /* захват групп/цепочек после переноса (8958–8982): нода над карточкой цепочки
+             — в конец цепочки, иначе — gid глубочайшей группы под центром ноды */
+          if (movedN) {
+            let changedG = false;
+            for (const id of store.sel) {
+              const nn = store.nodeById(id);
+              if (!nn) continue;
+              const s = sizesMap.get(id);
+              const w = s ? s.w : NODE_W;
+              const h = s ? s.h : 90;
+              const tg = store.deepestGroupAt(nn.x + w / 2, nn.y + h / 2, sizesMap, cardSizes);
+              let appended = false;
+              if (tg && tg.stack === true) appended = store.stackAppend(tg, id);
+              else if (!tg && wpUp) {
+                const tgS = store.deepestGroupAt(wpUp.x, wpUp.y, sizesMap, cardSizes);
+                if (tgS && tgS.stack === true) appended = store.stackAppend(tgS, id);
+              }
+              if (!appended) {
+                const ngid = tg ? tg.id : null;
+                if ((nn.gid || null) !== ngid) { nn.gid = ngid; changedG = true; }
+              } else {
+                changedG = true;
+              }
+            }
+            if (changedG) store.emit();
+          }
           store.dragEnd();
           break;
         }
@@ -700,10 +957,23 @@ export function CanvasBoard(props: { store: VetviStore }) {
                 if (n) { n.x = snapVal(n.x, true); n.y = snapVal(n.y, true); }
               }
             }
+            const gcS = store.groupById(g.gid);
+            if (gcS && (gcS.fold === undefined ? 2 : gcS.fold) < 2) {
+              gcS.x = snapVal(gcS.x, true);
+              gcS.y = snapVal(gcS.y, true);
+            }
             store.emit();
           }
           store.dragEnd();
           store.reparentAfterMove();
+          /* перенос цепочки: парк-ноды выравниваются по карточке после жеста
+             (8918 оригинала: if(ggU.stack)stackSyncParks(ggU)) */
+          const gcU = store.groupById(g.gid);
+          if (gcU && gcU.stack === true) {
+            stackSyncParks(store.doc, gcU);
+            store.scheduleSave();
+            store.emit();
+          }
           break;
         }
         case 'gresize': {
@@ -756,8 +1026,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
           if (g.target && g.target !== g.from) {
             const pre = store.beginEdit();
             const edges = store.doc.edges.filter((ed) => ed.from === g.from);
-            for (const ed of edges) ed.from = g.target as string;
-            store.commitEdit(pre, 'Перенос исходящих связей');
+            let applied = 0;
+            for (const ed of edges) {
+              if (ed.to === g.target) continue;
+              ed.from = g.target as string;
+              ed.fromReply = null;
+              applied++;
+            }
+            store.commitEdit(pre, 'Перенос исходящих стрелок');
+            store.toast(applied > 1 ? 'Переподключено выходов: ' + applied : 'Исходящая стрелка переподключена');
           }
           setHoverTarget(null);
           break;
@@ -766,8 +1043,14 @@ export function CanvasBoard(props: { store: VetviStore }) {
           if (g.target && g.target !== g.to) {
             const pre = store.beginEdit();
             const edges = store.doc.edges.filter((ed) => ed.to === g.to);
-            for (const ed of edges) { ed.to = g.target as string; ed.fromReply = null; }
-            store.commitEdit(pre, 'Перенос входящих связей');
+            let applied = 0;
+            for (const ed of edges) {
+              if (ed.from === g.target) continue;
+              ed.to = g.target as string;
+              applied++;
+            }
+            store.commitEdit(pre, 'Перенос входящих стрелок');
+            store.toast(applied > 1 ? 'Переподключено входов: ' + applied : 'Входящая стрелка переподключена');
           }
           setHoverTarget(null);
           break;
@@ -857,20 +1140,6 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return types.indexOf('text/vetvi-type') >= 0 || types.indexOf('text/vetvi-clone') >= 0 || types.indexOf('text/vetvi-var') >= 0;
   };
   const palHoverRef = useRef<HTMLElement | null>(null);
-  const dropEdgeRef = useRef<string | null>(null);
-  /* setDropEdge оригинала (4284–4288): класс drop-target на g.edge[data-id] */
-  const setDropEdge = useCallback((id: string | null) => {
-    if (dropEdgeRef.current === id) return;
-    if (dropEdgeRef.current) {
-      const prev = document.querySelector('#edges g.edge[data-id="' + dropEdgeRef.current + '"]');
-      if (prev) prev.classList.remove('drop-target');
-    }
-    dropEdgeRef.current = id;
-    if (id) {
-      const next = document.querySelector('#edges g.edge[data-id="' + id + '"]');
-      if (next) next.classList.add('drop-target');
-    }
-  }, []);
   const clearDropVisuals = useCallback(() => {
     setDropReady(false);
     document.body.classList.remove('dropping');
@@ -1003,6 +1272,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       lastPtr.current = { x: e.clientX, y: e.clientY };
       lastMouse.x = e.clientX;
       lastMouse.y = e.clientY;
+      store.lastPtr = { x: e.clientX, y: e.clientY };
     };
     window.addEventListener('mousemove', mm);
     return () => window.removeEventListener('mousemove', mm);
@@ -1379,6 +1649,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
             hiddenGids={new Set<string>()}
             onGroupDown={onGroupDown}
             onGroupResize={onGroupResize}
+            onQPortDown={onQPortDown}
+            onRowPinDown={onRowPinDown}
           />
         </div>
         <EdgeLayer
@@ -1428,6 +1700,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
           hiddenGids={new Set<string>()}
           onGroupDown={onGroupDown}
           onGroupResize={onGroupResize}
+          onQPortDown={onQPortDown}
+          onRowPinDown={onRowPinDown}
         />
       </div>
       <div id="labels" className={viewAnim ? 'animv' : undefined}>
@@ -1456,6 +1730,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
           display: marquee ? 'block' : 'none',
         }}
       />
+      {/* ghost при вытягивании строки из цепочки (#qGhost, 1162 оригинала; текст/позиция — GroupLayer) */}
+      <div id="qGhost" className="q-ghost" />
     </div>
     <div id="miniMap" ref={mmRef} onPointerDown={onMmDown} onContextMenu={onMmCtx} style={mmDim ? { width: mmDim.w + 'px', height: mmDim.h + 'px' } : undefined}>
       <svg id="mmSvg" viewBox={'0 0 ' + mmW + ' ' + mmH} preserveAspectRatio="none">

@@ -83,7 +83,11 @@ export interface VetviEdge {
   lt?: number;
   lp?: number;
   bd?: { dl: number; dy: number; dr: number };
-  tin?: string;
+  /** Вход переменной («var») — у обычных связей null (pass-through). */
+  tin?: string | null;
+  /** Авто-связь «кто за кем» внутри цепочки (1) — serialize: (q===1)?1:null. */
+  q?: number | null;
+  cond?: { vid: string; op: string; val: number | string | boolean } | null;
   [k: string]: unknown;
 }
 

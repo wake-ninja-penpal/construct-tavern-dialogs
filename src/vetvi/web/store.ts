@@ -12,7 +12,17 @@
  */
 
 import { AUTOSAVE_MS, HISTORY_LIMIT, NODE_W, TYPES } from '@/vetvi/core/constants';
+import {
+  stackableType,
+  stackChainEdgeObj,
+  stackDetachEdges,
+  stackOrderIds,
+  stackParkPos,
+  stackRebuildChains,
+  stackSyncParks,
+} from '@/vetvi/core/chains';
 import { docFromParsed, loadAutosave, saveAutosave, serializeDoc } from '@/vetvi/core/doc';
+import { dlgMaxDepth } from '@/vetvi/core/dialog';
 import { defaultDoc, defaultViewport, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
 import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
 import { splitPtsAtHalf } from '@/vetvi/core/insert';
@@ -136,6 +146,9 @@ export class VetviStore {
   revision = 0;
   saveState: SaveState = 'idle';
   lastSavedAt = 0;
+
+  /** Последняя позиция курсора (lastPtr оригинала) — для showLockTip вне жестов. */
+  lastPtr: { x: number; y: number } = { x: 0, y: 0 };
 
   private past: string[] = [];
   private future: string[] = [];
@@ -1516,26 +1529,31 @@ export class VetviStore {
     return '#8b929c';
   }
 
-  /** Разбить диалог на цепочку нод по репликам верхнего уровня (splitDialogNode). */
+  /** Разбить диалог на цепочку нод по репликам (splitDialogNode, 7463–7563).
+   *  Если нода внутри цепочки — созданные реплики входят в неё на место исходной. */
   splitDialogNode(id: string, deep: boolean): void {
     const n = this.nodeById(id);
     if (!n || n.type !== 'dialog' || !n.dialog) return;
     const flat: VetviReply[] = deep ? this.flatReplies(n.dialog.replies) : n.dialog.replies.filter((r) => !!r);
     if (flat.length < 2) return;
     const pre = this.serialize();
+    /* нода в цепочке: запоминаем группу и позицию для якорения созданных нод (7472–7473) */
+    const gS = this.stackGroupOf(n);
+    const kS = gS ? stackOrderIds(this.doc, gS).indexOf(id) : -1;
     const created: string[] = [];
     let prevId: string | null = null;
     for (let i = 0; i < flat.length; i++) {
       const r = flat[i];
       const c = JSON.parse(JSON.stringify(n)) as VetviNode;
       c.id = uid();
+      c.gid = null;
       c.x = n.x + i * 260;
       c.y = n.y;
       c.dialog = { participants: n.dialog.participants.slice(), description: i === 0 ? n.dialog.description : '', replies: [{ ...r, children: undefined }] };
       c.expand = 1;
       this.doc.nodes.push(c);
       created.push(c.id);
-      if (prevId) this.doc.edges.push(newEdge(prevId, c.id));
+      if (prevId && !gS) this.doc.edges.push(stackChainEdgeObj(prevId, c.id));
       prevId = c.id;
     }
     // входящие на первую копию, исходящие с последней
@@ -1545,8 +1563,19 @@ export class VetviStore {
     }
     this.doc.nodes = this.doc.nodes.filter((x) => x.id !== id);
     this.doc.edges = this.doc.edges.filter((e) => e.from !== id && e.to !== id);
+    if (gS) {
+      /* созданные ноды занимают место исходной в цепочке (7501–7507) */
+      const newOrder = stackOrderIds(this.doc, gS).filter((x) => x !== id);
+      newOrder.splice(Math.max(0, kS), 0, ...created);
+      gS.order = newOrder;
+      for (const cid of created) {
+        const cn = this.nodeById(cid);
+        if (cn) cn.gid = gS.id;
+      }
+      stackRebuildChains(this.doc, gS);
+    }
     this.commitEdit(pre, 'Разбивка диалога на реплики');
-    this.toast('Диалог разбит на ' + created.length + ' нод', 'ok');
+    this.toast('Диалог разбит на ' + created.length + ' нод' + (gS ? ' (внутри цепочки)' : ''), 'ok');
   }
 
   private flatReplies(arr: VetviReply[], out?: VetviReply[]): VetviReply[] {
@@ -1558,10 +1587,18 @@ export class VetviStore {
     return o;
   }
 
-  /** Объединить выделенные диалоги в один (mergeDialogNodes). */
+  /** Объединить выделенные диалоги в один (mergeDialogNodes, 7564+). */
   mergeDialogNodes(): void {
     const ids = [...this.sel].filter((id) => this.nodeById(id)?.type === 'dialog');
     if (ids.length < 2) return;
+    /* ноды внутри цепочки объединять нельзя (7568) */
+    for (const nid of ids) {
+      const nn = this.nodeById(nid);
+      if (nn && this.stackGroupOf(nn)) {
+        this.toast('Ноды внутри цепочки объединять нельзя — сначала выведите их (✕ на строке цепочки)', 'warn');
+        return;
+      }
+    }
     const pre = this.serialize();
     const keep = this.nodeById(ids[0]) as VetviNode;
     const created: string[] = [];
@@ -1580,6 +1617,384 @@ export class VetviStore {
     this.doc.edges = this.doc.edges.filter((e) => !created.includes(e.from) && !created.includes(e.to));
     this.commitEdit(pre, 'Объединение диалогов');
     this.toast('Диалогы объединены: ' + (created.length + 1), 'ok');
+  }
+
+  /* ═══ цепочки нод (стек-карточки): порт 7022–7462, 7839–7945 оригинала ═══ */
+
+  /** Группа-цепочка ноды (stackGroupOf, 7180). */
+  stackGroupOf(n: VetviNode): VetviGroup | null {
+    const g = n.gid ? this.groupById(n.gid) : undefined;
+    return g && g.stack === true ? g : null;
+  }
+
+  /** Лок, мешающий правке (lockBlockedBy оригинала). */
+  lockBlockedBy(ids: string[] | Set<string>): { id: string; name: string; color: string } | null {
+    return this.sync ? this.sync.blockedBy(ids) : null;
+  }
+
+  /** Все выделенные — stackable-ноды вне цепочек (selAllStackable, 7453). */
+  selAllStackable(): boolean {
+    if (this.sel.size < 2 || this.selGroups.size) return false;
+    for (const id of this.sel) {
+      const n = this.nodeById(id);
+      if (!n || !stackableType(n.type) || this.stackGroupOf(n)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Добавить ноду в конец цепочки без записи в историю (stackAppend, 7209–7218):
+   * старые связи убираются, нода встаёт в свой парк-слот, связи «кто за кем»
+   * перестраиваются. Историю пишет жест переноса (как в оригинале).
+   */
+  stackAppend(g: VetviGroup, nid: string): boolean {
+    const ids = stackOrderIds(this.doc, g);
+    if (ids.indexOf(nid) >= 0) return false;
+    stackDetachEdges(this.doc, nid);
+    g.order = ids.concat([nid]);
+    const n = this.nodeById(nid);
+    if (n) {
+      n.gid = g.id;
+      const pk = stackParkPos(g, ids.length);
+      n.x = pk.x;
+      n.y = pk.y;
+    }
+    stackRebuildChains(this.doc, g);
+    return true;
+  }
+
+  /**
+   * Сброс перетащенной ноды на свободную ноду/члена цепочки
+   * (stackDropCreate, 7239–7266): в существующую цепочку — в конец,
+   * иначе создаётся новая цепочка из пары. История — снимок pre жеста.
+   */
+  stackDropCreate(dragId: string, targetId: string, pre: string): boolean {
+    const A = this.nodeById(dragId);
+    const T = this.nodeById(targetId);
+    if (!A || !T) return false;
+    const sg = this.stackGroupOf(T);
+    this.pushHistoryPre(pre, 'Сборка цепочки');
+    const doc = this.doc;
+    if (sg) {
+      const ids = stackOrderIds(doc, sg);
+      /* нода попадает в цепочку: старые связи убираются, новая — по порядку цепочки */
+      stackDetachEdges(doc, dragId);
+      sg.order = ids.concat([dragId]);
+      A.gid = sg.id;
+      const pk = stackParkPos(sg, ids.length);
+      A.x = pk.x;
+      A.y = pk.y;
+      stackRebuildChains(doc, sg);
+      this.scheduleSave();
+      this.emit();
+      this.toast('«' + A.title + '» добавлена в цепочку «' + sg.name + '» (позиция ' + (ids.length + 1) + ') — старые связи убраны, добавлена связь от предыдущей ноды');
+      return true;
+    }
+    const g: VetviGroup = {
+      id: uid(),
+      name: 'Цепочка',
+      fold: 1,
+      x: Math.round(T.x),
+      y: Math.round(T.y),
+      parent: T.gid || null,
+      color: null,
+      alpha: 0.55,
+      badge: null,
+      auto: false,
+      stack: true,
+      order: [T.id, dragId],
+    };
+    stackDetachEdges(doc, dragId);
+    doc.groups.push(g);
+    T.gid = g.id;
+    A.gid = g.id;
+    const pk2 = stackParkPos(g, 1);
+    A.x = pk2.x;
+    A.y = pk2.y;
+    stackRebuildChains(doc, g);
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups = new Set([g.id]);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Объединены в цепочку: «' + T.title + '» → «' + A.title + '» — стандартная связь по порядку, старые связи «' + A.title + '» убраны. Порядок меняется перетаскиванием строк');
+    return true;
+  }
+
+  /** ✕ на строке цепочки (stackRowAction, 7267–7271): проверка локов → leaveGroup. */
+  stackRowAction(gid: string, nid: string): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const lk = this.lockBlockedBy(stackOrderIds(this.doc, g));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    this.leaveGroup(nid);
+  }
+
+  /** Перестановка строк цепочки (qRowApply, 7346–7362). */
+  reorderStackRows(gid: string, nid: string, insIdx: number | null): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const lk = this.lockBlockedBy(stackOrderIds(this.doc, g));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    const ids = stackOrderIds(this.doc, g);
+    const from = ids.indexOf(nid);
+    if (from < 0) return;
+    const rest = ids.filter((x) => x !== nid);
+    let idx = insIdx == null || insIdx < 0 ? rest.length : insIdx;
+    if (idx > rest.length) idx = rest.length;
+    const newOrder = rest.slice(0, idx).concat([nid], rest.slice(idx));
+    if (newOrder.join('\u0001') === ids.join('\u0001')) return;
+    this.pushHistory('Перестановка строк цепочки');
+    g.order = newOrder;
+    stackRebuildChains(this.doc, g);
+    stackSyncParks(this.doc, g);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Порядок цепочки изменён — связи «кто за кем» перестроены');
+  }
+
+  /**
+   * Вывод ноды из цепочки перетаскиванием (qExtractRow, 7364–7389): связь с
+   * соседями склеивается, нода ложится в точку отпускания, пустая цепочка
+   * удаляется. wp — мировая точка, client — экранные координаты для lock-подсказки.
+   */
+  extractStackRow(gid: string, nid: string, wp: { x: number; y: number }, client?: { x: number; y: number }): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const n = this.nodeById(nid);
+    if (!n) return;
+    const order0 = stackOrderIds(this.doc, g);
+    const idx = order0.indexOf(nid);
+    if (idx < 0) return;
+    const lk = this.lockBlockedBy(order0);
+    if (lk) {
+      this.showLockTip(client ? client.x : this.lastPtr.x, client ? client.y : this.lastPtr.y, lk);
+      return;
+    }
+    const prev = idx > 0 ? order0[idx - 1] : null;
+    const next = idx >= 0 && idx < order0.length - 1 ? order0[idx + 1] : null;
+    this.pushHistory('Вывод из цепочки');
+    const doc = this.doc;
+    doc.edges = doc.edges.filter((ed) => !(ed.q && (ed.from === nid || ed.to === nid)));
+    n.gid = g.parent || null;
+    g.order = order0.filter((x) => x !== nid);
+    if (prev && next && !doc.edges.some((ed) => ed.from === prev && ed.to === next && ed.tin !== 'var')) {
+      doc.edges.push(stackChainEdgeObj(prev, next));
+    }
+    /* ширина карточки диалога (dlgNodeWidth оригинала): своя ширина + отступы вложенности */
+    const w0 = n.type === 'dialog'
+      ? ((n.dlgWidth || NODE_W) + dlgMaxDepth((n.dialog && n.dialog.replies) || [], 0) * 23)
+      : NODE_W;
+    n.x = Math.round(wp.x - w0 / 2);
+    n.y = Math.round(wp.y - 24);
+    this.resolveOverlaps(new Set([nid]));
+    if (!g.order.length) {
+      doc.groups = doc.groups.filter((x) => x.id !== gid);
+      this.selGroups.delete(gid);
+    }
+    this.scheduleSave();
+    this.emit();
+    this.toast('Нода выведена из цепочки — связи с соседями склеены');
+  }
+
+  /**
+   * Цепочка → группа (stackToGroup, 7025–7052): ноды возвращаются на холст
+   * колонкой в порядке цепочки (вторая фаза — по реальным высотам после
+   * перерисовки), группа открывается рамкой с авторазмером.
+   */
+  stackToGroup(gid: string): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack !== true) return;
+    const ids = stackOrderIds(this.doc, g);
+    if (!ids.length) {
+      this.toast('Цепочка пуста', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy(ids);
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    const pre = this.serialize();
+    this.pushHistoryPre(pre, 'Цепочка → группа');
+    const gx = g.x || 0;
+    const gy = g.y || 0;
+    g.stack = false;
+    g.order = [];
+    g.fold = 2;
+    const gr = g as unknown as Record<string, unknown>;
+    gr.bbox = null;
+    gr.hh = null;
+    g.auto = true;
+    delete g.fx;
+    delete g.fy;
+    delete g.fw;
+    delete g.fh;
+    ids.forEach((id, i) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      n.x = Math.round(gx);
+      n.y = Math.round(gy + i * 130);
+    });
+    this.scheduleSave();
+    this.emit(); /* ноды видимы — можно измерить реальные высоты (renderAll, 7041) */
+    setTimeout(() => {
+      /* вторая фаза: колонка по реальным высотам (7042–7048) */
+      let yy = Math.round(gy);
+      for (const id of ids) {
+        const n = this.nodeById(id);
+        if (!n) continue;
+        const h = this.dimsOf(id).h;
+        n.y = Math.round(yy);
+        yy += h + 24;
+      }
+      this.resolveOverlaps(new Set(ids));
+      this.sel.clear();
+      this.selEdges.clear();
+      this.selGroups = new Set([g.id]);
+      this.scheduleSave();
+      this.emit();
+      this.toast('Цепочка «' + g.name + '» преобразована в группу: ноды на холсте в порядке цепочки, связи «кто за кем» сохранены');
+    }, 0);
+  }
+
+  /**
+   * Группа → цепочка (groupToStack, 7057–7099): порядок — по раскладке
+   * (шире, чем выше → слева направо, иначе сверху вниз), первая нода — якорь,
+   * у остальных старые связи убираются, между соседями — связи «кто за кем».
+   */
+  groupToStack(gid: string): void {
+    const g = this.groupById(gid);
+    if (!g || g.stack === true) return;
+    const ms = this.membersOf(g.id);
+    if (ms.length < 2) {
+      this.toast('Для цепочки нужно минимум две ноды в группе', 'warn');
+      return;
+    }
+    const bad = ms.filter((n) => !stackableType(n.type));
+    if (bad.length) {
+      this.toast('В цепочку нельзя: ' + bad.slice(0, 3).map((n) => '«' + (n.title || '?') + '»').join(', ') + (bad.length > 3 ? '…' : '') + ' — персонажи и заметки в цепочки не входят', 'warn');
+      return;
+    }
+    const kids = this.doc.groups.filter((cg) => cg.parent === gid);
+    if (kids.length) {
+      this.toast('Сначала распустите или выньте вложенные группы (' + kids.length + ')', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy(ms.map((n) => n.id));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    let x0 = 1e9;
+    let x1 = -1e9;
+    let y0 = 1e9;
+    let y1 = -1e9;
+    ms.forEach((n) => {
+      const d = this.dimsOf(n.id);
+      x0 = Math.min(x0, n.x);
+      x1 = Math.max(x1, n.x + d.w);
+      y0 = Math.min(y0, n.y);
+      y1 = Math.max(y1, n.y + d.h);
+    });
+    const ids = (x1 - x0 >= y1 - y0)
+      ? ms.slice().sort((a, b) => a.x - b.x || a.y - b.y).map((n) => n.id)
+      : ms.slice().sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.id);
+    this.pushHistory('Группа → цепочка');
+    const doc = this.doc;
+    g.stack = true;
+    g.fold = 1;
+    g.order = ids.slice();
+    const gr = g as unknown as Record<string, unknown>;
+    gr.bbox = null;
+    gr.hh = null;
+    /* карточка цепочки — в левый верхний угол области группы (7080) */
+    g.x = Math.round(x0);
+    g.y = Math.round(y0);
+    ids.forEach((id, i) => {
+      const n = this.nodeById(id);
+      if (!n) return;
+      if (i > 0) stackDetachEdges(doc, id);
+      const pk = stackParkPos(g, i);
+      n.x = pk.x;
+      n.y = pk.y;
+    });
+    const set = new Set(ids);
+    const consec: Record<string, boolean> = {};
+    for (let ci = 0; ci < ids.length - 1; ci++) consec[ids[ci] + '>' + ids[ci + 1]] = true;
+    doc.edges = doc.edges.filter((e) => {
+      if (e.q && set.has(e.from) && set.has(e.to)) return !!consec[e.from + '>' + e.to];
+      return true;
+    });
+    for (let cj = 0; cj < ids.length - 1; cj++) {
+      const aC = ids[cj];
+      const bC = ids[cj + 1];
+      if (!doc.edges.some((e) => e.from === aC && e.to === bC && e.q)) doc.edges.push(stackChainEdgeObj(aC, bC));
+    }
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups = new Set([g.id]);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Группа «' + g.name + '» преобразована в цепочку (' + ids.length + '): порядок — по раскладке, у нод кроме первой старые связи убраны');
+  }
+
+  /** «Собрать в цепочку (по порядку выделения)» (stackFromSelection, 7426–7445). */
+  stackFromSelection(): void {
+    const ids: string[] = [];
+    for (const id of this.sel) {
+      const n = this.nodeById(id);
+      if (n && stackableType(n.type) && !this.stackGroupOf(n)) ids.push(id);
+    }
+    if (this.selGroups.size || ids.length !== this.sel.size || ids.length < 2) {
+      this.toast('Выделите минимум две ноды вне цепочек', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy(ids);
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    this.pushHistory('Сборка цепочки из выделения');
+    const doc = this.doc;
+    const first = this.nodeById(ids[0]) as VetviNode;
+    const g: VetviGroup = {
+      id: uid(),
+      name: 'Цепочка',
+      fold: 1,
+      x: Math.round(first.x),
+      y: Math.round(first.y),
+      parent: first.gid || null,
+      color: null,
+      alpha: 0.55,
+      badge: null,
+      auto: false,
+      stack: true,
+      order: ids.slice(),
+    };
+    doc.groups.push(g);
+    ids.forEach((id, i) => {
+      const n = this.nodeById(id) as VetviNode;
+      n.gid = g.id;
+      /* первая нода — якорь: её связи сохраняются; остальные — старые связи убираются */
+      if (i > 0) stackDetachEdges(doc, id);
+      const pk = stackParkPos(g, i);
+      n.x = pk.x;
+      n.y = pk.y;
+    });
+    stackRebuildChains(doc, g);
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups = new Set([g.id]);
+    this.scheduleSave();
+    this.emit();
+    this.toast('Цепочка из ' + ids.length + ' нод собрана: связи перестроены по порядку (как «кто за кем»), вход в первую ноду сохранён');
   }
 
   /* ── группы ── */
@@ -1694,39 +2109,80 @@ export class VetviStore {
     const g = doc.groups.find((x) => x.id === gid);
     if (!g) return;
     const parent = g.parent || null;
-    if (g.stack && g.order) {
-      // цепочка: раскладываем ноды вертикально
-      const nodes = (g.order || []).map((id) => doc.nodes.find((n) => n.id === id)).filter(Boolean) as VetviNode[];
-      let y = g.y;
-      for (const n of nodes) {
-        n.x = g.x;
-        n.y = y;
-        y += 130;
+    if (g.stack === true) {
+      /* ungroup, 6997–7012: ноды колонкой от точки карточки; q-связи «кто за кем»
+         СОХРАНЯЮТСЯ как обычные связи на холсте (авто-связи не удаляются) */
+      const ids = stackOrderIds(doc, g);
+      ids.forEach((id, i) => {
+        const n = doc.nodes.find((x) => x.id === id);
+        if (!n) return;
         n.gid = parent;
-      }
-      doc.edges = doc.edges.filter((e) => !e.q);
+        n.x = Math.round(g.x || 0);
+        n.y = Math.round((g.y || 0) + i * 130);
+      });
     }
     for (const n of doc.nodes) if (n.gid === gid) n.gid = parent;
     for (const sg of doc.groups) if (sg.parent === gid) sg.parent = parent;
     doc.groups = doc.groups.filter((x) => x.id !== gid);
   }
 
+  /** Роспуск группы/разбор цепочки (ungroup, 6992–7021): локи, тосты 1:1. */
   dissolveGroup(gid: string): void {
-    this.mutate((doc) => { this.dissolveGroupIn(doc, gid); }, { label: 'Роспуск группы' });
+    const g = this.groupById(gid);
+    if (!g) return;
+    const lk = this.lockBlockedBy([gid].concat(this.membersOf(gid).map((n) => n.id)));
+    if (lk) {
+      this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk);
+      return;
+    }
+    const wasStack = g.stack === true;
+    const ids = wasStack ? stackOrderIds(this.doc, g) : [];
+    this.mutate((doc) => { this.dissolveGroupIn(doc, gid); }, { label: 'Разбор группы/цепочки' });
+    if (wasStack && ids.length) this.resolveOverlaps(new Set(ids));
+    this.toast(wasStack ? 'Цепочка разобрана — авто-связи «кто за кем» сохранены' : 'Группа «' + g.name + '» расформирована', 'warn');
   }
 
+  /** Покинуть группу / вывести из цепочки (leaveGroup, 7148–7177). */
   leaveGroup(nodeId: string): void {
     const n = this.nodeById(nodeId);
     if (!n || !n.gid) return;
-    this.mutate((doc) => {
-      const g = doc.groups.find((x) => x.id === n.gid);
-      n.gid = null;
-      if (g && g.stack && g.order) {
-        doc.edges = doc.edges.filter((e) => !e.q);
+    const gid = n.gid;
+    const g0 = this.groupById(gid);
+    if (g0 && g0.stack === true) {
+      /* цепочка (7152–7172): q-связи ноды убираются, соседи склеиваются, нода
+         встаёт в свой парк-слот; пустая цепочка удаляется */
+      const order0 = stackOrderIds(this.doc, g0);
+      const idx = order0.indexOf(nodeId);
+      const prev = idx > 0 ? order0[idx - 1] : null;
+      const next = idx >= 0 && idx < order0.length - 1 ? order0[idx + 1] : null;
+      this.mutate((doc) => {
+        const gg = doc.groups.find((x) => x.id === gid);
+        if (!gg) return;
+        doc.edges = doc.edges.filter((e) => !(e.q && (e.from === nodeId || e.to === nodeId)));
+        n.gid = gg.parent || null;
+        gg.order = order0.filter((x) => x !== nodeId);
+        if (prev && next && !doc.edges.some((e) => e.from === prev && e.to === next && e.tin !== 'var')) {
+          doc.edges.push(stackChainEdgeObj(prev, next));
+        }
+        const pk = stackParkPos(gg, Math.max(0, idx));
+        n.x = pk.x;
+        n.y = pk.y;
+      });
+      if (g0.order && !g0.order.length) {
+        this.doc.groups = this.doc.groups.filter((x) => x.id !== gid);
+        this.selGroups.delete(gid);
       }
+      this.emit();
+      this.toast('Узел выведен из цепочки', 'warn');
+      return;
+    }
+    this.mutate((doc) => {
+      const nn = doc.nodes.find((x) => x.id === nodeId);
+      if (nn) nn.gid = null;
     }, { label: 'Покинуть группу' });
     this.pruneEmptyGroups(this.doc);
     this.emit();
+    this.toast('Узел исключён из группы', 'warn');
   }
 
   /** После переноса: захват нод/групп под прямоугольником (reparentAfterMove). */

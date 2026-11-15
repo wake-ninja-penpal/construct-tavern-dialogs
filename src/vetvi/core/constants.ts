@@ -9,6 +9,9 @@ export const NODE_W = 216;
 /** Ширина карточки группы. */
 export const GCARD_W = 200;
 
+/** Ширина карточки цепочки (стек-карточки) — QCARD_W оригинала (строка 1365). */
+export const QCARD_W = 300;
+
 /** Шаг сетки и привязки. */
 export const GRID = 26;
 
