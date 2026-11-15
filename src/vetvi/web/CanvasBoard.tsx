@@ -246,17 +246,24 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   const visibleNodes = doc.nodes.filter((n) => !collapsedAncestorOf(doc, n.id));
 
-  /* ── колесо: зум к курсору / Shift — пан ── */
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (e.shiftKey) {
-      store.panBy(-e.deltaY, 0);
-      return;
-    }
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    store.zoomAt(x, y, Math.pow(1.0015, -e.deltaY));
+  /* ── колесо: зум к курсору / Shift — пан. Нативный слушатель passive:false —
+     делегированный React onWheel пассивен, preventDefault в нём не работает ── */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      if (e.shiftKey) {
+        store.panBy(-e.deltaY, 0);
+        return;
+      }
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      store.zoomAt(x, y, Math.pow(1.0015, -e.deltaY));
+    };
+    el.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => el.removeEventListener('wheel', onWheelNative);
   }, [store]);
 
   /* ── клики по пустому месту ── */
@@ -1696,7 +1703,6 @@ export function CanvasBoard(props: { store: VetviStore }) {
         backgroundSize: GRID * vp.z + 'px ' + GRID * vp.z + 'px',
         backgroundPosition: vp.x + 'px ' + vp.y + 'px',
       }}
-      onWheel={onWheel}
       onMouseDown={onCanvasDown}
       onContextMenu={onCtx}
       onDoubleClick={onDbl}
