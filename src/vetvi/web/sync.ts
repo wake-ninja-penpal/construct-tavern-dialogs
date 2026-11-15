@@ -18,6 +18,7 @@
 
 import { io, type Socket } from 'socket.io-client';
 
+import { docFromParsed } from '@/vetvi/core/doc';
 import { uid } from '@/vetvi/core/factory';
 import { getMe, setMeName } from '@/vetvi/core/identity';
 import { mergeDocs, mergeStats, type MergeStats } from '@/vetvi/core/merge';
@@ -97,6 +98,56 @@ export function syncFmtDate(iso: string | undefined): string {
 }
 
 export { copiesAll };
+
+/* ═══════════ сравнение версий документа (новая система комнат) ═══════════
+
+   Вход в комнату всегда грузит серверное состояние, а локальная копия не
+   заменяется сразу: если версии различаются — в углу холста появляется блок
+   со сравнением и выбором «опубликовать локальную / перезаписать локальные
+   данные / смерджить». Сравнение — канонический JSON: порядок ключей внутри
+   объектов не важен, «летучие» поля meta (modified/actionLog/editLog) не
+   учитываются. Обе версии прогоняются через docFromParsed — одинаковые
+   нормализация и дефолты. */
+
+function canonVal(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonVal);
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    Object.keys(o).sort().forEach((k) => { out[k] = canonVal(o[k]); });
+    return out;
+  }
+  return v;
+}
+
+function canonDocJson(d: unknown): string {
+  const doc = docFromParsed(d);
+  const meta = (doc.meta && typeof doc.meta === 'object' ? doc.meta : {}) as Record<string, unknown>;
+  const metaPick: Record<string, unknown> = {};
+  /* содержательные поля meta; modified/actionLog/editLog — летучие, не сравниваются */
+  ['name', 'projectId', 'created', 'passSalt', 'passHash'].forEach((k) => {
+    if (meta[k] !== undefined) metaPick[k] = meta[k];
+  });
+  return JSON.stringify({
+    meta: canonVal(metaPick),
+    nodes: canonVal(doc.nodes),
+    edges: canonVal(doc.edges),
+    groups: canonVal(doc.groups),
+    customTypes: canonVal(doc.customTypes || []),
+    listHidden: canonVal(doc.listHidden || {}),
+    vars: canonVal(doc.vars || []),
+    chars: canonVal(doc.chars || []),
+    palette: canonVal(doc.palette || []),
+  });
+}
+
+function docsDiffer(a: unknown, b: unknown): boolean {
+  return canonDocJson(a) !== canonDocJson(b);
+}
+
+function clonePlain(v: unknown): Record<string, unknown> {
+  try { return JSON.parse(JSON.stringify(v)) as Record<string, unknown>; } catch { return { nodes: [], edges: [], groups: [] }; }
+}
 
 export class SyncClient {
   enabled = false;
@@ -238,56 +289,47 @@ export class SyncClient {
         this.renderUI();
 
         const serverDoc = res.doc || null;
-        let localJson = '';
-        try { localJson = JSON.stringify(this.store.syncDocObj()); } catch { /* нет сериализации */ }
-        let serverJson = '';
-        try { serverJson = serverDoc ? JSON.stringify(serverDoc) : ''; } catch { /* нет сериализации */ }
-
         if (!serverDoc) {
           this.flushState(true);
           if (!opts.silent && !opts.own) this.store.toast('Комната открыта — отправьте ссылку соавторам');
-        } else if (localJson === serverJson) {
-          /* уже совпадаем */
-        } else if (opts.pushLocal) {
-          this.flushState(true);
         } else {
-          const localEmpty = this.store.doc.nodes.length === 0;
-          const roomPid = (serverDoc.meta && serverDoc.meta.projectId) ? String(serverDoc.meta.projectId) : null;
-          const metaPid = this.store.doc.meta.projectId as string | undefined;
-          /* своя комната без projectId в снимке — устаревший снимок этого же проекта */
-          const sameProject = !!(roomPid && metaPid && roomPid === metaPid) || (!roomPid && opts.own === true);
-          const serverModified = (serverDoc.meta && serverDoc.meta.modified) ? serverDoc.meta.modified : null;
-          const localModified = this.store.doc.meta.modified;
-          const serverNewer = !!(serverModified && localModified && (serverModified as number) >= (localModified as number));
-          /* Есть ли данные ЭТОГО проекта локально (слот roomPid). Нет слота и локальный
-             проект ещё ни разу не сохранялся (нет projectId) — проект открывается впервые:
-             молча загружаем состояние комнаты, без модалки (projInitStartup оригинала 11414:
-             чужой проект без данных слота грузится пустым → localEmpty → applyRemote). */
-          const hasLocalSlotForRoom = !!(roomPid && projReadSlot(roomPid));
-          const pristine = !metaPid; /* дефолтный «Без названия», ни одного автосохранения */
-          /* Переход по ССЫЛКЕ проекта (#room=…&project=P): комната содержит именно этот
-             проект, а локально открыт другой — открываем проект из комнаты, как «Открыть
-             проект» (диалог «публикация/загрузка» здесь только путает: выбор не влияет
-             на текущий документ и выглядит как «возврат в старый проект»). */
-          const linkSwitch = !!(opts.viaLink && roomPid && this.projectId && roomPid === this.projectId && metaPid && roomPid !== metaPid);
-          if (localEmpty || (!hasLocalSlotForRoom && pristine) || (sameProject && serverNewer)) {
-            this.applyRemote(serverDoc, true, opts.own === true);
-            this.store.toast('Загружено состояние из комнаты');
-          } else if (linkSwitch) {
-            this.applyRemote(serverDoc, true);
-            this.store.toast('Открыт проект из комнаты по ссылке', 'ok');
-          } else if (sameProject) {
+          let localJson = '';
+          try { localJson = JSON.stringify(this.store.syncDocObj()); } catch { /* нет сериализации */ }
+          let serverJson = '';
+          try { serverJson = JSON.stringify(serverDoc); } catch { /* нет сериализации */ }
+
+          if (localJson === serverJson) {
+            /* уже совпадаем */
+          } else if (opts.pushLocal) {
             this.flushState(true);
-            if (!opts.silent) this.store.toast('Локальная версия новее — опубликована в комнату', 'warn');
           } else {
-            this.store.confirmBox({
-              title: 'Комната уже содержит проект',
-              text: 'В комнате уже есть общее состояние, а у вас открыт другой проект. Загрузить общий (текущая работа будет заменена) или опубликовать вашу локальную версию?',
-              buttons: [
-                { label: 'Опубликовать мою', fn: () => { this.allowForeignOnce = true; this.flushState(true); this.allowForeignOnce = false; } },
-                { label: 'Загрузить из комнаты', primary: true, fn: () => this.applyRemote(serverDoc, true) },
-              ],
-            });
+            /* ── новая система входа в комнату ──
+               Сервер всегда авторитетен: состояние комнаты грузится в редактор,
+               а локальная копия проекта НЕ заменяется сразу (skipSave). Если версии
+               различаются — в углу холста появляется блок со сравнением версий и
+               выбором: опубликовать локальную на сервер / перезаписать локальные
+               данные серверными / смерджить. Единственное исключение — комната
+               содержит СОВСЕМ другой проект при своём входе (загрязнённая комната
+               или туда опубликовали чужой): тогда локальный проект не трогаем и
+               блок предлагает «загрузить из комнаты» явно. Диалога «Комната уже
+               содержит проект» больше нет — он вечными кругами возвращал прежний
+               проект при смене проектов. */
+            const roomPid = (serverDoc.meta && serverDoc.meta.projectId) ? String(serverDoc.meta.projectId) : null;
+            const metaPid = typeof this.store.doc.meta.projectId === 'string' ? String(this.store.doc.meta.projectId || '') : '';
+            const sameProject = !!(roomPid && metaPid && roomPid === metaPid) || (!roomPid && opts.own === true);
+            const localVer = this.captureLocalVersion(roomPid);
+            if (sameProject || !opts.own) {
+              this.applyRemote(serverDoc, true, opts.own === true, 0, !!localVer);
+              if (localVer && docsDiffer(localVer, serverDoc)) {
+                this.store.setSyncDiff({ kind: 'local-server', localDoc: localVer, serverDoc: clonePlain(serverDoc), by: null, at: Date.now() });
+                this.store.toast('Данные комнаты отличаются от локальной копии — см. блок в углу холста', 'warn');
+              } else if (!opts.silent) {
+                this.store.toast('Загружено состояние из комнаты');
+              }
+            } else {
+              this.store.setSyncDiff({ kind: 'foreign', localDoc: clonePlain(this.store.syncDocObj()), serverDoc: clonePlain(serverDoc), by: null, at: Date.now() });
+              this.store.toast('В комнате другой проект — ваши данные не заменены (см. блок в углу холста)', 'warn');
+            }
           }
         }
         if (this.mergeCount > 0) this.store.toast('Merge-запросов в очереди: ' + this.mergeCount, 'warn');
@@ -312,6 +354,10 @@ export class SyncClient {
     sock.on('vetvi:state', (m: { roomId?: string; doc?: SyncDoc }) => {
       if (!m || m.roomId !== this.room) return;
       this.handleRemoteDoc(m.doc);
+    });
+    sock.on('vetvi:replace', (m: { roomId?: string; doc?: SyncDoc; by?: { name?: string; color?: string } | null }) => {
+      if (!m || m.roomId !== this.room) return;
+      this.handleReplace(m.doc, m.by || null);
     });
     sock.on('vetvi:live', (m: { roomId?: string; nodes?: { id: string; x: number; y: number }[]; groups?: { id: string; x: number; y: number }[]; pts?: { eid: string; pts: { x: number; y: number }[] }[]; dlgW?: { id: string; w: number }[] }) => {
       if (!m || m.roomId !== this.room) return;
@@ -394,6 +440,7 @@ export class SyncClient {
     this.pendingRemote = null;
     this.pendingRemoteAt = 0;
     this.allowForeignOnce = false;
+    this.store.syncDiff = null;
     this.rlocks = null;
     this.store.syncLocks = {};
     this.joinPass = null;
@@ -417,14 +464,14 @@ export class SyncClient {
 
   /* ═══ применение удалённого состояния ═══ */
 
-  applyRemote(doc: SyncDoc | null, fit: boolean, keepPid = false, preserveTouchedAfter = 0): void {
+  applyRemote(doc: SyncDoc | null, fit: boolean, keepPid = false, preserveTouchedAfter = 0, skipSave = false): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
     this.applyingRemote = true;
     try {
       /* снимок комнаты — авторитетный (last-write-wins): клиент ПЕРЕНИМАЕТ projectId
-         комнаты. Без этого защита flushState «публикуется только свой проект» после
-         чужого снимка навсегда блокировала публикацию (projectId расходился с doc.meta
-         навсегда) — синхронизация умирала целиком, жили только live-события перетаскиваний. */
+         комнаты. Без этого после чужого снимка публикация навсегда блокировалась
+         (projectId расходился с doc.meta) — синхронизация умирала целиком,
+         жили только live-события перетаскиваний. */
       if (this.mode !== 'copy') {
         const rp = (doc.meta as { projectId?: unknown } | undefined)?.projectId;
         if (typeof rp === 'string' && rp && rp !== this.projectId) {
@@ -432,7 +479,7 @@ export class SyncClient {
           if (this.room) this.setHash(this.room, rp); /* хеш отражает реальный проект комнаты */
         }
       }
-      this.store.applyRemoteDoc(doc as Record<string, unknown>, keepPid, preserveTouchedAfter);
+      this.store.applyRemoteDoc(doc as Record<string, unknown>, keepPid, preserveTouchedAfter, skipSave);
       if (fit) {
         const api = canvasApi.current;
         const r = api ? api.getRect() : null;
@@ -454,6 +501,113 @@ export class SyncClient {
     if (this.applyingRemote) { this.pendingRemote = doc; this.pendingRemoteAt = Date.now(); return; }
     if (this.store.busyNow()) { this.pendingRemote = doc; this.pendingRemoteAt = Date.now(); return; }
     this.applyRemote(doc, false);
+  }
+
+  /* ═══ замена данных комнаты (новая система: изменения приезжают на сравнение) ═══ */
+
+  /** Участник заменил данные на сервере (vetvi:replace): НЕ применяем сразу —
+   *  блок в углу холста показывает «пришли изменения» со сравнением версий. */
+  handleReplace(doc: SyncDoc | null | undefined, by: { name?: string; color?: string } | null): void {
+    if (!doc || !Array.isArray(doc.nodes)) return;
+    if (this.applyingRemote) return;
+    this.store.setSyncDiff({
+      kind: 'incoming',
+      localDoc: clonePlain(this.store.syncDocObj()),
+      serverDoc: clonePlain(doc),
+      by: by ? { name: by.name || '', color: by.color || '' } : null,
+      at: Date.now(),
+    });
+    this.store.toast('Участник ' + ((by && by.name) || '') + ' заменил данные на сервере — пришли изменения (см. блок в углу холста)', 'warn');
+  }
+
+  /** Явная публикация версии в комнату как «замена данных» (кнопки блока расхождения):
+   *  у соавторов изменения НЕ применяются сразу — показывается сравнение. */
+  publishReplace(doc: SyncDoc): void {
+    if (!this.enabled || !this.sock || !this.sock.connected) return;
+    const me = getMe();
+    try { this.sock.emit('vetvi:replace', { roomId: this.room, doc, by: { name: me.name, color: me.color } }); } catch { /* соединение умерло */ }
+    try { this.lastSent = JSON.stringify(doc); } catch { /* нет сериализации */ }
+    /* закрепить комнату за проектом опубликованной версии в реестре */
+    this.store.scheduleSave();
+  }
+
+  /** Локальная копия проекта комнаты для блока сравнения: текущий документ, если
+   *  открыт именно этот проект (включая несохранённые правки), иначе слот проекта. */
+  captureLocalVersion(roomPid: string | null): Record<string, unknown> | null {
+    if (!roomPid) return null;
+    const metaPid = typeof this.store.doc.meta.projectId === 'string' ? String(this.store.doc.meta.projectId || '') : '';
+    if (metaPid && metaPid === roomPid) return clonePlain(this.store.syncDocObj());
+    try {
+      const slot = projReadSlot(roomPid);
+      if (slot && slot.doc) return clonePlain(slot.doc);
+    } catch { /* нет слота */ }
+    return null;
+  }
+
+  /* ── действия блока расхождения (SyncDiffModal) ── */
+
+  /** «Опубликовать локальную версию на сервер»: локальная версия возвращается в
+   *  редактор и заменяет данные комнаты; соавторы получают её на сравнение. */
+  diffPushLocal(): void {
+    const d = this.store.syncDiff;
+    if (!d) return;
+    if (d.kind !== 'foreign') this.applyRemote(d.localDoc as SyncDoc, false);
+    this.publishReplace(d.localDoc as SyncDoc);
+    this.store.clearSyncDiff();
+    this.store.toast('Локальная версия опубликована на сервере', 'ok');
+  }
+
+  /** «Перезаписать локальные данные серверными» / «Принять изменения» / «Загрузить
+   *  из комнаты»: версия комнаты применяется к редактору и слоту. */
+  diffTakeServer(): void {
+    const d = this.store.syncDiff;
+    if (!d) return;
+    this.applyRemote(d.serverDoc as SyncDoc, true);
+    this.store.clearSyncDiff();
+    this.store.toast(d.kind === 'incoming' ? 'Изменения приняты' : 'Локальные данные перезаписаны данными комнаты');
+  }
+
+  /** «Смерджить»: локальные изменения поверх версии комнаты (объекты, изменённые
+   *  локально, берутся из локальной версии; добавления обеих сторон остаются;
+   *  удалённые локально объекты выпадают). Результат применяется и публикуется
+   *  как замена данных комнаты. */
+  diffMerge(): void {
+    const d = this.store.syncDiff;
+    if (!d) return;
+    const server = d.serverDoc as SyncDoc;
+    const local = d.localDoc as SyncDoc;
+    const result = mergeDocs(server, local as unknown as Record<string, unknown>, {
+      nodes: (server.nodes || []) as unknown as IdObjList,
+      edges: (server.edges || []) as unknown as IdObjList,
+      groups: (server.groups || []) as unknown as IdObjList,
+      customTypes: (Array.isArray(server.customTypes) ? server.customTypes : []) as unknown as IdObjList,
+    });
+    const sMeta = (server.meta || {}) as Record<string, unknown>;
+    const lMeta = (local.meta || {}) as Record<string, unknown>;
+    const vars = byIdUnion((server.vars || []) as { id?: string }[], (local.vars || []) as { id?: string }[]);
+    const chars = byIdUnion((server.chars || []) as { id?: string }[], (local.chars || []) as { id?: string }[]);
+    const merged: SyncDoc = {
+      app: 'vetvi-room',
+      version: 1,
+      meta: { ...sMeta, name: (lMeta.name as string) || (sMeta.name as string) || 'Без названия' },
+      nodes: result.nodes as unknown as VetviNode[],
+      edges: result.edges as unknown as VetviEdge[],
+      groups: result.groups as unknown as VetviGroup[],
+      customTypes: result.customTypes,
+      listHidden: result.listHidden || {},
+      vars,
+      chars,
+      palette: (Array.isArray(server.palette) ? server.palette : (Array.isArray(local.palette) ? local.palette : [])) as string[],
+    };
+    this.applyRemote(merged, false);
+    this.publishReplace(merged);
+    this.store.clearSyncDiff();
+    this.store.toast('Проекты смерждены — результат опубликован на сервере', 'ok');
+  }
+
+  /** Закрыть блок расхождения без решения (×). */
+  diffDismiss(): void {
+    this.store.clearSyncDiff();
   }
 
   /* ═══ публикация состояния ═══ */
@@ -1114,6 +1268,25 @@ export class SyncClient {
 }
 
 /* ═══ вспомогательные ═══ */
+
+/** Объединение списков по id (vars/chars при смердживании): серверные + локальные, которых нет у сервера. */
+function byIdUnion(serverList: { id?: string }[], localList: { id?: string }[]): { id?: string }[] {
+  const seen = new Set<string>();
+  const out: { id?: string }[] = [];
+  serverList.forEach((x) => {
+    const k = x && x.id ? x.id : JSON.stringify(x);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(x);
+  });
+  localList.forEach((x) => {
+    const k = x && x.id ? x.id : JSON.stringify(x);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(x);
+  });
+  return out;
+}
 
 function copiesSave(list: SyncCopy[]): void {
   try {

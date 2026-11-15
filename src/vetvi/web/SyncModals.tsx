@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { getMe } from '@/vetvi/core/identity';
+import { mergeStats } from '@/vetvi/core/merge';
 import { copiesAll, syncFmtDate, type MergeRequest } from './sync';
 import type { VetviStore } from './store';
 
@@ -260,6 +261,157 @@ export function CopyBarModal({ store }: { store: VetviStore }) {
     >
       <p>Вы редактируете <b>локальную копию</b> «{cp.name}». Оригинал не изменяется. Отправьте merge-запрос, чтобы владелец оригинала рассмотрел и принял ваши изменения.</p>
       <p style={{ fontSize: '11.5px', color: 'var(--tx3)' }}>{cp.sourceRoomId ? 'Оригинал: комната ' + cp.sourceRoomId.slice(0, 10) + '…' : 'Копия локального проекта (без комнаты).'}</p>
+    </SyncShell>
+  );
+}
+
+/** Небольшой блок в углу холста: «данные отличаются» — клик открывает сравнение версий. */
+export function SyncDiffBadge({ store }: { store: VetviStore }) {
+  void store.revision;
+  const d = store.syncDiff;
+  if (!d) return null;
+  const stats = mergeStats(d.serverDoc as Record<string, unknown>, d.localDoc as Record<string, unknown>);
+  const n = stats.addedNodes + stats.changedNodes + stats.removedNodes + stats.addedEdges + stats.changedEdges + stats.removedEdges + stats.addedGroups + stats.changedGroups + stats.removedGroups + stats.changedTypes;
+  const label = d.kind === 'incoming'
+    ? 'Пришли изменения' + (d.by?.name ? ' от ' + d.by.name : '')
+    : d.kind === 'foreign'
+      ? 'В комнате другой проект'
+      : 'Данные отличаются от локальной копии';
+  return (
+    <div id="syncDiffBadge" role="status" aria-label={label}>
+      <button
+        type="button"
+        className="sd-badge-btn"
+        title="Нажмите, чтобы сравнить версии локальной копии и комнаты"
+        onClick={(e) => { e.stopPropagation(); store.openModal('syncDiff'); }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <span className="sd-badge-dot" />
+        <span className="sd-badge-text">
+          <b>{label}</b>
+          <i>{n ? 'различий: ' + n + ' — нажмите для сравнения' : 'нажмите для сравнения версий'}</i>
+        </span>
+      </button>
+      <button
+        type="button"
+        className="sd-badge-x"
+        title="Скрыть блок (версии останутся без изменений)"
+        aria-label="Скрыть блок расхождения"
+        onClick={(e) => { e.stopPropagation(); if (store.sync) store.sync.diffDismiss(); }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >×</button>
+    </div>
+  );
+}
+
+/* ═══════════ сравнение версий (блок расхождения local/server, новая система комнат) ═══════════ */
+
+interface IdTitle { id?: string; title?: string; text?: string }
+
+function titleOf(o: IdTitle | undefined): string {
+  const t = o && (o.title || o.text);
+  return t ? String(t).slice(0, 60) : '(без названия)';
+}
+
+/** Списки различий по нодам (для сравнения двух версий в SyncDiffModal). */
+function nodeDiffLists(localNodes: IdTitle[] | undefined, serverNodes: IdTitle[] | undefined) {
+  const lm: Record<string, IdTitle> = {};
+  (localNodes || []).forEach((n) => { if (n && n.id) lm[String(n.id)] = n; });
+  const sm: Record<string, IdTitle> = {};
+  (serverNodes || []).forEach((n) => { if (n && n.id) sm[String(n.id)] = n; });
+  const onlyLocal: IdTitle[] = [];
+  const changed: IdTitle[] = [];
+  (localNodes || []).forEach((n) => {
+    if (!n || !n.id) return;
+    const s = sm[String(n.id)];
+    if (!s) onlyLocal.push(n);
+    else if (JSON.stringify(s) !== JSON.stringify(n)) changed.push(n);
+  });
+  const onlyServer: IdTitle[] = [];
+  (serverNodes || []).forEach((n) => { if (n && n.id && !lm[String(n.id)]) onlyServer.push(n); });
+  return { onlyLocal, onlyServer, changed };
+}
+
+function DiffList({ cap, rows, max = 12, cls }: { cap: string; rows: IdTitle[]; max?: number; cls: string }) {
+  if (!rows.length) return null;
+  const show = rows.slice(0, max);
+  return (
+    <div className="sd-list">
+      <div className="sd-cap">{cap} ({rows.length})</div>
+      {show.map((r, i) => (
+        <div className={'sd-row ' + cls} key={(r.id || '') + i}>«{titleOf(r)}»{rows.length > max && i === max - 1 ? '' : ''}</div>
+      ))}
+      {rows.length > max && <div className="sd-row more">… и ещё {rows.length - max}</div>}
+    </div>
+  );
+}
+
+export function SyncDiffModal({ store }: { store: VetviStore }) {
+  void store.revision;
+  const d = store.syncDiff;
+  const sc = store.sync;
+  if (!d || !sc) return null;
+  const stats = mergeStats(d.serverDoc as Record<string, unknown>, d.localDoc as Record<string, unknown>);
+  const lists = nodeDiffLists(d.localDoc.nodes as IdTitle[], d.serverDoc.nodes as IdTitle[]);
+  const chip = (v: number, label: string) => (v ? <span className="mrg-chip">{label}: {v}</span> : null);
+  const total = stats.addedNodes + stats.changedNodes + stats.removedNodes + stats.addedEdges + stats.changedEdges + stats.removedEdges + stats.addedGroups + stats.changedGroups + stats.removedGroups + stats.changedTypes;
+  const head = d.kind === 'incoming'
+    ? <>Участник <b style={{ color: d.by?.color || undefined }}>{d.by?.name || '—'}</b> заменил данные на сервере. Изменения не применены — сравните версии и решите, что делать.</>
+    : d.kind === 'foreign'
+      ? <>В комнате находится <b>другой проект</b>. Ваши данные не заменялись: сравните версии и выберите — загрузить данные комнаты, опубликовать свою версию (комната перейдёт на ваш проект) или смерджить.</>
+      : <>Локальная копия проекта отличается от данных комнаты. Комната загружена как рабочая версия, локальная копия сохранена — сравните и решите, что делать.</>;
+  const localCap = d.kind === 'incoming' ? 'Ваша текущая версия' : 'Локальная копия';
+  const serverCap = d.kind === 'incoming' ? 'Пришедшая версия (замена)' : 'Версия комнаты (сервер)';
+  return (
+    <SyncShell
+      title="Сравнение версий проекта"
+      wide
+      onClose={() => { store.closeModal(); }}
+      foot={
+        <>
+          {d.kind === 'incoming' && <button type="button" className="btn primary" onClick={() => { sc.diffTakeServer(); store.closeModal(); }}>Принять изменения</button>}
+          {d.kind !== 'incoming' && <button type="button" className="btn primary" onClick={() => { sc.diffTakeServer(); store.closeModal(); }}>{d.kind === 'foreign' ? 'Загрузить из комнаты' : 'Перезаписать локальные данные'}</button>}
+          {d.kind !== 'incoming' && <button type="button" className="btn" onClick={() => { sc.diffPushLocal(); store.closeModal(); }}>{d.kind === 'foreign' ? 'Опубликовать мою (комнату)' : 'Опубликовать локальную версию'}</button>}
+          <button type="button" className="btn" onClick={() => { sc.diffMerge(); store.closeModal(); }}>Смерджить</button>
+          <button type="button" className="btn" onClick={() => { sc.diffDismiss(); store.closeModal(); }}>{d.kind === 'incoming' ? 'Отклонить' : 'Закрыть'}</button>
+        </>
+      }
+    >
+      <p className="sd-head">{head}</p>
+      <div className="sd-cols">
+        <div className="sd-col">
+          <div className="sd-col-cap">{localCap}</div>
+          <div className="sd-col-sub">{((d.localDoc.meta as { name?: string }) || {}).name || 'Без названия'} · нод: {(d.localDoc.nodes as unknown[])?.length || 0}</div>
+        </div>
+        <div className="sd-col">
+          <div className="sd-col-cap">{serverCap}</div>
+          <div className="sd-col-sub">{((d.serverDoc.meta as { name?: string }) || {}).name || 'Без названия'} · нод: {(d.serverDoc.nodes as unknown[])?.length || 0}</div>
+        </div>
+      </div>
+      <div className="sd-stats mrg-stats">
+        {chip(stats.addedNodes, '+ узлов (локальные)')}
+        {chip(stats.removedNodes, '− узлов (есть только в комнате)')}
+        {chip(stats.changedNodes, '~ узлов изменено')}
+        {chip(stats.changedDialogs, '~ реплик диалогов')}
+        {chip(stats.changedNotes, '~ заметок')}
+        {chip(stats.addedEdges, '+ связей')}
+        {chip(stats.changedEdges, '~ связей')}
+        {chip(stats.removedEdges, '− связей')}
+        {chip(stats.addedGroups, '+ групп')}
+        {chip(stats.changedGroups, '~ групп')}
+        {chip(stats.removedGroups, '− групп')}
+        {chip(stats.changedTypes, '~ своих типов')}
+      </div>
+      {!total && (
+        <p className="sd-empty">Содержимое версий совпадает — отличаются только служебные данные (время правки, журнал).</p>
+      )}
+      {!!total && (
+        <div className="sd-lists">
+          <DiffList cap="Только в локальной версии" rows={lists.onlyLocal} cls="add" />
+          <DiffList cap="Только в версии комнаты" rows={lists.onlyServer} cls="del" />
+          <DiffList cap="Изменены в обеих версиях" rows={lists.changed} cls="chg" />
+        </div>
+      )}
     </SyncShell>
   );
 }

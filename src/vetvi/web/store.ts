@@ -73,6 +73,29 @@ export interface LogEntry {
 }
 
 /**
+ * Расхождение локальных данных и данных комнаты (новая система входа в комнату):
+ *  — 'local-server' — на входе комната загрузила серверную версию, а локальная
+ *    копия проекта (слот) отличается от неё: блок в углу холста предлагает
+ *    сравнение и выбор «опубликовать локальную / перезаписать локальными данными
+ *    из комнаты / смерджить»;
+ *  — 'incoming' — участник заменил данные на сервере (vetvi:replace): изменения
+ *    НЕ применяются сразу — сравнение и кнопки «принять / отклонить / смерджить»;
+ *  — 'foreign' — в комнате совсем другой проект (загрязнённая комната): локальный
+ *    проект остаётся открытым, блок предлагает «загрузить из комнаты / опубликовать
+ *    мою (вылечить комнату) / смерджить».
+ */
+export interface SyncDiffInfo {
+  kind: 'local-server' | 'incoming' | 'foreign';
+  /** Локальная версия: слот проекта (или снимок текущего документа до замены). */
+  localDoc: Record<string, unknown>;
+  /** Версия сервера (комнаты) / пришедшая замена. */
+  serverDoc: Record<string, unknown>;
+  /** Кто заменил данные (для kind='incoming'). */
+  by?: { name?: string; color?: string } | null;
+  at: number;
+}
+
+/**
  * Личность редактора (editIdentity оригинала, 2850): в комнате совместного доступа —
  * участник синхронизации (имя/цвет, под которым его видят другие), локально — «вы».
  */
@@ -159,6 +182,8 @@ export class VetviStore {
   collabPop = false;
   /** Soft-lock редактируемого объекта (editLockIds оригинала): лок, взятый набором текста. */
   editLockIds: string[] = [];
+  /** Расхождение локальной копии и комнаты (см. SyncDiffInfo) — блок в углу холста. */
+  syncDiff: SyncDiffInfo | null = null;
 
   /** Клиент realtime-коллаборации (подключается в VetviApp). */
   sync: SyncClient | null = null;
@@ -175,6 +200,19 @@ export class VetviStore {
   /** Откат активного жеста при проигранной гонке локов (замыкание ставит холст). */
   setGestureRollback(fn: (() => void) | null): void {
     this.gestureRollback = fn;
+  }
+
+  /** Показать блок расхождения в углу холста (новая система комнат). */
+  setSyncDiff(info: SyncDiffInfo | null): void {
+    this.syncDiff = info;
+    this.emit();
+  }
+
+  /** Убрать блок расхождения (крестик/решение принято). */
+  clearSyncDiff(): void {
+    if (!this.syncDiff) return;
+    this.syncDiff = null;
+    this.emit();
   }
 
   revision = 0;
@@ -362,6 +400,7 @@ export class VetviStore {
     if (this.past.length > HISTORY_LIMIT) this.past.shift();
     this.future.length = 0;
     this.noteEditor();
+    if (this.syncDiff && this.syncDiff.kind === 'local-server') this.syncDiff = null;
     this.scheduleSave();
     this.emit();
   }
@@ -403,6 +442,9 @@ export class VetviStore {
     if (!opts || opts.history !== false) this.pushHistory(opts?.label);
     fn(this.doc);
     this.noteEditor();
+    /* правка после входа в комнату: локальная копия начинает следовать за серверной
+       версией — блок «данные отличаются» (local-server) больше не актуален */
+    if (this.syncDiff && this.syncDiff.kind === 'local-server') this.syncDiff = null;
     this.scheduleSave();
     this.emit();
   }
@@ -1463,6 +1505,35 @@ export class VetviStore {
     }, { label: 'Порядок реплик' });
   }
 
+  /** Перестановка реплики перетаскиванием (drop в dlgModal оригинала 4937–4945):
+   *  только среди соседей одного уровня (проверка вызывающего), вставка выше/ниже цели. */
+  moveReplyPair(nodeId: string, srcRid: string, tgtRid: string, below: boolean): boolean {
+    let moved = false;
+    this.mutate((doc) => {
+      const n = doc.nodes.find((x) => x.id === nodeId);
+      if (!n || !n.dialog) return;
+      const findLoc = (arr: VetviReply[], id: string, parent: VetviReply[] | null): { arr: VetviReply[]; idx: number; parent: VetviReply[] | null } | null => {
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i].id === id) return { arr, idx: i, parent };
+          const ch = arr[i].children;
+          if (ch && ch.length) {
+            const hit = findLoc(ch, id, arr);
+            if (hit) return hit;
+          }
+        }
+        return null;
+      };
+      const s = findLoc(n.dialog.replies, srcRid, null);
+      const t = findLoc(n.dialog.replies, tgtRid, null);
+      if (!s || !t || s.parent !== t.parent) return;
+      const m = s.arr.splice(s.idx, 1)[0];
+      const insAt = (s.idx < t.idx) ? (t.idx - 1) : t.idx;
+      t.arr.splice(below ? insAt + 1 : insAt, 0, m);
+      moved = true;
+    }, { label: 'Порядок реплик' });
+    return moved;
+  }
+
   setDlgLinear(nodeId: string, on: boolean): void {
     this.updateNode(nodeId, { linear: on }, { label: on ? 'Проигрывание подряд: вкл' : 'Проигрывание подряд: выкл' });
   }
@@ -1519,6 +1590,42 @@ export class VetviStore {
     }, { history: false });
     this.scheduleSave();
     this.emit();
+  }
+
+  /** Перестановка исходов перетаскиванием за строку (branchMoveOutcome оригинала 5850). */
+  moveOutcomePair(nodeId: string, srcOid: string, tgtOid: string, below: boolean): boolean {
+    let changed = false;
+    this.mutate((doc) => {
+      const n = doc.nodes.find((x) => x.id === nodeId);
+      if (!n || !Array.isArray(n.outcomes)) return;
+      const arr = n.outcomes as { id: string }[];
+      const s = arr.findIndex((o) => o.id === srcOid);
+      const t = arr.findIndex((o) => o.id === tgtOid);
+      if (s < 0 || t < 0 || s === t) return;
+      const m = arr.splice(s, 1)[0];
+      const insAt = (s < t) ? (t - 1) : t;
+      arr.splice(below ? insAt + 1 : insAt, 0, m);
+      changed = true;
+    }, { label: 'Изменение порядка исходов' });
+    return changed;
+  }
+
+  /** Перестановка кнопок действия перетаскиванием (actionMoveAction оригинала). */
+  moveActionPair(nodeId: string, srcAid: string, tgtAid: string, below: boolean): boolean {
+    let changed = false;
+    this.mutate((doc) => {
+      const n = doc.nodes.find((x) => x.id === nodeId);
+      if (!n || !Array.isArray(n.actions)) return;
+      const arr = n.actions as { id: string }[];
+      const s = arr.findIndex((a) => a.id === srcAid);
+      const t = arr.findIndex((a) => a.id === tgtAid);
+      if (s < 0 || t < 0 || s === t) return;
+      const m = arr.splice(s, 1)[0];
+      const insAt = (s < t) ? (t - 1) : t;
+      arr.splice(below ? insAt + 1 : insAt, 0, m);
+      changed = true;
+    }, { label: 'Изменение порядка кнопок' });
+    return changed;
   }
 
   addAction(nodeId: string): void {
@@ -3157,7 +3264,7 @@ export class VetviStore {
    * (иначе отложенное применение устаревшего снимка отбрасывает ноду назад —
    * «прыгающие» позиции у обоих участников).
    */
-  applyRemoteDoc(doc: Record<string, unknown> | null, keepPid = false, preserveTouchedAfter = 0): void {
+  applyRemoteDoc(doc: Record<string, unknown> | null, keepPid = false, preserveTouchedAfter = 0, skipSave = false): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
     this.flushPendingLog();
     const d = doc as {
@@ -3305,7 +3412,10 @@ export class VetviStore {
     this.selGroups = gs;
     /* открытый редактор диалога: нода удалена — закрываем */
     if (this.dialogEdit && !this.nodeById(this.dialogEdit)) this.closeDialogEditor();
-    this.scheduleSave();
+    /* skipSave — вход в комнату (новая система): серверная версия открыта в редакторе,
+       но слот локальной копии пока не перезаписывается — блок в углу холста предлагает
+       сравнить версии и решить (при первой правке автосейв запишет как обычно). */
+    if (!skipSave) this.scheduleSave();
     this.emit();
   }
 

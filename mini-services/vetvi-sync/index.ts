@@ -655,6 +655,31 @@ io.on('connection', (socket: Socket) => {
     }
   })
 
+  /* ── замена данных комнаты (новая система: прилетает соавторам на сравнение,
+        НЕ применяется сразу — клиент показывает блок расхождения) ── */
+  socket.on('vetvi:replace', (msg: { roomId?: string; doc?: unknown; by?: { name?: string; color?: string } | null }) => {
+    try {
+      if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      const doc = msg.doc as { nodes?: unknown[] } | undefined
+      if (!doc || !Array.isArray(doc.nodes)) return
+      const json = JSON.stringify(doc)
+      if (json.length > MAX_DOC_BYTES) {
+        socket.emit('vetvi:error', { message: 'Документ слишком большой для синхронизации' })
+        return
+      }
+      saveRoomDoc(msg.roomId, doc, new Date().toISOString())
+      scheduleTrim()
+      socket.to(msg.roomId).emit('vetvi:replace', {
+        roomId: msg.roomId,
+        doc,
+        by: msg.by && typeof msg.by === 'object' ? { name: String(msg.by.name || '').slice(0, 40), color: String(msg.by.color || '').slice(0, 20) } : null,
+      })
+      console.log(`[vetvi-sync] replace in "${msg.roomId}" by ${msg.by?.name || '?'}`)
+    } catch (error) {
+      console.error('[vetvi-sync] replace error', error)
+    }
+  })
+
   /* ── живые перетаскивания ── */
   socket.on(
     'vetvi:live',

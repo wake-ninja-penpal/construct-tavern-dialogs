@@ -36,6 +36,10 @@ const GRIP_D = 'M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01'
 const X_D = 'M6 6l12 12M18 6 6 18';
 const VAR_D = 'M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5M5 12.5h14M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5';
 
+/* перетаскивание строк исходов/кнопок на карточке (bindOutcomeDrag оригинала 5864):
+   grip по mousedown делает строку draggable, drop выше/ниже цели переставляет */
+let cardDragOid: string | null = null;
+
 const MAX_DLG_DEPTH = 10;
 const DLG_REPLY_INDENT = 23;
 
@@ -221,6 +225,61 @@ export function NodeCard(props: {
     (isDlg ? 'выход диалога (правая грань, внизу)' : n.type === 'action' || n.type === 'branch' ? 'выход (правая грань, внизу)' : 'выход — тяните к другому узлу') +
     ' · Ctrl+тянуть — отсоединить и перенести исходящие';
 
+  /* каркас перетаскивания строки исхода/кнопки за grip (bindOutcomeDrag оригинала) */
+  const rowDrag = (oid: string, kind: 'outcome' | 'action') => ({
+    onDragStart: (ev: React.DragEvent) => {
+      const row = ev.currentTarget as HTMLElement;
+      if (row.getAttribute('draggable') !== 'true') { ev.preventDefault(); return; }
+      ev.dataTransfer.effectAllowed = 'move';
+      try { ev.dataTransfer.setData('text/plain', oid); } catch { /* старые браузеры */ }
+      cardDragOid = oid;
+      setTimeout(() => row.classList.add('dragging'), 0);
+    },
+    onDragEnd: (ev: React.DragEvent) => {
+      const row = ev.currentTarget as HTMLElement;
+      row.removeAttribute('draggable');
+      row.classList.remove('dragging', 'drop-above', 'drop-below');
+      cardDragOid = null;
+    },
+    onDragOver: (ev: React.DragEvent) => {
+      if (!cardDragOid || cardDragOid === oid) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      const row = ev.currentTarget as HTMLElement;
+      const rect = row.getBoundingClientRect();
+      const below = (ev.clientY - rect.top) > (rect.height / 2);
+      row.classList.toggle('drop-below', below);
+      row.classList.toggle('drop-above', !below);
+    },
+    onDragLeave: (ev: React.DragEvent) => {
+      (ev.currentTarget as HTMLElement).classList.remove('drop-above', 'drop-below');
+    },
+    onDrop: (ev: React.DragEvent) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const row = ev.currentTarget as HTMLElement;
+      const rect = row.getBoundingClientRect();
+      const below = (ev.clientY - rect.top) > (rect.height / 2);
+      row.classList.remove('drop-above', 'drop-below');
+      const src = cardDragOid;
+      cardDragOid = null;
+      if (!src || src === oid) return;
+      if (kind === 'outcome') store.moveOutcomePair(n.id, src, oid, below);
+      else store.moveActionPair(n.id, src, oid, below);
+    },
+  });
+
+  const rowGrip = (title: string) => ({
+    'data-nodrag': true,
+    title,
+    onPointerDown: (ev: React.PointerEvent) => ev.stopPropagation(),
+    onMouseDown: (ev: React.MouseEvent) => {
+      const row = (ev.currentTarget as HTMLElement).closest('.br-out');
+      if (row) row.setAttribute('draggable', 'true');
+    },
+    onDoubleClick: (ev: React.MouseEvent) => ev.preventDefault(),
+  });
+
   const commitRename = () => {
     const v = renameRef.current?.value ?? '';
     store.updateNode(n.id, { title: v }, { label: 'Переименование ноды' });
@@ -304,9 +363,9 @@ export function NodeCard(props: {
       onMouseDown={(e) => {
         const t = e.target as HTMLElement;
         if (t.closest('[data-pin]') || t.closest('[data-nodrag]')) return;
-        /* Ctrl/⌘+ЛКМ — пан по холсту, ноды игнорируются (8104 оригинала):
-           не выделяем и не тащим — событие уходит на canvas (обработчик пана) */
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && !store.spaceDown) return;
+        /* Ctrl/⌘+ЛКМ, Space, средняя кнопка — пан по холсту, нода игнорируется
+           (8104/8297 оригинала: не выделяем и не тащим — событие уходит на canvas) */
+        if (e.button === 1 || store.spaceDown || ((e.ctrlKey || e.metaKey) && !e.altKey)) return;
         e.stopPropagation();
         if (e.shiftKey) store.toggleSelect(n.id);
         else if (!selected) store.selectOnly(n.id);
@@ -433,8 +492,8 @@ export function NodeCard(props: {
             {outcomes.map((o, i) => {
               const nm = o.label || ('Исход ' + (i + 1));
               return (
-                <div className="br-out" key={o.id} data-oid={o.id}>
-                  <span className="br-grip" title="Перетащите — изменить порядок исходов"><Ic d={GRIP_D} size={10} /></span>
+                <div className="br-out" key={o.id} data-oid={o.id} {...rowDrag(o.id, 'outcome')}>
+                  <span className="br-grip" {...rowGrip('Перетащите — изменить порядок исходов')}><Ic d={GRIP_D} size={10} /></span>
                   <span className="lbl">{nm}</span>
                   <span
                     className={'cnd' + (o.cond ? ' on' : '')}
@@ -478,8 +537,8 @@ export function NodeCard(props: {
             {actions.map((a, i) => {
               const nm = a.label || ('Кнопка ' + (i + 1));
               return (
-                <div className="br-out ac-out" key={a.id} data-oid={a.id}>
-                  <span className="br-grip" title="Перетащите — изменить порядок кнопок"><Ic d={GRIP_D} size={10} /></span>
+                <div className="br-out ac-out" key={a.id} data-oid={a.id} {...rowDrag(a.id, 'action')}>
+                  <span className="br-grip" {...rowGrip('Перетащите — изменить порядок кнопок')}><Ic d={GRIP_D} size={10} /></span>
                   <span className="lbl">{nm}</span>
                   <button
                     type="button"

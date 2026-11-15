@@ -28,6 +28,7 @@ import { GroupLayer } from './GroupLayer';
 import { EdgeLayer, buildEdgeItems } from './EdgeLayer';
 import { collapsedAncestorOf, groupCardRect, groupFrameRect, snapG } from './ggroups';
 import { ctxMenus } from './ctxMenus';
+import { SyncDiffBadge } from './SyncModals';
 
 type Gest =
   | { mode: 'pan'; sx: number; sy: number; lx: number; ly: number }
@@ -159,7 +160,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
   /* dropready — перетаскивание из палитры над холстом; panning — активный пан; animv — анимация вида */
   const [dropReady, setDropReady] = useState(false);
   const [panning, setPanning] = useState(false);
-  const [viewAnim, setViewAnim] = useState(false);
+  const worldRef = useRef<HTMLDivElement>(null);
+  const labelsRef = useRef<HTMLDivElement>(null);
+  const animT = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sink = useMemo(
     () => ({
@@ -208,17 +211,24 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return () => { canvasApi.current = null; };
   }, [store, sizesMap]);
 
-  /* ── центрирование по запросу (с анимацией вида — animateView оригинала) ── */
+  /* ── центрирование по запросу (плавная анимация — animateView оригинала 7716):
+       класс .animv вешается на DOM ДО изменения вида (в обход React — как в
+       классической версии): CSS-переход срабатывает, вид едет плавно (0.45s) ── */
   useEffect(() => {
     if (store.centerReq && canvasApi.current) {
+      const cv = canvasRef.current;
+      const world = worldRef.current;
+      const labels = labelsRef.current;
+      if (cv) cv.classList.add('animv');
+      if (world) world.classList.add('animv');
+      if (labels) labels.classList.add('animv');
       canvasApi.current.centerOn(store.centerReq.id);
-      /* setState в кадре анимации, а не синхронно в эффекте */
-      const raf = requestAnimationFrame(() => setViewAnim(true));
-      const t = setTimeout(() => setViewAnim(false), 480);
-      return () => {
-        cancelAnimationFrame(raf);
-        clearTimeout(t);
-      };
+      if (animT.current) clearTimeout(animT.current);
+      animT.current = setTimeout(() => {
+        if (cv) cv.classList.remove('animv');
+        if (world) world.classList.remove('animv');
+        if (labels) labels.classList.remove('animv');
+      }, 480);
     }
   }, [store.centerReq?.t]);
 
@@ -267,42 +277,50 @@ export function CanvasBoard(props: { store: VetviStore }) {
   }, [store]);
 
   /* ── клики по пустому месту ── */
+
+  /* пан-жест — используется и при зажатом Ctrl на нодах/группах/связях:
+     объекты игнорируются, тянется холст (8104–8118 оригинала) */
+  const startPanGesture = useCallback((e: React.MouseEvent) => {
+    gestRef.current = { mode: 'pan', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY };
+    setPanning(true);
+    document.body.classList.add('panning');
+    e.preventDefault();
+  }, []);
+
+  /** Ctrl/⌘ зажат (без Alt/Space) — объект игнорируется, начинается пан холста;
+   *  Ctrl+Shift — рисование новой группы. Исключения — пины/фолды/грипы (8104). */
+  const modGestureInstead = useCallback((e: React.MouseEvent): boolean => {
+    if (e.button !== 0) return false;
+    const modK = e.ctrlKey || e.metaKey;
+    if (!modK || e.altKey || store.spaceDown) return false;
+    const t = e.target as HTMLElement;
+    if (t.closest && t.closest('[data-pin], .qport, .dlg-reply-pin, .gb-grip, .gb-fold, .gb-salla, .n-seq, .n-fold, .opin, .vpinn, [data-nodrag]')) return false;
+    if (e.shiftKey) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const w = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
+      gestRef.current = { mode: 'gcreate', sx: w.x, sy: w.y, cx: e.clientX, cy: e.clientY };
+      setMarquee({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: 0, h: 0, g: true });
+      e.preventDefault();
+      return true;
+    }
+    startPanGesture(e);
+    return true;
+  }, [store, startPanGesture]);
+
   const onCanvasDown = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     store.closeCtx();
     if (e.button === 2) return;
     /* Ctrl/⌘+ЛКМ — перемещение по холсту, Ctrl+Shift — новая группа; ноды ИГНОРИРУЮТСЯ
        (8104 оригинала: исключения — только пины/фолды/грипы, но не тело ноды) */
-    const modK = e.ctrlKey || e.metaKey;
-    if (
-      e.button === 0 &&
-      modK &&
-      !e.altKey &&
-      !store.spaceDown &&
-      !(t.closest('[data-pin]') || t.closest('.qport') || t.closest('.dlg-reply-pin') || t.closest('.gb-grip') || t.closest('.gb-fold') || t.closest('.gb-salla') || t.closest('.n-seq') || t.closest('.n-fold'))
-    ) {
-      if (e.shiftKey) {
-        const rect = canvasRef.current!.getBoundingClientRect();
-        const w = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
-        gestRef.current = { mode: 'gcreate', sx: w.x, sy: w.y, cx: e.clientX, cy: e.clientY };
-        setMarquee({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: 0, h: 0, g: true });
-        e.preventDefault();
-        return;
-      }
-      gestRef.current = { mode: 'pan', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY };
-      setPanning(true);
-      document.body.classList.add('panning');
-      e.preventDefault();
+    if (modGestureInstead(e)) return;
+    /* средняя кнопка/Space — пан по холсту независимо от цели (8297 оригинала:
+       делегированный обработчик — и на ноде/группе/стрелке тоже пан, не захват объекта) */
+    if (e.button === 1 || store.spaceDown) {
+      startPanGesture(e);
       return;
     }
     if (t.closest('[data-node-id]') || t.closest('[data-pin]') || t.closest('.rn-gframe, .groupbox') || t.closest('.rn-gcard, .gcard, .qcard')) return;
-    if (e.button === 1 || store.spaceDown || (store.ctrlDown && !e.shiftKey)) {
-      gestRef.current = { mode: 'pan', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY };
-      setPanning(true);
-      document.body.classList.add('panning');
-      e.preventDefault();
-      return;
-    }
     if (e.button !== 0) return;
     if (altDown) {
       const rect = canvasRef.current!.getBoundingClientRect();
@@ -330,7 +348,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       setMarquee({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: 0, h: 0 });
     }
     e.preventDefault();
-  }, [store, altDown]);
+  }, [store, altDown, modGestureInstead, startPanGesture]);
 
   /* ── ноды ── */
   const onNodeDragStart = useCallback((e: React.MouseEvent, id: string) => {
@@ -347,6 +365,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
   /* ── группы ── */
   const onGroupDown = useCallback((e: React.MouseEvent, gid: string) => {
     if (e.button !== 0) return;
+    /* Ctrl/⌘+ЛКМ по группе — пан по холсту, группа не захватывается (8104 оригинала);
+       Space — тоже пан (средняя кнопка отфильтрована выше) */
+    if (modGestureInstead(e)) return;
+    if (store.spaceDown) { startPanGesture(e); return; }
     const t = e.target as HTMLElement;
     if (t.closest('[data-nodrag]')) return;
     // выделение группы при захвате (selectGroup, 8251–8261): shift — добавить/убрать
@@ -384,7 +406,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     }
     e.preventDefault();
     e.stopPropagation();
-  }, [store]);
+  }, [store, modGestureInstead, startPanGesture]);
 
   const onGroupResize = useCallback((e: React.MouseEvent, gid: string, dir: 'r' | 'b' | 'br') => {
     const g = store.groupById(gid);
@@ -512,10 +534,14 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   /* ── связи: клики/вейпоинты/подписи/мосты ── */
   const onEdgeDown = useCallback((e: React.MouseEvent, id: string) => {
+    /* Ctrl/⌘+ЛКМ по стрелке — пан по холсту, связь не захватывается (8104 оригинала);
+       средняя кнопка/Space — тоже пан */
+    if (modGestureInstead(e)) return;
+    if (e.button === 1 || store.spaceDown) { startPanGesture(e); return; }
     if (e.shiftKey) store.toggleEdge(id);
     else store.selectEdgeOnly(id);
     e.preventDefault();
-  }, [store]);
+  }, [store, modGestureInstead, startPanGesture]);
 
   const onEdgeDbl = useCallback((e: React.MouseEvent, id: string) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -533,24 +559,33 @@ export function CanvasBoard(props: { store: VetviStore }) {
   }, [store, items]);
 
   const onWpDown = useCallback((e: React.MouseEvent, id: string, i: number) => {
+    /* Ctrl/⌘+ЛКМ по вейпоинту — пан по холсту (8104 оригинала: изгибы не исключение) */
+    if (modGestureInstead(e)) return;
+    if (e.button === 1 || store.spaceDown) { startPanGesture(e); return; }
     gestRef.current = { mode: 'wp', eid: id, idx: i };
     store.dragBegin();
     store.setGestureIds(['e:' + id]);
     if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
-  }, [store]);
+  }, [store, modGestureInstead, startPanGesture]);
 
   const onWpDbl = (e: React.MouseEvent, id: string, i: number) => {
     store.deleteWaypoint(id, i);
   };
 
   const onLabelDown = (e: React.MouseEvent, id: string) => {
+    /* Ctrl/⌘+ЛКМ по подписи связи — пан по холсту (8104 оригинала) */
+    if (modGestureInstead(e)) return;
+    if (e.button === 1 || store.spaceDown) { startPanGesture(e); return; }
     gestRef.current = { mode: 'label', eid: id };
     store.setGestureIds(['e:' + id]);
     e.preventDefault();
   };
 
   const onBridgeDown = useCallback((e: React.MouseEvent, id: string, part: 'l' | 'r' | 'h') => {
+    /* Ctrl/⌘+ЛКМ по мосту — пан по холсту (8104 оригинала) */
+    if (modGestureInstead(e)) return;
+    if (e.button === 1 || store.spaceDown) { startPanGesture(e); return; }
     const ed = store.edgeById(id);
     if (!ed) return;
     const bd = ed.bd || { dl: 0, dy: 0, dr: 0 };
@@ -559,7 +594,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     store.setGestureIds(['e:' + id]);
     if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
-  }, [store]);
+  }, [store, modGestureInstead, startPanGesture]);
 
   /* базовые позиции carry-клонов при старте режима */
   const carryBase = (() => {
@@ -1706,7 +1741,6 @@ export function CanvasBoard(props: { store: VetviStore }) {
         + (store.spaceDown ? ' space' : '')
         + (store.ctrlDown ? ' ctrlpan' : '')
         + (panning ? ' panning' : '')
-        + (viewAnim ? ' animv' : '')
       }
       style={{
         backgroundSize: GRID * vp.z + 'px ' + GRID * vp.z + 'px',
@@ -1723,7 +1757,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     >
       <div
         id="world"
-        className={viewAnim ? 'animv' : undefined}
+        ref={worldRef}
         style={{
           position: 'absolute',
           left: 0,
@@ -1798,7 +1832,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           onRowPinDown={onRowPinDown}
         />
       </div>
-      <div id="labels" className={viewAnim ? 'animv' : undefined}>
+      <div id="labels" ref={labelsRef}>
         {labelBadges.map((b) => (
           <div
             key={b.key}
@@ -1826,6 +1860,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
       />
       {/* ghost при вытягивании строки из цепочки (#qGhost, 1162 оригинала; текст/позиция — GroupLayer) */}
       <div id="qGhost" className="q-ghost" />
+      {/* блок расхождения локальной копии и комнаты — в углу холста (новая система комнат) */}
+      <SyncDiffBadge store={store} />
     </div>
     <div id="miniMap" ref={mmRef} onPointerDown={onMmDown} onContextMenu={onMmCtx} style={mmDim ? { width: mmDim.w + 'px', height: mmDim.h + 'px' } : undefined}>
       <svg id="mmSvg" viewBox={'0 0 ' + mmW + ' ' + mmH} preserveAspectRatio="none">

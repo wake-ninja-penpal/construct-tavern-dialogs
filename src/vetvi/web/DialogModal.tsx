@@ -26,6 +26,7 @@ const ICONS: Record<string, React.ReactNode> = {
   chev: <path d="m6 9 6 6 6-6" />,
   chevUp: <path d="m6 15 6-6 6 6" />,
   target: <><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></>,
+  grip: <path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01" />,
 };
 
 function Ic(props: { name: string; size: number }) {
@@ -65,6 +66,64 @@ function taGrow(ta: HTMLTextAreaElement) {
   ta.style.height = (ta.scrollHeight + 2) + 'px'; /* +2 — верхняя и нижняя границы */
 }
 
+/* ═══ перетаскивание реплик — порядок среди соседей одного уровня (dlgDragRid оригинала 4887–4949) ═══ */
+
+let dlgDragRid: string | null = null;
+
+interface ReplyLoc { arr: VetviReply[]; idx: number; parent: VetviReply[] | null }
+
+function findReplyLoc(arr: VetviReply[], id: string, parent: VetviReply[] | null): ReplyLoc | null {
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i].id === id) return { arr, idx: i, parent };
+    const ch = arr[i].children;
+    if (ch && ch.length) {
+      const hit = findReplyLoc(ch, id, arr);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/* автоскролл списка реплик при перетаскивании к краям модалки (dlgAutoScroll оригинала 1601–1626):
+   без него дотащить реплику до конца длинного списка нельзя — браузер сам не листает */
+let dlgScrollEl: HTMLElement | null = null;
+let dlgScrollDir = 0;
+let dlgScrollRaf = 0;
+let dlgScrollLast = 0;
+
+function dlgAutoScrollStop(): void {
+  dlgScrollDir = 0;
+  dlgScrollLast = 0;
+  dlgScrollEl = null;
+  if (dlgScrollRaf) { cancelAnimationFrame(dlgScrollRaf); dlgScrollRaf = 0; }
+}
+
+function dlgAutoScrollStep(ts: number): void {
+  if (!dlgScrollEl || !dlgScrollDir) { dlgScrollRaf = 0; dlgScrollLast = 0; return; }
+  if (!dlgScrollLast) dlgScrollLast = ts;
+  const dt = Math.min(50, ts - dlgScrollLast);
+  dlgScrollLast = ts;
+  dlgScrollEl.scrollTop += dlgScrollDir * dt * 0.75; /* ~750px/с независимо от герцовки */
+  dlgScrollRaf = requestAnimationFrame(dlgAutoScrollStep);
+}
+
+function dlgAutoScrollUpdate(ev: DragEvent): void {
+  if (!dlgDragRid) { dlgAutoScrollStop(); return; }
+  const sc = document.getElementById('dlgModalBody');
+  if (!sc) { dlgAutoScrollStop(); return; }
+  const r = sc.getBoundingClientRect();
+  const Z = 46;
+  const y = ev.clientY;
+  const dir = (y < r.top + Z) ? -1 : ((y > r.bottom - Z) ? 1 : 0);
+  if (dir !== dlgScrollDir) { dlgScrollDir = dir; dlgScrollLast = 0; }
+  if (dlgScrollDir) {
+    dlgScrollEl = sc;
+    if (!dlgScrollRaf) dlgScrollRaf = requestAnimationFrame(dlgAutoScrollStep);
+  } else {
+    dlgAutoScrollStop();
+  }
+}
+
 export function DialogModal({ store }: { store: VetviStore }) {
   const nodeId = store.dialogEdit;
   const node = nodeId ? store.nodeById(nodeId) : null;
@@ -89,6 +148,25 @@ export function DialogModal({ store }: { store: VetviStore }) {
     (el as HTMLElement).classList.add('dlg-flash');
   }, [flash]);
 
+  /* автоскролл списка реплик при перетаскивании (слушатели делегированные — модалка не пересоздаётся, 4959–4963 оригинала) */
+  useEffect(() => {
+    if (!store.dialogEdit) return;
+    const body = listRef.current;
+    if (!body) return;
+    const onOver = (ev: DragEvent) => dlgAutoScrollUpdate(ev);
+    const onLeave = (ev: DragEvent) => {
+      const rt = ev.relatedTarget as Node | null;
+      if (!(rt && body.contains(rt))) dlgAutoScrollStop();
+    };
+    body.addEventListener('dragover', onOver);
+    body.addEventListener('dragleave', onLeave);
+    return () => {
+      body.removeEventListener('dragover', onOver);
+      body.removeEventListener('dragleave', onLeave);
+      dlgAutoScrollStop();
+    };
+  }, [store.dialogEdit]);
+
   const n = node;
   const chars: VetviChar[] = store.doc.chars || [];
   const participants = n && n.dialog ? n.dialog.participants || [] : [];
@@ -108,12 +186,79 @@ export function DialogModal({ store }: { store: VetviStore }) {
     store.setParticipants(n.id, participants.filter((p) => p !== pid));
   };
 
+  /* локальная ссылка на диалог (сужение типа для замыканий drag-обработчиков) */
+  const dlg = n.dialog;
+
   const renderReply = (r: VetviReply, depth: number): React.ReactNode => {
     const isRoot = depth === 0;
     const isFlash = !!(flash && flash.nodeId === n.id && flash.replyId === r.id);
     const loop = !!(r as unknown as { loop?: boolean }).loop;
+    /* перетаскивание реплик (dlgDragRid оригинала): grip по mousedown делает строку draggable,
+       drop выше/ниже цели переставляет; только среди соседей одного уровня */
+    const onDragStart = (ev: React.DragEvent) => {
+      const row = ev.currentTarget as HTMLElement;
+      if (ev.target !== row) return; /* dragstart от вложенной реплики — не мешаем */
+      if (row.getAttribute('draggable') !== 'true') { ev.preventDefault(); return; }
+      ev.dataTransfer.effectAllowed = 'move';
+      try { ev.dataTransfer.setData('text/plain', r.id); } catch { /* старые браузеры */ }
+      dlgDragRid = r.id;
+      setTimeout(() => row.classList.add('dragging'), 0);
+    };
+    const onDragEnd = (ev: React.DragEvent) => {
+      const row = ev.currentTarget as HTMLElement;
+      row.removeAttribute('draggable');
+      row.classList.remove('dragging');
+      document.querySelectorAll('#dlgModalBody .dlg-reply-ed').forEach((x) => x.classList.remove('drop-above', 'drop-below'));
+      dlgDragRid = null;
+      dlgAutoScrollStop();
+    };
+    const onDragOver = (ev: React.DragEvent) => {
+      if (!dlgDragRid || dlgDragRid === r.id) return;
+      const inner = (ev.target as HTMLElement).closest ? (ev.target as HTMLElement).closest('.dlg-reply-ed') : null;
+      if (inner && inner !== ev.currentTarget) return; /* вложенная реплика обработает сама */
+      const srcLoc = findReplyLoc(dlg.replies, dlgDragRid, null);
+      const tgtLoc = findReplyLoc(dlg.replies, r.id, null);
+      if (!srcLoc || !tgtLoc || srcLoc.parent !== tgtLoc.parent) return; /* только соседние */
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+      const below = (ev.clientY - rect.top) > (rect.height / 2);
+      (ev.currentTarget as HTMLElement).classList.toggle('drop-below', below);
+      (ev.currentTarget as HTMLElement).classList.toggle('drop-above', !below);
+    };
+    const onDragLeave = (ev: React.DragEvent) => {
+      (ev.currentTarget as HTMLElement).classList.remove('drop-above', 'drop-below');
+    };
+    const onDrop = (ev: React.DragEvent) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dlgAutoScrollStop();
+      const row = ev.currentTarget as HTMLElement;
+      const rect = row.getBoundingClientRect();
+      const below = (ev.clientY - rect.top) > (rect.height / 2);
+      row.classList.remove('drop-above', 'drop-below');
+      const srcRid = dlgDragRid;
+      dlgDragRid = null;
+      if (!srcRid || srcRid === r.id) return;
+      const srcLoc = findReplyLoc(dlg.replies, srcRid, null);
+      const tgtLoc = findReplyLoc(dlg.replies, r.id, null);
+      if (!srcLoc || !tgtLoc || srcLoc.parent !== tgtLoc.parent) {
+        store.toast('Перемещать можно только реплики одного уровня', 'warn');
+        return;
+      }
+      store.moveReplyPair(n.id, srcRid, r.id, below);
+    };
     return (
-      <div key={r.id} className={'dlg-reply-ed' + (isRoot ? ' root' : '') + (isFlash ? ' dlg-flash' : '')} data-rid={r.id}>
+      <div
+        key={r.id}
+        className={'dlg-reply-ed' + (isRoot ? ' root' : '') + (isFlash ? ' dlg-flash' : '')}
+        data-rid={r.id}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         <div className="dlg-reply-row-ed">
           <select
             data-f="speaker"
@@ -162,6 +307,17 @@ export function DialogModal({ store }: { store: VetviStore }) {
               store.updateReply(n.id, r.id, { loop: !loop } as Partial<VetviReply>, { label: 'Повтор реплики' });
             }}
           ><Ic name="repeat" size={11} /></button>
+          <button
+            type="button"
+            className="mini-btn dlg-drag"
+            data-act="drag"
+            title="Перетащить — изменить порядок (тяните реплику за grip)"
+            onMouseDown={(ev) => {
+              const row = (ev.currentTarget as HTMLElement).closest('.dlg-reply-ed');
+              if (row) row.setAttribute('draggable', 'true');
+            }}
+            onDoubleClick={(ev) => ev.preventDefault()}
+          ><Ic name="grip" size={11} /></button>
           <button type="button" className="mini-btn" title="Реплика выше" onClick={() => store.moveReply(n.id, r.id, -1)}><Ic name="chevUp" size={11} /></button>
           <button type="button" className="mini-btn" title="Реплика ниже" onClick={() => store.moveReply(n.id, r.id, 1)}><Ic name="chev" size={11} /></button>
           <button type="button" className="mini-btn" title="К реплике на холсте" onClick={() => { store.requestFlash(n.id, r.id); }}><Ic name="target" size={11} /></button>
@@ -189,7 +345,7 @@ export function DialogModal({ store }: { store: VetviStore }) {
           <span className="dlg-modal-title">Реплики: {n.title || 'Диалог'}</span>
           <button type="button" className="dlg-modal-close" title="Закрыть" onClick={close}>×</button>
         </div>
-        <div className="dlg-modal-body" ref={listRef}>
+        <div className="dlg-modal-body" id="dlgModalBody" ref={listRef}>
           {partChars.length > 0 && (
             <div className="dlg-participants">
               {partChars.map((c) => {

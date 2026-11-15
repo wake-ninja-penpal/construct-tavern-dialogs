@@ -31,7 +31,7 @@ import type { LogEntry, VetviStore } from './store';
 import { TypeEditorModal } from './TypeEditorModal';
 import { TextsImportModal } from './TextsImportModal';
 import { TypeIcon } from './NodeCard';
-import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RenameMeModal, RoomPassModal, ShareModal } from './SyncModals';
+import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RenameMeModal, RoomPassModal, ShareModal, SyncDiffModal } from './SyncModals';
 
 /* ═══════════ иконки оригинала (ic(name,size): viewBox 24, stroke 1.7) ═══════════ */
 
@@ -1003,6 +1003,7 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'copies': return <CopiesModal store={store} />;
     case 'copyBar': return <CopyBarModal store={store} />;
     case 'merge': return <MergeModal store={store} />;
+    case 'syncDiff': return <SyncDiffModal store={store} />;
     case 'renameMe': return <RenameMeModal store={store} />;
     case 'typeEditor': return <TypeEditorModal store={store} id={store.modalArg} />;
     case 'textsImport': return <TextsImportModal store={store} />;
