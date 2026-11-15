@@ -71,7 +71,7 @@ function mmNodeColor(store: VetviStore, n: VetviNode, depth = 0): string {
       if (sub) return sub;
     }
   }
-  return n.color ? nodeColor(n) : (typeInfo(n.type).color || '#8b929c');
+  return n.color ? nodeColor(n, store.doc.customTypes) : (typeInfo(n.type, store.doc.customTypes).color || '#8b929c');
 }
 
 /* groupRectWorld оригинала (3050): fold=2 — рамка, fold<2 — карточка (GCARD_W/QCARD_W) */

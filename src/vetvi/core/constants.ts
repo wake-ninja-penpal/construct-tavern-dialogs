@@ -65,5 +65,10 @@ export const KIND_RU: Record<string, string> = {
   bridge: 'мост',
 };
 
+/** Максимальная глубина дерева реплик (MAX_DLG_DEPTH оригинала, 1365). */
+export const MAX_DLG_DEPTH = 10;
+/** Отступ вложенных реплик (DLG_REPLY_INDENT оригинала, 1365). */
+export const DLG_REPLY_INDENT = 23;
+
 /** Типы нод, у которых главный выход — вниз правой грани. */
 export const MAIN_BOTTOM_TYPES = ['dialog', 'action', 'branch'];

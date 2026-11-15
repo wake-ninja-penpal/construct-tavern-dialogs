@@ -407,7 +407,7 @@ export function GroupLayer(props: {
               <div className="q-list">
                 {direct.length ? direct.map((n, i) => {
                   const cast = qRowCast(store, n);
-                  const rowCol = cast.color || nodeColor(n);
+                  const rowCol = cast.color || nodeColor(n, store.doc.customTypes);
                   const link = i < direct.length - 1 ? qLinkInfo(doc, n, direct[i + 1]) : null;
                   const linkTag = link ? qLinkTagText(store, link) : null;
                   const row = (
@@ -565,7 +565,7 @@ export function GroupLayer(props: {
             {fold === 1 && (
               <div className="gb-list">
                 {rows.map((n) => {
-                  const rc = nodeColor(n);
+                  const rc = nodeColor(n, store.doc.customTypes);
                   return (
                     <div className="gc-row" key={n.id} data-nid={n.id}
                       onMouseDown={(e) => { e.stopPropagation(); store.selectOnly(n.id); props.onGroupDown(e, g.id); }}

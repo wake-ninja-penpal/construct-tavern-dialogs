@@ -313,7 +313,7 @@ function NotesSection({ store, n }: { store: VetviStore; n: VetviNode }) {
 
 /* ═══ палитра: paletteCoreHtml + bindPalette + toggleSwatches ═══ */
 
-function Swatches({ cur, doc, extraFirst, onPick, children, id }: {
+export function Swatches({ cur, doc, extraFirst, onPick, children, id }: {
   cur: string | null | undefined;
   doc: VetviDoc;
   extraFirst?: string[];

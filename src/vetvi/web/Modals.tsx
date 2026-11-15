@@ -28,6 +28,8 @@ import { condText } from '@/vetvi/core/vars';
 import { STATUS_RU, TYPES } from '@/vetvi/core/constants';
 import type { VetviNode } from '@/vetvi/core/types';
 import type { LogEntry, VetviStore } from './store';
+import { TypeEditorModal } from './TypeEditorModal';
+import { TextsImportModal } from './TextsImportModal';
 import { TypeIcon } from './NodeCard';
 import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RenameMeModal, RoomPassModal, ShareModal } from './SyncModals';
 
@@ -1002,6 +1004,8 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'copyBar': return <CopyBarModal store={store} />;
     case 'merge': return <MergeModal store={store} />;
     case 'renameMe': return <RenameMeModal store={store} />;
+    case 'typeEditor': return <TypeEditorModal store={store} id={store.modalArg} />;
+    case 'textsImport': return <TextsImportModal store={store} />;
     default: return null;
   }
 }

@@ -11,6 +11,7 @@
 import { useLayoutEffect, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 import { NODE_W, STATUS_RU } from '@/vetvi/core/constants';
+import { ALL_ICONS } from '@/vetvi/core/icons';
 import { getMe } from '@/vetvi/core/identity';
 import { nodeColor, shadeHex, typeInfo } from '@/vetvi/core/geometry';
 import { branchVarOverride, condText, varName, varNodeChipText } from '@/vetvi/core/vars';
@@ -58,7 +59,7 @@ function Ic({ d, size }: { d: string; size: number }) {
   );
 }
 
-export function TypeIcon({ type, size = 13 }: { type: string; size?: number }) {
+export function TypeIcon({ type, size = 13, icon }: { type: string; size?: number; icon?: string | null }) {
   const paths: Record<string, string> = {
     scene: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6l-2 4M13 6l-2 4M18 6l-2 4"/>',
     quest: '<path d="M6 3v18"/><path d="M6 4.5h11l-2.6 3.7 2.6 3.8H6"/>',
@@ -70,7 +71,11 @@ export function TypeIcon({ type, size = 13 }: { type: string; size?: number }) {
     event: '<path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21M6 6l2.4 2.4M15.6 15.6 18 18M18 6l-2.4 2.4M8.4 15.6 6 18"/>',
     note: '<path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z"/><path d="M9.5 8.5h5M9.5 12h5"/>',
   };
-  const d = paths[type] || paths.scene;
+  /* ic(name) оригинала: явная иконка (свой тип) → ALL_ICONS → fallback star */
+  const d = (icon ? (ALL_ICONS[icon] || ALL_ICONS.star) : null)
+    || paths[type]
+    || ALL_ICONS[type]
+    || ALL_ICONS.star;
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <g dangerouslySetInnerHTML={{ __html: d }} />
@@ -174,7 +179,7 @@ export function NodeCard(props: {
   }, [renaming]);
 
   const isDlg = n.type === 'dialog';
-  const info = typeInfo(n.type);
+  const info = typeInfo(n.type, store.doc.customTypes);
   const ex = (n.expand === 0 || n.expand === 1 || n.expand === 2) ? n.expand : 1;
   const status = STATUS_RU[n.status] ? n.status : 'idea';
   const isFlash = !!(flash && flash.nodeId === n.id);
@@ -191,7 +196,7 @@ export function NodeCard(props: {
   /* краска карточки: участники → цвет персонажа, иначе своя краска/цвет типа (renderWorld) */
   const castPs = (!isDlg && Array.isArray(n.participants)) ? (n.participants as string[]) : [];
   const cc = castPs.length ? store.charColor(castPs[0]) : null;
-  const paint = (!cc && n.color) ? nodeColor(n) : null;
+  const paint = (!cc && n.color) ? nodeColor(n, store.doc.customTypes) : null;
 
   const dlgReplies: VetviReply[] = (isDlg && n.dialog && Array.isArray(n.dialog.replies)) ? n.dialog.replies : [];
   const dlgParticipants = (isDlg && n.dialog && Array.isArray(n.dialog.participants)) ? n.dialog.participants : [];

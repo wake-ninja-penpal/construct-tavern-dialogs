@@ -181,15 +181,22 @@ export function TopBar(props: { store: VetviStore }) {
             Сохранить как… (JSON)
             <kbd>{hkText('saveAs')}</kbd>
           </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); if (store.sel.size) store.exportSelection(); else store.toast('Выделите ноды для экспорта', 'warn'); }}>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTxtFile(); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
+            Текстовый файл (.txt)
+          </div>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(false); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h6M9 16h6M9 9h2" /></svg>
+            Тексты (JSON)
+          </div>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(true); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
-            Экспорт выделенных нод
+            Тексты выделенных нод (JSON)
             <kbd>{hkText('exportSel')}</kbd>
           </div>
-          <div className="ctx-sep" />
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openModal('projects'); }}>
+          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openTextsImport(); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
-            Импорт из файла…
+            Импорт текстов (JSON)…
           </div>
         </div>
       </div>

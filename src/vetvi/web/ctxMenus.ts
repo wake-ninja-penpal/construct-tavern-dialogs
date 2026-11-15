@@ -7,7 +7,13 @@
 import { hkText } from '@/vetvi/core/hotkeys';
 import { NODE_W, TYPES } from '@/vetvi/core/constants';
 import { screenToWorld } from '@/vetvi/core/geometry';
+import { countReplies } from '@/vetvi/core/dialog';
 import type { CtxItem, VetviStore } from './store';
+
+/** countReplies(n.dialog.replies) оригинала (9430–9431) — все реплики с вложенными. */
+function countAllReplies(replies: { children?: unknown[] }[]): number {
+  return countReplies(replies as never[]);
+}
 
 export function ctxMenus(store: VetviStore) {
   const w2 = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -17,9 +23,11 @@ export function ctxMenus(store: VetviStore) {
   };
 
   const addItems = (x: number, y: number): CtxItem[] => {
+    /* ctxAddItems оригинала (9407–9414): allTypeKeys — встроенные + свои (с « ·» в конце) */
     const items: CtxItem[] = [{ head: 'Добавить' }];
-    for (const [key, info] of Object.entries(TYPES)) {
-      items.push({ dot: info.color, label: info.name, fn: () => { store.addNodeAt(key, x - NODE_W / 2, y - 20); } });
+    for (const key of store.allTypeKeys()) {
+      const info = store.typeInfoOf(key);
+      items.push({ dot: info.color, label: info.name + (TYPES[key] ? '' : ' ·'), fn: () => { store.addNodeAt(key, x - NODE_W / 2, y - 20); } });
     }
     return items;
   };
@@ -31,6 +39,7 @@ export function ctxMenus(store: VetviStore) {
       const n = store.nodeById(id);
       if (!n) return [{ label: 'Нода не найдена', fn: () => undefined }];
       const selCount = store.sel.size;
+      const selGroupCount = store.selGroups.size;
       const allDialogs = selCount >= 2 && [...store.sel].every((nid) => store.nodeById(nid)?.type === 'dialog');
       const items: CtxItem[] = [];
       items.push({ label: 'Играть отсюда (' + hkText('play') + ')', fn: () => {
@@ -41,19 +50,31 @@ export function ctxMenus(store: VetviStore) {
         const r = store.duplicateSelection();
         if (r) store.startCarry(r.ids, r.pre);
       } });
-      items.push({ label: 'Экспорт выделенных в JSON (' + hkText('exportSel') + ')', fn: () => store.exportSelection() });
+      /* 1:1 (9428): «Экспорт выделенных в JSON» — Тексты (JSON) выделения */
+      items.push({ label: 'Экспорт выделенных в JSON (' + hkText('exportSel') + ')', fn: () => store.exportTextsJson(true) });
       items.push({ label: 'Центрировать (' + hkText('centerSel') + ')', fn: () => store.requestCenter(id) });
       items.push({ label: 'Журнал изменений', fn: () => { store.setLogFilters(id, null); store.openModal('log'); } });
       if (n.type === 'dialog' && n.dialog && n.dialog.replies.length >= 2) {
         items.push({ label: 'Разбить на реплики (' + n.dialog.replies.length + ')', fn: () => store.splitDialogNode(id, false) });
+        /* 9430–9432: «Разбить на все реплики» — когда есть вложенные дети */
+        const cntAll = countAllReplies(n.dialog.replies);
+        if (cntAll > n.dialog.replies.length && cntAll >= 2) {
+          items.push({ label: 'Разбить на все реплики (' + cntAll + ')', fn: () => store.splitDialogNode(id, true) });
+        }
       }
       if (allDialogs) items.push({ label: 'Объединить в один диалог', fn: () => store.mergeDialogNodes() });
       /* собрать выделенные stackable-ноды в цепочку (9437) */
       if (selCount >= 2 && store.selAllStackable()) items.push({ label: 'Собрать в цепочку', fn: () => store.stackFromSelection() });
-      if (selCount > 1) {
-        items.push({ sep: true });
+      /* 9438–9443: выравнивание/распределение при мульти-выделении (ноды + группы) */
+      if (selCount + selGroupCount > 1) {
         items.push({ label: 'Выровнять в ряд (' + hkText('alignH') + ')', fn: () => store.alignH() });
         items.push({ label: 'Выровнять в столбец (' + hkText('alignV') + ')', fn: () => store.alignV() });
+        items.push({ label: 'Распределить по строкам…', fn: () => store.openDistribute() });
+      }
+      /* 9445–9447: пара без связи — «Создать мост» */
+      if (selCount === 2 && selGroupCount === 0) {
+        const bp = store.bridgePairCandidate();
+        if (bp) items.push({ label: 'Создать мост', fn: () => store.createBridge(bp.a, bp.b) });
       }
       items.push({ sep: true });
       items.push({ label: 'Свернуть / развернуть', fn: () => store.cycleExpand(id) });
@@ -88,18 +109,7 @@ export function ctxMenus(store: VetviStore) {
       if (g.stack === true) {
         items.push({ label: 'Переименовать / настроить', fn: () => store.selectGroupOnly(gid) });
         items.push({ label: 'Журнал изменений', fn: () => { store.setLogFilters(null, gid); store.openModal('log'); } });
-        items.push({ label: 'Экспорт цепочки в JSON', fn: () => {
-          const nodes = store.membersOf(gid);
-          const ids = new Set(nodes.map((n) => n.id));
-          import('@/vetvi/core/projects').then((m) => {
-            m.downloadJson('vetvi-group.json', {
-              app: 'vetvi-export', version: 1,
-              nodes,
-              edges: store.doc.edges.filter((e) => ids.has(e.from) && ids.has(e.to)),
-              groups: [g],
-            });
-          });
-        } });
+        items.push({ label: 'Экспорт цепочки в JSON (' + hkText('exportSel') + ')', fn: () => store.exportTextsJson(true) });
         items.push({ label: 'Преобразовать в группу', fn: () => store.stackToGroup(gid) });
         if (g.parent) items.push({ label: 'Вынуть из родителя', fn: () => store.updateGroup(gid, { parent: null }, { label: 'Вложенность группы' }) });
         items.push({ sep: true });
@@ -113,18 +123,7 @@ export function ctxMenus(store: VetviStore) {
       items.push({ label: 'Выделить все ноды группы', fn: () => store.setSel(store.membersOf(gid).map((n) => n.id)) });
       items.push({ label: 'Переименовать / настроить', fn: () => store.selectGroupOnly(gid) });
       items.push({ label: 'Журнал изменений', fn: () => { store.setLogFilters(null, gid); store.openModal('log'); } });
-      items.push({ label: 'Экспорт группы в JSON', fn: () => {
-        const nodes = store.membersOf(gid);
-        const ids = new Set(nodes.map((n) => n.id));
-        import('@/vetvi/core/projects').then((m) => {
-          m.downloadJson('vetvi-group.json', {
-            app: 'vetvi-export', version: 1,
-            nodes,
-            edges: store.doc.edges.filter((e) => ids.has(e.from) && ids.has(e.to)),
-            groups: [g],
-          });
-        });
-      } });
+      items.push({ label: 'Экспорт группы в JSON (' + hkText('exportSel') + ')', fn: () => store.exportTextsJson(true) });
       /* преобразование группы в цепочку (9513) */
       if (store.membersOf(gid).length >= 2) items.push({ label: 'Преобразовать в цепочку', fn: () => store.groupToStack(gid) });
       if (g.parent) items.push({ label: 'Вынуть из родителя', fn: () => store.updateGroup(gid, { parent: null }, { label: 'Вложенность группы' }) });
@@ -151,12 +150,13 @@ export function ctxMenus(store: VetviStore) {
       return items;
     },
 
-    /** Меню «Создать и подключить» при броске связи в пустоту. */
+    /** Меню «Создать и подключить» при броске связи в пустоту (7994–8012 оригинала). */
     connectFrom(from: string, out: string | null, reply: string | null, clientX: number, clientY: number): CtxItem[] {
       const w = w2(clientX, clientY);
       const items: CtxItem[] = [{ head: 'Создать и подключить' }];
-      for (const [key, info] of Object.entries(TYPES)) {
-        items.push({ dot: info.color, label: info.name, fn: () => {
+      for (const key of store.allTypeKeys()) {
+        const info = store.typeInfoOf(key);
+        items.push({ dot: info.color, label: info.name + (TYPES[key] ? '' : ' ·'), fn: () => {
           const n = store.addNodeAt(key, w.x - NODE_W / 2, w.y - 20);
           store.connectNodes(from, n.id, { fromOut: out, fromReply: reply });
         } });

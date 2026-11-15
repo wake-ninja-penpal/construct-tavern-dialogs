@@ -29,6 +29,9 @@ const P_CHAR = '<circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c1.1-3.4 3.9-5
 const P_CHEV = '<path d="m6 9 6 6 6-6"/>';
 const P_X = '<path d="M6 6l12 12M18 6 6 18"/>';
 const P_GRIP = '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>';
+const P_EYE = '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
+const P_EYE_OFF = '<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>';
+const P_PENCIL = '<path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>';
 
 /** ic(name,size) оригинала — svg-обёртка над путём иконки. */
 function Ic(props: { d: string; size?: number }) {
@@ -142,7 +145,7 @@ export function LeftPane(props: { store: VetviStore }) {
           </button>
         ))}
       </nav>
-      <PalettePane store={store} active={tab === 'pal'} />
+      <PalettePane store={store} active={tab === 'pal'} onEditType={(id) => store.openModal('typeEditor', id)} onNewType={() => store.openModal('typeEditor', null)} />
       <ListPane store={store} active={tab === 'list'} />
       <VarsPane store={store} active={tab === 'vars'} />
       <CharsPane store={store} active={tab === 'chars'} onFile={onFile} onRecrop={onRecrop} />
@@ -152,7 +155,7 @@ export function LeftPane(props: { store: VetviStore }) {
 }
 
 /* ── свой тип из документа (customTypes оригинала; отображение без редактора) ── */
-interface CustomTypeRec { id: string; name: string; color: string }
+interface CustomTypeRec { id: string; name: string; color: string; icon: string }
 
 function customTypesOf(doc: VetviDoc): CustomTypeRec[] {
   const arr: unknown[] = Array.isArray(doc.customTypes) ? (doc.customTypes as unknown[]) : [];
@@ -165,15 +168,22 @@ function customTypesOf(doc: VetviDoc): CustomTypeRec[] {
       id: c.id,
       name: typeof c.name === 'string' && c.name ? c.name : 'Свой тип',
       color: typeof c.color === 'string' && c.color ? c.color : '#8b929c',
+      icon: typeof c.icon === 'string' && c.icon ? c.icon : 'star',
     });
   }
   return out;
 }
 
-function typeInfoEx(doc: VetviDoc, key: string): { name: string; color: string } {
-  if (TYPES[key]) return TYPES[key];
+function typeInfoEx(doc: VetviDoc, key: string): { name: string; color: string; icon: string } {
+  if (TYPES[key]) {
+    const icons: Record<string, string> = {
+      scene: 'scene', quest: 'quest', dialog: 'dialog', skill: 'skill', action: 'action',
+      branch: 'branch', varnode: 'variable', event: 'event', note: 'note',
+    };
+    return { name: TYPES[key].name, color: TYPES[key].color, icon: icons[key] || 'star' };
+  }
   const c = customTypesOf(doc).find((x) => x.id === key);
-  return c ? { name: c.name, color: c.color } : { name: 'Нода', color: '#8b929c' };
+  return c ? { name: c.name, color: c.color, icon: c.icon } : { name: 'Заметка', color: '#8b929c', icon: 'note' };
 }
 
 /** listHidden(key) оригинала: в классике — массив, в ядре — record. */
@@ -199,8 +209,13 @@ function allDescNodes(store: VetviStore, gid: string, visited?: Set<string>): Ve
   return out;
 }
 
-/* ── Элементы (палитра с перетаскиванием) ── */
-function PalettePane({ store, active }: { store: VetviStore; active: boolean }) {
+/* ── Элементы (палитра с перетаскиванием; eye/pencil/x — ориг. 4298–4307, 4355–4363) ── */
+function PalettePane({ store, active, onEditType, onNewType }: {
+  store: VetviStore;
+  active: boolean;
+  onEditType: (id: string) => void;
+  onNewType: () => void;
+}) {
   const [palFold, setPalFold] = useState<Record<string, boolean>>({});
 
   const drop = (e: React.DragEvent) => {
@@ -227,6 +242,9 @@ function PalettePane({ store, active }: { store: VetviStore; active: boolean }) 
     <div className={'tabpane' + (active ? ' active' : '')} id="panePal" onDragOver={(e) => e.preventDefault()} onDrop={drop}>
       <div className="v-head" style={{ margin: '2px 10px 8px' }}>
         <span>Элементы</span>
+        <button type="button" className="btn primary" id="bAddType" title="Создать свой тип элемента" onClick={onNewType}>
+          + Свой тип
+        </button>
       </div>
       <div id="palList">
         {typeKeys.map((key) => {
@@ -254,9 +272,28 @@ function PalettePane({ store, active }: { store: VetviStore; active: boolean }) 
                 store.addNodeAt(key, wx, wy);
               }}
             >
-              <span className="pal-ico"><TypeIcon type={key} size={16} /></span>
+              <span className="pal-ico"><TypeIcon type={key} size={16} icon={isCustom ? info.icon : null} /></span>
               <span className="pal-name">{info.name}</span>
               <span className="pal-cnt">{cnt}</span>
+              <button
+                type="button"
+                className={'mini-btn eye' + (off ? ' off' : '')}
+                data-eye={key}
+                title={off ? 'Вернуть тип в раздел «На холсте»' : 'Убрать тип из раздела «На холсте»'}
+                onClick={(e) => { e.stopPropagation(); store.toggleListVis(key); }}
+              >
+                <Ic d={off ? P_EYE_OFF : P_EYE} size={13} />
+              </button>
+              {isCustom && (
+                <span className="item-acts">
+                  <button type="button" className="mini-btn" data-edit={key} title="Редактировать" onClick={(e) => { e.stopPropagation(); onEditType(key); }}>
+                    <Ic d={P_PENCIL} size={12} />
+                  </button>
+                  <button type="button" className="mini-btn del" data-del={key} title="Удалить тип" onClick={(e) => { e.stopPropagation(); store.deleteCustomType(key); }}>
+                    <Ic d={P_X} size={12} />
+                  </button>
+                </span>
+              )}
             </div>
           );
         })}
@@ -294,7 +331,7 @@ function PalettePane({ store, active }: { store: VetviStore; active: boolean }) 
                     className="pal-item cv-card"
                     draggable
                     data-node={n.id}
-                    style={{ '--c': nodeColor(n) } as CSSProperties}
+                    style={{ '--c': nodeColor(n, store.doc.customTypes) } as CSSProperties}
                     title="Клик — перейти · перетащите, чтобы создать копию"
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/vetvi-clone', n.id);
@@ -360,7 +397,7 @@ function ListPane({ store, active }: { store: VetviStore; active: boolean }) {
       style={indent == null ? undefined : { paddingLeft: indent }}
       onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
     >
-      <span className="dot" style={{ background: nodeColor(n), color: nodeColor(n) }} />
+      <span className="dot" style={{ background: nodeColor(n, store.doc.customTypes), color: nodeColor(n, store.doc.customTypes) }} />
       <span className="t">{n.title}</span>
       <span className="k">{typeInfo(n.type).name}</span>
     </div>

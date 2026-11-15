@@ -21,6 +21,7 @@ import { NoteModals, noteBus, noteModalOpen } from './NoteModals';
 import { DialogModal } from './DialogModal';
 import { ModalHost, ConfirmHost, bindLogHelpers } from './Modals';
 import { CtxMenuHost, ToastHost } from './CtxMenu';
+import { DstWin } from './DstWin';
 import { CollabPopover, LockScreen, LockTipHost } from './SyncModals';
 import { canvasApi } from './canvasApi';
 
@@ -250,6 +251,7 @@ export default function VetviApp() {
       <ModalHost store={store} />
       <ConfirmHost store={store} />
       {store.modal === 'player' && <Player store={store} />}
+      {!!store.dstState.ids && <DstWin store={store} />}
       <CtxMenuHost store={store} />
       <ToastHost store={store} />
       <CollabPopover store={store} />
