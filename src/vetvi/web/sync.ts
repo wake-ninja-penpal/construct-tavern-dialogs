@@ -421,6 +421,17 @@ export class SyncClient {
     if (!doc || !Array.isArray(doc.nodes)) return;
     this.applyingRemote = true;
     try {
+      /* снимок комнаты — авторитетный (last-write-wins): клиент ПЕРЕНИМАЕТ projectId
+         комнаты. Без этого защита flushState «публикуется только свой проект» после
+         чужого снимка навсегда блокировала публикацию (projectId расходился с doc.meta
+         навсегда) — синхронизация умирала целиком, жили только live-события перетаскиваний. */
+      if (this.mode !== 'copy') {
+        const rp = (doc.meta as { projectId?: unknown } | undefined)?.projectId;
+        if (typeof rp === 'string' && rp && rp !== this.projectId) {
+          this.projectId = rp;
+          if (this.room) this.setHash(this.room, rp); /* хеш отражает реальный проект комнаты */
+        }
+      }
       this.store.applyRemoteDoc(doc as Record<string, unknown>, keepPid, preserveTouchedAfter);
       if (fit) {
         const api = canvasApi.current;
@@ -438,7 +449,9 @@ export class SyncClient {
 
   handleRemoteDoc(doc: SyncDoc | null | undefined): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
-    if (this.applyingRemote) return;
+    /* снимок, пришедший во время применения другого, не выбрасываем — откладываем:
+     * выброс терял правки соавтора безвозвратно (следующий паблиш перезаписывал их) */
+    if (this.applyingRemote) { this.pendingRemote = doc; this.pendingRemoteAt = Date.now(); return; }
     if (this.store.busyNow()) { this.pendingRemote = doc; this.pendingRemoteAt = Date.now(); return; }
     this.applyRemote(doc, false);
   }
@@ -455,16 +468,23 @@ export class SyncClient {
     if (!this.enabled || !this.sock || !this.sock.connected) return;
     if (this.applyingRemote && !force) return;
     const doc = this.store.syncDocObj();
-    /* в комнату публикуется только «свой» документ: снимок другого проекта
-       (диалог комнаты ещё не решён, фоновый автосейв, смена проекта) загрязнял
-       комнату чужим meta.projectId — после этого «Загрузить из комнаты» вечно
-       возвращала предыдущий проект. Явная публикация из диалога — через
-       allowForeignOnce. */
-    if (!force || !this.allowForeignOnce) {
+    /* flushSave больше не публикует, поэтому сюда попадают ТОЛЬКО реальные правки
+       открытого документа (scheduleSave мутаций и явные публикации). Если открытый
+       документ — другой проект, комната переходит на него (last-write-wins): клиент
+       перенимает его projectId и публикует. Прежнее поведение (тихий return) убивало
+       синхронизацию навсегда: projectId расходился с документом после чужого снимка
+       или «Опубликовать мою», оба участника переставали публиковать состояние —
+       в комнате работали только live-перетаскивания, ничего не сохранялось.
+       Принятие projectId безусловно — и для force-публикации («Опубликовать мою»):
+       комната переходит на опубликованный проект немедленно, а не после следующей правки. */
+    {
       const roomPid = this.projectId;
       const docPid = (doc.meta && typeof (doc.meta as { projectId?: unknown }).projectId === 'string')
         ? String((doc.meta as { projectId?: string }).projectId) : '';
-      if (roomPid && docPid && roomPid !== docPid) return;
+      if (roomPid && docPid && roomPid !== docPid) {
+        this.projectId = docPid;
+        if (this.room) this.setHash(this.room, docPid); /* хеш отражает реальный проект комнаты */
+      }
     }
     let json = '';
     try { json = JSON.stringify(doc); } catch { return; }
