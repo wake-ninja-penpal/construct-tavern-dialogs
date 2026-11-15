@@ -1,13 +1,15 @@
 'use client';
 
 /**
- * Ветви — контекстное меню и тосты (порт openCtxMenu/toast оригинала).
- * Позиция меню уже обрезана к границам окна в store.openCtx.
+ * Ветви — контекстное меню и тосты (порт #ctx/#toasts оригинала).
+ * Разметка 1:1: #ctx.show > .ctx-sep/.ctx-h/.ctx-i(.danger)>span.dot,
+ * #toasts > .toast(.ok|.warn|.err)>.td. Позиция меню уже обрезана к границам
+ * окна в store.openCtx; авто-скрытие тоста — store (2800 мс), здесь фаза .out.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import type { VetviStore } from './store';
+import type { Toast, VetviStore } from './store';
 
 export function CtxMenuHost({ store }: { store: VetviStore }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -24,28 +26,39 @@ export function CtxMenuHost({ store }: { store: VetviStore }) {
   }, [ctx, store]);
 
   if (!ctx) return null;
-  const items = ctx.items;
-  const x = ctx.x;
-  const y = ctx.y;
 
   return (
-    <div ref={ref} className="rn-ctx show" style={{ left: x, top: y }} role="menu" aria-label="Контекстное меню">
-      {items.map((it, i) => {
-        if (it.sep) return <div className="rn-ctx-sep" key={i} />;
-        if (it.head) return <div className="rn-ctx-h" key={i}>{it.head}</div>;
+    <div id="ctx" ref={ref} className="show" style={{ left: ctx.x, top: ctx.y }} role="menu" aria-label="Контекстное меню">
+      {ctx.items.map((it, i) => {
+        if (it.sep) return <div className="ctx-sep" key={i} />;
+        if (it.head) return <div className="ctx-h" key={i}>{it.head}</div>;
         return (
-          <button
+          <div
             key={i}
-            type="button"
+            className={'ctx-i' + (it.danger ? ' danger' : '')}
             role="menuitem"
-            className={'rn-ctx-item' + (it.danger ? ' danger' : '')}
-            onClick={() => { store.closeCtx(); if (it.fn) it.fn(); }}
+            onClick={(ev) => { ev.stopPropagation(); store.closeCtx(); if (it.fn) it.fn(); }}
           >
-            {it.dot && <span className="rn-ctx-dot" style={{ background: it.dot }} />}
+            {it.dot && <span className="dot" style={{ background: it.dot }} />}
             {it.label}
-          </button>
+          </div>
         );
       })}
+    </div>
+  );
+}
+
+/* один тост: за 320 мс до удаления из store включается класс .out (tOut оригинала) */
+function ToastRow({ t }: { t: Toast }) {
+  const [out, setOut] = useState(false);
+  useEffect(() => {
+    const tm = window.setTimeout(() => setOut(true), 2480);
+    return () => window.clearTimeout(tm);
+  }, []);
+  return (
+    <div className={'toast ' + t.kind + (out ? ' out' : '')}>
+      <span className="td" />
+      {t.msg}
     </div>
   );
 }
@@ -53,12 +66,9 @@ export function CtxMenuHost({ store }: { store: VetviStore }) {
 export function ToastHost({ store }: { store: VetviStore }) {
   void store.revision;
   return (
-    <div className="rn-toasts" aria-live="polite">
+    <div id="toasts" aria-live="polite">
       {store.toasts.map((t) => (
-        <div className={'rn-toast ' + t.kind} key={t.id}>
-          <span className="td" />
-          {t.msg}
-        </div>
+        <ToastRow key={t.id} t={t} />
       ))}
     </div>
   );

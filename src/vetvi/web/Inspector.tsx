@@ -1,643 +1,1498 @@
 'use client';
 
 /**
- * Ветви — инспектор (этап 2): все типы нод — название/статус/цвет/текст,
- * диалог (участники + реплики + редактор в отдельном окне), развилка (исходы
- * с условиями по переменным + перебивание входом), действие (кнопки),
- * переменная (выбор/режим/операция/значение), связь (подпись/тип/условие/разворот),
- * мультивыделение (выравнивание/группа/дубль), группа (имя/вид/цвет/альфа/состав).
+ * Ветви — инспектор: 1:1 порт правой панели оригинала (/vetvi/index.html).
+ *
+ * Корень — <aside id="right"> (как в оригинальном #layout) с .i-cap и #insp;
+ * разметка, классы и id повторяют renderInspector и его хелперы:
+ * renderInspNode / renderInspEdge / renderInspGroup (+ цепочка) / renderInspMulti /
+ * renderInspEmpty, inspPartsHtml, inspOutsHtml, inspActionsHtml, inspVarHtml,
+ * inspCondHtml, condRowHtml, paletteCoreHtml/bindPalette/toggleSwatches,
+ * charAvatarHtml, applyInspectorLockState.
+ * Стили — оригинальный дизайн-система (vetvi.css), новых классов нет; инлайн —
+ * только динамические цвета и те инлайны, что были в оригинале.
  */
 
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
-import { PALETTE_COLORS, STATUS_CYCLE, STATUS_RU, TYPES } from '@/vetvi/core/constants';
-import { shadeHex } from '@/vetvi/core/geometry';
-import type { VetviNode } from '@/vetvi/core/types';
-import { condOpsFor, condText, opsForType, varById, varType, varValText } from '@/vetvi/core/vars';
+import { PALETTE_COLORS, TYPES } from '@/vetvi/core/constants';
+import { clamp, typeInfo } from '@/vetvi/core/geometry';
+import { hkText } from '@/vetvi/core/hotkeys';
+import type { VetviDoc, VetviGroup, VetviNode, VetviReply } from '@/vetvi/core/types';
+import {
+  branchVarOverride, condOpsFor, isTrueVal, opsForType,
+  varById, varName, varType, varsList,
+} from '@/vetvi/core/vars';
 import type { Cond } from '@/vetvi/core/vars';
+import { allDescNodes } from './ggroups';
 import type { VetviStore } from './store';
+import { TypeIcon } from './NodeCard';
 
-export function Inspector(props: { store: VetviStore; onClose: () => void }) {
-  const { store } = props;
-  void store.revision;
-  const editPreRef = useRef<string | null>(null);
+/* ═══ константы оригинала ═══ */
 
-  /* ── группа ── */
-  if (store.selGroups.size === 1 && !store.sel.size) {
-    const gid = [...store.selGroups][0];
-    const g = store.groupById(gid);
-    if (g) return <GroupInspector store={store} gid={gid} onClose={props.onClose} editPreRef={editPreRef} />;
-  }
+const STATUS_INSP: Record<string, string> = { idea: 'Идея', draft: 'В работе', done: 'Готово' };
+const KINDS: Record<string, string> = { flow: 'Обычная', choice: 'Выбор', cond: 'Условие', bridge: 'Мост' };
+const FOLD_NAMES = ['Компакт', 'Список', 'Развёрнута'];
+const PALETTE_VIS = 16;
 
-  /* ── мультивыделение ── */
-  if (store.sel.size > 1) {
-    return (
-      <aside className="rn-inspector" aria-label="Инспектор: выделение">
-        <div className="rn-insp-head">
-          <span className="rn-insp-type">Выделено: {store.sel.size}</span>
-          <button type="button" className="rn-insp-x" title="Снять выделение" onClick={props.onClose}>×</button>
-        </div>
-        <div className="rn-btn-row">
-          <button type="button" className="rn-mini" onClick={() => store.alignH()}>Выровнять в ряд</button>
-          <button type="button" className="rn-mini" onClick={() => store.alignV()}>Выровнять в столбец</button>
-        </div>
-        <div className="rn-btn-row">
-          <button type="button" className="rn-mini" onClick={() => { const r = store.duplicateSelection(); if (r) store.startCarry(r.ids, r.pre); }}>Дубль (Ctrl+D)</button>
-          <button type="button" className="rn-mini" onClick={() => { store.openModal('groupCreate'); }}>Сгруппировать (Ctrl+G)</button>
-          <button type="button" className="rn-mini" onClick={() => store.exportSelection()}>Экспорт в JSON</button>
-        </div>
-        <div className="rn-insp-foot">
-          <button type="button" className="rn-danger" onClick={() => store.deleteSelected()}>Удалить выделенное</button>
-        </div>
-      </aside>
-    );
-  }
+/* ═══ иконки (порт ic() оригинала) ═══ */
 
-  /* ── связь ── */
-  if (store.selEdges.size && !store.sel.size) {
-    const eid = [...store.selEdges][0];
-    const e = store.edgeById(eid);
-    if (e) return <EdgeInspector store={store} eid={eid} onClose={props.onClose} editPreRef={editPreRef} />;
-  }
+const ICONS: Record<string, string> = {
+  branch: '<circle cx="5" cy="12" r="2.3"/><circle cx="19" cy="5" r="2.3"/><circle cx="19" cy="19" r="2.3"/><path d="M7.3 12h3.2c2.6 0 2.9-7 6.2-7M10.5 12c2.6 0 2.9 7 6.2 7"/>',
+  dialog: '<path d="M4 5.5h16v10.5h-9.5L6 20v-4H4z"/><path d="M8 9.5h8M8 12.3h5"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
+  swap: '<path d="M4 8h13M14 4.5 17.5 8 14 11.5M20 16H7M10 12.5 6.5 16l3.5 3.5"/>',
+  target: '<circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5"/>',
+  pencil: '<path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  expand: '<path d="M9 9 4 4m0 0v4M4 4h4M15 9l5-5m0 0v4M20 4h-4M9 15l-5 5m0 0v-4M4 20h4M15 15l5 5m0 0v-4M20 20h-4"/>',
+  corner: '<path d="M5 5v4.6a3.9 3.9 0 0 0 3.9 3.9H19"/><path d="m15.5 9.5 3.5 3.5-3.5 3.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  alignH: '<path d="M2 12h20"/><rect x="4" y="8" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="8" rx="1"/><rect x="16" y="8" width="4" height="8" rx="1"/>',
+  alignV: '<path d="M12 2v20"/><rect x="8" y="4" width="8" height="4" rx="1"/><rect x="8" y="10" width="8" height="4" rx="1"/><rect x="8" y="16" width="8" height="4" rx="1"/>',
+  grip: '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>',
+};
 
-  const id = store.sel.size ? [...store.sel][0] : null;
-  const n = id ? store.nodeById(id) : null;
-  if (!n) {
-    return (
-      <aside className="rn-inspector empty" aria-label="Инспектор">
-        <div className="rn-insp-title">Инспектор</div>
-        <div className="rn-insp-hint">Ничего не выбрано. Кликните по ноде, связи или группе на холсте.</div>
-      </aside>
-    );
-  }
-
-  const info = TYPES[n.type] || { name: 'Нода', color: '#8b929c' };
-  const baseColor = n.color || info.color;
-  const isDialog = n.type === 'dialog';
-  const isBranch = n.type === 'branch';
-  const isAction = n.type === 'action';
-  const isVar = n.type === 'varnode';
-
-  const commit = (patch: Partial<VetviNode>) => {
-    store.updateNode(n.id, patch, { history: true });
-  };
-
-  const chars = store.doc.chars || [];
-  const participants = isDialog && n.dialog ? n.dialog.participants || [] : [];
-
+function Ico({ name, size = 15 }: { name: string; size?: number }) {
   return (
-    <aside className="rn-inspector" aria-label={'Инспектор: ' + info.name}>
-      <div className="rn-insp-head">
-        <span className="rn-insp-type" style={{ color: baseColor }}>{info.name}</span>
-        <button type="button" className="rn-insp-x" title="Снять выделение" onClick={props.onClose}>×</button>
-      </div>
-
-      <label className="rn-field">
-        <span>Название</span>
-        <input
-          value={n.title}
-          onFocus={() => { editPreRef.current = store.beginEdit(); }}
-          onChange={(e) => store.updateNode(n.id, { title: e.target.value }, { history: false })}
-          onBlur={() => { store.commitEdit(editPreRef.current, 'Название ноды'); editPreRef.current = null; }}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-          aria-label="Название ноды"
-        />
-      </label>
-
-      <div className="rn-field">
-        <span>Статус</span>
-        <div className="rn-seg" role="group" aria-label="Статус ноды">
-          {STATUS_CYCLE.map((s) => (
-            <button key={s} type="button" className={'c-' + s + (n.status === s ? ' on' : '')} onClick={() => commit({ status: s })}>
-              {STATUS_RU[s]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="rn-field">
-        <span>Цвет</span>
-        <div className="rn-palette">
-          {PALETTE_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={'rn-swatch' + (baseColor.toLowerCase() === c ? ' on' : '')}
-              style={{ background: shadeHex(c, -60) }}
-              title={c}
-              aria-label={'Цвет ' + c}
-              onClick={() => { commit({ color: c, tint: -60 }); }}
-            />
-          ))}
-          <input
-            type="color"
-            className="rn-picker"
-            title="Свой цвет"
-            value={/^#[0-9a-fA-F]{6}$/.test(baseColor) ? baseColor : '#e2a54e'}
-            onChange={(e) => commit({ color: e.target.value, tint: 0 })}
-            aria-label="Свой цвет ноды"
-          />
-        </div>
-        <div className="rn-tint-row">
-          <span>Яркость</span>
-          <input
-            type="range"
-            min={-60}
-            max={60}
-            step={10}
-            value={Number(n.tint ?? -60)}
-            onChange={(e) => store.updateNode(n.id, { tint: Number(e.target.value) }, { history: false })}
-            onMouseUp={() => { store.commitEdit(editPreRef.current, 'Яркость ноды'); editPreRef.current = store.beginEdit(); }}
-            aria-label="Яркость цвета"
-          />
-        </div>
-      </div>
-
-      {isDialog && n.dialog && (
-        <>
-          <div className="rn-field">
-            <span>Участники диалога</span>
-            <div className="rn-parts">
-              {chars.length === 0 && <div className="rn-insp-hint">Нет персонажей — создайте их на вкладке «Персонажи» слева.</div>}
-              {chars.map((c) => {
-                const on = participants.includes(c.id);
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={'rn-part' + (on ? ' on' : '')}
-                    style={on ? { ['--pc' as string]: c.color || '#9cb878' } : undefined}
-                    onClick={() => {
-                      const next = on ? participants.filter((p) => p !== c.id) : [...participants, c.id];
-                      store.setParticipants(n.id, next);
-                    }}
-                  >
-                    <span className={'rn-av sm ' + (c.avShape === 'square' ? 'square' : 'circle') + (c.av ? '' : ' empty')} style={{ borderColor: c.color || '#9cb878' }}>
-                      {c.av ? <img src={String(c.av)} alt="" /> : (c.name || '?')[0].toUpperCase()}
-                    </span>
-                    {c.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <label className="rn-field">
-            <span>Описание диалога</span>
-            <textarea
-              rows={3}
-              value={n.dialog.description}
-              onFocus={() => { editPreRef.current = store.beginEdit(); }}
-              onChange={(e) => store.updateNode(n.id, { dialog: { ...n.dialog!, description: e.target.value } }, { history: false })}
-              onBlur={() => { store.commitEdit(editPreRef.current, 'Описание диалога'); editPreRef.current = null; }}
-              aria-label="Описание диалога"
-            />
-          </label>
-          <div className="rn-field">
-            <div className="rn-row-head">
-              <span>Реплики ({n.dialog.replies.length})</span>
-              <button type="button" className="rn-mini" onClick={() => store.openDialogEditor(n.id)}>Открыть редактор…</button>
-            </div>
-            <div className="rn-seg">
-              <button type="button" className={n.linear ? 'on' : ''} onClick={() => store.setDlgLinear(n.id, true)} title="Проигрывать реплики подряд">▸▸ подряд</button>
-              <button type="button" className={!n.linear ? 'on' : ''} onClick={() => store.setDlgLinear(n.id, false)}>ветвление</button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {!isDialog && !isVar && (
-        <label className="rn-field">
-          <span>Текст</span>
-          <textarea
-            rows={4}
-            value={n.text}
-            onFocus={() => { editPreRef.current = store.beginEdit(); }}
-            onChange={(e) => store.updateNode(n.id, { text: e.target.value }, { history: false })}
-            onBlur={() => { store.commitEdit(editPreRef.current, 'Текст ноды'); editPreRef.current = null; }}
-            aria-label="Текст ноды"
-          />
-        </label>
-      )}
-
-      <label className="rn-field">
-        <span>Метки (через запятую)</span>
-        <input
-          value={Array.isArray(n.tags) ? (n.tags as string[]).join(', ') : ''}
-          onFocus={() => { editPreRef.current = store.beginEdit(); }}
-          onChange={(e) => store.updateNode(n.id, { tags: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) }, { history: false })}
-          onBlur={() => { store.commitEdit(editPreRef.current, 'Метки ноды'); editPreRef.current = null; }}
-          aria-label="Метки ноды"
-        />
-      </label>
-
-      {isBranch && <OutcomesEditor store={store} n={n} editPreRef={editPreRef} />}
-      {isAction && <ActionsEditor store={store} n={n} editPreRef={editPreRef} />}
-      {isVar && <VarNodeEditor store={store} n={n} editPreRef={editPreRef} />}
-
-      <div className="rn-insp-foot">
-        <button type="button" className="rn-mini" onClick={() => { const r = store.duplicateSelection(); if (r) store.startCarry(r.ids, r.pre); }}>Дубль</button>
-        {n.gid && <button type="button" className="rn-mini" onClick={() => store.leaveGroup(n.id)}>Покинуть группу</button>}
-        <button type="button" className="rn-danger" onClick={() => store.deleteSelected()}>Удалить ноду</button>
-      </div>
-    </aside>
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <g dangerouslySetInnerHTML={{ __html: ICONS[name] || ICONS.branch }} />
+    </svg>
   );
 }
 
-/* ── исходы развилки с условиями ── */
-function OutcomesEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
-  const outcomes = Array.isArray(n.outcomes) ? n.outcomes : [];
-  const vars = store.doc.vars || [];
-  const ov = store.doc.edges.find((e) => e.to === n.id && e.tin === 'var');
-  const overrideSrc = ov ? store.nodeById(ov.from) : null;
-  const overrideVid = overrideSrc && overrideSrc.type === 'varnode' ? overrideSrc.vid : null;
-  return (
-    <div className="rn-field">
-      <div className="rn-row-head">
-        <span>Исходы ({outcomes.length})</span>
-        <button type="button" className="rn-mini" onClick={() => store.addOutcome(n.id)}>+ Исход</button>
-      </div>
-      {overrideVid && (
-        <div className="rn-insp-hint warn">Условия исходов считаются по переменной «{store.charById(overrideVid)?.name || varById(store.doc, overrideVid)?.name || '…'}» — вход переменной перебивает индивидуальные.</div>
-      )}
-      <div className="rn-replies-edit">
-        {outcomes.map((o, i) => {
-          const cond = o.cond;
-          return (
-            <div className="rn-out-edit" key={o.id}>
-              <div className="rn-out-line">
-                <button type="button" title="Выше" onClick={() => store.moveOutcome(n.id, o.id, -1)}>↑</button>
-                <input
-                  value={o.label}
-                  placeholder={'Исход ' + (i + 1)}
-                  aria-label={'Подпись исхода ' + (i + 1)}
-                  onFocus={() => { editPreRef.current = store.beginEdit(); }}
-                  onChange={(e) => {
-                    const arr = (n.outcomes || []).map((x) => x.id === o.id ? { ...x, label: e.target.value } : x);
-                    store.updateNode(n.id, { outcomes: arr }, { history: false });
-                  }}
-                  onBlur={() => { store.commitEdit(editPreRef.current, 'Подпись исхода'); editPreRef.current = null; }}
-                />
-                <button type="button" title="Удалить исход" onClick={() => store.deleteOutcome(n.id, o.id)}>×</button>
-              </div>
-              <CondRow
-                store={store}
-                cond={cond}
-                onChange={(c) => {
-                  const cc = c as { vid: string; op: string; val: number | string } | null;
-                  const arr = (n.outcomes || []).map((x) => x.id === o.id ? { ...x, cond: cc } : x);
-                  store.updateNode(n.id, { outcomes: arr as typeof n.outcomes }, { label: cc ? 'Условие исхода' : 'Сброс условия исхода' });
-                }}
-                editPreRef={editPreRef}
-              />
-            </div>
-          );
-        })}
-        {!outcomes.length && <div className="rn-insp-hint">Исходов нет — потяните связь от главного пина или добавьте исход.</div>}
-      </div>
-    </div>
-  );
+/* ═══ хелперы оригинала ═══ */
+
+function hexToRgba(hex: string | null | undefined, a: number): string {
+  let h = String(hex || '').replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return 'rgba(154,161,172,' + a + ')';
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
 }
 
-/* ── кнопки действия ── */
-function ActionsEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
-  const actions = Array.isArray(n.actions) ? (n.actions as { id: string; label?: string }[]) : [];
-  return (
-    <div className="rn-field">
-      <div className="rn-row-head">
-        <span>Кнопки ({actions.length})</span>
-        <button type="button" className="rn-mini" onClick={() => store.addAction(n.id)}>+ Кнопка</button>
-      </div>
-      <div className="rn-replies-edit">
-        {actions.map((a, i) => (
-          <div className="rn-out-line" key={a.id}>
-            <input
-              value={a.label || ''}
-              placeholder={'Кнопка ' + (i + 1)}
-              aria-label={'Кнопка ' + (i + 1)}
-              onFocus={() => { editPreRef.current = store.beginEdit(); }}
-              onChange={(e) => {
-                const arr = actions.map((x) => x.id === a.id ? { ...x, label: e.target.value } : x);
-                store.updateNode(n.id, { actions: arr }, { history: false });
-              }}
-              onBlur={() => { store.commitEdit(editPreRef.current, 'Кнопка действия'); editPreRef.current = null; }}
-            />
-            <button type="button" title="Удалить кнопку" onClick={() => store.deleteAction(n.id, a.id)}>×</button>
-          </div>
-        ))}
-        {!actions.length && <div className="rn-insp-hint">Кнопок нет — добавьте и потяните от пина кнопки связь.</div>}
-      </div>
-    </div>
-  );
+/** varCastVal(v0, raw) как в оригинале: первый аргумент — объект переменной,
+    поэтому значение фактически приводится к обрезанной строке (ветка else). */
+function castInspVal(raw: unknown): string {
+  return String(raw == null ? '' : raw).trim().slice(0, 200);
 }
 
-/* ── нода переменной ── */
-function VarNodeEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
-  const vars = store.doc.vars || [];
-  const v = varById(store.doc, n.vid);
-  const mode = n.varMode === 'get' ? 'get' : 'set';
-  const t = v ? varType(v) : 'num';
-  return (
-    <>
-      <div className="rn-field">
-        <span>Переменная</span>
-        {vars.length === 0 ? (
-          <div className="rn-insp-hint">Нет переменных — создайте их на вкладке «Переменные» слева.</div>
-        ) : (
-          <select
-            value={n.vid || ''}
-            aria-label="Привязка переменной"
-            onChange={(e) => store.updateNode(n.id, { vid: e.target.value || null }, { label: 'Привязка переменной' })}
-          >
-            <option value="">— не выбрана —</option>
-            {vars.map((vv) => <option key={vv.id} value={vv.id}>{vv.name}</option>)}
-          </select>
-        )}
-      </div>
-      {v && (
-        <>
-          <div className="rn-field">
-            <span>Режим</span>
-            <div className="rn-seg">
-              <button type="button" className={mode === 'get' ? 'on' : ''} onClick={() => store.updateNode(n.id, { varMode: 'get' }, { label: 'Режим переменной' })}>Чтение (get)</button>
-              <button type="button" className={mode === 'set' ? 'on' : ''} onClick={() => store.updateNode(n.id, { varMode: 'set' }, { label: 'Режим переменной' })}>Изменение (set)</button>
-            </div>
-          </div>
-          {mode === 'set' && (
-            <div className="rn-field">
-              <span>Операция и значение</span>
-              <div className="rn-var-op-row">
-                <select
-                  value={String(n.varOp ?? '=')}
-                  aria-label="Операция"
-                  onChange={(e) => store.updateNode(n.id, { varOp: e.target.value }, { label: 'Операция переменной' })}
-                >
-                  {Object.entries(opsForType(t)).map(([k, sym]) => <option key={k} value={k}>{sym}</option>)}
-                </select>
-                {t === 'bool' ? (
-                  <select
-                    value={n.varVal === true || n.varVal === 'true' ? 'true' : 'false'}
-                    aria-label="Значение"
-                    onChange={(e) => store.updateNode(n.id, { varVal: e.target.value === 'true' }, { label: 'Значение переменной' })}
-                  >
-                    <option value="true">true</option>
-                    <option value="false">false</option>
-                  </select>
-                ) : (
-                  <input
-                    value={String(n.varVal ?? '')}
-                    placeholder={t === 'num' ? 'На сколько изменить' : 'Новое значение'}
-                    aria-label="Значение"
-                    onFocus={() => { editPreRef.current = store.beginEdit(); }}
-                    onChange={(e) => store.updateNode(n.id, { varVal: e.target.value }, { history: false })}
-                    onBlur={() => { store.commitEdit(editPreRef.current, 'Значение переменной'); editPreRef.current = null; }}
-                  />
-                )}
-              </div>
-            </div>
-          )}
-          <div className="rn-insp-hint">
-            {mode === 'get'
-              ? 'Режим «чтение»: в проигрывателе показывает значение; связь с пином «вход переменной» развилки перебивает условия её исходов.'
-              : 'Текущее: ' + v.name + ' ' + String(n.varOp ?? '=') + ' ' + varValText(n.varVal, v) + '. В проигрывателе значение меняется при проходе через ноду.'}
-          </div>
-        </>
-      )}
-    </>
-  );
+function customTypesOf(doc: VetviDoc): { id: string; name: string; color?: string }[] {
+  return Array.isArray(doc.customTypes) ? (doc.customTypes as { id: string; name: string; color?: string }[]) : [];
 }
 
-/* ── связь ── */
-function EdgeInspector({ store, eid, onClose, editPreRef }: { store: VetviStore; eid: string; onClose: () => void; editPreRef: React.MutableRefObject<string | null> }) {
-  const e = store.edgeById(eid);
-  if (!e) {
-    return <aside className="rn-inspector empty" aria-label="Инспектор"><div className="rn-insp-hint">Связь не найдена.</div></aside>;
+/** paletteAdd оригинала: свой цвет в начало project.palette (≤24, без дублей). */
+function paletteAdd(doc: VetviDoc, hex: string): void {
+  if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+  hex = hex.toLowerCase();
+  if (PALETTE_COLORS.indexOf(hex) >= 0) return;
+  if (!Array.isArray(doc.palette)) doc.palette = [];
+  const i = doc.palette.indexOf(hex);
+  if (i > 0) doc.palette.splice(i, 1);
+  if (i !== 0) doc.palette.unshift(hex);
+  if (doc.palette.length > 24) doc.palette.length = 24;
+}
+
+/** branchCondDefault оригинала. */
+function branchCondDefault(doc: VetviDoc): { vid: string; op: string; val: number | string | boolean } {
+  const v0 = varsList(doc)[0] || null;
+  return { vid: v0 ? v0.id : '', op: '==', val: (v0 && varType(v0) === 'bool') ? true : 0 };
+}
+
+/** countReplies оригинала: реплики считаются с вложенными детьми. */
+function countReplies(replies: VetviReply[] | undefined): number {
+  if (!Array.isArray(replies)) return 0;
+  let c = 0;
+  for (const r of replies) {
+    c++;
+    if (r.children && r.children.length) c += countReplies(r.children);
   }
-  const from = store.nodeById(e.from);
-  const to = store.nodeById(e.to);
-  const cond = (e as unknown as { cond?: Cond }).cond;
-  const fromOutName = e.fromOut && from ? (
-    from.type === 'branch' ? (from.outcomes || []).find((o) => o.id === e.fromOut)?.label : (from.actions || []).find((a) => (a as { id: string }).id === e.fromOut) && (from.actions as { id: string; label?: string }[]).find((a) => (a as { id: string }).id === e.fromOut)!.label
-  ) : null;
-  const fromReplyText = e.fromReply && from && from.dialog ? (findReplyText(from.dialog.replies, e.fromReply) || '') : null;
-  return (
-    <aside className="rn-inspector" aria-label="Инспектор: связь">
-      <div className="rn-insp-head">
-        <span className="rn-insp-type">Связь</span>
-        <button type="button" className="rn-insp-x" title="Снять выделение" onClick={onClose}>×</button>
-      </div>
-      <div className="rn-insp-hint">
-        {from?.title || '…'}{fromOutName ? ' · исход «' + fromOutName + '»' : fromReplyText ? ' · из реплики «' + fromReplyText.slice(0, 24) + '…»' : ''} → {to?.title || '…'}
-        {e.tin === 'var' && ' · вход переменной развилки'}
-      </div>
-      <label className="rn-field">
-        <span>Подпись</span>
-        <input
-          value={e.label || ''}
-          onFocus={() => { editPreRef.current = store.beginEdit(); }}
-          onChange={(ev) => store.setEdgeLabel(eid, ev.target.value, { history: false })}
-          onBlur={() => { store.commitEdit(editPreRef.current, 'Подпись связи'); editPreRef.current = null; }}
-          aria-label="Подпись связи"
-        />
-      </label>
-      <div className="rn-field">
-        <span>Тип линии</span>
-        <div className="rn-seg">
-          {[['flow', 'Обычная'], ['choice', 'Выбор'], ['cond', 'Условие'], ['bridge', 'Мост']].map(([k, lbl]) => (
-            <button key={k} type="button" className={(e.kind || 'flow') === k ? 'on' : ''} onClick={() => store.setEdgeKind(eid, k)}>{lbl}</button>
-          ))}
-        </div>
-      </div>
-      {from?.type === 'branch' && (
-        <div className="rn-field">
-          <span>Условие перехода (развилка)</span>
-          <CondRow
-            store={store}
-            cond={cond}
-            onChange={(c) => store.setEdgeCond(eid, c as { vid: string; op: string; val: number | string } | null)}
-            editPreRef={editPreRef}
-          />
-        </div>
-      )}
-      <div className="rn-btn-row">
-        <button type="button" className="rn-mini" onClick={() => store.reverseEdge(eid)}>Развернуть направление</button>
-        {!!(e.pts && e.pts.length) && <button type="button" className="rn-mini" onClick={() => store.resetEdgePts(eid)}>Сбросить изгибы ({e.pts!.length})</button>}
-      </div>
-      <div className="rn-insp-hint">Двойной клик по линии — добавить изгиб; двойной по точке — убрать; мост правится перетаскиванием его отрезков.</div>
-      <div className="rn-insp-foot">
-        <button type="button" className="rn-danger" onClick={() => store.deleteEdge(eid)}>Удалить связь</button>
-      </div>
-    </aside>
-  );
+  return c;
 }
 
-function findReplyText(replies: { id: string; text?: string; children?: { id: string; text?: string }[] }[], rid: string): string | null {
+function findReplyText(replies: VetviReply[] | undefined, rid: string): string | null {
+  if (!Array.isArray(replies)) return null;
   for (const r of replies) {
     if (r.id === rid) return r.text || '';
     if (r.children) {
-      const f = findReplyText(r.children as typeof replies, rid);
+      const f = findReplyText(r.children, rid);
       if (f !== null) return f;
     }
   }
   return null;
 }
 
-/* ── группа ── */
-function GroupInspector({ store, gid, onClose, editPreRef }: { store: VetviStore; gid: string; onClose: () => void; editPreRef: React.MutableRefObject<string | null> }) {
-  const g = store.groupById(gid);
-  if (!g) return null;
-  const fold = g.fold === undefined ? 2 : g.fold;
-  const members = store.membersOf(gid);
-  const parents = store.doc.groups.filter((x) => x.id !== gid && !isDescendantOf(store, gid, x.id));
-  return (
-    <aside className="rn-inspector" aria-label="Инспектор: группа">
-      <div className="rn-insp-head">
-        <span className="rn-insp-type" style={{ color: g.color || '#8b929c' }}>Группа</span>
-        <button type="button" className="rn-insp-x" title="Снять выделение" onClick={onClose}>×</button>
-      </div>
-      <label className="rn-field">
-        <span>Название</span>
-        <input
-          value={g.name || ''}
-          onFocus={() => { editPreRef.current = store.beginEdit(); }}
-          onChange={(e) => store.updateGroup(gid, { name: e.target.value }, { history: false })}
-          onBlur={() => { store.commitEdit(editPreRef.current, 'Название группы'); editPreRef.current = null; }}
-          aria-label="Название группы"
-        />
-      </label>
-      <div className="rn-field">
-        <span>Вид</span>
-        <div className="rn-seg">
-          {[2, 1, 0].map((f) => (
-            <button key={f} type="button" className={fold === f ? 'on' : ''} onClick={() => store.updateGroup(gid, { fold: f }, { label: 'Вид группы' })}>
-              {f === 2 ? 'рамка' : f === 1 ? 'список' : 'компакт'}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="rn-field">
-        <span>Родительская группа</span>
-        <select
-          value={g.parent || ''}
-          onChange={(e) => store.updateGroup(gid, { parent: e.target.value || null }, { label: 'Вложенность группы' })}
-          aria-label="Родительская группа"
-        >
-          <option value="">— нет —</option>
-          {parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      </div>
-      <div className="rn-field">
-        <span>Цвет</span>
-        <div className="rn-palette sm">
-          {PALETTE_COLORS.map((c) => (
-            <button key={c} type="button" className={'rn-swatch' + ((g.color || '') === c ? ' on' : '')} style={{ background: c }} title={c} aria-label={'Цвет ' + c} onClick={() => store.updateGroup(gid, { color: c }, { label: 'Цвет группы' })} />
-          ))}
-          <input type="color" className="rn-picker" title="Свой цвет" value={/^#[0-9a-fA-F]{6}$/.test(g.color || '') ? (g.color as string) : '#8b929c'} onChange={(e) => store.updateGroup(gid, { color: e.target.value }, { label: 'Цвет группы' })} aria-label="Свой цвет группы" />
-        </div>
-      </div>
-      <div className="rn-field">
-        <span>Прозрачность {Math.round((typeof g.alpha === 'number' ? g.alpha : 0.55) * 100)}%</span>
-        <input
-          type="range"
-          min={10}
-          max={100}
-          value={Math.round((typeof g.alpha === 'number' ? g.alpha : 0.55) * 100)}
-          onChange={(e) => store.updateGroup(gid, { alpha: Number(e.target.value) / 100 }, { history: false })}
-          onMouseUp={() => { store.commitEdit(editPreRef.current, 'Прозрачность группы'); editPreRef.current = store.beginEdit(); }}
-          aria-label="Прозрачность группы"
-        />
-      </div>
-      <div className="rn-field">
-        <span>Состав ({members.length})</span>
-        <div className="rn-group-members">
-          {members.map((m) => (
-            <button key={m.id} type="button" className="rn-gmember" onClick={() => { store.selectOnly(m.id); store.requestCenter(m.id); }}>
-              <span className="rn-gcdot" style={{ background: m.color || TYPES[m.type]?.color }} />
-              {m.title || TYPES[m.type]?.name}
-            </button>
-          ))}
-          {!members.length && <div className="rn-insp-hint">Пусто — перенесите ноды внутрь рамки.</div>}
-        </div>
-      </div>
-      <div className="rn-btn-row">
-        <button type="button" className="rn-mini" onClick={() => store.setSel(members.map((m) => m.id))}>Выделить все ноды</button>
-        <button type="button" className="rn-mini" onClick={() => { store.setLogFilters(null, gid); store.openModal('log'); }}>Журнал группы</button>
-      </div>
-      <div className="rn-insp-foot">
-        <button type="button" className="rn-danger" onClick={() => store.dissolveGroup(gid)}>Распустить группу</button>
-      </div>
-    </aside>
-  );
+/** Перестановка «src → tgt (выше/ниже)» — ядро branchMoveOutcome/actionMoveAction. */
+function movePairInList(arr: { id: string }[], srcId: string, tgtId: string, below: boolean): boolean {
+  let s = -1;
+  let t = -1;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i].id === srcId) s = i;
+    if (arr[i].id === tgtId) t = i;
+  }
+  if (s < 0 || t < 0 || s === t) return false;
+  const moved = arr.splice(s, 1)[0];
+  const insAt = (s < t ? t - 1 : t) + (below ? 1 : 0);
+  arr.splice(insAt, 0, moved);
+  return true;
 }
 
-function isDescendantOf(store: VetviStore, ancestorId: string, ofId: string): boolean {
-  let cur: string | null | undefined = ofId;
+/** stackOrderIds оригинала: порядок нод цепочки по g.order + остаток по раскладке. */
+function stackOrderIds(doc: VetviDoc, g: VetviGroup): string[] {
+  const members = doc.nodes.filter((n) => n.gid === g.id);
+  const known: Record<string, boolean> = {};
+  const out: string[] = [];
+  members.forEach((m) => { known[m.id] = true; });
+  (Array.isArray(g.order) ? (g.order as string[]) : []).forEach((id) => {
+    if (known[id]) { out.push(id); known[id] = false; }
+  });
+  members.forEach((m) => { if (known[m.id]) out.push(m.id); });
+  return out;
+}
+
+function isDescGroup(doc: VetviDoc, ancestorId: string, childId: string): boolean {
+  let cur: string | null | undefined = childId;
   const seen = new Set<string>();
   while (cur && !seen.has(cur)) {
     seen.add(cur);
     if (cur === ancestorId) return true;
-    cur = store.groupById(cur)?.parent;
+    cur = doc.groups.find((g) => g.id === cur)?.parent;
   }
   return false;
 }
 
-/* ── строка условия по переменной ── */
-function CondRow({ store, cond, onChange, editPreRef }: {
-  store: VetviStore;
-  cond: Cond | null | undefined;
-  onChange: (c: Cond | null) => void;
-  editPreRef: React.MutableRefObject<string | null>;
+function fmtD(iso?: number | string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch {
+    return '—';
+  }
+}
+
+function nodeCap(n: VetviNode, cstName: string | null): string {
+  if (n.type === 'dialog') return 'Диалог';
+  if (TYPES[n.type]) return 'Элемент';
+  return 'Свой тип: ' + (cstName || typeInfo(n.type).name);
+}
+
+/** Блокировка инспектора, если объект редактирует другой участник (lockBlockedBy). */
+function lockFor(store: VetviStore, ids: string[]): { id: string; name: string; color: string } | null {
+  for (const id of ids) {
+    const l = store.syncLocks[id];
+    if (l) return l;
+  }
+  return null;
+}
+
+/* ═══ палитра: paletteCoreHtml + bindPalette + toggleSwatches ═══ */
+
+function Swatches({ cur, doc, extraFirst, onPick, children, id }: {
+  cur: string | null | undefined;
+  doc: VetviDoc;
+  extraFirst?: string[];
+  onPick: (v: string | null, fromPicker: boolean) => void;
+  children?: ReactNode;
+  id?: string;
 }) {
-  const vars = store.doc.vars || [];
-  const on = !!cond;
-  const v = cond ? varById(store.doc, cond.vid) : null;
-  const t = v ? varType(v) : 'num';
+  const [expanded, setExpanded] = useState(false);
+  const pickerRef = useRef<HTMLInputElement | null>(null);
+  const list: string[] = [
+    ...(Array.isArray(doc.palette) ? (doc.palette as string[]) : []),
+    ...(extraFirst || []),
+    ...PALETTE_COLORS,
+  ];
+  const vis: ReactNode[] = [];
+  const hidden: ReactNode[] = [];
+  list.forEach((c, i) => {
+    const on = !!(cur && String(cur).toLowerCase() === String(c).toLowerCase());
+    const b = (
+      <button
+        key={c + ':' + i}
+        type="button"
+        className={'swatch' + (on ? ' on' : '')}
+        style={{ background: c }}
+        title={c}
+        onClick={() => onPick(c, false)}
+      />
+    );
+    if (i < PALETTE_VIS) vis.push(b);
+    else hidden.push(b);
+  });
+  const more = hidden.length;
+  const openPicker = () => {
+    const p = pickerRef.current;
+    if (!p) return;
+    try {
+      if (p.showPicker) p.showPicker();
+      else p.click();
+    } catch {
+      p.click();
+    }
+  };
   return (
-    <div className="rn-cond">
-      <div className="rn-seg sm">
-        <button type="button" className={!on ? 'on' : ''} onClick={() => onChange(null)}>Без условия</button>
-        <button type="button" className={on ? 'on' : ''} disabled={!vars.length} onClick={() => {
-          const v0 = vars[0];
-          onChange(v0 ? { vid: v0.id, op: '==', val: varType(v0) === 'bool' ? true : 0 } : null);
-        }}>По переменной</button>
+    <div className={'swatches' + (expanded ? ' sw-x' : '')} id={id}>
+      {vis}
+      {more > 0 && <span className="sw-more">{hidden}</span>}
+      {more > 0 && (
+        <button
+          type="button"
+          className="sw-toggle"
+          title={expanded ? 'Свернуть палитру' : 'Показать скрытые цвета'}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? 'Свернуть ▴' : 'Ещё ' + more + ' ▾'}
+        </button>
+      )}
+      <button type="button" className="swatch custom" title="Свой цвет — выбрать любой и добавить в палитру" onClick={openPicker}>
+        <Ico name="plus" size={13} />
+      </button>
+      <input
+        ref={pickerRef}
+        type="color"
+        className="sw-picker"
+        tabIndex={-1}
+        aria-hidden="true"
+        value={/^#[0-9a-fA-F]{6}$/.test(String(cur || '')) ? String(cur) : '#e2a54e'}
+        onChange={(ev) => {
+          const hex = (ev.target.value || '').toLowerCase();
+          if (/^#[0-9a-f]{6}$/.test(hex)) onPick(hex, true);
+        }}
+      />
+      {children}
+    </div>
+  );
+}
+
+/* ═══ плашка участника: dlg-chip + c-av chip (charAvatarHtml) ═══ */
+
+function PartChip({ store, pid, onRemove }: { store: VetviStore; pid: string; onRemove: () => void }) {
+  const c = store.charById(pid);
+  const color = store.charColor(pid);
+  const name = store.charName(pid);
+  const shape = c && c.avShape === 'square' ? 'square' : 'circle';
+  const av = c ? ((c.av as string | null) || null) : null;
+  return (
+    <span className="dlg-chip" style={{ background: hexToRgba(color, 0.15), color, borderColor: hexToRgba(color, 0.55) }}>
+      <span className={'c-av ' + shape + (av ? '' : ' empty') + ' chip'} style={{ borderColor: color }}>
+        {av ? <img src={av} alt="" /> : (name || '?')[0].toUpperCase()}
+      </span>
+      <span>{name}</span>
+      <span className="x" title="Убрать" onClick={onRemove}><Ico name="x" size={10} /></span>
+    </span>
+  );
+}
+
+/** Удаление участника диалога с чисткой спикеров реплик (как .x в renderInspNode). */
+function removeDialogPart(store: VetviStore, nodeId: string, pid: string): void {
+  store.mutate((doc) => {
+    const nn = doc.nodes.find((x) => x.id === nodeId);
+    if (!nn || !nn.dialog) return;
+    nn.dialog.participants = nn.dialog.participants.filter((p) => p !== pid);
+    const clean = (arr: VetviReply[]) => {
+      for (const r of arr) {
+        if (r.speaker === pid) r.speaker = nn.dialog!.participants[0] || null;
+        if (r.children) clean(r.children);
+      }
+    };
+    clean(nn.dialog.replies || []);
+  }, { label: 'Участники диалога' });
+}
+
+/** Правка условия исхода одной операцией (аналог discrete оригинала). */
+function setOutcomeCond(store: VetviStore, nodeId: string, oid: string, next: Cond | null, label: string): void {
+  store.mutate((doc) => {
+    const nn = doc.nodes.find((x) => x.id === nodeId);
+    if (!nn || !Array.isArray(nn.outcomes)) return;
+    const oo = nn.outcomes.find((x) => x.id === oid);
+    if (oo) (oo as { cond?: unknown }).cond = next;
+  }, { label });
+}
+
+/* ═══ строка условия: condRowHtml + bindCondRow ═══ */
+
+function CondRow({ doc, cond, cls, onChange, onEditPre, onEditEnd }: {
+  doc: VetviDoc;
+  cond: Cond;
+  cls?: string;
+  onChange: (next: Cond, live?: boolean) => void;
+  onEditPre: () => void;
+  onEditEnd: () => void;
+}) {
+  const vars = varsList(doc);
+  const v0 = varById(doc, cond.vid);
+  const vt = v0 ? varType(v0) : 'num';
+  const cops = condOpsFor(vt);
+  const setVar = (vid: string) => {
+    const nv = varById(doc, vid);
+    const op = (nv && !condOpsFor(varType(nv))[cond.op]) ? '==' : cond.op;
+    onChange({ vid, op, val: castInspVal(cond.val) });
+  };
+  return (
+    <div className={'v-row op' + (cls ? ' ' + cls : '')}>
+      <select className="inp v-var" title="Переменная" value={cond.vid} onChange={(ev) => setVar(ev.target.value)}>
+        {vars.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+      </select>
+      <select className="inp v-op" title="Сравнение" value={cond.op} onChange={(ev) => onChange({ ...cond, op: ev.target.value })}>
+        {Object.keys(cops).map((k) => <option key={k} value={k}>{cops[k]}</option>)}
+      </select>
+      {vt === 'bool' ? (
+        <select
+          className="inp v-val"
+          title="Значение"
+          value={isTrueVal(cond.val) ? '1' : '0'}
+          onChange={(ev) => onChange({ ...cond, val: ev.target.value === '1' })}
+        >
+          <option value="1">true</option>
+          <option value="0">false</option>
+        </select>
+      ) : (
+        <input
+          className="inp v-val"
+          title="Значение"
+          value={String(cond.val ?? '')}
+          onFocus={onEditPre}
+          onChange={(ev) => onChange({ ...cond, val: castInspVal(ev.target.value) }, true)}
+          onBlur={onEditEnd}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ═══ grip-перетаскивание строк исходов/кнопок (bindOutcomeDrag) ═══ */
+
+let outDragOid: string | null = null;
+
+function GripCell({ title }: { title: string }) {
+  return (
+    <span
+      className="out-grip"
+      title={title}
+      onPointerDown={(ev) => ev.stopPropagation()}
+      onMouseDown={(ev) => {
+        const row = (ev.currentTarget as HTMLElement).closest('.out-ed');
+        if (row) row.setAttribute('draggable', 'true');
+      }}
+      onDoubleClick={(ev) => ev.preventDefault()}
+    >
+      <Ico name="grip" size={10} />
+    </span>
+  );
+}
+
+/* ═══ нода: инспектор (renderInspNode) ═══ */
+
+function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
+  const doc = store.doc;
+  const isDialog = n.type === 'dialog';
+  const customs = customTypesOf(doc);
+  const isCustom = !TYPES[n.type];
+  const cst = customs.find((c) => c.id === n.type) || null;
+  const baseInfo = typeInfo(n.type);
+  const typeName = isCustom ? (cst ? cst.name : baseInfo.name) : baseInfo.name;
+  const typeColor = isCustom ? ((cst && cst.color) ? cst.color : '#8b929c') : baseInfo.color;
+  const gr = n.gid ? store.groupById(n.gid) : null;
+  const inn = doc.edges.filter((e) => e.to === n.id).length;
+  const out = doc.edges.filter((e) => e.from === n.id).length;
+  const chars = doc.chars || [];
+
+  const commit = (patch: Partial<VetviNode>, opts?: { history?: boolean; label?: string }) => store.updateNode(n.id, patch, opts);
+
+  const changeType = (v: string) => {
+    if (isDialog) { commit({ type: v }, { label: 'Тип ноды' }); return; }
+    store.mutate((d) => {
+      const nn = d.nodes.find((x) => x.id === n.id);
+      if (!nn) return;
+      nn.type = v;
+      if (v !== 'varnode') { delete nn.vid; delete nn.varMode; delete nn.varOp; delete nn.varVal; }
+      if (v !== 'branch' && Array.isArray(nn.outcomes)) delete nn.outcomes;
+    }, { label: 'Тип ноды' });
+  };
+
+  const pickColor = (v: string | null, fromPicker: boolean) => {
+    store.mutate((d) => {
+      const nn = d.nodes.find((x) => x.id === n.id);
+      if (!nn) return;
+      if (v === null) { nn.color = null; nn.tint = 0; return; }
+      if (fromPicker) paletteAdd(d, v);
+      nn.color = v;
+    }, { label: v === null ? 'Сброс цвета элемента' : 'Цвет элемента' });
+  };
+
+  const typehead = (
+    <div className="i-typehead" id="iTypeWrap">
+      <span className="i-typeico" style={{ color: typeColor, background: 'rgba(255,255,255,.05)' }}>
+        <TypeIcon type={n.type} size={18} />
+      </span>
+      <select className="inp" id="iType" value={n.type} onChange={(ev) => changeType(ev.target.value)}>
+        {Object.keys(TYPES).map((t) => <option key={t} value={t}>{TYPES[t].name}</option>)}
+        {customs.map((c) => <option key={c.id} value={c.id}>{c.name} (свой)</option>)}
+      </select>
+    </div>
+  );
+
+  const statusSeg = (
+    <>
+      <label className="i-lab">Статус</label>
+      <div className="seg" id="iSt">
+        {Object.keys(STATUS_INSP).map((k) => (
+          <button
+            key={k}
+            type="button"
+            data-s={k}
+            className={n.status === k ? 'on c-' + k : ''}
+            onClick={() => commit({ status: k }, { label: 'Статус ноды' })}
+          >
+            {STATUS_INSP[k]}
+          </button>
+        ))}
       </div>
-      {on && cond && (
-        <div className="rn-cond-row">
-          <select
-            value={cond.vid}
-            aria-label="Переменная условия"
-            onChange={(e) => onChange({ vid: e.target.value, op: '==', val: varType(varById(store.doc, e.target.value)) === 'bool' ? true : 0 })}
+    </>
+  );
+
+  const titleInput = (
+    <input
+      className="inp"
+      id="iTitle"
+      value={n.title}
+      maxLength={80}
+      onFocus={() => { editPreRef.current = store.beginEdit(); }}
+      onChange={(ev) => commit({ title: ev.target.value }, { history: false })}
+      onBlur={() => { store.commitEdit(editPreRef.current, 'Название ноды'); editPreRef.current = null; }}
+      onKeyDown={(ev) => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); }}
+    />
+  );
+
+  const meta = (
+    <div className="i-meta">
+      тип: {typeName}
+      {gr ? <><br />группа: {gr.name}</> : null}
+      <br />ID: {n.id} · входов: {inn} · выходов: {out}
+    </div>
+  );
+
+  const capEl = <div className="i-cap">{nodeCap(n, isCustom && cst ? cst.name : null)}</div>;
+
+  const nodeActs = (
+    <div className="i-actions">
+      <button type="button" className="btn" title={'Дубль (' + hkText('duplicate') + ')'} onClick={() => { const r = store.duplicateSelection(); if (r) store.startCarry(r.ids, r.pre); }}>
+        <Ico name="copy" />Дубль
+      </button>
+      <button type="button" className="btn" title={'Центр (' + hkText('centerSel') + ')'} onClick={() => store.requestCenter(n.id)}>
+        <Ico name="target" />Центр
+      </button>
+      <button type="button" className="btn danger" title={'Удалить (' + hkText('deleteSel') + ')'} onClick={() => store.deleteSelected()}>
+        <Ico name="trash" />Удалить
+      </button>
+    </div>
+  );
+
+  /* ── диалог (ветка dialog оригинала) ── */
+  if (isDialog && n.dialog) {
+    const d = n.dialog;
+    const parts = Array.isArray(d.participants) ? d.participants : [];
+    const avail = chars.filter((c) => parts.indexOf(c.id) < 0);
+    const replies = Array.isArray(d.replies) ? d.replies : [];
+    const cr = countReplies(replies);
+    return (
+      <>
+        {capEl}
+        {typehead}
+        <label className="i-lab">Название диалога</label>
+        {titleInput}
+        {statusSeg}
+        <div className="i-seqrow" title="Режим проигрывания этой ноды в новелле">
+          <button type="button" className={'n-seq' + (n.linear ? ' on' : '')} id="iSeq" onClick={() => store.setDlgLinear(n.id, !n.linear)}><i /></button>
+          <span className="i-seqlab">Проигрывать подряд — все реплики диалога идут одна за другой, без выбора ответа</span>
+        </div>
+        <label className="i-lab">Участники</label>
+        <div id="dlgParts">
+          {parts.map((pid) => (
+            <PartChip key={pid} store={store} pid={pid} onRemove={() => removeDialogPart(store, n.id, pid)} />
+          ))}
+        </div>
+        <select
+          className="inp"
+          id="dlgAddPart"
+          style={{ marginTop: 6, height: 28, fontSize: 11.5 }}
+          value=""
+          onChange={(ev) => {
+            const v = ev.target.value;
+            if (v) store.setParticipants(n.id, [...parts, v]);
+          }}
+        >
+          <option value="">+ добавить участника…</option>
+          {avail.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <label className="i-lab">Описание</label>
+        <textarea
+          className="inp"
+          id="dlgDesc"
+          placeholder="Кратко о чём диалог, контекст…"
+          style={{ minHeight: 60 }}
+          value={d.description || ''}
+          onFocus={() => { editPreRef.current = store.beginEdit(); }}
+          onChange={(ev) => {
+            const v = ev.target.value;
+            store.mutate((d2) => {
+              const nn = d2.nodes.find((x) => x.id === n.id);
+              if (nn && nn.dialog) nn.dialog.description = v;
+            }, { history: false });
+          }}
+          onBlur={() => { store.commitEdit(editPreRef.current, 'Описание диалога'); editPreRef.current = null; }}
+        />
+        <label className="i-lab">Реплики ({cr})</label>
+        <div style={{ marginTop: 6 }}>
+          <button type="button" className="btn primary" id="dlgEditReplies" style={{ width: '100%' }} onClick={() => store.openDialogEditor(n.id)}>
+            <Ico name="pencil" size={14} />Редактировать реплики
+          </button>
+        </div>
+        {replies.length >= 2 && (
+          <div style={{ marginTop: 6 }}>
+            <button type="button" className="btn" id="dlgSplitBtn" style={{ width: '100%' }} title="Разбить диалог на отдельные ноды — по одной на реплику" onClick={() => store.splitDialogNode(n.id, false)}>
+              <Ico name="expand" size={14} />Разбить на реплики ({replies.length})
+            </button>
+          </div>
+        )}
+        {cr > replies.length && cr >= 2 && (
+          <div style={{ marginTop: 6 }}>
+            <button type="button" className="btn" id="dlgSplitAllBtn" style={{ width: '100%' }} title="Разбить на отдельные ноды — по одной на каждую реплику, включая вложенные (ответ-ветки); порядок — сверху вниз" onClick={() => store.splitDialogNode(n.id, true)}>
+              <Ico name="corner" size={14} />Разбить на все реплики ({cr})
+            </button>
+          </div>
+        )}
+        {meta}
+        {nodeActs}
+      </>
+    );
+  }
+
+  /* ── обычная нода (общая ветка renderInspNode) ── */
+  const parts = Array.isArray(n.participants) ? (n.participants as string[]) : [];
+  const avail = chars.filter((c) => parts.indexOf(c.id) < 0);
+  const tint = clamp(typeof n.tint === 'number' ? n.tint : 0, -60, 60);
+  const isBranch = n.type === 'branch';
+  const isAction = n.type === 'action';
+  const isVar = n.type === 'varnode';
+  return (
+    <>
+      {capEl}
+      {typehead}
+      <label className="i-lab">Название (или {hkText('rename')} на холсте)</label>
+      {titleInput}
+      {statusSeg}
+      <label className="i-lab">Участники</label>
+      <div id="nParts">
+        {parts.length
+          ? parts.map((pid) => (
+            <PartChip
+              key={pid}
+              store={store}
+              pid={pid}
+              onRemove={() => store.updateNode(n.id, { participants: parts.filter((p) => p !== pid) }, { label: 'Участники элемента' })}
+            />
+          ))
+          : <span style={{ fontSize: 11, color: 'var(--tx3)' }}>пока никого — добавьте персонажей</span>}
+      </div>
+      <select
+        className="inp"
+        id="nAddPart"
+        style={{ marginTop: 6, height: 28, fontSize: 11.5 }}
+        value=""
+        disabled={!avail.length}
+        onChange={(ev) => {
+          const v = ev.target.value;
+          if (!v) return;
+          store.updateNode(n.id, { participants: [...parts, v] }, { label: 'Участники элемента' });
+        }}
+      >
+        <option value="">+ добавить участника…</option>
+        {avail.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <label className="i-lab">Цвет фона элемента</label>
+      <Swatches id="inSw" cur={n.color} doc={doc} onPick={pickColor}>
+        <button
+          type="button"
+          className={'swatch reset' + (n.color ? '' : ' on')}
+          title="Сбросить к базовому виду"
+          onClick={() => pickColor(null, false)}
+        >
+          <Ico name="x" size={12} />
+        </button>
+      </Swatches>
+      <label className="i-lab">Яркость цвета: <span id="inTintVal">{(tint > 0 ? '+' : '') + tint}%</span></label>
+      <input
+        type="range"
+        className="inp"
+        id="inTint"
+        min={-60}
+        max={60}
+        value={tint}
+        onPointerDown={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => commit({ tint: Number(ev.target.value) }, { history: false })}
+        onPointerUp={() => { store.commitEdit(editPreRef.current, 'Яркость ноды'); editPreRef.current = null; }}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Яркость ноды'); editPreRef.current = null; }}
+      />
+      <label className="i-lab">Описание</label>
+      <textarea
+        className="inp"
+        id="iText"
+        placeholder="Что здесь происходит?"
+        value={n.text || ''}
+        onFocus={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => commit({ text: ev.target.value }, { history: false })}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Текст ноды'); editPreRef.current = null; }}
+      />
+      <label className="i-lab">Теги, через запятую</label>
+      <input
+        className="inp"
+        id="iTags"
+        value={Array.isArray(n.tags) ? (n.tags as string[]).join(', ') : ''}
+        placeholder="акт 1, хаб…"
+        onFocus={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => commit({ tags: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) }, { history: false })}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Метки ноды'); editPreRef.current = null; }}
+      />
+      {isBranch && <OutcomesEditor store={store} n={n} editPreRef={editPreRef} />}
+      {isAction && <ActionsEditor store={store} n={n} editPreRef={editPreRef} />}
+      {isVar && <VarNodeEditor store={store} n={n} editPreRef={editPreRef} />}
+      {meta}
+      {nodeActs}
+    </>
+  );
+}
+
+/* ═══ развилка: исходы с условиями (inspOutsHtml + bindInspOuts) ═══ */
+
+function OutcomesEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
+  const doc = store.doc;
+  const outcomes = Array.isArray(n.outcomes) ? n.outcomes : [];
+  const vars = varsList(doc);
+  const ov = branchVarOverride(doc, n);
+  return (
+    <>
+      <label className="i-lab">Исходы развилки ({outcomes.length})</label>
+      {ov && (
+        <div className="vin-hint">
+          <span>вход: переменная «{varName(doc, ov)}» — перебивает переменные во всех условиях исходов</span>
+          <button
+            type="button"
+            className="mini-btn"
+            id="iVinDel"
+            title="Отключить переменную от входа развилки"
+            onClick={() => store.mutate((d) => {
+              d.edges = d.edges.filter((e) => !(e.to === n.id && e.tin === 'var'));
+            }, { label: 'Отключение переменной от входа' })}
           >
-            {vars.map((vv) => <option key={vv.id} value={vv.id}>{vv.name}</option>)}
-          </select>
-          <select
-            value={cond.op}
-            aria-label="Оператор"
-            onChange={(e) => onChange({ ...cond, op: e.target.value })}
-          >
-            {Object.entries(condOpsFor(t)).map(([k, sym]) => <option key={k} value={k}>{sym}</option>)}
-          </select>
-          {t === 'bool' ? (
-            <select
-              value={cond.val === true || cond.val === 'true' ? 'true' : 'false'}
-              aria-label="Значение условия"
-              onChange={(e) => onChange({ ...cond, val: e.target.value === 'true' })}
+            <Ico name="x" size={12} />
+          </button>
+        </div>
+      )}
+      <div id="iOuts">
+        {!outcomes.length && (
+          <div className="v-empty">Добавьте исходы — у каждого появится свой пин на узле (тяните стрелку от строки исхода). Исходу можно привязать переменную: путь откроется только при совпадении значения.</div>
+        )}
+        {outcomes.map((o, i) => {
+          const cond = (o.cond || null) as Cond | null;
+          return (
+            <div
+              className="out-ed"
+              data-i={i}
+              key={o.id}
+              onDragStart={(ev) => {
+                const row = ev.currentTarget as HTMLElement;
+                if (row.getAttribute('draggable') !== 'true') { ev.preventDefault(); return; }
+                ev.dataTransfer.effectAllowed = 'move';
+                try { ev.dataTransfer.setData('text/plain', o.id); } catch { /* старые браузеры */ }
+                outDragOid = o.id;
+                setTimeout(() => row.classList.add('dragging'), 0);
+              }}
+              onDragEnd={(ev) => {
+                const row = ev.currentTarget as HTMLElement;
+                row.removeAttribute('draggable');
+                row.classList.remove('dragging', 'drop-above', 'drop-below');
+                outDragOid = null;
+              }}
+              onDragOver={(ev) => {
+                if (!outDragOid || outDragOid === o.id) return;
+                ev.preventDefault();
+                ev.dataTransfer.dropEffect = 'move';
+                const row = ev.currentTarget as HTMLElement;
+                const rect = row.getBoundingClientRect();
+                const below = (ev.clientY - rect.top) > rect.height / 2;
+                row.classList.toggle('drop-below', below);
+                row.classList.toggle('drop-above', !below);
+              }}
+              onDragLeave={(ev) => (ev.currentTarget as HTMLElement).classList.remove('drop-above', 'drop-below')}
+              onDrop={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const row = ev.currentTarget as HTMLElement;
+                const rect = row.getBoundingClientRect();
+                const below = (ev.clientY - rect.top) > rect.height / 2;
+                row.classList.remove('drop-above', 'drop-below');
+                const srcOid = outDragOid;
+                outDragOid = null;
+                if (!srcOid || srcOid === o.id) return;
+                const arr = outcomes;
+                const s = arr.findIndex((x) => x.id === srcOid);
+                const t = arr.findIndex((x) => x.id === o.id);
+                if (s < 0 || t < 0 || s === t) return;
+                store.mutate((d) => {
+                  const nn = d.nodes.find((x) => x.id === n.id);
+                  if (!nn || !Array.isArray(nn.outcomes)) return;
+                  movePairInList(nn.outcomes as { id: string }[], srcOid, o.id, below);
+                }, { label: 'Изменение порядка исходов' });
+              }}
             >
-              <option value="true">true</option>
-              <option value="false">false</option>
+              <div className="out-ed-row">
+                <GripCell title="Перетащите — изменить порядок исходов" />
+                <input
+                  className="inp out-lbl"
+                  value={o.label || ''}
+                  placeholder="Название исхода…"
+                  maxLength={60}
+                  onFocus={() => { editPreRef.current = store.beginEdit(); }}
+                  onChange={(ev) => store.updateOutcome(n.id, o.id, { label: ev.target.value }, { history: false })}
+                  onBlur={() => { store.commitEdit(editPreRef.current, 'Подпись исхода'); editPreRef.current = null; }}
+                />
+                <button type="button" className="v-del out-del" title="Удалить исход" onClick={() => store.deleteOutcome(n.id, o.id)}>
+                  <Ico name="x" size={12} />
+                </button>
+              </div>
+              <div className="out-ed-cond">
+                <div className="seg out-cond-tog">
+                  <button
+                    type="button"
+                    data-s="off"
+                    className={o.cond ? '' : 'on'}
+                    onClick={() => setOutcomeCond(store, n.id, o.id, null, 'Сброс условия исхода')}
+                  >
+                    Без условия
+                  </button>
+                  <button
+                    type="button"
+                    data-s="on"
+                    className={o.cond ? 'on' : ''}
+                    onClick={() => setOutcomeCond(store, n.id, o.id, branchCondDefault(doc), 'Условие исхода')}
+                  >
+                    По переменной
+                  </button>
+                </div>
+                {cond && vars.length > 0 && (
+                  <CondRow
+                    doc={doc}
+                    cond={cond}
+                    cls="out-cond-row"
+                    onChange={(next, live) => {
+                      if (live) store.updateOutcome(n.id, o.id, { cond: next as typeof o.cond }, { history: false });
+                      else setOutcomeCond(store, n.id, o.id, next, 'Условие исхода');
+                    }}
+                    onEditPre={() => { editPreRef.current = store.beginEdit(); }}
+                    onEditEnd={() => { store.commitEdit(editPreRef.current, 'Условие исхода'); editPreRef.current = null; }}
+                  />
+                )}
+                {cond && !vars.length && <div className="v-empty">Нет переменных — создайте на вкладке «Переменные».</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ margin: '6px 0 10px' }}>
+        <button type="button" className="btn" id="iOutAdd" style={{ width: '100%' }} onClick={() => store.addOutcome(n.id)}>
+          <Ico name="plus" size={14} />Добавить исход
+        </button>
+      </div>
+    </>
+  );
+}
+
+/* ═══ действие: список кнопок (inspActionsHtml + bindInspActions) ═══ */
+
+function ActionsEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
+  const actions = Array.isArray(n.actions) ? (n.actions as { id: string; label?: string }[]) : [];
+  return (
+    <>
+      <label className="i-lab">Кнопки действия ({actions.length})</label>
+      <div id="iActs">
+        {!actions.length && (
+          <div className="v-empty">Добавьте кнопки с коротким текстом — у каждой свой пин на узле. В проигрывании игрок нажимает кнопку: исход задаётся стрелкой от её пина.</div>
+        )}
+        {actions.map((a, i) => (
+          <div
+            className="out-ed"
+            data-i={i}
+            key={a.id}
+            onDragStart={(ev) => {
+              const row = ev.currentTarget as HTMLElement;
+              if (row.getAttribute('draggable') !== 'true') { ev.preventDefault(); return; }
+              ev.dataTransfer.effectAllowed = 'move';
+              try { ev.dataTransfer.setData('text/plain', a.id); } catch { /* старые браузеры */ }
+              outDragOid = a.id;
+              setTimeout(() => row.classList.add('dragging'), 0);
+            }}
+            onDragEnd={(ev) => {
+              const row = ev.currentTarget as HTMLElement;
+              row.removeAttribute('draggable');
+              row.classList.remove('dragging', 'drop-above', 'drop-below');
+              outDragOid = null;
+            }}
+            onDragOver={(ev) => {
+              if (!outDragOid || outDragOid === a.id) return;
+              ev.preventDefault();
+              ev.dataTransfer.dropEffect = 'move';
+              const row = ev.currentTarget as HTMLElement;
+              const rect = row.getBoundingClientRect();
+              const below = (ev.clientY - rect.top) > rect.height / 2;
+              row.classList.toggle('drop-below', below);
+              row.classList.toggle('drop-above', !below);
+            }}
+            onDragLeave={(ev) => (ev.currentTarget as HTMLElement).classList.remove('drop-above', 'drop-below')}
+            onDrop={(ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              const row = ev.currentTarget as HTMLElement;
+              const rect = row.getBoundingClientRect();
+              const below = (ev.clientY - rect.top) > rect.height / 2;
+              row.classList.remove('drop-above', 'drop-below');
+              const srcOid = outDragOid;
+              outDragOid = null;
+              if (!srcOid || srcOid === a.id) return;
+              const s = actions.findIndex((x) => x.id === srcOid);
+              const t = actions.findIndex((x) => x.id === a.id);
+              if (s < 0 || t < 0 || s === t) return;
+              store.mutate((d) => {
+                const nn = d.nodes.find((x) => x.id === n.id);
+                if (!nn || !Array.isArray(nn.actions)) return;
+                movePairInList(nn.actions as { id: string }[], srcOid, a.id, below);
+              }, { label: 'Изменение порядка кнопок' });
+            }}
+          >
+            <div className="out-ed-row">
+              <GripCell title="Перетащите — изменить порядок кнопок" />
+              <input
+                className="inp out-lbl"
+                value={a.label || ''}
+                placeholder="Текст кнопки…"
+                maxLength={60}
+                onFocus={() => { editPreRef.current = store.beginEdit(); }}
+                onChange={(ev) => store.updateAction(n.id, a.id, { label: ev.target.value }, { history: false })}
+                onBlur={() => { store.commitEdit(editPreRef.current, 'Кнопка действия'); editPreRef.current = null; }}
+              />
+              <button type="button" className="v-del out-del" title="Удалить кнопку" onClick={() => store.deleteAction(n.id, a.id)}>
+                <Ico name="x" size={12} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ margin: '6px 0 10px' }}>
+        <button type="button" className="btn" id="iActAdd" style={{ width: '100%' }} onClick={() => store.addAction(n.id)}>
+          <Ico name="plus" size={14} />Добавить кнопку
+        </button>
+      </div>
+    </>
+  );
+}
+
+/* ═══ нода переменной (inspVarHtml + bindInspVar) ═══ */
+
+function VarNodeEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
+  const doc = store.doc;
+  const vars = varsList(doc);
+  const v0 = varById(doc, n.vid);
+  const vt = v0 ? varType(v0) : 'num';
+  const mode = n.varMode === 'get' ? 'get' : 'set';
+  const opd = opsForType(vt);
+  return (
+    <>
+      <label className="i-lab">Переменная</label>
+      <select
+        className="inp"
+        id="iVarSel"
+        value={n.vid || ''}
+        onChange={(ev) => store.updateNode(n.id, { vid: ev.target.value || null }, { label: 'Привязка переменной' })}
+      >
+        <option value="">— не выбрана —</option>
+        {vars.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+      </select>
+      {!vars.length && <div className="v-empty">Нет переменных — создайте их на вкладке «Переменные» слева, либо перетащите переменную на холст.</div>}
+      <label className="i-lab">Режим ноды</label>
+      <div className="seg" id="iVarMode">
+        <button
+          type="button"
+          data-m="get"
+          className={mode === 'get' ? 'on' : ''}
+          title="Показывает значение переменной"
+          onClick={() => store.updateNode(n.id, { varMode: 'get' }, { label: 'Режим переменной' })}
+        >
+          Чтение
+        </button>
+        <button
+          type="button"
+          data-m="set"
+          className={mode === 'set' ? 'on' : ''}
+          title="Меняет значение переменной"
+          onClick={() => store.updateNode(n.id, { varMode: 'set' }, { label: 'Режим переменной' })}
+        >
+          Изменение
+        </button>
+      </div>
+      {mode === 'set' && vars.length > 0 && (
+        <div className="v-row op" id="iVarOpRow" style={{ marginTop: 6 }}>
+          <select
+            className="inp v-op"
+            title="Операция"
+            value={String(n.varOp ?? '=')}
+            onChange={(ev) => store.updateNode(n.id, { varOp: ev.target.value }, { label: 'Операция переменной' })}
+          >
+            {Object.keys(opd).map((k) => <option key={k} value={k}>{opd[k]}</option>)}
+          </select>
+          {vt === 'bool' ? (
+            <select
+              className="inp v-val"
+              title="Значение"
+              value={isTrueVal(n.varVal) ? '1' : '0'}
+              onChange={(ev) => store.updateNode(n.id, { varVal: ev.target.value === '1' }, { label: 'Значение переменной' })}
+            >
+              <option value="1">true</option>
+              <option value="0">false</option>
             </select>
           ) : (
             <input
-              value={String(cond.val ?? '')}
-              aria-label="Значение условия"
+              className="inp v-val"
+              title={vt === 'num' ? 'На сколько изменить' : 'Новое значение'}
+              value={String(n.varVal ?? '')}
               onFocus={() => { editPreRef.current = store.beginEdit(); }}
-              onChange={(e) => onChange({ ...cond, val: e.target.value })}
-              onBlur={() => { store.commitEdit(editPreRef.current, 'Значение условия'); editPreRef.current = null; }}
+              onChange={(ev) => store.updateNode(n.id, { varVal: castInspVal(ev.target.value) }, { history: false })}
+              onBlur={() => { store.commitEdit(editPreRef.current, 'Значение переменной'); editPreRef.current = null; }}
             />
           )}
-          <span className="rn-cond-hint">{condText(store.doc, cond)}</span>
         </div>
       )}
-      {on && !vars.length && <div className="rn-insp-hint warn">Нет переменных — создайте их на вкладке «Переменные».</div>}
+      {mode === 'get' && <div className="v-empty" style={{ marginTop: 6 }}>В режиме новеллы эта нода считает значение (всплывашка у HUD) и ведёт дальше; её можно соединить со входом «переменная» у развилки.</div>}
+    </>
+  );
+}
+
+/* ═══ связь (renderInspEdge + inspCondHtml) ═══ */
+
+function EdgeBody({ store, eid, editPreRef }: { store: VetviStore; eid: string; editPreRef: React.MutableRefObject<string | null> }) {
+  const e = store.edgeById(eid);
+  if (!e) return null;
+  const A = store.nodeById(e.from);
+  const B = store.nodeById(e.to);
+  const kind = e.kind || 'flow';
+
+  let fromReplyInfo: ReactNode = null;
+  if (A && A.type === 'dialog' && e.fromReply) {
+    const r = findReplyText(A.dialog?.replies, e.fromReply);
+    if (r) fromReplyInfo = <><br />из реплики: «{r.slice(0, 40)}»</>;
+  }
+  let fromOutInfo: ReactNode = null;
+  if (A && A.type === 'branch' && e.fromOut) {
+    const oo = (A.outcomes || []).find((o) => o.id === e.fromOut);
+    if (oo) fromOutInfo = <><br />из исхода: «{oo.label || 'Исход'}»</>;
+  }
+
+  return (
+    <>
+      <div className="i-cap">Связь</div>
+      <label className="i-lab">Подпись</label>
+      <input
+        className="inp"
+        id="iLbl"
+        value={e.label || ''}
+        placeholder="например: условие выполнено"
+        onFocus={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => store.setEdgeLabel(eid, ev.target.value, { history: false })}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Подпись связи'); editPreRef.current = null; }}
+      />
+      <label className="i-lab">Тип связи</label>
+      <div className="seg" id="iKind">
+        {Object.keys(KINDS).map((k) => (
+          <button key={k} type="button" data-k={k} className={kind === k ? 'on' : ''} onClick={() => store.setEdgeKind(eid, k)}>
+            {KINDS[k]}
+          </button>
+        ))}
+      </div>
+      {A && A.type === 'branch' && <EdgeCondSection store={store} e={e} editPreRef={editPreRef} />}
+      <div className="i-meta">
+        из: «{A ? A.title : '?'}»{fromReplyInfo}{fromOutInfo}
+        <br />в: «{B ? B.title : '?'}»
+        <br />ID: {e.id}
+      </div>
+      {store.selEdges.size > 1 && <div className="i-meta">выбрано связей: {store.selEdges.size}</div>}
+      {!!(e.pts && e.pts.length) && <div className="i-meta">точек излома: {e.pts.length}</div>}
+      <div className="i-actions">
+        <button type="button" className="btn" id="iSwap" onClick={() => store.reverseEdge(eid)}>
+          <Ico name="swap" />Развернуть
+        </button>
+        <button type="button" className="btn danger" id="iDelE" onClick={() => store.deleteEdge(eid)}>
+          <Ico name="trash" />Удалить
+        </button>
+      </div>
+    </>
+  );
+}
+
+function EdgeCondSection({ store, e, editPreRef }: { store: VetviStore; e: { id: string; cond?: unknown }; editPreRef: React.MutableRefObject<string | null> }) {
+  const doc = store.doc;
+  const vars = varsList(doc);
+  const on = !!e.cond;
+  const cond = (e.cond || null) as Cond | null;
+  return (
+    <>
+      <label className="i-lab">Условие перехода (развилка)</label>
+      <div className="seg" id="iCondTog">
+        <button
+          type="button"
+          data-s="off"
+          className={on ? '' : 'on'}
+          onClick={() => store.setEdgeCond(e.id, null)}
+        >
+          Без условия
+        </button>
+        <button
+          type="button"
+          data-s="on"
+          className={on ? 'on' : ''}
+          onClick={() => store.setEdgeCond(e.id, branchCondDefault(doc) as { vid: string; op: string; val: number | string })}
+        >
+          По переменной
+        </button>
+      </div>
+      {on && vars.length > 0 && (
+        <CondRow
+          doc={doc}
+          cond={cond as Cond}
+          cls="iCondRow"
+          onChange={(next, live) => {
+            if (live) store.updateEdge(e.id, { cond: next as { vid: string; op: string; val: number | string } }, { history: false });
+            else store.setEdgeCond(e.id, next as { vid: string; op: string; val: number | string });
+          }}
+          onEditPre={() => { editPreRef.current = store.beginEdit(); }}
+          onEditEnd={() => { store.commitEdit(editPreRef.current, 'Условие связи'); editPreRef.current = null; }}
+        />
+      )}
+      {on && !vars.length && <div className="v-empty">Нет переменных — создайте на вкладке «Переменные» слева.</div>}
+    </>
+  );
+}
+
+/* ═══ группа / цепочка (renderInspGroup) ═══ */
+
+function GroupBody({ store, gid, editPreRef }: { store: VetviStore; gid: string; editPreRef: React.MutableRefObject<string | null> }) {
+  const g = store.groupById(gid);
+  if (!g) return null;
+  if (g.stack === true) return <StackBody store={store} g={g} editPreRef={editPreRef} />;
+
+  const doc = store.doc;
+  const ms = allDescNodes(doc, gid);
+  const fold = typeof g.fold === 'number' ? g.fold : 2;
+  const parents = doc.groups.filter((o) => o.id !== gid && !isDescGroup(doc, o.id, gid));
+  const alpha = Math.round(clamp(typeof g.alpha === 'number' ? g.alpha : 0.55, 0.1, 1) * 100);
+
+  const pickColor = (v: string | null, fromPicker: boolean) => {
+    store.mutate((d) => {
+      const gg = d.groups.find((x) => x.id === gid);
+      if (!gg) return;
+      if (fromPicker && v) paletteAdd(d, v);
+      gg.color = v;
+    }, { label: 'Цвет группы' });
+  };
+
+  return (
+    <>
+      <div className="i-cap">Группа</div>
+      <label className="i-lab">Название</label>
+      <input
+        className="inp"
+        id="igName"
+        value={g.name || ''}
+        maxLength={60}
+        onFocus={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => store.updateGroup(gid, { name: ev.target.value }, { history: false })}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Название группы'); editPreRef.current = null; }}
+      />
+      <label className="i-lab">Вид</label>
+      <div className="seg" id="igFoldSeg">
+        {[2, 1, 0].map((f) => (
+          <button
+            key={f}
+            type="button"
+            data-f={f}
+            className={fold === f ? 'on' : ''}
+            onClick={() => store.updateGroup(gid, { fold: f }, { label: 'Смена вида группы' })}
+          >
+            {FOLD_NAMES[f]}
+          </button>
+        ))}
+      </div>
+      <label className="i-lab">Родительская группа</label>
+      <select
+        className="inp"
+        id="igParent"
+        value={g.parent || ''}
+        onChange={(ev) => store.updateGroup(gid, { parent: ev.target.value || null }, { label: 'Вложенность группы' })}
+      >
+        <option value="">— нет —</option>
+        {parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <label className="i-lab">Цвет</label>
+      <Swatches id="igSw" cur={g.color || null} doc={doc} extraFirst={['#9aa1ac']} onPick={pickColor} />
+      <label className="i-lab">Прозрачность: <span id="igAlphaVal">{alpha}%</span></label>
+      <input
+        type="range"
+        className="inp"
+        id="igAlpha"
+        min={10}
+        max={100}
+        value={alpha}
+        onPointerDown={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => store.updateGroup(gid, { alpha: Number(ev.target.value) / 100 }, { history: false })}
+        onPointerUp={() => { store.commitEdit(editPreRef.current, 'Прозрачность группы'); editPreRef.current = null; }}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Прозрачность группы'); editPreRef.current = null; }}
+      />
+      <label className="chk">
+        <input
+          type="checkbox"
+          id="igBadge"
+          checked={!!g.badge}
+          onChange={(ev) => {
+            const on = ev.target.checked;
+            store.mutate((d) => {
+              const gg = d.groups.find((x) => x.id === gid);
+              if (gg) (gg as { badge?: unknown }).badge = on;
+            }, { label: on ? 'Ярлык группы: вкл' : 'Ярлык группы: выкл' });
+          }}
+        />
+        Ярлык с именем (не зависит от зума)
+      </label>
+      <label className="chk">
+        <input
+          type="checkbox"
+          id="igAuto"
+          checked={!!g.auto}
+          onChange={(ev) => {
+            const on = ev.target.checked;
+            store.mutate((d) => {
+              const gg = d.groups.find((x) => x.id === gid);
+              if (!gg) return;
+              (gg as { auto?: unknown }).auto = on;
+              if (on) { delete gg.fx; delete gg.fy; delete gg.fw; delete gg.fh; }
+            }, { label: 'Авторазмер группы' });
+          }}
+        />
+        Авторазмер (рамка следует за содержимым)
+      </label>
+      <label className="i-lab">Состав ({ms.length})</label>
+      <div className="gm-list">
+        {ms.map((m) => (
+          <div className="gm-row" key={m.id}>
+            <span className="dot" style={{ background: m.color || typeInfo(m.type).color }} />
+            {m.title || typeInfo(m.type).name}
+          </div>
+        ))}
+      </div>
+      <div className="i-actions">
+        <button
+          type="button"
+          className="btn"
+          id="igSelAll"
+          onClick={() => { const ids = ms.map((m) => m.id); if (ids.length) store.setSel(ids); }}
+        >
+          <Ico name="target" />Выделить все ноды
+        </button>
+        <button type="button" className="btn danger" id="igUng" onClick={() => store.dissolveGroup(gid)}>
+          <Ico name="x" />Распустить
+        </button>
+      </div>
+      <div className="i-meta">«Преобразовать в цепочку»: порядок нод берётся по раскладке (сверху вниз, у широкой группы — слева направо), первая нода сохраняет входящие связи, у остальных старые связи убираются; между соседями появятся связи «кто за кем».</div>
+    </>
+  );
+}
+
+/* цепочка (stack-ветка renderInspGroup) */
+function StackBody({ store, g, editPreRef }: { store: VetviStore; g: VetviGroup; editPreRef: React.MutableRefObject<string | null> }) {
+  const doc = store.doc;
+  const ids = stackOrderIds(doc, g);
+  const tint = typeof g.tint === 'number' ? g.tint : 0;
+  const pickColor = (v: string | null, fromPicker: boolean) => {
+    store.mutate((d) => {
+      const gg = d.groups.find((x) => x.id === g.id);
+      if (!gg) return;
+      if (v === null) { gg.color = null; gg.tint = 0; return; }
+      if (fromPicker) paletteAdd(d, v);
+      gg.color = v;
+    }, { label: v === null ? 'Сброс цвета цепочки' : 'Цвет цепочки' });
+  };
+  return (
+    <>
+      <div className="i-cap">Цепочка</div>
+      <label className="i-lab">Название</label>
+      <input
+        className="inp"
+        id="igName"
+        value={g.name || ''}
+        maxLength={60}
+        onFocus={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => store.updateGroup(g.id, { name: ev.target.value }, { history: false })}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Название группы'); editPreRef.current = null; }}
+      />
+      <label className="i-lab">Цвет фона карточки</label>
+      <Swatches id="iqSw" cur={g.color || null} doc={doc} onPick={pickColor}>
+        <button
+          type="button"
+          className={'swatch reset' + (g.color ? '' : ' on')}
+          title="Сбросить к обычному цвету нод"
+          onClick={() => pickColor(null, false)}
+        >
+          <Ico name="x" size={12} />
+        </button>
+      </Swatches>
+      <label className="i-lab">Яркость цвета: <span id="iqTintVal">{(tint > 0 ? '+' : '') + tint}%</span></label>
+      <input
+        type="range"
+        className="inp"
+        id="iqTint"
+        min={-60}
+        max={60}
+        value={tint}
+        onPointerDown={() => { editPreRef.current = store.beginEdit(); }}
+        onChange={(ev) => store.updateGroup(g.id, { tint: Number(ev.target.value) }, { history: false })}
+        onPointerUp={() => { store.commitEdit(editPreRef.current, 'Яркость цепочки'); editPreRef.current = null; }}
+        onBlur={() => { store.commitEdit(editPreRef.current, 'Яркость цепочки'); editPreRef.current = null; }}
+      />
+      <div className="i-meta" />
+      <label className="i-lab">Порядок ({ids.length})</label>
+      <div className="gm-list">
+        {ids.map((id, i) => {
+          const nq = store.nodeById(id);
+          if (!nq) return null;
+          const ps = (nq.type === 'dialog')
+            ? ((nq.dialog && nq.dialog.participants) || [])
+            : (Array.isArray(nq.participants) ? (nq.participants as string[]) : []);
+          const psOk = ps.filter((p) => store.charById(p));
+          const dot = psOk.length ? store.charColor(psOk[0]) : (nq.color || typeInfo(nq.type).color);
+          let snip = '';
+          if (nq.type === 'dialog' && nq.dialog) {
+            const dq = (nq.dialog.description || '').trim();
+            const rq = (nq.dialog.replies || []).map((r) => (r.text || '').trim()).filter(Boolean);
+            snip = [dq].concat(rq).slice(0, 2).join(' · ');
+          } else {
+            snip = (nq.text || '').trim();
+          }
+          if (snip.length > 70) snip = snip.slice(0, 70) + '…';
+          return (
+            <div className="gm-row" data-nid={nq.id} key={nq.id}>
+              <span className="q-num">{i + 1}</span>
+              <span className="dot" style={{ background: dot, color: dot }} />
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {nq.title}{snip ? <span className="gm-snip"> — {snip}</span> : null}
+              </span>
+              {psOk.length > 0 && (
+                <div className="q-cast">
+                  {psOk.map((pid) => (
+                    <span key={pid} title="Прикреплённый персонаж" style={{ background: store.charColor(pid) }}>
+                      {store.charName(pid)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="i-actions">
+        <button type="button" className="btn danger" id="igUng" onClick={() => store.dissolveGroup(g.id)}>
+          <Ico name="x" />Разобрать цепочку
+        </button>
+      </div>
+      <div className="i-meta">
+        тип: цепочка нод<br />ID: {g.id} · входов в цепочку: {doc.edges.filter((e) => ids[0] && e.to === ids[0] && e.tin !== 'var').length}
+      </div>
+    </>
+  );
+}
+
+/* ═══ мультивыделение (renderInspMulti) ═══ */
+
+function MultiBody({ store }: { store: VetviStore }) {
+  const gn = store.selGroups.size;
+  const [name, setName] = useState('');
+  const allDialogs = store.sel.size >= 2 && [...store.sel].every((id) => store.nodeById(id)?.type === 'dialog');
+  const create = () => store.createGroupFromSel(name.trim());
+  return (
+    <>
+      <div className="i-cap">Группа</div>
+      <div className="i-empty" style={{ paddingTop: 6 }}>
+        <h3>Выбрано: {store.sel.size} узлов{gn ? ', ' + gn + ' групп' : ''}</h3>
+        <p>Выделенные группы станут вложенными в новую. Узлы внутри выделенных групп останутся в них.</p>
+      </div>
+      <div className="grp-row">
+        <input
+          className="inp"
+          id="mgName"
+          placeholder="Название группы…"
+          maxLength={60}
+          value={name}
+          onChange={(ev) => setName(ev.target.value)}
+          onKeyDown={(ev) => { if (ev.key === 'Enter') create(); }}
+        />
+        <button type="button" className="btn primary" id="mgGo" title={'Сгруппировать (' + hkText('group') + ')'} onClick={create}>
+          Сгруппировать
+        </button>
+      </div>
+      {allDialogs && (
+        <button type="button" className="btn primary" id="mgMerge" style={{ width: '100%', marginTop: 8 }} onClick={() => store.mergeDialogNodes()}>
+          <Ico name="dialog" size={14} />Объединить в один диалог
+        </button>
+      )}
+      <div className="i-actions">
+        <button type="button" className="btn" title={'В ряд (' + hkText('alignH') + ')'} onClick={() => store.alignH()}>
+          <Ico name="alignH" />В ряд
+        </button>
+        <button type="button" className="btn" title={'В столбец (' + hkText('alignV') + ')'} onClick={() => store.alignV()}>
+          <Ico name="alignV" />В столбец
+        </button>
+        <button type="button" className="btn" id="gDup" onClick={() => { const r = store.duplicateSelection(); if (r) store.startCarry(r.ids, r.pre); }}>
+          <Ico name="copy" />Дубль
+        </button>
+        <button type="button" className="btn danger" id="gDel" onClick={() => store.deleteSelected()}>
+          <Ico name="trash" />Удалить
+        </button>
+      </div>
+    </>
+  );
+}
+
+/* ═══ пусто (renderInspEmpty) ═══ */
+
+function EmptyBody({ store }: { store: VetviStore }) {
+  const doc = store.doc;
+  const customs = customTypesOf(doc);
+  const keys = [...Object.keys(TYPES), ...customs.map((c) => c.id)];
+  const cells = keys.map((key) => {
+    const c = customs.find((x) => x.id === key) || null;
+    const info = typeInfo(key);
+    const name = c ? c.name : info.name;
+    const color = c ? (c.color || '#8b929c') : info.color;
+    const cnt = doc.nodes.filter((x) => x.type === key).length;
+    return (
+      <div className="ovcell" key={key}>
+        <span className="d" style={{ background: color }} />
+        <span className="n">{name}</span>
+        <span className="c">{cnt}</span>
+      </div>
+    );
+  });
+  return (
+    <div className="i-empty">
+      <div className="ghost"><Ico name="branch" size={26} /></div>
+      <h3>Ничего не выбрано</h3>
+      <p>
+        Кликните по узлу, связи или рамке группы.<br />
+        <b>Ctrl+ЛКМ</b> (зажать и тянуть) — перемещение по холсту.<br />
+        <b>Ctrl+Shift+ЛКМ</b> по холсту — нарисовать новую группу.
+      </p>
+      <div className="ovgrid">{cells}</div>
+      <div className="ovmeta">
+        создан: {fmtD(doc.meta.created)}<br />
+        изменён: {fmtD(doc.meta.modified)}<br />
+        своих типов: {customs.length} · групп: {doc.groups.length}
+      </div>
     </div>
+  );
+}
+
+/* ═══ корень: aside#right → .i-cap → #insp ═══ */
+
+export function Inspector(props: { store: VetviStore; onClose: () => void }) {
+  const { store } = props;
+  void store.revision;
+  const editPreRef = useRef<string | null>(null);
+  const inspRef = useRef<HTMLDivElement | null>(null);
+
+  /* выбор режима — как в renderInspector оригинала; свой .i-cap у каждого режима внутри #insp */
+  let body: ReactNode = null;
+  let lockIds: string[] = [];
+
+  const edgeSel = store.selEdges.size > 0 && store.sel.size === 0;
+  const eSel = edgeSel ? store.edgeById([...store.selEdges][0]) : undefined;
+
+  if (eSel) {
+    lockIds = [eSel.id];
+    body = <EdgeBody store={store} eid={eSel.id} editPreRef={editPreRef} />;
+  } else {
+    const total = store.sel.size + store.selGroups.size;
+    if (total > 1) {
+      body = <MultiBody store={store} />;
+    } else if (total === 1 && store.selGroups.size === 1) {
+      const gid = [...store.selGroups][0];
+      const g = store.groupById(gid);
+      if (g) {
+        lockIds = [gid];
+        body = <GroupBody store={store} gid={gid} editPreRef={editPreRef} />;
+      } else {
+        body = <EmptyBody store={store} />;
+      }
+    } else if (store.sel.size === 1) {
+      const nid = [...store.sel][0];
+      const n = store.nodeById(nid);
+      if (n) {
+        lockIds = [nid];
+        body = <NodeBody store={store} n={n} editPreRef={editPreRef} />;
+      } else {
+        body = <EmptyBody store={store} />;
+      }
+    } else {
+      body = <EmptyBody store={store} />;
+    }
+  }
+
+  /* applyInspectorLockState: блокировка полей, если объект правит другой участник */
+  const blk = lockFor(store, lockIds);
+  useEffect(() => {
+    const box = inspRef.current;
+    if (!box) return;
+    const els = box.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button');
+    els.forEach((el) => { el.disabled = false; el.removeAttribute('data-lklock'); });
+    const hint = box.querySelector('#inspLockHint');
+    if (hint) hint.remove();
+    if (!blk) return;
+    els.forEach((el) => {
+      if (!el.disabled) { el.disabled = true; el.setAttribute('data-lklock', '1'); }
+    });
+    const d = document.createElement('div');
+    d.id = 'inspLockHint';
+    d.style.cssText = 'display:flex;align-items:center;gap:7px;margin:2px 0 10px;padding:7px 10px;border:1px solid ' + hexToRgba(blk.color, 0.6) + ';border-radius:8px;background:rgba(226,165,78,.07);font:600 11.5px var(--body);color:#f4d9b8';
+    d.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;flex:none;background:' + (blk.color || '#8b929c') + '"></span>Объект используется другим пользователем' + (blk.name ? ' — ' + blk.name : '');
+    box.insertBefore(d, box.firstChild);
+  });
+
+  return (
+    <aside id="right" aria-label="Инспектор">
+      <div className="i-cap">
+        Инспектор элемента
+        <button
+          type="button"
+          className="mini-btn"
+          title="Снять выделение"
+          style={{ float: 'right', width: 20, height: 20, marginTop: -2 }}
+          onClick={props.onClose}
+        >
+          ×
+        </button>
+      </div>
+      <div id="insp" ref={inspRef}>
+        {body}
+      </div>
+    </aside>
   );
 }

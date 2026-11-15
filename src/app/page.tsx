@@ -10,7 +10,7 @@
 
 import { useEffect } from 'react';
 
-import './vetvi-react.css';
+import './vetvi.css';
 import VetviApp from '@/vetvi/web/VetviApp';
 import { getStore } from '@/vetvi/web/store';
 

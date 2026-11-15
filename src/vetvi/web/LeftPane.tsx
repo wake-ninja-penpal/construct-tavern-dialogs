@@ -1,59 +1,132 @@
 'use client';
 
 /**
- * Ветви — левая панель (порт вкладок оригинала): Элементы (палитра с drag),
- * Обзор (список нод), Переменные (полный редактор), Персонажи (аватары/цвета).
+ * Ветви — левая панель: 1:1 порт aside#left классической версии.
+ * Вкладки .ltabs/.ltab/.lt-ic, палитра .pal-item/.pal-sep/.pal-group/.cv-card,
+ * обзор .search/.nli (.grp/.ov-f/.garr/.dot/.t/.k/.list-empty),
+ * переменные .v-item/.v-row/.v-grip/.v-name/.v-type/.v-val/.v-del/.v-fold/.v-edit/.ve-*,
+ * персонажи .c-avpick/.c-av/.c-name/.ce-avrow/.shp/.swatches/.ce-desc.
+ * Классы, id и структура DOM совпадают с оригиналом — стили vetvi.css применяются как есть.
  */
 
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
-import { NODE_W, STATUS_RU, TYPES } from '@/vetvi/core/constants';
+import { NODE_W, PALETTE_COLORS, STATUS_RU, TYPES } from '@/vetvi/core/constants';
 import { nodeColor, typeInfo } from '@/vetvi/core/geometry';
-import { opsForType, VAR_TYPES, varCastVal, varType } from '@/vetvi/core/vars';
-import type { VetviChar, VetviNode, VetviVar } from '@/vetvi/core/types';
+import { opsForType, VAR_TYPES, varCastVal, varType, isTrueVal } from '@/vetvi/core/vars';
+import type { VetviChar, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vetvi/core/types';
 import { condOpsFor, varById } from '@/vetvi/core/vars';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
+
+/* ── иконки (копия ALLICONS оригинала) ── */
+const P_FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>';
+const P_LIST = '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.1"/><circle cx="3.7" cy="12" r="1.1"/><circle cx="3.7" cy="18" r="1.1"/>';
+const P_VAR = '<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>';
+const P_CHAR = '<circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c1.1-3.4 3.9-5.2 7.2-5.2s6.1 1.8 7.2 5.2"/>';
+const P_CHEV = '<path d="m6 9 6 6 6-6"/>';
+const P_X = '<path d="M6 6l12 12M18 6 6 18"/>';
+const P_GRIP = '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>';
+
+/** ic(name,size) оригинала — svg-обёртка над путём иконки. */
+function Ic(props: { d: string; size?: number }) {
+  const size = props.size || 15;
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <g dangerouslySetInnerHTML={{ __html: props.d }} />
+    </svg>
+  );
+}
 
 export function LeftPane(props: { store: VetviStore }) {
   const { store } = props;
   const tab = store.leftTab;
   void store.revision;
 
+  const tabs = [['pal', 'Элементы'], ['list', 'Обзор'], ['vars', 'Переменные'], ['chars', 'Персонажи']] as const;
+
   return (
-    <aside className="rn-left" style={{ width: store.leftWidth }} aria-label="Панель проекта">
-      <div className="rn-ltabs" role="tablist">
-        {([['pal', 'Элементы'], ['list', 'Обзор'], ['vars', 'Переменные'], ['chars', 'Персонажи']] as const).map(([t, title]) => (
+    <aside id="left" style={{ width: store.leftWidth }} aria-label="Панель проекта">
+      <nav className="ltabs" role="tablist">
+        {tabs.map(([t, title]) => (
           <button
             key={t}
             type="button"
             role="tab"
             aria-selected={tab === t}
+            data-t={t}
             title={title}
-            className={tab === t ? 'on' : ''}
+            className={'ltab' + (tab === t ? ' active' : '')}
             onClick={() => store.setLeftTab(t)}
           >
-            {t === 'pal' && <FolderIcon />}
-            {t === 'list' && <ListIcon />}
-            {t === 'vars' && <VarIcon />}
-            {t === 'chars' && <CharIcon />}
+            <span className="lt-ic">
+              <Ic d={t === 'pal' ? P_FOLDER : t === 'list' ? P_LIST : t === 'vars' ? P_VAR : P_CHAR} size={16} />
+            </span>
           </button>
         ))}
-      </div>
-      <div className="rn-lbody">
-        {tab === 'pal' && <PalettePane store={store} />}
-        {tab === 'list' && <ListPane store={store} />}
-        {tab === 'vars' && <VarsPane store={store} />}
-        {tab === 'chars' && <CharsPane store={store} />}
-      </div>
+      </nav>
+      <PalettePane store={store} active={tab === 'pal'} />
+      <ListPane store={store} active={tab === 'list'} />
+      <VarsPane store={store} active={tab === 'vars'} />
+      <CharsPane store={store} active={tab === 'chars'} />
     </aside>
   );
 }
 
+/* ── свой тип из документа (customTypes оригинала; отображение без редактора) ── */
+interface CustomTypeRec { id: string; name: string; color: string }
+
+function customTypesOf(doc: VetviDoc): CustomTypeRec[] {
+  const arr: unknown[] = Array.isArray(doc.customTypes) ? (doc.customTypes as unknown[]) : [];
+  const out: CustomTypeRec[] = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== 'object') continue;
+    const c = raw as Record<string, unknown>;
+    if (typeof c.id !== 'string' || !c.id) continue;
+    out.push({
+      id: c.id,
+      name: typeof c.name === 'string' && c.name ? c.name : 'Свой тип',
+      color: typeof c.color === 'string' && c.color ? c.color : '#8b929c',
+    });
+  }
+  return out;
+}
+
+function typeInfoEx(doc: VetviDoc, key: string): { name: string; color: string } {
+  if (TYPES[key]) return TYPES[key];
+  const c = customTypesOf(doc).find((x) => x.id === key);
+  return c ? { name: c.name, color: c.color } : { name: 'Нода', color: '#8b929c' };
+}
+
+/** listHidden(key) оригинала: в классике — массив, в ядре — record. */
+function listHiddenAt(doc: VetviDoc, key: string): boolean {
+  const lh = doc.listHidden;
+  if (Array.isArray(lh)) return ((lh as unknown[]).indexOf(key) >= 0);
+  if (lh && typeof lh === 'object') return Boolean((lh as Record<string, unknown>)[key]);
+  return false;
+}
+
+function gColorOf(g: VetviGroup): string {
+  return typeof g.color === 'string' && g.color ? g.color : '#9aa1ac';
+}
+
+/** allDescNodes(gid) оригинала: ноды группы + всех вложенных групп. */
+function allDescNodes(store: VetviStore, gid: string, visited?: Set<string>): VetviNode[] {
+  const seen = visited || new Set<string>();
+  if (seen.has(gid)) return [];
+  seen.add(gid);
+  const out: VetviNode[] = [];
+  for (const n of store.doc.nodes) if (n.gid === gid) out.push(n);
+  for (const cg of store.doc.groups) if (cg.parent === gid) out.push(...allDescNodes(store, cg.id, seen));
+  return out;
+}
+
 /* ── Элементы (палитра с перетаскиванием) ── */
-function PalettePane({ store }: { store: VetviStore }) {
-  const drop = (e: React.DragEvent, target: 'canvas') => {
-    void target;
+function PalettePane({ store, active }: { store: VetviStore; active: boolean }) {
+  const [palFold, setPalFold] = useState<Record<string, boolean>>({});
+
+  const drop = (e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('text/vetvi-type');
     if (!type) return;
@@ -65,74 +138,223 @@ function PalettePane({ store }: { store: VetviStore }) {
     };
     store.addNodeAt(type, w.x, w.y);
   };
+
+  const isHidden = (key: string) => listHiddenAt(store.doc, key);
+  const typeKeys = Object.keys(TYPES).concat(customTypesOf(store.doc).map((c) => c.id));
+  const canvasGroups = typeKeys
+    .filter((key) => !isHidden(key))
+    .map((key) => ({ key, list: store.doc.nodes.filter((n) => n.type === key) }))
+    .filter((g) => g.list.length > 0);
+
   return (
-    <div className="rn-pane" onDragOver={(e) => e.preventDefault()} onDrop={(e) => drop(e, 'canvas')}>
-      <div className="rn-pane-head">Элементы сюжета</div>
-      <div className="rn-pane-hint">Перетащите на холст или кликните, чтобы добавить в центр вида.</div>
-      <div className="rn-pal-list">
-        {Object.entries(TYPES).map(([key, info]) => (
-          <div
-            key={key}
-            className="rn-pal-item"
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData('text/vetvi-type', key);
-              e.dataTransfer.effectAllowed = 'copy';
-            }}
-            onClick={() => {
-              const el = document.querySelector('.rn-canvas');
-              const r = el ? el.getBoundingClientRect() : { width: 800, height: 600 };
-              const wx = (r.width / 2 - store.vp.x) / store.vp.z - NODE_W / 2;
-              const wy = (r.height / 2 - store.vp.y) / store.vp.z - 40;
-              store.addNodeAt(key, wx, wy);
-            }}
-          >
-            <span className="rn-pal-ico" style={{ color: info.color }}><TypeIcon type={key} /></span>
-            <span className="rn-pal-name">{info.name}</span>
-            <span className="rn-pal-dot" style={{ background: info.color }} />
-          </div>
-        ))}
+    <div className={'tabpane' + (active ? ' active' : '')} id="panePal" onDragOver={(e) => e.preventDefault()} onDrop={drop}>
+      <div className="v-head" style={{ margin: '2px 10px 8px' }}>
+        <span>Элементы</span>
+      </div>
+      <div id="palList">
+        {typeKeys.map((key) => {
+          const info = typeInfoEx(store.doc, key);
+          const isCustom = !TYPES[key];
+          const off = isHidden(key);
+          const cnt = store.doc.nodes.filter((n) => n.type === key).length;
+          return (
+            <div
+              key={key}
+              className={'pal-item' + (isCustom ? ' custom' : '') + (off ? ' dim' : '')}
+              draggable
+              data-type={key}
+              style={{ '--c': info.color } as CSSProperties}
+              title={(isCustom ? 'Свой тип · ' : '') + info.name}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/vetvi-type', key);
+                e.dataTransfer.effectAllowed = 'copy';
+              }}
+              onClick={() => {
+                const el = document.querySelector('.rn-canvas');
+                const r = el ? el.getBoundingClientRect() : { width: 800, height: 600 };
+                const wx = (r.width / 2 - store.vp.x) / store.vp.z - NODE_W / 2;
+                const wy = (r.height / 2 - store.vp.y) / store.vp.z - 40;
+                store.addNodeAt(key, wx, wy);
+              }}
+            >
+              <span className="pal-ico"><TypeIcon type={key} size={16} /></span>
+              <span className="pal-name">{info.name}</span>
+              <span className="pal-cnt">{cnt}</span>
+            </div>
+          );
+        })}
+        <div className="pal-sep">на холсте</div>
+        {!store.doc.nodes.length && (
+          <div className="pal-hint" style={{ textAlign: 'center' }}>Холст пуст — перетащите что-нибудь сверху.</div>
+        )}
+        {!!store.doc.nodes.length && !canvasGroups.length && (
+          <div className="pal-hint" style={{ textAlign: 'center' }}>Все типы убраны глазиками выше.</div>
+        )}
+        {canvasGroups.map(({ key, list }) => {
+          const info = typeInfoEx(store.doc, key);
+          const isCustom = !TYPES[key];
+          const fk = 'cv:' + key;
+          const folded = !!palFold[fk];
+          return (
+            <Fragment key={fk}>
+              <div
+                className={'pal-group foldable' + (folded ? ' folded' : '')}
+                title={folded ? 'Развернуть' : 'Свернуть'}
+                onClick={() => setPalFold({ ...palFold, [fk]: !folded })}
+              >
+                <span className="pg-chev"><Ic d={P_CHEV} size={10} /></span>
+                <span className="dot" style={{ background: info.color }} />
+                {info.name}{isCustom ? ' ·' : null}
+                <span className="pg-cnt">{list.length}</span>
+              </div>
+              {!folded && list.map((n) => {
+                const desc = n.type === 'dialog'
+                  ? (n.dialog && n.dialog.description ? n.dialog.description : 'диалог')
+                  : (n.text || 'без описания');
+                return (
+                  <div
+                    key={n.id}
+                    className="pal-item cv-card"
+                    draggable
+                    data-node={n.id}
+                    style={{ '--c': nodeColor(n) } as CSSProperties}
+                    title="Клик — перейти · перетащите, чтобы создать копию"
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/vetvi-clone', n.id);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
+                  >
+                    <span className="pal-ico"><TypeIcon type={n.type} size={16} /></span>
+                    <span className="cv-info">
+                      <span className="pal-name">{n.title}</span>
+                      <span className="cv-desc">{desc}</span>
+                    </span>
+                    <span className={'n-st st-' + (STATUS_RU[n.status] ? n.status : 'idea')} title={STATUS_RU[n.status] || ''} />
+                  </div>
+                );
+              })}
+            </Fragment>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-/* ── Обзор (список нод) ── */
-function ListPane({ store }: { store: VetviStore }) {
+/* ── Обзор (список нод и групп) ── */
+function ListPane({ store, active }: { store: VetviStore; active: boolean }) {
   const [q, setQ] = useState('');
-  const nodes = store.doc.nodes.filter((n) => {
+  const [ovFold, setOvFold] = useState<Record<string, boolean>>({});
+  const query = q.toLowerCase();
+
+  const nodeMatches = (n: VetviNode) => {
     if (!q.trim()) return true;
-    const s = q.toLowerCase();
-    return (n.title || '').toLowerCase().includes(s) || (n.text || '').toLowerCase().includes(s);
-  });
-  return (
-    <div className="rn-pane">
-      <div className="rn-pane-head">Обзор проекта</div>
-      <input className="rn-lsearch" placeholder="Фильтр по названию или тексту…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Фильтр нод" />
-      <div className="rn-list-list">
-        {nodes.map((n: VetviNode) => (
-          <button
-            key={n.id}
-            type="button"
-            className={'rn-list-item' + (store.sel.has(n.id) ? ' on' : '')}
-            onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
-          >
-            <span className="rn-list-dot" style={{ background: nodeColor(n) }} />
-            <span className="rn-list-title">{n.title || typeInfo(n.type).name}</span>
-            <span className="rn-list-type">{typeInfo(n.type).name}</span>
-            <span className={'rn-st st-' + (STATUS_RU[n.status] ? n.status : 'idea')} />
-          </button>
-        ))}
-        {!nodes.length && <div className="rn-pane-hint">Ничего не найдено.</div>}
+    return (n.title || '').toLowerCase().includes(query) || (n.text || '').toLowerCase().includes(query);
+  };
+
+  const selectGroupCenter = (gid: string) => {
+    store.selectGroupOnly(gid);
+    const ms = allDescNodes(store, gid);
+    if (!ms.length) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of ms) {
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+    const el = document.querySelector('.rn-canvas');
+    const r = el ? el.getBoundingClientRect() : { width: 800, height: 600 };
+    store.setViewport({
+      x: r.width / 2 - ((minX + maxX) / 2) * store.vp.z,
+      y: r.height / 2 - ((minY + maxY) / 2) * store.vp.z,
+    });
+  };
+
+  const nodeRow = (n: VetviNode, indent: number | null): ReactNode => (
+    <div
+      key={n.id}
+      className={'nli' + (store.sel.has(n.id) ? ' sel' : '')}
+      data-id={n.id}
+      style={indent == null ? undefined : { paddingLeft: indent }}
+      onClick={() => { store.selectOnly(n.id); store.requestCenter(n.id); }}
+    >
+      <span className="dot" style={{ background: nodeColor(n), color: nodeColor(n) }} />
+      <span className="t">{n.title}</span>
+      <span className="k">{typeInfo(n.type).name}</span>
+    </div>
+  );
+
+  const groupRows = (g: VetviGroup, depth: number, out: ReactNode[]) => {
+    const desc = allDescNodes(store, g.id);
+    const matchSelf = !query || g.name.toLowerCase().includes(query);
+    const matched = desc.filter(nodeMatches);
+    if (query && !matchSelf && !matched.length) return;
+    const indent = 9 + depth * 14;
+    const isF = !!ovFold[g.id] && !query;
+    out.push(
+      <div
+        key={'g:' + g.id}
+        className={'nli grp' + (store.selGroups.has(g.id) ? ' sel' : '')}
+        data-gid={g.id}
+        style={{ paddingLeft: indent }}
+        onClick={(ev) => {
+          const tgt = ev.target as Element | null;
+          if (tgt && tgt.closest && tgt.closest('.ov-f')) return;
+          selectGroupCenter(g.id);
+        }}
+      >
+        <button
+          type="button"
+          className={'ov-f' + (isF ? ' folded' : '')}
+          title="Свернуть/развернуть"
+          onClick={(ev) => { ev.stopPropagation(); setOvFold({ ...ovFold, [g.id]: !ovFold[g.id] }); }}
+        >
+          <Ic d={P_CHEV} size={10} />
+        </button>
+        <span className="garr"><Ic d={P_FOLDER} size={11} /></span>
+        <span className="dot" style={{ background: gColorOf(g), color: gColorOf(g) }} />
+        <span className="t">{g.name}</span>
+        <span className="k">{desc.length}</span>
       </div>
+    );
+    if (isF) return;
+    for (const cg of store.doc.groups) if (cg.parent === g.id) groupRows(cg, depth + 1, out);
+    for (const n of store.membersOf(g.id).filter((x) => matchSelf || nodeMatches(x))) out.push(nodeRow(n, indent + 22));
+  };
+
+  const rows: ReactNode[] = [];
+  for (const g of store.childGroups(null)) groupRows(g, 0, rows);
+  const loose = store.doc.nodes.filter((n) => !n.gid && nodeMatches(n));
+  if (store.doc.groups.length && loose.length) {
+    rows.push(<div key="sep-loose" className="pal-sep" style={{ margin: '16px 4px 2px' }}>без группы</div>);
+  }
+  for (const n of loose) rows.push(nodeRow(n, null));
+  if (!rows.length) {
+    rows.push(<div key="empty" className="list-empty">{query.trim() ? 'Ничего не найдено' : 'Пока нет узлов'}</div>);
+  }
+
+  return (
+    <div className={'tabpane' + (active ? ' active' : '')} id="paneList">
+      <div className="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+        <input id="sQ" placeholder="Поиск по узлам и группам…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Фильтр нод" />
+      </div>
+      <div id="nodeList">{rows}</div>
     </div>
   );
 }
 
 /* ── Переменные ── */
-function VarsPane({ store }: { store: VetviStore }) {
+function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
   const vars = store.doc.vars || [];
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [dragReady, setDragReady] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const dragVid = useRef<string | null>(null);
   const editPreRef = useRef<string | null>(null);
 
@@ -164,46 +386,66 @@ function VarsPane({ store }: { store: VetviStore }) {
     store.toast('Нода переменной создана', 'ok');
   };
 
+  const nameFocus = () => { editPreRef.current = store.beginEdit(); };
+  const nameBlur = () => { store.commitEdit(editPreRef.current, 'Правка переменной'); editPreRef.current = null; };
+  const valFocus = () => { editPreRef.current = store.beginEdit(); };
+  const valBlur = () => { store.commitEdit(editPreRef.current, 'Значение переменной'); editPreRef.current = null; };
+
   return (
-    <div className="rn-pane" onDragOver={(e) => e.preventDefault()} onDrop={dropToCanvas}>
-      <div className="rn-pane-head rn-between">
+    <div className={'tabpane' + (active ? ' active' : '')} id="paneVars" onDragOver={(e) => e.preventDefault()} onDrop={dropToCanvas}>
+      <div className="v-head">
         <span>Переменные сюжета</span>
-        <button type="button" className="rn-mini" onClick={() => { const v = store.addVar(); setOpen(new Set([...open, v.id])); }}>+ Переменная</button>
+        <button type="button" className="btn primary" title="Создать переменную" onClick={() => { const v = store.addVar(); setOpen(new Set([...open, v.id])); }}>+ Переменная</button>
       </div>
       {!vars.length && (
-        <div className="rn-pane-hint">
-          Переменная — это число (number), текст (string) или флаг true/false. Перетащите её на холст, чтобы создать ноду переменной; условия исходов развилки читают значения при проигрывании.
+        <div className="v-hint">
+          <b>Переменных пока нет.</b><br /><br />
+          Переменная — это число (number), текст (string) или флаг true/false (boolean), которые меняются по ходу истории: «доверие», «золото», «имя героя»…<br /><br />
+          1. Создайте переменную кнопкой выше.<br />
+          2. <b>Перетащите строку переменной на холст</b> — получится нода изменения или чтения (режим меняется в инспекторе).<br />
+          3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.
         </div>
       )}
-      <div className="rn-vars-list">
+      <div id="vRows">
         {vars.map((v: VetviVar) => {
           const isOpen = open.has(v.id);
           const t = varType(v);
           return (
-            <div className="rn-var-row" key={v.id}>
-              <div className="rn-var-line">
+            <div
+              key={v.id}
+              data-vid={v.id}
+              className={'v-item' + (isOpen ? ' open' : '') + (draggingId === v.id ? ' dragging' : '')}
+              draggable={dragReady === v.id}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/vetvi-var', v.id);
+                e.dataTransfer.effectAllowed = 'copy';
+                dragVid.current = v.id;
+                setDraggingId(v.id);
+              }}
+              onDragEnd={() => { setDragReady(null); setDraggingId(null); }}
+            >
+              <div className="v-row">
                 <span
-                  className="rn-var-grip"
-                  draggable
-                  title="Перетащите на холст — создастся нода переменной"
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('text/vetvi-var', v.id);
-                    e.dataTransfer.effectAllowed = 'copy';
-                    dragVid.current = v.id;
-                  }}
-                >⠿</span>
+                  className="v-grip"
+                  title="Перетащите на холст — создать ноду переменной"
+                  onMouseDown={() => setDragReady(v.id)}
+                  onDoubleClick={(e) => e.preventDefault()}
+                ><Ic d={P_GRIP} size={12} /></span>
                 <input
-                  className="rn-var-name"
+                  className="inp v-name"
                   maxLength={40}
                   value={String(v.name || '')}
+                  title="Название переменной"
+                  placeholder="название"
                   aria-label="Имя переменной"
-                  onFocus={() => { editPreRef.current = store.beginEdit(); }}
+                  onFocus={nameFocus}
                   onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
-                  onBlur={() => { store.commitEdit(editPreRef.current, 'Правка переменной'); editPreRef.current = null; }}
+                  onBlur={nameBlur}
                 />
                 <select
-                  className="rn-var-type"
+                  className="inp v-type"
                   value={t}
+                  title="Тип переменной"
                   aria-label="Тип переменной"
                   onChange={(e) => store.updateVar(v.id, { type: e.target.value, val: varCastVal(e.target.value, v.val) }, { label: 'Тип переменной' })}
                 >
@@ -211,48 +453,105 @@ function VarsPane({ store }: { store: VetviStore }) {
                 </select>
                 {t === 'bool' ? (
                   <select
-                    className="rn-var-val"
-                    value={v.val === true || v.val === 'true' ? 'true' : 'false'}
+                    className="inp v-val"
+                    title="Начальное значение"
                     aria-label="Значение"
-                    onChange={(e) => store.updateVar(v.id, { val: e.target.value === 'true' }, { label: 'Значение переменной' })}
+                    value={isTrueVal(v.val) ? '1' : '0'}
+                    onChange={(e) => store.updateVar(v.id, { val: e.target.value === '1' }, { label: 'Значение переменной' })}
                   >
-                    <option value="true">true</option>
-                    <option value="false">false</option>
+                    <option value="1">true</option>
+                    <option value="0">false</option>
                   </select>
                 ) : (
                   <input
-                    className="rn-var-val"
+                    className="inp v-val"
                     value={String(v.val ?? '')}
+                    title="Начальное значение"
+                    placeholder={t === 'num' ? '0' : 'текст'}
                     aria-label="Значение по умолчанию"
-                    onFocus={() => { editPreRef.current = store.beginEdit(); }}
+                    onFocus={valFocus}
                     onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
-                    onBlur={() => { store.commitEdit(editPreRef.current, 'Значение переменной'); editPreRef.current = null; }}
+                    onBlur={valBlur}
                   />
                 )}
-                <button type="button" className="rn-var-del" title="Удалить переменную" onClick={() => store.deleteVar(v.id)}>×</button>
-                <button type="button" className="rn-var-fold" title="Подробнее" onClick={() => toggleOpen(v.id)}>{isOpen ? '▾' : '▸'}</button>
+                <button type="button" className="v-del" title="Удалить переменную" onClick={() => store.deleteVar(v.id)}><Ic d={P_X} size={12} /></button>
+                <button type="button" className="v-fold" title={isOpen ? 'Свернуть' : 'Развернуть для редактирования'} onClick={() => toggleOpen(v.id)}><Ic d={P_CHEV} size={12} /></button>
               </div>
               {isOpen && (
-                <div className="rn-var-edit">
-                  {t === 'num' && (
-                    <div className="rn-var-steps">
-                      <button type="button" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) - 1 }, { history: false })}>−</button>
-                      <button type="button" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) + 1 }, { history: false })}>+</button>
+                <div className="v-edit">
+                  <div>
+                    <label>Название</label>
+                    <input
+                      className="inp ve-name"
+                      maxLength={40}
+                      value={String(v.name || '')}
+                      placeholder="название переменной"
+                      aria-label="Имя переменной (расширенный редактор)"
+                      onFocus={nameFocus}
+                      onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
+                      onBlur={nameBlur}
+                    />
+                  </div>
+                  <div>
+                    <label>Тип</label>
+                    <div className="ve-types">
+                      {Object.keys(VAR_TYPES).map((tk) => (
+                        <button
+                          key={tk}
+                          type="button"
+                          className={t === tk ? 'on' : ''}
+                          onClick={() => {
+                            if (varType(v) === tk) return;
+                            store.updateVar(v.id, { type: tk, val: varCastVal(tk, v.val) }, { label: 'Тип переменной' });
+                          }}
+                        >{VAR_TYPES[tk]}</button>
+                      ))}
                     </div>
-                  )}
-                  {t === 'bool' && (
-                    <div className="rn-var-steps">
-                      <button type="button" onClick={() => store.updateVar(v.id, { val: true }, { history: false })}>true</button>
-                      <button type="button" onClick={() => store.updateVar(v.id, { val: false }, { history: false })}>false</button>
-                    </div>
-                  )}
-                  <div className="rn-var-use">{varUseText(store, v.id)}</div>
+                  </div>
+                  <div>
+                    <label>Начальное значение</label>
+                    {t === 'num' ? (
+                      <div className="ve-valrow">
+                        <button type="button" className="ve-step" title="−1" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) - 1 }, { history: false })}>−</button>
+                        <input
+                          className="inp ve-val"
+                          value={String(v.val ?? '')}
+                          title="Начальное значение"
+                          onFocus={valFocus}
+                          onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
+                          onBlur={valBlur}
+                        />
+                        <button type="button" className="ve-step" title="+1" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) + 1 }, { history: false })}>+</button>
+                      </div>
+                    ) : t === 'bool' ? (
+                      <div className="ve-bools">
+                        <button type="button" className={isTrueVal(v.val) ? 'on' : ''} onClick={() => store.updateVar(v.id, { val: true }, { history: false })}>true</button>
+                        <button type="button" className={!isTrueVal(v.val) ? 'on' : ''} onClick={() => store.updateVar(v.id, { val: false }, { history: false })}>false</button>
+                      </div>
+                    ) : (
+                      <input
+                        className="inp ve-val"
+                        value={String(v.val == null ? '' : v.val)}
+                        title="Начальное значение"
+                        placeholder="текст"
+                        onFocus={valFocus}
+                        onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
+                        onBlur={valBlur}
+                      />
+                    )}
+                  </div>
+                  <div className="ve-use">{varUseText(store, v.id)}</div>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+      {!!vars.length && (
+        <div className="v-hint">
+          <b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов.
+        </div>
+      )}
     </div>
   );
 }
@@ -279,11 +578,10 @@ function varUseText(store: VetviStore, vid: string): string {
 }
 
 /* ── Персонажи ── */
-function CharsPane({ store }: { store: VetviStore }) {
+function CharsPane({ store, active }: { store: VetviStore; active: boolean }) {
   const chars = store.doc.chars || [];
   const [open, setOpen] = useState<Set<string>>(new Set());
   const editPreRef = useRef<string | null>(null);
-  const fileRefs = useRef(new Map<string, HTMLInputElement | null>());
 
   const toggleOpen = (id: string) => {
     const s = new Set(open);
@@ -300,83 +598,124 @@ function CharsPane({ store }: { store: VetviStore }) {
     });
   };
 
+  const nameFocus = () => { editPreRef.current = store.beginEdit(); };
+  const nameBlur = () => { store.commitEdit(editPreRef.current, 'Правка персонажа'); editPreRef.current = null; };
+  const descFocus = () => { editPreRef.current = store.beginEdit(); };
+  const descBlur = () => { store.commitEdit(editPreRef.current, 'Описание персонажа'); editPreRef.current = null; };
+
   return (
-    <div className="rn-pane">
-      <div className="rn-pane-head rn-between">
+    <div className={'tabpane' + (active ? ' active' : '')} id="paneChars">
+      <div className="v-head">
         <span>Персонажи истории</span>
-        <button type="button" className="rn-mini" onClick={() => { const c = store.addChar(); setOpen(new Set([...open, c.id])); }}>+ Персонаж</button>
+        <button type="button" className="btn primary" title="Создать персонажа" onClick={() => { const c = store.addChar(); setOpen(new Set([...open, c.id])); }}>+ Персонаж</button>
       </div>
       {!chars.length && (
-        <div className="rn-pane-hint">
-          Персонаж — участник диалогов: имя, цвет и аватар. Добавьте персонажа и выберите его участником диалога — реплики получат говорящего.
+        <div className="v-hint">
+          <b>Персонажей пока нет.</b><br /><br />
+          Персонаж — действующее лицо истории: его добавляют <b>участником диалога</b> (и автором реплик), а также участником обычных узлов — блок окрасится в его цвет.<br /><br />
+          1. Создайте персонажа кнопкой выше.<br />
+          2. Откройте диалог → «Участники» → добавьте персонажа.<br />
+          3. Имя и цвет меняются в любой момент — плашки на холсте обновятся сами.
         </div>
       )}
-      <div className="rn-chars-list">
+      <div id="cRows">
         {chars.map((c: VetviChar) => {
           const isOpen = open.has(c.id);
+          const shape = c.avShape === 'square' ? 'square' : 'circle';
           return (
-            <div className="rn-char-row" key={c.id}>
-              <div className="rn-char-line">
-                <button type="button" className="rn-char-avpick" title="Загрузить аватар" onClick={() => fileRefs.current.get(c.id)?.click()}>
-                  <span className={'rn-av ' + (c.avShape === 'square' ? 'square' : 'circle') + (c.av ? '' : ' empty')} style={{ borderColor: c.color || '#9cb878' }}>
+            <div key={c.id} data-cid={c.id} className={'v-item' + (isOpen ? ' open' : '')}>
+              <div className="v-row">
+                <label className="c-avpick" title={c.av ? 'Сменить аватар' : 'Задать аватар — загрузить картинку'}>
+                  <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' row'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
                     {c.av ? <img src={String(c.av)} alt={'Аватар: ' + c.name} /> : (c.name || '?')[0].toUpperCase()}
                   </span>
-                </button>
+                  <input type="file" className="c-av-pick" accept="image/*" hidden onChange={(e) => onFile(c.id, e.target.files?.[0] || null)} />
+                </label>
                 <input
-                  ref={(el) => { fileRefs.current.set(c.id, el); }}
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={(e) => onFile(c.id, e.target.files?.[0] || null)}
-                />
-                <input
-                  className="rn-char-name"
+                  className="inp v-name c-name"
                   maxLength={60}
                   value={String(c.name || '')}
+                  title="Имя персонажа"
+                  placeholder="имя персонажа"
                   aria-label="Имя персонажа"
-                  onFocus={() => { editPreRef.current = store.beginEdit(); }}
+                  onFocus={nameFocus}
                   onChange={(e) => store.updateChar(c.id, { name: e.target.value }, { history: false })}
-                  onBlur={() => { store.commitEdit(editPreRef.current, 'Правка персонажа'); editPreRef.current = null; }}
+                  onBlur={nameBlur}
                 />
-                <button type="button" className="rn-var-del" title="Удалить персонажа" onClick={() => store.deleteChar(c.id)}>×</button>
-                <button type="button" className="rn-var-fold" title="Подробнее" onClick={() => toggleOpen(c.id)}>{isOpen ? '▾' : '▸'}</button>
+                <button type="button" className="v-del" title="Удалить персонажа" onClick={() => store.deleteChar(c.id)}><Ic d={P_X} size={12} /></button>
+                <button type="button" className="v-fold" title={isOpen ? 'Свернуть' : 'Развернуть для редактирования'} onClick={() => toggleOpen(c.id)}><Ic d={P_CHEV} size={12} /></button>
               </div>
               {isOpen && (
-                <div className="rn-char-edit">
-                  <div className="rn-char-avrow">
-                    <span className={'rn-av big ' + (c.avShape === 'square' ? 'square' : 'circle') + (c.av ? '' : ' empty')} style={{ borderColor: c.color || '#9cb878' }}>
+                <div className="v-edit">
+                  <div className="ce-avrow">
+                    <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' big'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
                       {c.av ? <img src={String(c.av)} alt="" /> : (c.name || '?')[0].toUpperCase()}
                     </span>
-                    <div className="rn-char-avbtns">
-                      <button type="button" className="rn-mini" onClick={() => fileRefs.current.get(c.id)?.click()}>Загрузить…</button>
-                      {!!c.av && <button type="button" className="rn-mini" onClick={() => store.updateChar(c.id, { av: null }, { label: 'Убрать аватар' })}>Убрать</button>}
-                    </div>
-                    <div className="rn-seg sm">
-                      <button type="button" className={c.avShape !== 'square' ? 'on' : ''} onClick={() => store.updateChar(c.id, { avShape: 'circle' }, { history: false })}>круг</button>
-                      <button type="button" className={c.avShape === 'square' ? 'on' : ''} onClick={() => store.updateChar(c.id, { avShape: 'square' }, { history: false })}>квадрат</button>
+                    <div className="ce-avctl">
+                      <div className="ce-avbtns">
+                        <label className="ce-av-up" title="Загрузить картинку — откроется кадрирование">
+                          Загрузить…
+                          <input type="file" className="ce-av-file" accept="image/*" hidden onChange={(e) => onFile(c.id, e.target.files?.[0] || null)} />
+                        </label>
+                        {!!c.av && (
+                          <button type="button" className="ce-av-rm" title="Убрать аватар" onClick={() => store.updateChar(c.id, { av: null }, { label: 'Убрать аватар' })}>Убрать</button>
+                        )}
+                      </div>
+                      <div className="ce-av-shape">
+                        <button type="button" className={'shp' + (shape === 'circle' ? ' on' : '')} title="Аватар-круг" onClick={() => store.updateChar(c.id, { avShape: 'circle' }, { history: false })}><i className="shp-ic circle" />круг</button>
+                        <button type="button" className={'shp' + (shape === 'square' ? ' on' : '')} title="Аватар-квадрат со скруглёнными углами" onClick={() => store.updateChar(c.id, { avShape: 'square' }, { history: false })}><i className="shp-ic square" />квадрат</button>
+                      </div>
                     </div>
                   </div>
-                  <div className="rn-palette sm">
-                    {['#e2a54e', '#e0b46b', '#d0714e', '#cf6b5a', '#c9857a', '#d6c96a', '#b7b26a', '#9cb878', '#7fb5a2', '#cbbd92', '#aab1bb', '#8b929c'].map((col) => (
-                      <button key={col} type="button" className={'rn-swatch' + (c.color === col ? ' on' : '')} style={{ background: col }} title={col} aria-label={'Цвет ' + col} onClick={() => store.updateChar(c.id, { color: col }, { label: 'Цвет персонажа' })} />
-                    ))}
+                  <div>
+                    <label>Имя</label>
+                    <input
+                      className="inp ce-name"
+                      maxLength={60}
+                      value={String(c.name || '')}
+                      placeholder="имя персонажа"
+                      aria-label="Имя персонажа (расширенный редактор)"
+                      onFocus={nameFocus}
+                      onChange={(e) => store.updateChar(c.id, { name: e.target.value }, { history: false })}
+                      onBlur={nameBlur}
+                    />
                   </div>
-                  <textarea
-                    rows={2}
-                    placeholder="Описание персонажа"
-                    value={String(c.text || '')}
-                    aria-label="Описание персонажа"
-                    onFocus={() => { editPreRef.current = store.beginEdit(); }}
-                    onChange={(e) => store.updateChar(c.id, { text: e.target.value }, { history: false })}
-                    onBlur={() => { store.commitEdit(editPreRef.current, 'Описание персонажа'); editPreRef.current = null; }}
-                  />
-                  <div className="rn-var-use">{charUseText(store, c.id)}</div>
+                  <div>
+                    <label>Цвет</label>
+                    <div className="swatches">
+                      {PALETTE_COLORS.map((col) => (
+                        <button
+                          key={col}
+                          type="button"
+                          className={'swatch' + (c.color === col ? ' on' : '')}
+                          style={{ background: col }}
+                          title={col}
+                          aria-label={'Цвет ' + col}
+                          onClick={() => store.updateChar(c.id, { color: col }, { label: 'Цвет персонажа' })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label>Описание</label>
+                    <textarea
+                      className="inp ce-desc"
+                      placeholder="Кто это, какова его роль в истории…"
+                      style={{ minHeight: 52 }}
+                      aria-label="Описание персонажа"
+                      onFocus={descFocus}
+                      onChange={(e) => store.updateChar(c.id, { text: e.target.value }, { history: false })}
+                      onBlur={descBlur}
+                    />
+                  </div>
+                  <div className="ve-use">{charUseText(store, c.id)}</div>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+      {!!chars.length && <div className="v-hint" />}
     </div>
   );
 }
@@ -427,20 +766,6 @@ export function fileToAvatar(file: File, cb: (dataUrl: string) => void): void {
     img.src = String(reader.result);
   };
   reader.readAsDataURL(file);
-}
-
-/* иконки */
-function FolderIcon() {
-  return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>;
-}
-function ListIcon() {
-  return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6h12M8 12h12M8 18h12" /><circle cx="3.7" cy="6" r="1.1" /><circle cx="3.7" cy="12" r="1.1" /><circle cx="3.7" cy="18" r="1.1" /></svg>;
-}
-function VarIcon() {
-  return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5" /><path d="M5 12.5h14" /><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5" /></svg>;
-}
-function CharIcon() {
-  return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8.2" r="3.6" /><path d="M4.8 20c1.1-3.4 3.9-5.2 7.2-5.2s6.1 1.8 7.2 5.2" /></svg>;
 }
 
 /* helpers used by pane */
