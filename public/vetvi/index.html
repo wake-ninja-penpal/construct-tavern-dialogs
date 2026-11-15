@@ -625,6 +625,7 @@ body.connecting .vpinn{cursor:copy}
 .patch-ver-head{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:9px;background:rgba(226,165,78,.08);box-shadow:inset 0 0 0 1px rgba(226,165,78,.26)}
 .patch-ver-v{font:700 12.5px var(--body);color:var(--acc2)}
 .patch-tools{padding:10px 14px 0}
+.log-tools{padding:10px 14px 0}
 .patch-empty{padding:18px 14px;text-align:center;font-size:12px;color:var(--tx3)}
 .patch-latest{font:700 9px var(--body);letter-spacing:.5px;text-transform:uppercase;color:#14161a;background:var(--acc);border-radius:5px;padding:2px 7px}
 .patch-item{display:flex;gap:9px;align-items:flex-start;padding:6px 4px 1px;margin:0 2px;font:400 12.5px/1.5 var(--body);color:var(--tx2)}
@@ -1277,6 +1278,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 </div></div>
 <div id="logModal" class="dlg-modal"><div class="dlg-modal-card log-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Журнал действий</span><button class="dlg-modal-close" id="logModalClose" title="Закрыть">×</button></div>
+  <div class="log-tools"><div class="search-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input id="logInp" placeholder="Поиск по журналу: действие, автор, объект, дата…" autocomplete="off" spellcheck="false" aria-label="Поиск по журналу действий"></div></div>
   <div class="dlg-modal-body" id="logModalBody"></div>
   <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logAll" title="Показать все записи" style="display:none">Все записи</button><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
 </div></div>
@@ -2532,11 +2534,12 @@ function logFocus(e){
   if(!flashed)toast('Объекты этой записи уже удалены или скрыты','warn');
 }
 function openLogModal(){
+  logSearch='';var li=$('#logInp');if(li)li.value='';
   $('#logModal').classList.add('show');
   if(logModalIdx<0)logModalIdx=0;
   renderLogModal();
 }
-function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logFilterGroup=null;logModalIdx=-1;}
+function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logFilterGroup=null;logModalIdx=-1;logSearch='';var li=$('#logInp');if(li)li.value='';}
 /* журнал по конкретной ноде: совпадение записи с нодой (по diff.nodes новых записей,
    по разделам нод/ids — для старых, по названию в тексте действия — как последний шанс) */
 function logEntryForNode(e,id){
@@ -2552,10 +2555,35 @@ function logEntryForNode(e,id){
   var n=nodeById(id);
   return !!(n&&n.title&&e.act&&e.act.indexOf(n.title)>=0);
 }
+/* поиск по журналу: текст запроса + debounce-таймер (фильтр срабатывает после паузы в вводе) */
+var logSearch='',logSearchT=null;
+/* весь текст записи для поиска: действие, автор, весь diff (имена нод/групп/переменных,
+   старые и новые значения, подписи, условия) и дата записи */
+function logEntrySearchText(e){
+  if(!e)return '';
+  var parts=[];
+  if(e.act)parts.push(String(e.act));
+  if(e.by&&e.by.name)parts.push(String(e.by.name));
+  if(e.diff){try{parts.push(JSON.stringify(e.diff));}catch(_){}}
+  parts.push(fmtWhenShort(e.t)||'');
+  return parts.join(' ').toLowerCase();
+}
+/* esc с подсветкой первого совпадения с запросом (как в поиске по проекту) */
+function logHl(s){
+  var t=String(s==null?'':s),q=logSearch.trim();
+  if(!q)return esc(t);
+  var i=t.toLowerCase().indexOf(q.toLowerCase());
+  if(i<0)return esc(t);
+  return esc(t.slice(0,i))+'<mark class="search-mark">'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length));
+}
 function logFiltered(){
   var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
   if(logFilterNode)log=log.filter(function(e){return logEntryForNode(e,logFilterNode);});
   if(logFilterGroup)log=log.filter(function(e){return logEntryForGroup(e,logFilterGroup);});
+  if(logSearch){
+    var q=logSearch.toLowerCase();
+    log=log.filter(function(e){return logEntrySearchText(e).indexOf(q)>=0;});
+  }
   return log;
 }
 function openNodeLog(id){
@@ -2721,12 +2749,12 @@ function renderLogModal(){
   $('#logNavInfo').textContent='записей: '+log.length+(gone?' · объект удалён':'');
   var la=$('#logAll');if(la)la.style.display=(logFilterNode||logFilterGroup)?'':'none';
   var body=$('#logModalBody');
-  if(!log.length){var emptyMsg=logFilterNode?'Для этой ноды пока нет записей в журнале.':(logFilterGroup?'Для этой группы пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.');body.innerHTML='<div class="log-empty">'+emptyMsg+'</div>';return;}
+  if(!log.length){var lq=logSearch.trim(),emptyMsg=lq?'По «'+lq+'» в журнале ничего нет':(logFilterNode?'Для этой ноды пока нет записей в журнале.':(logFilterGroup?'Для этой группы пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.'));body.innerHTML='<div class="log-empty">'+esc(emptyMsg)+'</div>';return;}
   if(logModalIdx>=log.length)logModalIdx=0;
   var rows=log.map(function(e,i){
     var c=(e.by&&e.by.color)||'#8b929c',nm=(e.by&&e.by.name)||'—',open=i===logModalIdx;
     return '<div class="log-row'+(open?' open':'')+'" data-i="'+i+'">'+
-      '<div class="log-line"><span class="log-when">'+esc(fmtWhenShort(e.t))+'</span><span class="log-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="log-who">'+esc(nm)+'</span><span class="log-act">'+esc(e.act||'')+'</span></div>'+
+      '<div class="log-line"><span class="log-when">'+logHl(fmtWhenShort(e.t))+'</span><span class="log-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="log-who">'+logHl(nm)+'</span><span class="log-act">'+logHl(e.act||'')+'</span></div>'+
       (open?logRowDetHtml(e):'')+
     '</div>';
   }).join('');
@@ -2774,9 +2802,25 @@ $('#logAll').onclick=function(){logFilterNode=null;logFilterGroup=null;logModalI
 $('#logPrev').onclick=function(){logNavStep(-1);};
 $('#logNext').onclick=function(){logNavStep(1);};
 $('#bLog').onclick=openLogModal;
+/* поиск по журналу: срабатывает после паузы в вводе, а не на каждый символ (как в патчноуте);
+   Enter открывает первую найденную запись, Esc в поле сначала очищает запрос */
+$('#logInp').addEventListener('input',function(e){
+  clearTimeout(logSearchT);
+  var v=e.target.value;
+  logSearchT=setTimeout(function(){logSearch=v;logModalIdx=-1;renderLogModal();},300);
+});
+$('#logInp').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){e.preventDefault();logModalIdx=0;renderLogModal();}
+});
 window.addEventListener('keydown',function(e){
   if(!$('#logModal').classList.contains('show'))return;
-  if(e.key==='Escape'){closeLogModal();return;}
+  var inInp=e.target&&e.target.id==='logInp';
+  if(e.key==='Escape'){
+    if(inInp&&e.target.value){e.target.value='';logSearch='';logModalIdx=-1;renderLogModal();e.preventDefault();}
+    else closeLogModal();
+    return;
+  }
+  if(inInp)return;/* в поле поиска стрелки двигают каретку, а не выбирают запись */
   if(e.key==='ArrowDown'){e.preventDefault();logNavStep(1);}
   if(e.key==='ArrowUp'){e.preventDefault();logNavStep(-1);}
 },true);
@@ -9631,8 +9675,11 @@ function hkRefreshStatic(){
    Новые записи добавлять в НАЧАЛО списка PATCHNOTES (свежая версия сверху);
    в окне есть фильтр по тексту записей и номеру версии.
    k — тип записи: add = «новое», fix = «исправлено», chg = «изменено». */
-var APP_VERSION='1.2.0';
+var APP_VERSION='1.3.0';
 var PATCHNOTES=[
+  {ver:'1.3.0',items:[
+    {k:'add',t:'Поиск в «Журнале действий»: записи фильтруются по тексту действия, автору, именам нод, групп и переменных, старым и новым значениям, а также по дате. Совпадения подсвечиваются, фильтр срабатывает после паузы в вводе, Enter открывает первую найденную запись, Esc в поле сначала очищает запрос.'}
+  ]},
   {ver:'1.2.0',items:[
     {k:'fix',t:'Горячие клавиши больше не молчат, пока курсор стоит в поле ввода: глобальные сочетания — поиск по проекту, патчноут, сохранение, «сохранить как», менеджер проектов — работают в любой момент. Раньше хоткеи не срабатывали до щелчка мимо поля ввода (например, после правки реплики), поэтому казалось, что клавиши «оживают» только после открытия настроек.'},
     {k:'add',t:'Фильтр в окне горячих клавиш (настройки): список быстро сужается по названию действия или по клавишам.'},
