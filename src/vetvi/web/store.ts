@@ -38,6 +38,7 @@ import type { EdgeGeom, NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, Ve
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import { canvasApi } from './canvasApi';
+import { noteModalOpen } from './NoteModals';
 import type { SyncClient } from './sync';
 
 type Listener = () => void;
@@ -384,7 +385,16 @@ export class VetviStore {
       // в комнате слот всё равно ведётся для оффлайна
     }
     saveAutosave(this.doc, this.vp, this.bend);
-    projSaveCurrent(this.doc, this.vp, this.bend, this.syncRoom);
+    /* roomId «липнет» только к своему проекту: если подключены к комнате другого
+       проекта (диалог ещё открыт, фоновой автосейв сработал раньше ответа) —
+       запись реестра текущего проекта не должна получить чужой roomId,
+       иначе смена проектов вечно переподключается не в ту комнату. */
+    let roomForEntry = this.syncRoom;
+    if (roomForEntry && this.sync && this.sync.projectId) {
+      const pid = typeof this.doc.meta.projectId === 'string' ? this.doc.meta.projectId : '';
+      if (this.sync.projectId !== pid) roomForEntry = null;
+    }
+    projSaveCurrent(this.doc, this.vp, this.bend, roomForEntry);
     if (this.syncMode === 'copy' && this.sync) this.sync.persistCopyTick();
   }
 
@@ -460,6 +470,10 @@ export class VetviStore {
     this.emit();
   }
 
+  /** Немедленное сохранение в слот (saveNow оригинала: только localStorage,
+   *  БЕЗ публикации в комнату — publish делает только queueState после реальных правок.
+   *  Публикация здесь загрязняла комнату снимком чужого проекта при каждой смене
+   *  проекта/перезагрузке страницы — источник «вечного» диалога про комнату). */
   flushSave(): void {
     this.flushPendingLog();
     if (this.saveT) { clearTimeout(this.saveT); this.saveT = null; }
@@ -467,7 +481,6 @@ export class VetviStore {
     this.persist();
     this.saveState = 'saved';
     this.lastSavedAt = Date.now();
-    if (this.sync) this.sync.flushState(false);
     this.emit();
   }
 
@@ -687,6 +700,7 @@ export class VetviStore {
 
   setDlgWidth(id: string, w: number): void {
     this.updateNode(id, { dlgWidth: clamp(Math.round(w), 216, 1200) }, { history: false });
+    this.touchPos('n:' + id);
     const n = this.nodeById(id);
     if (n && this.sync) this.sync.liveDlg(n);
   }
@@ -714,6 +728,31 @@ export class VetviStore {
   dragStartSnapshot: string | null = null;
   dragMoved = false;
 
+  /* ── время последнего локального сдвига объекта (позиционная гонка синка) ──
+     Когда отложенный снимок комнаты применяется после жеста, объекты, сдвинутые
+     локально ПОСЛЕ прихода снимка, не перезаписываются устаревшими координатами —
+     иначе нода «прыгает» обратно и обе стороны начинают гонять позиции по кругу. */
+  posTouched: Map<string, number> = new Map();
+
+  /** Отметить объект как локально сдвинутый сейчас (n:<id>/g:<gid>/e:<eid>). */
+  touchPos(key: string): void {
+    this.posTouched.set(key, Date.now());
+    if (this.posTouched.size > 3000) {
+      const cut = Date.now() - 60000;
+      for (const [k, t] of this.posTouched) {
+        if (t < cut) this.posTouched.delete(k);
+      }
+      if (this.posTouched.size > 3000) this.posTouched.clear();
+    }
+  }
+
+  /** Идентификаторы объектов активного жеста холста ('n:id'/'g:id'/'e:id'). */
+  gestureIds: Set<string> = new Set();
+
+  setGestureIds(ids: Iterable<string>): void {
+    this.gestureIds = new Set(ids);
+  }
+
   dragBegin(): void {
     this.dragStartSnapshot = this.serialize();
     this.dragMoved = false;
@@ -727,6 +766,7 @@ export class VetviStore {
       if (!n) continue;
       n.x += dx;
       n.y += dy;
+      this.touchPos('n:' + id);
     }
     this.emit();
     if (this.sync) this.sync.liveDrag({ ids: this.sel });
@@ -757,6 +797,7 @@ export class VetviStore {
       this.dragStartSnapshot = null;
       this.dragMoved = false;
     }
+    this.gestureIds.clear();
   }
 
   deleteSelected(): void {
@@ -930,6 +971,7 @@ export class VetviStore {
     const e = this.doc.edges.find((x2) => x2.id === id);
     if (!e || !Array.isArray(e.pts) || !e.pts[index]) return;
     e.pts[index] = { x: Math.round(x), y: Math.round(y) };
+    this.touchPos('e:' + id);
     this.emit();
     if (this.sync) this.sync.livePts(e);
   }
@@ -998,6 +1040,7 @@ export class VetviStore {
     const e = this.doc.edges.find((x) => x.id === id);
     if (!e) return;
     e.bd = { dl: Math.round(dl), dy: Math.round(dy), dr: Math.round(dr) };
+    this.touchPos('e:' + id);
     this.emit();
   }
 
@@ -2374,7 +2417,7 @@ export class VetviStore {
     this.mutateManual((doc) => { doc.meta.name = name; }, 'Переименование проекта');
   }
 
-  openProject(id: string): void {
+  openProject(id: string, roomHint?: string | null): void {
     /* как projOpen оригинала: текущий проект уже открыт — нечего делать */
     if (id === String(this.doc.meta.projectId || '') && this.syncMode !== 'copy') {
       this.toast('Этот проект уже открыт');
@@ -2406,11 +2449,12 @@ export class VetviStore {
     if (pv) { this.syncProjPass = pv; this.lockUnlocked = true; }
     projSetCur(id);
     this.toast('Открыт проект: ' + (this.doc.meta.name || 'Без названия'), 'ok');
-    /* проект привязан к комнате — подключаемся после разблокировки (projOpen оригинала) */
+    /* проект привязан к комнате — подключаемся после разблокировки (projOpen оригинала);
+       roomHint (комната из ссылки) приоритетнее «липкой» записи реестра */
     const entry = projList().find((e) => e.id === id);
-    if (entry && entry.roomId && this.sync) {
+    const roomId = roomHint || (entry ? entry.roomId : null);
+    if (roomId && this.sync) {
       this.sync.mode = 'room';
-      const roomId = entry.roomId;
       this.lockAfterUnlock(() => {
         this.sync!.connect(roomId, id, { own: true, silent: true });
         this.sync!.setHash(roomId, id);
@@ -3022,6 +3066,44 @@ export class VetviStore {
   finishGestureDrag(): void {
     this.dragStartSnapshot = null;
     this.dragMoved = false;
+    this.gestureIds.clear();
+  }
+
+  /**
+   * Проигранная гонка лока: откат ТОЛЬКО объектов активного жеста к снимку начала
+   * (applySnap оригинала — жест отменяется, но чужие параллельные правки,
+   * пришедшие пока жест шёл, не затираются целиком, как было при полном applyRemoteDoc).
+   */
+  restoreGesturePositions(snapJson: string | null, ids: Set<string>): boolean {
+    if (!snapJson || !ids.size) return false;
+    let parsed: { nodes?: VetviNode[]; edges?: VetviEdge[]; groups?: VetviGroup[] };
+    try { parsed = JSON.parse(snapJson); } catch { return false; }
+    let hit = false;
+    for (const key of ids) {
+      const kind = key.slice(0, 2);
+      const id = key.slice(2);
+      if (kind === 'n:') {
+        const src = (parsed.nodes || []).find((n) => n.id === id);
+        const dst = this.nodeById(id);
+        if (src && dst && (dst.x !== src.x || dst.y !== src.y)) { dst.x = src.x; dst.y = src.y; hit = true; }
+      } else if (kind === 'g:') {
+        const src = (parsed.groups || []).find((g) => g.id === id);
+        const dst = this.groupById(id);
+        if (src && dst && (dst.x !== src.x || dst.y !== src.y)) { dst.x = src.x; dst.y = src.y; hit = true; }
+      } else if (kind === 'e:') {
+        const src = (parsed.edges || []).find((e) => e.id === id);
+        const dst = this.edgeById(id);
+        if (src && dst) {
+          if (src.pts) dst.pts = src.pts;
+          dst.lt = src.lt;
+          dst.lp = src.lp;
+          if (src.bd) dst.bd = src.bd;
+          hit = true;
+        }
+      }
+    }
+    if (hit) this.emit();
+    return hit;
   }
 
   pointerFn: (() => string | null) | null = null;
@@ -3036,11 +3118,15 @@ export class VetviStore {
 
   /* ── совместное редактирование: помощь SyncClient ── */
 
-  /** Активный ввод/модалка/жест/анимация: в комнате удалённые снимки ждут (pendingRemote). */
+  /** Активный ввод/жест/анимация: в комнате удалённые снимки ждут (pendingRemote).
+   *  Как syncBusy оригинала (11636): жесты холста, ввод текста, редактор реплик и
+   *  заметок. Обычные модалки/окна подтверждения НЕ ждут — чужие снимки применяются
+   *  сразу (в оригинале #modalWrap в syncBusy не входит; лишнее ожидание было
+   *  источником «прыгающих» отложенных применений). */
   busyNow(): boolean {
     const t = typeof document !== 'undefined' ? document.activeElement : null;
     const typing = !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
-    return typing || this.modal != null || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag || this.busyAnim;
+    return typing || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag || this.busyAnim || noteModalOpen();
   }
 
   /** Снимок проекта для комнаты (syncDocObj оригинала). */
@@ -3066,8 +3152,12 @@ export class VetviStore {
    * журнал действий объединяется с пришедшим (правки участников не теряют
    * друг друга), выделение подрезается до живых id, история не пишется.
    * keepPid: снимок комнаты без meta.projectId — сохраняем привязку к проекту.
+   * preserveTouchedAfter: метка времени прихода снимка — объекты, сдвинутые
+   * локально ПОЗЖЕ (жест/перетаскивание/живой синк), сохраняют свои координаты
+   * (иначе отложенное применение устаревшего снимка отбрасывает ноду назад —
+   * «прыгающие» позиции у обоих участников).
    */
-  applyRemoteDoc(doc: Record<string, unknown> | null, keepPid = false): void {
+  applyRemoteDoc(doc: Record<string, unknown> | null, keepPid = false, preserveTouchedAfter = 0): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
     this.flushPendingLog();
     const d = doc as {
@@ -3136,10 +3226,58 @@ export class VetviStore {
     if (d.bend === 'ortho90' || d.bend === 'ortho45' || d.bend === 'smooth') {
       if (d.bend !== this.bend) this.bend = d.bend;
     }
-    this.doc.nodes = d.nodes || [];
-    this.doc.edges = d.edges || [];
+    /* позиции, тронутые локально позже прихода снимка, не перезаписываем */
+    const pres = preserveTouchedAfter > 0 ? this.posTouched : null;
+    const newer = (key: string) => !!(pres && (pres.get(key) || 0) > preserveTouchedAfter);
+    const incNodes = (d.nodes || []) as VetviNode[];
+    let newNodes = incNodes;
+    if (pres) {
+      const oldById = new Map(this.doc.nodes.map((n) => [n.id, n] as const));
+      let need = false;
+      for (const rn of incNodes) { if (newer('n:' + rn.id)) { need = true; break; } }
+      if (need) {
+        newNodes = incNodes.map((rn) => {
+          if (!newer('n:' + rn.id)) return rn;
+          const local = oldById.get(rn.id);
+          if (!local) return rn;
+          return { ...rn, x: local.x, y: local.y, ...(rn.dlgWidth !== undefined ? { dlgWidth: local.dlgWidth } : null) } as VetviNode;
+        });
+      }
+    }
+    this.doc.nodes = newNodes;
+    const incEdges = (d.edges || []) as VetviEdge[];
+    let newEdges = incEdges;
+    if (pres) {
+      const oldEdgeById = new Map(this.doc.edges.map((e) => [e.id, e] as const));
+      let needE = false;
+      for (const re of incEdges) { if (newer('e:' + re.id)) { needE = true; break; } }
+      if (needE) {
+        newEdges = incEdges.map((re) => {
+          if (!newer('e:' + re.id)) return re;
+          const local = oldEdgeById.get(re.id);
+          if (!local) return re;
+          return { ...re, pts: local.pts, lt: local.lt, lp: local.lp, bd: local.bd } as VetviEdge;
+        });
+      }
+    }
+    this.doc.edges = newEdges;
+    const incGroups = (d.groups || []) as VetviGroup[];
+    let newGroups = incGroups;
+    if (pres) {
+      const oldGrById = new Map(this.doc.groups.map((g) => [g.id, g] as const));
+      let needG = false;
+      for (const rg of incGroups) { if (newer('g:' + rg.id)) { needG = true; break; } }
+      if (needG) {
+        newGroups = incGroups.map((rg) => {
+          if (!newer('g:' + rg.id)) return rg;
+          const local = oldGrById.get(rg.id);
+          if (!local) return rg;
+          return { ...rg, x: local.x, y: local.y } as VetviGroup;
+        });
+      }
+    }
+    this.doc.groups = newGroups;
     this.doc.customTypes = Array.isArray(d.customTypes) ? d.customTypes : [];
-    this.doc.groups = Array.isArray(d.groups) ? d.groups : [];
     /* цепочки всегда fold=1; старое «Очередь» → «Цепочка» */
     for (const g of this.doc.groups) {
       if (g.stack && (g.fold !== 1 || g.name === 'Очередь')) {

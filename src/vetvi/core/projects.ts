@@ -59,7 +59,10 @@ let skipSaveId: string | null = null;
 
 /** Запись текущего проекта в слот + реестр (projSaveCurrent).
  * roomId «липкий» (как в оригинале): пишется только когда проект реально в комнате —
- * иначе запись сохраняет прежнюю привязку и проект переподключается после перезагрузки. */
+ * иначе запись сохраняет прежнюю привязку и проект переподключается после перезагрузки.
+ * Комната принадлежит одному проекту: закрепив roomId за записью, снимаем его с
+ * чужих записей (лечит реестр после старых загрязнений — иначе смена проектов
+ * вечно переподключается в комнату другого проекта и предлагает «публикацию»). */
 export function projSaveCurrent(doc: VetviDoc, vp: VetviViewport, bend: string, roomId: string | null = null): void {
   let pid = typeof doc.meta.projectId === 'string' ? doc.meta.projectId : '';
   if (!pid) {
@@ -80,7 +83,13 @@ export function projSaveCurrent(doc: VetviDoc, vp: VetviViewport, bend: string, 
     nodes: doc.nodes.length,
     at: now,
   };
-  if (roomId) entry.roomId = roomId;
+  if (roomId) {
+    entry.roomId = roomId;
+    /* чужой проект больше не ссылается на эту комнату */
+    for (const e of list) {
+      if (e.id !== pid && e.roomId === roomId) delete e.roomId;
+    }
+  }
   if (i >= 0) list[i] = { ...list[i], ...entry };
   else list.push(entry);
   list.sort((a, b) => String(b.modified || b.at || '').localeCompare(String(a.modified || a.at || '')));

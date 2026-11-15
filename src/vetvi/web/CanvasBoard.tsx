@@ -338,6 +338,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (store.spaceDown) return; /* Space над нодой: ни пан, ни drag (8158–8159 оригинала) */
     gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY, stackHl: null, dropEdge: null };
     store.dragBegin();
+    store.setGestureIds([...store.sel].map((x) => 'n:' + x));
     /* soft-lock: захват выделенных нод на время жеста */
     if (store.sync && store.sync.enabled) { store.sync.lockTake([...store.sel]); store.setGestureRollback(null); }
     e.preventDefault();
@@ -373,6 +374,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     }
     gestRef.current = { mode: 'group', gid, lx: e.clientX, ly: e.clientY, base };
     store.dragBegin();
+    store.setGestureIds(['g:' + gid, ...[...base.keys()].map((k) => (k.startsWith('g:') ? k : 'n:' + k))]);
     /* soft-lock: члены группы + рамки */
     if (store.sync && store.sync.enabled) {
       const lkIds: string[] = [gid];
@@ -398,6 +400,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
     gestRef.current = { mode: 'link', from: id, out, reply, wx: w.x, wy: w.y, sx: w.x, sy: w.y, target: null, varin: false };
     setPendingLink({ from: id, out, reply, x: w.x, y: w.y, startX: w.x, startY: w.y });
+    store.setGestureIds(['n:' + id]);
     if (store.sync && store.sync.enabled) {
       store.sync.lockTake([id]);
       store.setGestureRollback(() => { setPendingLink(null); setHoverTarget(null); });
@@ -488,6 +491,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const n = store.nodeById(id);
     if (!n) return;
     gestRef.current = { mode: 'dlgW', id, startX: e.clientX, startW: n.dlgWidth || 216 };
+    store.setGestureIds(['n:' + id]);
     if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
   }, [store]);
@@ -531,6 +535,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const onWpDown = useCallback((e: React.MouseEvent, id: string, i: number) => {
     gestRef.current = { mode: 'wp', eid: id, idx: i };
     store.dragBegin();
+    store.setGestureIds(['e:' + id]);
     if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
   }, [store]);
@@ -541,6 +546,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   const onLabelDown = (e: React.MouseEvent, id: string) => {
     gestRef.current = { mode: 'label', eid: id };
+    store.setGestureIds(['e:' + id]);
     e.preventDefault();
   };
 
@@ -550,6 +556,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const bd = ed.bd || { dl: 0, dy: 0, dr: 0 };
     gestRef.current = { mode: 'bridge', eid: id, part, lx: e.clientX, ly: e.clientY, dl: bd.dl, dy: bd.dy, dr: bd.dr };
     store.dragBegin();
+    store.setGestureIds(['e:' + id]);
     if (store.sync && store.sync.enabled) store.sync.lockTake([id]);
     e.preventDefault();
   }, [store]);
@@ -712,15 +719,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
           for (const [id, b] of g.base) {
             if (id.startsWith('g:')) {
               const sg = store.groupById(id.slice(2));
-              if (sg) { sg.x += dx; sg.y += dy; }
+              if (sg) { sg.x += dx; sg.y += dy; store.touchPos(id); }
             } else {
               const n = store.nodeById(id);
-              if (n) { n.x += dx; n.y += dy; }
+              if (n) { n.x += dx; n.y += dy; store.touchPos('n:' + id); }
             }
           }
           /* карточка/цепочка (fold<2) едет вместе с содержимым (8556–8560) */
           const gc = store.groupById(g.gid);
-          if (gc && (gc.fold === undefined ? 2 : gc.fold) < 2) { gc.x += dx; gc.y += dy; }
+          if (gc && (gc.fold === undefined ? 2 : gc.fold) < 2) { gc.x += dx; gc.y += dy; store.touchPos('g:' + g.gid); }
           store.emit();
           /* живые перетаскивания: члены группы + рамки (включая подгруппы) */
           if (store.sync) {
@@ -845,6 +852,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           if (ed) {
             ed.lt = lt;
             ed.lp = clamp(side * Math.min(44, len), -44, 44);
+            store.touchPos('e:' + g.eid);
             store.emit();
           }
           break;
@@ -876,6 +884,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       gestRef.current = null;
       store.syncBusyFlag = false;
       store.gestureRollback = null;
+      store.gestureIds.clear();
       /* жест завершён: отдаём локи жеста (8700 оригинала). Без активного жеста —
          ничего не отдаём: клик по полю инспектора не должен ронять edit-лок. */
       if (g && store.sync && store.sync.enabled) store.sync.lockGiveAll(store.editLockIds);

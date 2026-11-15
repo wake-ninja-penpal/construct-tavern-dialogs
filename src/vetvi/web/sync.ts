@@ -54,6 +54,9 @@ interface JoinOpts {
   own?: boolean;
   pushLocal?: boolean;
   password?: string;
+  /* подключение по ссылке из хэша (#room=…&project=…): проект ссылки, совпадающий
+     с проектом комнаты, открывается из комнаты без диалога — как переход по ссылке */
+  viaLink?: boolean;
   _pwWrong?: boolean;
 }
 
@@ -103,6 +106,10 @@ export class SyncClient {
   status: 'off' | 'conn' | 'on' | 'err' | 'lost' = 'off';
   applyingRemote = false;
   pendingRemote: SyncDoc | null = null;
+  /* когда пришёл отложенный снимок — локальные сдвиги позже него не перезаписываются */
+  pendingRemoteAt = 0;
+  /* разовая явная публикация чужого проекта в комнату (кнопка «Опубликовать мою») */
+  allowForeignOnce = false;
   joinPass: string | null = null;
   stateT: ReturnType<typeof setTimeout> | null = null;
   lastSent = '';
@@ -258,9 +265,17 @@ export class SyncClient {
              чужой проект без данных слота грузится пустым → localEmpty → applyRemote). */
           const hasLocalSlotForRoom = !!(roomPid && projReadSlot(roomPid));
           const pristine = !metaPid; /* дефолтный «Без названия», ни одного автосохранения */
+          /* Переход по ССЫЛКЕ проекта (#room=…&project=P): комната содержит именно этот
+             проект, а локально открыт другой — открываем проект из комнаты, как «Открыть
+             проект» (диалог «публикация/загрузка» здесь только путает: выбор не влияет
+             на текущий документ и выглядит как «возврат в старый проект»). */
+          const linkSwitch = !!(opts.viaLink && roomPid && this.projectId && roomPid === this.projectId && metaPid && roomPid !== metaPid);
           if (localEmpty || (!hasLocalSlotForRoom && pristine) || (sameProject && serverNewer)) {
             this.applyRemote(serverDoc, true, opts.own === true);
             this.store.toast('Загружено состояние из комнаты');
+          } else if (linkSwitch) {
+            this.applyRemote(serverDoc, true);
+            this.store.toast('Открыт проект из комнаты по ссылке', 'ok');
           } else if (sameProject) {
             this.flushState(true);
             if (!opts.silent) this.store.toast('Локальная версия новее — опубликована в комнату', 'warn');
@@ -269,7 +284,7 @@ export class SyncClient {
               title: 'Комната уже содержит проект',
               text: 'В комнате уже есть общее состояние, а у вас открыт другой проект. Загрузить общий (текущая работа будет заменена) или опубликовать вашу локальную версию?',
               buttons: [
-                { label: 'Опубликовать мою', fn: () => this.flushState(true) },
+                { label: 'Опубликовать мою', fn: () => { this.allowForeignOnce = true; this.flushState(true); this.allowForeignOnce = false; } },
                 { label: 'Загрузить из комнаты', primary: true, fn: () => this.applyRemote(serverDoc, true) },
               ],
             });
@@ -377,6 +392,8 @@ export class SyncClient {
     this.store.syncUsers = [];
     this.mergeCount = 0;
     this.pendingRemote = null;
+    this.pendingRemoteAt = 0;
+    this.allowForeignOnce = false;
     this.rlocks = null;
     this.store.syncLocks = {};
     this.joinPass = null;
@@ -400,16 +417,20 @@ export class SyncClient {
 
   /* ═══ применение удалённого состояния ═══ */
 
-  applyRemote(doc: SyncDoc | null, fit: boolean, keepPid = false): void {
+  applyRemote(doc: SyncDoc | null, fit: boolean, keepPid = false, preserveTouchedAfter = 0): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
     this.applyingRemote = true;
     try {
-      this.store.applyRemoteDoc(doc as Record<string, unknown>, keepPid);
+      this.store.applyRemoteDoc(doc as Record<string, unknown>, keepPid, preserveTouchedAfter);
       if (fit) {
         const api = canvasApi.current;
         const r = api ? api.getRect() : null;
         if (r && api) this.store.fitView(r.width, r.height, api.sizes);
       }
+      /* применён свежий снимок — старый отложенный уже не актуален, а эхо-публикация
+         того же содержимого не нужна (lastSent = применённый документ) */
+      this.pendingRemote = null;
+      try { this.lastSent = JSON.stringify(this.store.syncDocObj()); } catch { /* нет сериализации */ }
     } finally {
       this.applyingRemote = false;
     }
@@ -418,7 +439,7 @@ export class SyncClient {
   handleRemoteDoc(doc: SyncDoc | null | undefined): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
     if (this.applyingRemote) return;
-    if (this.store.busyNow()) { this.pendingRemote = doc; return; }
+    if (this.store.busyNow()) { this.pendingRemote = doc; this.pendingRemoteAt = Date.now(); return; }
     this.applyRemote(doc, false);
   }
 
@@ -434,6 +455,17 @@ export class SyncClient {
     if (!this.enabled || !this.sock || !this.sock.connected) return;
     if (this.applyingRemote && !force) return;
     const doc = this.store.syncDocObj();
+    /* в комнату публикуется только «свой» документ: снимок другого проекта
+       (диалог комнаты ещё не решён, фоновый автосейв, смена проекта) загрязнял
+       комнату чужим meta.projectId — после этого «Загрузить из комнаты» вечно
+       возвращала предыдущий проект. Явная публикация из диалога — через
+       allowForeignOnce. */
+    if (!force || !this.allowForeignOnce) {
+      const roomPid = this.projectId;
+      const docPid = (doc.meta && typeof (doc.meta as { projectId?: unknown }).projectId === 'string')
+        ? String((doc.meta as { projectId?: string }).projectId) : '';
+      if (roomPid && docPid && roomPid !== docPid) return;
+    }
     let json = '';
     try { json = JSON.stringify(doc); } catch { return; }
     if (json === this.lastSent && !force) return;
@@ -496,6 +528,9 @@ export class SyncClient {
         if (!n) return;
         n.x = u.x;
         n.y = u.y;
+        /* живой сдвиг соавтора — тоже «свежая» позиция: отложенный снимок,
+           пришедший раньше этих событий, не должен её затереть */
+        this.store.touchPos('n:' + u.id);
         changed = true;
       });
     }
@@ -505,19 +540,20 @@ export class SyncClient {
         if (!g) return;
         g.x = u.x;
         g.y = u.y;
+        this.store.touchPos('g:' + u.id);
         changed = true;
       });
     }
     if (m.pts) {
       m.pts.forEach((u) => {
         const ed = this.store.edgeById(u.eid);
-        if (ed && Array.isArray(u.pts)) { ed.pts = u.pts; changed = true; }
+        if (ed && Array.isArray(u.pts)) { ed.pts = u.pts; this.store.touchPos('e:' + u.eid); changed = true; }
       });
     }
     if (m.dlgW) {
       m.dlgW.forEach((u) => {
         const n = this.store.nodeById(u.id);
-        if (n) { n.dlgWidth = u.w; changed = true; }
+        if (n) { n.dlgWidth = u.w; this.store.touchPos('n:' + u.id); changed = true; }
       });
     }
     if (changed) this.store.emit();
@@ -599,13 +635,14 @@ export class SyncClient {
     let hit = false;
     /* проигранная гонка набора текста: снимаем фокус с поля (11974–11986 оригинала) */
     if (this.store.editLockDenied(new Set(Object.keys(ids)))) hit = true;
-    /* откат мутаций активного жеста по снимку начала */
+    /* откат активного жеста: ТОЛЬКО объекты жеста возвращаются к снимку начала
+       (applySnap оригинала) — чужие параллельные правки не затираются целиком.
+       Список объектов читаем ДО очистки жеста (ack может прийти после pointerup). */
     const snap = this.store.dragStartSnapshot;
+    const gids = new Set(this.store.gestureIds);
     if (snap && (this.store.dragMoved || this.store.syncBusyFlag)) {
       try {
-        const parsed = JSON.parse(snap) as Record<string, unknown>;
-        this.store.applyRemoteDoc(parsed, true);
-        hit = true;
+        if (this.store.restoreGesturePositions(snap, gids)) hit = true;
       } catch { /* нет снимка */ }
     }
     this.store.dragStartSnapshot = null;
@@ -1030,7 +1067,7 @@ export class SyncClient {
     if (p.room && !this.enabled) {
       this.mode = 'room';
       this.store.lockAfterUnlock(() => {
-        this.connect(p.room, p.project || null, {});
+        this.connect(p.room, p.project || null, { viaLink: true });
       });
     }
     window.addEventListener('hashchange', () => {
@@ -1038,7 +1075,7 @@ export class SyncClient {
       if (np.room && np.room !== this.room) {
         this.mode = 'room';
         this.store.lockAfterUnlock(() => {
-          this.connect(np.room, np.project || null, {});
+          this.connect(np.room, np.project || null, { viaLink: true });
         });
       }
     });
@@ -1046,8 +1083,10 @@ export class SyncClient {
       this.pollT = setInterval(() => {
         if (this.pendingRemote && !this.store.busyNow() && !this.applyingRemote) {
           const d = this.pendingRemote;
+          const at = this.pendingRemoteAt;
           this.pendingRemote = null;
-          this.applyRemote(d, false);
+          this.pendingRemoteAt = 0;
+          this.applyRemote(d, false, false, at);
         }
       }, 600);
     }
