@@ -1,0 +1,461 @@
+/* Ветви — стили React-редактора (этап 1).
+   Палитра и визуальный язык совпадают с классической версией /vetvi/index.html. */
+
+.rn-app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0c0d0f;
+  color: #e7e9ec;
+  font-family: 'Golos Text', sans-serif;
+  --acc: #e2a54e;
+  --panel: #15171b;
+  --card: #1e2127;
+  --card2: #232730;
+  --line: #2a2e36;
+  --tx: #e7e9ec;
+  --tx2: #a6acb7;
+  --tx3: #6d7480;
+  --ok: #8fbf7f;
+  --warn: #d8c96f;
+}
+
+/* ── тулбар ── */
+.rn-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.rn-brand {
+  font-family: 'Unbounded', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tx);
+  white-space: nowrap;
+}
+.rn-brand em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--acc);
+  border: 1px solid rgba(226, 165, 78, 0.4);
+  border-radius: 5px;
+  padding: 2px 5px;
+  margin-left: 6px;
+}
+.rn-name {
+  width: 200px;
+  height: 28px;
+  background: #101216;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--tx);
+  font: 600 12.5px 'Golos Text', sans-serif;
+  padding: 0 9px;
+  outline: none;
+}
+.rn-name:focus { border-color: var(--acc); }
+.rn-tools { display: flex; align-items: center; gap: 6px; }
+.rn-btn {
+  height: 28px;
+  min-width: 30px;
+  padding: 0 9px;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--tx);
+  font: 600 12px 'Golos Text', sans-serif;
+  cursor: pointer;
+}
+.rn-btn:hover { border-color: #404653; background: #262b33; }
+.rn-btn.primary { background: rgba(226, 165, 78, 0.16); border-color: rgba(226, 165, 78, 0.5); color: #f0c179; }
+.rn-addwrap { position: relative; }
+.rn-menu {
+  position: absolute;
+  top: 33px;
+  left: 0;
+  z-index: 30;
+  min-width: 168px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+}
+.rn-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  color: var(--tx);
+  font: 500 12.5px 'Golos Text', sans-serif;
+  padding: 7px 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.rn-menu button:hover { background: var(--card2); }
+.rn-dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.rn-counts { font: 400 11.5px 'JetBrains Mono', monospace; color: var(--tx3); white-space: nowrap; }
+.rn-save { font: 500 11px 'Golos Text', sans-serif; color: var(--tx3); white-space: nowrap; }
+.rn-save[data-state='saved'] { color: var(--ok); opacity: 0.75; }
+.rn-save[data-state='pending'] { color: var(--warn); }
+.rn-classic {
+  margin-left: auto;
+  font: 500 11.5px 'Golos Text', sans-serif;
+  color: var(--tx3);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+.rn-classic:hover { color: var(--acc); border-color: rgba(226, 165, 78, 0.4); }
+
+/* ── основная область ── */
+.rn-main { flex: 1; display: flex; min-height: 0; }
+
+/* ── холст ── */
+.rn-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background-color: #0c0d0f;
+  cursor: grab;
+}
+.rn-canvas:active { cursor: grabbing; }
+.rn-world { position: absolute; inset: 0; transform-origin: 0 0; }
+.rn-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.rn-edge { fill: none; stroke: #565d6a; stroke-width: 2; pointer-events: none; }
+.rn-edge.sel { stroke: var(--acc); stroke-width: 2.4; }
+.rn-edge.pending { stroke: rgba(226, 165, 78, 0.6); stroke-dasharray: 6 5; }
+.rn-edge-hit { fill: none; stroke: transparent; stroke-width: 13; pointer-events: stroke; cursor: pointer; }
+.rn-edge-label {
+  fill: var(--tx3);
+  font: 600 10px 'JetBrains Mono', monospace;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* ── карточка ноды ── */
+.rn-node {
+  position: absolute;
+  background: linear-gradient(#20242b, #191c21);
+  border: 1px solid #31363f;
+  border-radius: 11px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38);
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.16s, border-color 0.16s;
+}
+.rn-node:hover { box-shadow: 0 12px 26px rgba(0, 0, 0, 0.5); border-color: #404653; }
+.rn-node.sel { border-color: #e2a54e; }
+.rn-node.dim { outline: 2px dashed rgba(226, 165, 78, 0.5); outline-offset: 2px; }
+.rn-bar {
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--c);
+}
+.rn-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 8px 7px 13px;
+}
+.rn-ico { flex: none; display: flex; }
+.rn-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rn-st { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.rn-st.st-draft { background: #8f96a2; }
+.rn-st.st-done { background: var(--ok); }
+.rn-exp {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--tx3);
+  cursor: pointer;
+}
+.rn-exp:hover { color: var(--tx); }
+.rn-body { padding: 0 12px 11px 14px; }
+.rn-node.ex-0 .rn-body { display: none; }
+.rn-text {
+  font-size: 12px;
+  color: var(--tx2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rn-node.ex-2 .rn-text { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.rn-text.empty { color: var(--tx3); font-style: italic; }
+.rn-replies { margin-top: 7px; display: flex; flex-direction: column; gap: 4px; }
+.rn-reply {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  background: #171a1f;
+  border: 1px solid #262a31;
+  border-radius: 7px;
+  padding: 4px 7px;
+  font-size: 11px;
+  color: var(--tx2);
+}
+.rn-reply-sp { flex: none; font: 700 9.5px 'JetBrains Mono', monospace; color: #9cb878; }
+.rn-reply-t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-outs { margin-top: 7px; display: flex; flex-direction: column; gap: 4px; }
+.rn-out {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: #171a1f;
+  border: 1px solid #262a31;
+  border-radius: 7px;
+  padding: 4px 18px 4px 7px;
+  font-size: 11px;
+  color: var(--tx2);
+}
+.rn-out-l { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.rn-tags span {
+  font: 600 9.5px 'JetBrains Mono', monospace;
+  letter-spacing: 0.4px;
+  color: var(--tx3);
+  background: var(--card2);
+  border: 1px solid #303540;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+/* ── пины ── */
+.rn-ipin,
+.rn-opin {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #14161a;
+  border: 2px solid #565d6a;
+  cursor: crosshair;
+  z-index: 2;
+}
+.rn-ipin { left: -6px; top: 50%; margin-top: -6px; }
+.rn-ipin:hover { border-color: var(--acc); }
+.rn-opin { right: -6px; top: 50%; margin-top: -6px; }
+.rn-opin.main.mb { top: auto; bottom: 16px; margin-top: 0; }
+.rn-opin:hover { border-color: var(--acc); background: rgba(226, 165, 78, 0.3); }
+.rn-out .rn-opin { position: absolute; right: -6px; top: 50%; margin-top: -6px; }
+
+/* ── управление видом ── */
+.rn-ctrls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(21, 23, 27, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 5px 7px;
+  z-index: 10;
+}
+.rn-ctrls button {
+  width: 26px;
+  height: 26px;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--tx2);
+  cursor: pointer;
+  font: 600 13px 'Golos Text', sans-serif;
+}
+.rn-ctrls button:hover { color: var(--tx); border-color: #404653; }
+.rn-ctrls button.on { color: var(--acc); border-color: rgba(226, 165, 78, 0.5); }
+.rn-zoom { min-width: 44px; text-align: center; font: 600 11px 'JetBrains Mono', monospace; color: var(--tx3); }
+
+/* ── инспектор ── */
+.rn-inspector {
+  flex: none;
+  width: 292px;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  max-height: 100%;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rn-inspector.empty { justify-content: flex-start; }
+.rn-insp-title { font: 700 12px 'Unbounded', sans-serif; color: var(--tx3); text-transform: uppercase; letter-spacing: 1px; }
+.rn-insp-head { display: flex; align-items: center; justify-content: space-between; }
+.rn-insp-type { font: 700 12.5px 'Golos Text', sans-serif; }
+.rn-insp-x {
+  width: 24px;
+  height: 24px;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--tx3);
+  cursor: pointer;
+}
+.rn-insp-x:hover { color: var(--tx); }
+.rn-insp-hint { font-size: 11.5px; line-height: 1.5; color: var(--tx3); }
+.rn-field { display: flex; flex-direction: column; gap: 6px; }
+.rn-field > span { font: 600 10.5px 'Golos Text', sans-serif; text-transform: uppercase; letter-spacing: 0.6px; color: var(--tx3); }
+.rn-field input[type='text'],
+.rn-field input:not([type]),
+.rn-field textarea {
+  width: 100%;
+  background: #101216;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--tx);
+  font: 500 12.5px 'Golos Text', sans-serif;
+  padding: 7px 9px;
+  outline: none;
+  resize: vertical;
+}
+.rn-field input:focus,
+.rn-field textarea:focus { border-color: var(--acc); }
+.rn-seg { display: flex; gap: 4px; }
+.rn-seg button {
+  flex: 1;
+  height: 26px;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--tx3);
+  font: 600 11px 'Golos Text', sans-serif;
+  cursor: pointer;
+}
+.rn-seg button.on.c-idea { color: var(--warn); border-color: rgba(216, 201, 111, 0.5); }
+.rn-seg button.on.c-draft { color: #c8cdd6; border-color: rgba(200, 205, 214, 0.4); }
+.rn-seg button.on.c-done { color: var(--ok); border-color: rgba(143, 191, 127, 0.5); }
+.rn-palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rn-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.rn-swatch.on { border-color: #e7e9ec; }
+.rn-swatch.more { background: var(--card2); border: 1px solid var(--line); color: var(--tx3); font-size: 10px; }
+.rn-picker { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--card2); cursor: pointer; }
+.rn-row-head { display: flex; align-items: center; justify-content: space-between; }
+.rn-row-head span { font: 600 10.5px 'Golos Text', sans-serif; text-transform: uppercase; letter-spacing: 0.6px; color: var(--tx3); }
+.rn-mini {
+  height: 24px;
+  padding: 0 9px;
+  background: rgba(226, 165, 78, 0.14);
+  border: 1px solid rgba(226, 165, 78, 0.4);
+  border-radius: 7px;
+  color: #f0c179;
+  font: 600 11px 'Golos Text', sans-serif;
+  cursor: pointer;
+}
+.rn-replies-edit { display: flex; flex-direction: column; gap: 8px; }
+.rn-reply-edit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px;
+  background: #101216;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px;
+}
+.rn-reply-edit.one { grid-template-columns: 1fr auto; }
+.rn-reply-edit .rn-reply-sp-inp { grid-column: 1; }
+.rn-reply-edit textarea { grid-column: 1; }
+.rn-reply-btns { display: flex; gap: 4px; grid-column: 2; grid-row: 1 / span 2; align-items: start; }
+.rn-reply-btns button,
+.rn-reply-edit > button {
+  width: 24px;
+  height: 24px;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--tx3);
+  cursor: pointer;
+}
+.rn-reply-btns button:hover, .rn-reply-edit > button:hover { color: var(--tx); }
+.rn-insp-foot { margin-top: auto; padding-top: 8px; }
+.rn-danger {
+  width: 100%;
+  height: 30px;
+  background: rgba(207, 107, 90, 0.12);
+  border: 1px solid rgba(207, 107, 90, 0.4);
+  border-radius: 8px;
+  color: #cf6b5a;
+  font: 600 12px 'Golos Text', sans-serif;
+  cursor: pointer;
+}
+.rn-danger:hover { background: rgba(207, 107, 90, 0.2); }
+
+/* ── статус-бар ── */
+.rn-statusbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 26px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  font: 400 10.5px 'Golos Text', sans-serif;
+  color: var(--tx3);
+}
+.rn-status-r { font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+
+/* адаптив: на узких экранах инспектор уходит вниз */
+@media (max-width: 760px) {
+  .rn-main { flex-direction: column; }
+  .rn-inspector {
+    width: 100%;
+    max-height: 38vh;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .rn-name { width: 120px; }
+  .rn-counts, .rn-classic { display: none; }
+}
