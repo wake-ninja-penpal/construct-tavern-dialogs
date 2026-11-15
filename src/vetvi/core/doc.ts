@@ -10,6 +10,7 @@
 
 import { LS_KEY } from './constants';
 import { defaultDoc, defaultViewport, uid } from './factory';
+import { stItem, stSetItem } from './storage';
 import type { VetviAutosave, VetviDoc, VetviEdge, VetviGroup, VetviNode, VetviViewport } from './types';
 
 /** Реестр проектов и текущий проект — как менеджер проектов классической версии. */
@@ -154,32 +155,20 @@ export function loadAutosave(): { doc: VetviDoc; vp: VetviViewport; bend: string
     }
   };
   // 1) текущий проект менеджера проектов (или указанный в hash)
-  let curId = '';
-  try {
-    curId = window.localStorage.getItem(LS_CURPROJ) || '';
-  } catch {
-    curId = '';
-  }
+  let curId = stItem(LS_CURPROJ) || '';
   const hashProject = /project=([A-Za-z0-9_-]+)/.exec(window.location.hash || '');
   if (hashProject) curId = hashProject[1];
   if (curId) {
-    try {
-      const raw = window.localStorage.getItem(slotKey(curId));
-      const res = fromRaw(raw);
-      if (res) {
-        res.doc.meta.projectId = curId;
-        return res;
-      }
-    } catch {
-      // слот недоступен — уходим в fallback
+    const res = fromRaw(stItem(slotKey(curId)));
+    if (res) {
+      res.doc.meta.projectId = curId;
+      return res;
     }
   }
   // 2) legacy-зеркало автосохранения
-  try {
-    const res = fromRaw(window.localStorage.getItem(LS_KEY));
+  {
+    const res = fromRaw(stItem(LS_KEY));
     if (res) return res;
-  } catch {
-    // пусто — читаем ниже дефолт
   }
   return { doc: defaultDoc(), vp: defaultViewport(), bend: 'smooth' };
 }
@@ -206,42 +195,23 @@ export function serializeDoc(doc: VetviDoc, vp: VetviViewport, bend: string): st
 /**
  * Запись автосохранения: слот текущего проекта + реестр менеджера проектов
  * классической версии + legacy-зеркало LS_KEY. Благодаря этому проект,
- * отредактированный в React-версии, открывается в /vetvi/index.html «как свой».
+/**
+ * Запись автосохранения: слот текущего проекта + реестр менеджера проектов
+ * классической версии + legacy-зеркало LS_KEY — через фасад хранилища (LS/IDB).
  */
 export function saveAutosave(doc: VetviDoc, vp: VetviViewport, bend: string): void {
   if (typeof window === 'undefined') return;
-  // id проекта: как в оригинале — meta.projectId, иначе генерируем и прописываем
   let pid = typeof doc.meta.projectId === 'string' ? doc.meta.projectId : '';
   if (!pid) {
     pid = uid();
     doc.meta.projectId = pid;
   }
-  const payload: VetviAutosave = { project: doc, vp, bend };
-  const raw = JSON.stringify(payload);
+  const raw = JSON.stringify({ project: doc, vp, bend });
   try {
-    window.localStorage.setItem(slotKey(pid), raw);
-    window.localStorage.setItem(LS_KEY, raw);
-    window.localStorage.setItem(LS_CURPROJ, pid);
+    stSetItem(slotKey(pid), raw);
+    stSetItem(LS_KEY, raw);
+    stSetItem(LS_CURPROJ, pid);
   } catch {
-    // переполнение квоты — автосохранение пропускается, как в оригинале
     return;
-  }
-  // реестр проектов: обновить запись (name/modified/nodes/at), сорт по modified
-  try {
-    const now = new Date().toISOString();
-    let list: { id: string; name?: string; created?: string; modified?: string; nodes?: number; roomId?: string | null; at?: string }[] = [];
-    const regRaw = window.localStorage.getItem(LS_PROJECTS);
-    if (regRaw) {
-      const parsed: unknown = JSON.parse(regRaw);
-      if (Array.isArray(parsed)) list = parsed as typeof list;
-    }
-    const i = list.findIndex((e) => e && e.id === pid);
-    const entry = { id: pid, name: doc.meta.name || 'Без названия', created: (i >= 0 ? list[i].created : undefined) || now, modified: now, nodes: doc.nodes.length, roomId: null, at: now };
-    if (i >= 0) list[i] = { ...list[i], ...entry };
-    else list.push(entry);
-    list.sort((a, b) => String(b.modified || b.at || '').localeCompare(String(a.modified || a.at || '')));
-    window.localStorage.setItem(LS_PROJECTS, JSON.stringify(list));
-  } catch {
-    // реестр не обновился — слот и зеркало всё равно записаны
   }
 }

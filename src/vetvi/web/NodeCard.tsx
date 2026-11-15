@@ -1,30 +1,23 @@
 'use client';
 
 /**
- * Ветви — карточка ноды на холсте (React-слой).
- * Визуальный язык классической версии: тёмная карточка с цветной полосой слева,
- * пины входа слева и выхода справа (у диалога/действия/развилки — внизу правой грани),
- * у развилки и действия — пин на каждом исходе.
+ * Ветви — карточка ноды (этап 2): спикеры/цвета персонажей, пины реплик,
+ * «повтор», сворачивание с пином, исходы с пинами и условиями, вход переменной
+ * развилки, инлайн-переименование, ресайз ширины диалога, вспышка реплики.
  */
 
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useEffect, useRef } from 'react';
 
-import { MAIN_BOTTOM_TYPES, STATUS_RU } from '@/vetvi/core/constants';
+import { STATUS_RU } from '@/vetvi/core/constants';
 import { nodeColor, typeInfo } from '@/vetvi/core/geometry';
 import type { VetviNode, VetviViewport } from '@/vetvi/core/types';
+import { condText, varNodeChipText } from '@/vetvi/core/vars';
+import type { VetviStore } from './store';
+import type { MeasureSink } from './measure';
 
-export interface MeasureSink {
-  setSize(id: string, w: number, h: number): void;
-  setPort(key: string, p: { x: number; y: number }): void;
-}
+const STATUS_COLOR: Record<string, string> = { idea: '#d8c96f', draft: '#8f96a2', done: '#8fbf7f' };
 
-const STATUS_COLOR: Record<string, string> = {
-  idea: '#d8c96f',
-  draft: '#8f96a2',
-  done: '#8fbf7f',
-};
-
-function TypeIcon({ type }: { type: string }) {
+export function TypeIcon({ type, size = 13 }: { type: string; size?: number }) {
   const paths: Record<string, string> = {
     scene: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6l-2 4M13 6l-2 4M18 6l-2 4"/>',
     quest: '<path d="M6 3v18"/><path d="M6 4.5h11l-2.6 3.7 2.6 3.8H6"/>',
@@ -38,7 +31,7 @@ function TypeIcon({ type }: { type: string }) {
   };
   const d = paths[type] || paths.scene;
   return (
-    <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <g dangerouslySetInnerHTML={{ __html: d }} />
     </svg>
   );
@@ -53,20 +46,21 @@ export function NodeCard(props: {
   node: VetviNode;
   vp: VetviViewport;
   selected: boolean;
-  dimmed?: boolean;
-  store: {
-    selectOnly(id: string): void;
-    toggleSelect(id: string): void;
-    updateNode(id: string, patch: Partial<VetviNode>, opts?: { history?: boolean }): void;
-  };
+  store: VetviStore;
   sink: MeasureSink;
+  flash: { nodeId: string; replyId: string | null; t: number } | null;
+  lockedBy?: { name: string; color: string } | null;
   onDragStart: (e: React.MouseEvent, id: string) => void;
-  onPinDown: (e: React.MouseEvent, id: string, out?: string | null) => void;
+  onPinDown: (e: React.MouseEvent, id: string, out: string | null, reply: string | null) => void;
+  onPinReattach: (e: React.MouseEvent, id: string) => void;
+  onResizeDown: (e: React.MouseEvent, id: string) => void;
+  onDblClick: (id: string) => void;
+  onReplyDbl: (nodeId: string, rid: string) => void;
 }) {
-  const { node: n, vp, selected, sink, store } = props;
+  const { node: n, vp, selected, sink, store, flash } = props;
   const rootRef = useRef<HTMLDivElement>(null);
+  const renameRef = useRef<HTMLInputElement>(null);
 
-  // Измерение карточки и пинов после каждой отрисовки — значения в мировых координатах.
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -76,56 +70,113 @@ export function NodeCard(props: {
     el.querySelectorAll<HTMLElement>('[data-pin]').forEach((pin) => {
       const pr = pin.getBoundingClientRect();
       const key = n.id + ':' + String(pin.dataset.pin || '');
-      sink.setPort(key, {
-        x: n.x + (pr.left + pr.width / 2 - rr.left) / z,
-        y: n.y + (pr.top + pr.height / 2 - rr.top) / z,
-      });
+      sink.setPort(key, { x: n.x + (pr.left + pr.width / 2 - rr.left) / z, y: n.y + (pr.top + pr.height / 2 - rr.top) / z });
     });
   });
+
+  const renaming = store.renameId === n.id;
+
+  useEffect(() => {
+    if (renaming && renameRef.current) {
+      renameRef.current.focus();
+      renameRef.current.select();
+    }
+  }, [renaming]);
 
   const color = nodeColor(n);
   const info = typeInfo(n.type);
   const status = STATUS_RU[n.status] ? n.status : 'idea';
   const collapsed = n.expand === 0;
-  const text = collapsed ? '' : textOf(n);
-  const mainBottom = MAIN_BOTTOM_TYPES.indexOf(n.type) >= 0;
+  const mainBottom = n.type === 'dialog' || n.type === 'action' || n.type === 'branch';
+  const width = n.dlgWidth && n.dlgWidth >= 216 ? n.dlgWidth : 216;
+  const isFlash = !!(flash && flash.nodeId === n.id);
+  const chars = store.doc.chars || [];
 
   const replies = (!collapsed && n.type === 'dialog' && n.dialog?.replies) ? n.dialog.replies : [];
-  const outcomes = (!collapsed && (n.type === 'branch') && Array.isArray(n.outcomes)) ? n.outcomes : [];
-  const actions = (!collapsed && (n.type === 'action') && Array.isArray(n.actions)) ? (n.actions as { id: string; label?: string }[]) : [];
+  const outcomes = (!collapsed && n.type === 'branch' && Array.isArray(n.outcomes)) ? n.outcomes : [];
+  const actions = (!collapsed && n.type === 'action' && Array.isArray(n.actions)) ? (n.actions as { id: string; label?: string }[]) : [];
+  const outs = n.type === 'action' ? actions : outcomes;
+  const hasVarIn = n.type === 'branch';
 
-  const width = n.dlgWidth && n.dlgWidth >= 216 ? n.dlgWidth : 216;
+  const commitRename = () => {
+    const v = renameRef.current?.value ?? '';
+    store.updateNode(n.id, { title: v }, { label: 'Переименование ноды' });
+    store.cancelRename();
+  };
 
-  const cycleExpand = () => {
-    const next = n.expand === 0 ? 1 : n.expand === 1 ? 2 : 0;
-    store.updateNode(n.id, { expand: next });
+  const speakerOf = (sid: string | null): { name: string; color: string; av: string | null; shape: string } | null => {
+    if (!sid) return null;
+    const c = store.charById(sid);
+    if (c) return { name: c.name || '(без имени)', color: c.color || '#8b929c', av: (c.av as string | null) || null, shape: c.avShape === 'square' ? 'square' : 'circle' };
+    const nn = store.nodeById(sid);
+    if (nn) return { name: nn.title || '(без имени)', color: nn.color || info.color, av: null, shape: 'circle' };
+    return { name: '(неизвестный)', color: '#8b929c', av: null, shape: 'circle' };
+  };
+
+  const renderReply = (r: { id: string; speaker?: string | null; text?: string; loop?: boolean; children?: { id: string }[] }) => {
+    const sp = speakerOf(r.speaker ?? null);
+    const flashing = isFlash && flash?.replyId === r.id;
+    return (
+      <div className={'rn-reply' + (flashing ? ' flash' : '')} key={r.id} data-reply-id={r.id}>
+        <span className="rn-reply-sp" style={sp ? { color: sp.color } : undefined}>
+          {sp && <span className={'rn-av ' + sp.shape + (sp.av ? '' : ' empty')} style={{ borderColor: sp.color }}>{sp.av ? <img src={sp.av} alt="" /> : (sp.name[0] || '?').toUpperCase()}</span>}
+          {sp ? sp.name : '—'}
+        </span>
+        <span className="rn-reply-t">{String(r.text || '')}</span>
+        {!!r.loop && <span className="rn-loop" title="Повтор: диалог зациклен">↻</span>}
+        <span
+          className="rn-reply-pin"
+          data-pin={'reply:' + r.id}
+          title="Исход из реплики: потянуть связь"
+          onMouseDown={(e) => { e.stopPropagation(); props.onPinDown(e, n.id, null, r.id); }}
+        />
+        {(r.children || []).map((ch) => renderReply(ch as { id: string; speaker?: string | null; text?: string; loop?: boolean; children?: { id: string }[] }))}
+      </div>
+    );
   };
 
   return (
     <div
       ref={rootRef}
       data-node-id={n.id}
-      className={
-        'rn-node' +
-        (selected ? ' sel' : '') +
-        (collapsed ? ' ex-0' : n.expand === 2 ? ' ex-2' : ' ex-1') +
-        (props.dimmed ? ' dim' : '')
-      }
+      className={'rn-node' + (selected ? ' sel' : '') + (collapsed ? ' ex-0' : n.expand === 2 ? ' ex-2' : ' ex-1') + (isFlash ? ' flash' : '')}
       style={{ left: n.x, top: n.y, width, ['--c' as string]: color }}
       onMouseDown={(e) => {
-        if ((e.target as HTMLElement).closest('[data-pin]')) return;
+        const t = e.target as HTMLElement;
+        if (t.closest('[data-pin]') || t.closest('[data-nodrag]')) return;
         e.stopPropagation();
         if (e.shiftKey) store.toggleSelect(n.id);
         else if (!selected) store.selectOnly(n.id);
         props.onDragStart(e, n.id);
       }}
+      onDoubleClick={(e) => {
+        const t = e.target as HTMLElement;
+        if (t.closest('[data-pin]') || t.closest('[data-nodrag]')) return;
+        props.onDblClick(n.id);
+      }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!selected) store.selectOnly(n.id); }}
     >
       <span className="rn-bar" aria-hidden="true" />
       <div className="rn-head">
         <span className="rn-ico" style={{ color }}><TypeIcon type={n.type} /></span>
-        <span className="rn-title" title={n.title}>{n.title || info.name}</span>
-        <span className={'rn-st st-' + status} title={'Статус: ' + (STATUS_RU[status] || status)} />
-        <button type="button" className="rn-exp" title="Свернуть/развернуть" onClick={(e) => { e.stopPropagation(); cycleExpand(); }}>
+        {renaming ? (
+          <input
+            ref={renameRef}
+            className="rn-rename"
+            defaultValue={n.title}
+            aria-label="Название ноды"
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') store.cancelRename();
+            }}
+            onBlur={commitRename}
+          />
+        ) : (
+          <span className="rn-title" title={n.title}>{n.title || info.name}</span>
+        )}
+        <span className={'rn-st st-' + status} data-nodrag title={'Статус: ' + (STATUS_RU[status] || status)} onClick={(e) => { e.stopPropagation(); store.cycleStatus(n.id); }} />
+        <button type="button" className="rn-exp" data-nodrag title="Свернуть/развернуть" onClick={(e) => { e.stopPropagation(); store.cycleExpand(n.id); }}>
           <svg viewBox="0 0 24 24" width={11} height={11} fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {n.expand === 0 ? <path d="m6 9 6 6 6-6" /> : <path d="m6 15 6-6 6 6" />}
           </svg>
@@ -133,77 +184,68 @@ export function NodeCard(props: {
       </div>
       {!collapsed && (
         <div className="rn-body">
-          {n.type === 'varnode' ? null : (
-            text ? <div className="rn-text">{text}</div> : <div className="rn-text empty">— пусто —</div>
+          {n.type === 'varnode' ? (
+            <div className="rn-text rn-varchip">{varNodeChipText(store.doc, n)}</div>
+          ) : (
+            textOf(n) ? <div className="rn-text">{textOf(n)}</div> : <div className="rn-text empty">— пусто —</div>
           )}
-          {n.type === 'varnode' && (
-            <div className="rn-text">{String(n.varMode === 'get' ? 'чтение' : 'запись') + ' · ' + String(n.varOp ?? '=') + ' · ' + String(n.varVal ?? 0)}</div>
-          )}
-          {n.type === 'dialog' && !n.dialog?.replies.length && (
-            <div className="rn-text empty">реплик пока нет</div>
-          )}
-          {replies.length > 0 && (
-            <div className="rn-replies">
-              {replies.map((r) => (
-                <div className="rn-reply" key={r.id} data-reply-id={r.id}>
-                  <span className="rn-reply-sp">{r.speaker ? String(r.speaker) : '—'}</span>
-                  <span className="rn-reply-t">{String(r.text || '')}</span>
-                </div>
-              ))}
+          {n.type === 'dialog' && !!n.linear && <div className="rn-linear" title="Проигрывать подряд">▸▸ подряд</div>}
+          {n.type === 'dialog' && !n.dialog?.replies.length && <div className="rn-text empty">реплик пока нет</div>}
+          {replies.length > 0 && <div className="rn-replies">{replies.map((r) => renderReply(r))}</div>}
+          {outs.length > 0 && (
+            <div className="rn-outs">
+              {outs.map((o) => {
+                const oid = (o as { id: string }).id;
+                const cond = (o as { cond?: { vid: string; op: string; val: number | string } }).cond;
+                return (
+                  <div className="rn-out" key={oid}>
+                    <span className="rn-out-l">{String((o as { label?: string }).label || '—')}</span>
+                    {cond && <span className="rn-out-cond" title={condText(store.doc, cond)}>⌥</span>}
+                    <span
+                      className="rn-opin"
+                      data-pin={'out:' + oid}
+                      data-out={oid}
+                      title="Исход: потянуть связь"
+                      onMouseDown={(e) => { e.stopPropagation(); props.onPinDown(e, n.id, oid, null); }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
-          {outcomes.length > 0 && (
-            <div className="rn-outs">
-              {outcomes.map((o) => (
-                <div className="rn-out" key={o.id}>
-                  <span className="rn-out-l">{String(o.label || '—')}</span>
-                  <span
-                    className="rn-opin"
-                    data-pin={'out:' + o.id}
-                    data-out={o.id}
-                    title="Исход: потянуть связь"
-                    onMouseDown={(e) => { e.stopPropagation(); props.onPinDown(e, n.id, o.id); }}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-          {actions.length > 0 && (
-            <div className="rn-outs">
-              {actions.map((a) => (
-                <div className="rn-out" key={a.id}>
-                  <span className="rn-out-l">{String(a.label || '—')}</span>
-                  <span
-                    className="rn-opin"
-                    data-pin={'out:' + a.id}
-                    data-out={a.id}
-                    title="Действие: потянуть связь"
-                    onMouseDown={(e) => { e.stopPropagation(); props.onPinDown(e, n.id, a.id); }}
-                  />
-                </div>
-              ))}
+          {hasVarIn && (
+            <div className="rn-varin">
+              <span>вход переменной</span>
+              <span className="rn-vpinn" data-pin="varin" title="Вход переменной развилки: потяните связь от ноды «Переменная»" />
             </div>
           )}
           {Array.isArray(n.tags) && n.tags.length > 0 && (
-            <div className="rn-tags">
-              {n.tags.slice(0, 4).map((t, i) => <span key={i}>{String(t)}</span>)}
-            </div>
+            <div className="rn-tags">{(n.tags as string[]).slice(0, 4).map((t, i) => <span key={i}>{String(t)}</span>)}</div>
           )}
         </div>
       )}
-      {/* пин входа слева */}
-      <span
-        className="rn-ipin"
-        data-pin="in"
-        title="Вход"
-      />
-      {/* главный пин выхода справа: у dialog/action/branch — низ правой грани */}
+      {collapsed && n.type === 'dialog' && !!n.dialog?.replies?.length && (
+        <div className="rn-collapsed-info">{n.dialog.replies.length} репл.</div>
+      )}
+      <span className="rn-ipin" data-pin="in" title="Вход" />
+      {collapsed && (
+        <span className="rn-cpin" data-pin="collapse" title="Выход свернутого диалога" />
+      )}
       <span
         className={'rn-opin main' + (mainBottom ? ' mb' : '')}
         data-pin="out"
-        title="Выход: потянуть связь"
-        onMouseDown={(e) => { e.stopPropagation(); props.onPinDown(e, n.id, null); }}
+        title="Выход: потянуть связь. Ctrl — перенести исходящие"
+        onMouseDown={(e) => { e.stopPropagation(); if (e.ctrlKey || e.metaKey) props.onPinReattach(e, n.id); else props.onPinDown(e, n.id, null, null); }}
       />
+      {n.type === 'dialog' && (
+        <span
+          className="rn-wband"
+          data-nodrag
+          title="Ширина диалога: потянуть"
+          onMouseDown={(e) => { e.stopPropagation(); props.onResizeDown(e, n.id); }}
+        />
+      )}
+      {props.lockedBy && <span className="rn-lock" style={{ ['--lc' as string]: props.lockedBy.color }} title={'Правит: ' + props.lockedBy.name} />}
     </div>
   );
 }
