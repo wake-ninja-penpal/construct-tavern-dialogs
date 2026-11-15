@@ -450,6 +450,10 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .port:hover::after{border-color:var(--acc);background:#2a2113;transform:scale(1.25);box-shadow:0 0 10px rgba(226,165,78,.5)}
 .node.t-dialog .pout{top:auto;bottom:8px;right:-13px;left:auto;margin-top:0}
 .node.t-dialog .n-body{padding-bottom:34px}
+/* у «Действие» и «Развилки» главный выход тоже внизу справа, как у «Диалога»:
+   отступ снизу резервирует место, чтобы пин не висел поверх внутренних узлов */
+.node.t-action .pout,.node.t-branch .pout{top:auto;bottom:8px;right:-13px;left:auto;margin-top:0}
+.node.t-action .n-body,.node.t-branch .n-body{padding-bottom:34px}
 .dlg-tree{margin-top:8px;padding:4px 0}
 .dlg-empty{color:var(--tx3);font-style:italic;text-align:center;padding:12px 4px;font-size:10.5px}
 .dlg-participants{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
@@ -465,6 +469,8 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .dlg-reply-row.has-out{background:rgba(226,165,78,.10);box-shadow:inset 0 0 0 1px rgba(226,165,78,.45)}
 .dlg-reply-row.src-hl{background:rgba(240,193,121,.14);box-shadow:inset 0 0 0 1px var(--acc2)}
 .dlg-reply-row.src-sel{background:rgba(226,165,78,.16);box-shadow:inset 0 0 0 1.5px var(--acc)}
+/* подсветка реплики на карточке ноды: «К ноде» из проигрывателя */
+.dlg-reply-row.dlg-flash{animation:dlgFlash 2.4s ease}
 .dlg-reply-pin{position:absolute;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#0f1114;border:2px solid #565c66;flex:none;opacity:0;transition:opacity .15s,border-color .15s,background .15s}
 .node:hover .dlg-reply-pin,.node.sel .dlg-reply-pin{opacity:1}
 .dlg-reply-pin.out{right:-5px;cursor:grab}
@@ -612,6 +618,44 @@ body.connecting .vpinn{cursor:copy}
 .dlg-modal-close:hover{background:#262b33;color:var(--tx)}
 .dlg-modal-body{padding:16px 20px;overflow-y:auto;flex:1}
 .dlg-modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--line)}
+/* ═══ патчноут: окно «Что нового» — открывается горячей клавишей (Mod+H) ═══ */
+.patch-card{width:680px;max-width:92vw}
+.patch-body{padding:12px 14px}
+.patch-ver+.patch-ver{margin-top:12px}
+.patch-ver-head{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:9px;background:rgba(226,165,78,.08);box-shadow:inset 0 0 0 1px rgba(226,165,78,.26)}
+.patch-ver-v{font:700 12.5px var(--body);color:var(--acc2)}
+.patch-tools{padding:10px 14px 0}
+.log-tools{padding:10px 14px 0}
+.patch-empty{padding:18px 14px;text-align:center;font-size:12px;color:var(--tx3)}
+.patch-latest{font:700 9px var(--body);letter-spacing:.5px;text-transform:uppercase;color:#14161a;background:var(--acc);border-radius:5px;padding:2px 7px}
+.patch-item{display:flex;gap:9px;align-items:flex-start;padding:6px 4px 1px;margin:0 2px;font:400 12.5px/1.5 var(--body);color:var(--tx2)}
+.patch-item>span:last-child{min-width:0}
+.patch-tag{flex:none;margin-top:2px;font:700 8.5px var(--body);letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:5px}
+.patch-tag.add{color:#9cb878;background:rgba(156,184,120,.13);box-shadow:inset 0 0 0 1px rgba(156,184,120,.35)}
+.patch-tag.fix{color:#e08a75;background:rgba(224,138,117,.12);box-shadow:inset 0 0 0 1px rgba(224,138,117,.32)}
+.patch-tag.chg{color:#d6c96a;background:rgba(214,201,106,.12);box-shadow:inset 0 0 0 1px rgba(214,201,106,.32)}
+/* ═══ поиск по проекту: окно с находками по всем полям нод (Mod+F) ═══ */
+.search-card{width:660px;max-width:92vw}
+.search-body{padding:12px 14px}
+.search-bar{display:flex;align-items:center;gap:9px;background:#191c21;border:1px solid #262a31;border-radius:10px;padding:8px 12px}
+.search-bar svg{flex:none;color:var(--tx3)}
+.search-bar input{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--tx);font:600 13.5px var(--body)}
+.search-bar input::placeholder{color:#5a6069;font-weight:400}
+.search-hint{font-size:11px;color:var(--tx3);margin:8px 2px 6px;min-height:14px}
+.search-results{max-height:46vh;overflow-y:auto;border:1px solid var(--line2);border-radius:10px;background:rgba(255,255,255,.015)}
+.search-node-row+.search-node-row{border-top:1px solid rgba(255,255,255,.05)}
+.search-node-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:rgba(226,165,78,.05);border:none;padding:7px 11px;cursor:pointer;transition:background .15s;font:inherit;color:inherit}
+.search-node-head:hover{background:rgba(226,165,78,.11)}
+.search-nico{flex:none;display:flex;align-items:center}
+.search-ntitle{flex:1;min-width:0;font:700 12.5px var(--body);color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-ntype{flex:none;font:700 9px var(--body);letter-spacing:.4px;text-transform:uppercase;color:var(--tx3);background:rgba(255,255,255,.06);border-radius:5px;padding:2px 7px}
+.search-hit{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;background:transparent;border:none;padding:5px 11px 5px 32px;cursor:pointer;transition:background .15s;font:inherit;color:inherit}
+.search-hit:hover{background:rgba(255,255,255,.05)}
+.search-kind{flex:none;font:700 9.5px var(--body);letter-spacing:.3px;text-transform:uppercase;color:#9aa1ac;background:rgba(255,255,255,.05);border-radius:4px;padding:2px 6px;min-width:56px;text-align:center}
+.search-frag{flex:1;min-width:0;font:400 12px/1.45 var(--body);color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-mark{background:rgba(226,165,78,.28);color:#f0c179;border-radius:3px;padding:0 2px;font-weight:700}
+.search-more{font:600 10px var(--body);color:var(--tx3);padding:4px 11px 6px 32px}
+.search-empty{padding:18px 14px;text-align:center;font-size:12px;color:var(--tx3)}
 /* ═══ настройки проекта ═══ */
 .set-card{width:600px;min-width:0}
 .set-sec-title{font-size:13px;font-weight:700;color:var(--tx);margin:2px 0 6px}
@@ -655,6 +699,8 @@ body.connecting .vpinn{cursor:copy}
 .hk-row{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--line)}
 .hk-row:last-child{border-bottom:0}
 .hk-row.cap{background:rgba(226,165,78,.09)}
+.hk-search{margin-top:8px}
+.hk-empty{padding:18px 14px;text-align:center;font-size:12px;color:var(--tx3)}
 .hk-name{flex:1;min-width:0;font-size:12.5px;color:var(--tx);line-height:1.3}
 .hk-keys{display:flex;align-items:center;gap:6px;white-space:nowrap}
 .hk-wait{font-size:11.5px;color:var(--tx3);font-style:italic}
@@ -1146,8 +1192,8 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
       </div>
       <div class="pl-actions">
         <button class="pl-btn" id="plBackBtn" title="Шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
-        <button class="pl-btn" id="plRestartBtn" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
-        <button class="pl-btn" id="plShowBtn" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
+        <button class="pl-btn" id="plRestartBtn" data-hk-title="plRestart" data-hk-base="Сначала" title="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+        <button class="pl-btn" id="plShowBtn" data-hk-title="plShow" data-hk-base="Выйти из проигрывания и показать на холсте ноду текущего текста" title="Выйти из проигрывания и показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
         <button class="pl-btn accent" id="plExitBtn" title="Выйти в редактор (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Выход</button>
       </div>
     </div>
@@ -1157,8 +1203,8 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
     <div class="pl-sub">эта ветка истории завершена</div>
     <div class="pl-btns">
       <button class="pl-btn" id="plEndBack" title="Вернуться на шаг назад (←)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 0 10h-3"/></svg>Назад</button>
-      <button class="pl-btn" id="plEndRestart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
-      <button class="pl-btn" id="plEndShow" title="Показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
+      <button class="pl-btn" id="plEndRestart" data-hk-title="plRestart" data-hk-base="Сначала"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Заново</button>
+      <button class="pl-btn" id="plEndShow" data-hk-title="plShow" data-hk-base="Показать на холсте ноду текущего текста" title="Показать на холсте ноду текущего текста"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>К ноде</button>
       <button class="pl-btn accent" id="plEndExit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>В редактор</button>
     </div>
   </div>
@@ -1232,8 +1278,24 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
 </div></div>
 <div id="logModal" class="dlg-modal"><div class="dlg-modal-card log-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Журнал действий</span><button class="dlg-modal-close" id="logModalClose" title="Закрыть">×</button></div>
+  <div class="log-tools"><div class="search-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input id="logInp" placeholder="Поиск по журналу: действие, автор, объект, дата…" autocomplete="off" spellcheck="false" aria-label="Поиск по журналу действий"></div></div>
   <div class="dlg-modal-body" id="logModalBody"></div>
   <div class="dlg-modal-foot"><span class="log-foot-info" id="logNavInfo"></span><button class="btn" id="logAll" title="Показать все записи" style="display:none">Все записи</button><button class="btn" id="logPrev" title="Предыдущая запись (↑)">↑ Пред.</button><button class="btn" id="logNext" title="Следующая запись (↓)">След. ↓</button><button class="btn primary" id="logDone">Готово</button></div>
+</div></div>
+<div id="patchModal" class="dlg-modal"><div class="dlg-modal-card patch-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Что нового — патчноут</span><button class="dlg-modal-close" id="patchModalClose" title="Закрыть">×</button></div>
+  <div class="patch-tools"><div class="search-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input id="patchInp" placeholder="Фильтр журнала: текст записи или версия…" autocomplete="off" spellcheck="false"></div></div>
+  <div class="dlg-modal-body patch-body" id="patchBody"></div>
+  <div class="dlg-modal-foot"><span class="log-foot-info" id="patchVerInfo"></span><button class="btn primary" id="patchDone">Закрыть</button></div>
+</div></div>
+<div id="searchModal" class="dlg-modal"><div class="dlg-modal-card search-card">
+  <div class="dlg-modal-head"><span class="dlg-modal-title">Поиск по проекту</span><button class="dlg-modal-close" id="searchModalClose" title="Закрыть">×</button></div>
+  <div class="dlg-modal-body search-body">
+    <div class="search-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input id="searchInp" placeholder="Найти в репликах, названиях, заметках, метках, исходах…" autocomplete="off" spellcheck="false"></div>
+    <div class="search-hint" id="searchHint"></div>
+    <div class="search-results" id="searchResults"><div class="search-empty">Введите минимум два символа — поиск идёт по всем нодам проекта</div></div>
+  </div>
+  <div class="dlg-modal-foot"><span class="log-foot-info">Enter — к первой находке · Esc — закрыть</span><button class="btn primary" id="searchDone">Закрыть</button></div>
 </div></div>
 <div id="setModal" class="dlg-modal"><div class="dlg-modal-card set-card">
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки проекта</span><button class="dlg-modal-close" id="setModalClose" title="Закрыть">×</button></div>
@@ -1288,6 +1350,7 @@ body.pl-open #topbar,body.pl-open #layout,body.pl-open #status{filter:none}
   <div class="dlg-modal-head"><span class="dlg-modal-title">Настройки — Горячие клавиши</span><button class="dlg-modal-close" id="hkModalClose" title="Вернуться к настройкам">×</button></div>
   <div class="dlg-modal-body">
     <div class="set-hint"></div>
+    <div class="search-bar hk-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input id="hkSearch" placeholder="Фильтр по названию действия или клавишам…" autocomplete="off" spellcheck="false"></div>
     <div class="hk-list" id="hkList"></div>
     <div class="set-foot-row"><button class="btn btn-xs" id="hkResetAll">Сбросить все</button><span class="set-store-msg" id="hkMsg"></span></div>
   </div>
@@ -1639,6 +1702,7 @@ function dlgNodeWidth(n){
   return (n.dlgWidth||NODE_W)+maxD*DLG_REPLY_INDENT;
 }
 function dlgMainAnchor(n,el){
+  /* общий якорь главного выхода (низ правой грани): диалог, действие, развилка */
   var w=el?el.offsetWidth:dlgNodeWidth(n);
   var h=el?el.offsetHeight:200;
   return{x:n.x+w,y:n.y+h-21};
@@ -2470,11 +2534,12 @@ function logFocus(e){
   if(!flashed)toast('Объекты этой записи уже удалены или скрыты','warn');
 }
 function openLogModal(){
+  logSearch='';var li=$('#logInp');if(li)li.value='';
   $('#logModal').classList.add('show');
   if(logModalIdx<0)logModalIdx=0;
   renderLogModal();
 }
-function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logFilterGroup=null;logModalIdx=-1;}
+function closeLogModal(){$('#logModal').classList.remove('show');logFilterNode=null;logFilterGroup=null;logModalIdx=-1;logSearch='';var li=$('#logInp');if(li)li.value='';}
 /* журнал по конкретной ноде: совпадение записи с нодой (по diff.nodes новых записей,
    по разделам нод/ids — для старых, по названию в тексте действия — как последний шанс) */
 function logEntryForNode(e,id){
@@ -2490,10 +2555,35 @@ function logEntryForNode(e,id){
   var n=nodeById(id);
   return !!(n&&n.title&&e.act&&e.act.indexOf(n.title)>=0);
 }
+/* поиск по журналу: текст запроса + debounce-таймер (фильтр срабатывает после паузы в вводе) */
+var logSearch='',logSearchT=null;
+/* весь текст записи для поиска: действие, автор, весь diff (имена нод/групп/переменных,
+   старые и новые значения, подписи, условия) и дата записи */
+function logEntrySearchText(e){
+  if(!e)return '';
+  var parts=[];
+  if(e.act)parts.push(String(e.act));
+  if(e.by&&e.by.name)parts.push(String(e.by.name));
+  if(e.diff){try{parts.push(JSON.stringify(e.diff));}catch(_){}}
+  parts.push(fmtWhenShort(e.t)||'');
+  return parts.join(' ').toLowerCase();
+}
+/* esc с подсветкой первого совпадения с запросом (как в поиске по проекту) */
+function logHl(s){
+  var t=String(s==null?'':s),q=logSearch.trim();
+  if(!q)return esc(t);
+  var i=t.toLowerCase().indexOf(q.toLowerCase());
+  if(i<0)return esc(t);
+  return esc(t.slice(0,i))+'<mark class="search-mark">'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length));
+}
 function logFiltered(){
   var log=Array.isArray(project.meta.actionLog)?project.meta.actionLog:[];
   if(logFilterNode)log=log.filter(function(e){return logEntryForNode(e,logFilterNode);});
   if(logFilterGroup)log=log.filter(function(e){return logEntryForGroup(e,logFilterGroup);});
+  if(logSearch){
+    var q=logSearch.toLowerCase();
+    log=log.filter(function(e){return logEntrySearchText(e).indexOf(q)>=0;});
+  }
   return log;
 }
 function openNodeLog(id){
@@ -2659,12 +2749,12 @@ function renderLogModal(){
   $('#logNavInfo').textContent='записей: '+log.length+(gone?' · объект удалён':'');
   var la=$('#logAll');if(la)la.style.display=(logFilterNode||logFilterGroup)?'':'none';
   var body=$('#logModalBody');
-  if(!log.length){var emptyMsg=logFilterNode?'Для этой ноды пока нет записей в журнале.':(logFilterGroup?'Для этой группы пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.');body.innerHTML='<div class="log-empty">'+emptyMsg+'</div>';return;}
+  if(!log.length){var lq=logSearch.trim(),emptyMsg=lq?'По «'+lq+'» в журнале ничего нет':(logFilterNode?'Для этой ноды пока нет записей в журнале.':(logFilterGroup?'Для этой группы пока нет записей в журнале.':'Пока пусто. Сделайте что-нибудь на холсте — действия появятся здесь: кто, когда и что именно изменил.'));body.innerHTML='<div class="log-empty">'+esc(emptyMsg)+'</div>';return;}
   if(logModalIdx>=log.length)logModalIdx=0;
   var rows=log.map(function(e,i){
     var c=(e.by&&e.by.color)||'#8b929c',nm=(e.by&&e.by.name)||'—',open=i===logModalIdx;
     return '<div class="log-row'+(open?' open':'')+'" data-i="'+i+'">'+
-      '<div class="log-line"><span class="log-when">'+esc(fmtWhenShort(e.t))+'</span><span class="log-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="log-who">'+esc(nm)+'</span><span class="log-act">'+esc(e.act||'')+'</span></div>'+
+      '<div class="log-line"><span class="log-when">'+logHl(fmtWhenShort(e.t))+'</span><span class="log-dot" style="background:'+esc(c)+';color:'+esc(c)+'"></span><span class="log-who">'+logHl(nm)+'</span><span class="log-act">'+logHl(e.act||'')+'</span></div>'+
       (open?logRowDetHtml(e):'')+
     '</div>';
   }).join('');
@@ -2712,9 +2802,25 @@ $('#logAll').onclick=function(){logFilterNode=null;logFilterGroup=null;logModalI
 $('#logPrev').onclick=function(){logNavStep(-1);};
 $('#logNext').onclick=function(){logNavStep(1);};
 $('#bLog').onclick=openLogModal;
+/* поиск по журналу: срабатывает после паузы в вводе, а не на каждый символ (как в патчноуте);
+   Enter открывает первую найденную запись, Esc в поле сначала очищает запрос */
+$('#logInp').addEventListener('input',function(e){
+  clearTimeout(logSearchT);
+  var v=e.target.value;
+  logSearchT=setTimeout(function(){logSearch=v;logModalIdx=-1;renderLogModal();},300);
+});
+$('#logInp').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){e.preventDefault();logModalIdx=0;renderLogModal();}
+});
 window.addEventListener('keydown',function(e){
   if(!$('#logModal').classList.contains('show'))return;
-  if(e.key==='Escape'){closeLogModal();return;}
+  var inInp=e.target&&e.target.id==='logInp';
+  if(e.key==='Escape'){
+    if(inInp&&e.target.value){e.target.value='';logSearch='';logModalIdx=-1;renderLogModal();e.preventDefault();}
+    else closeLogModal();
+    return;
+  }
+  if(inInp)return;/* в поле поиска стрелки двигают каретку, а не выбирают запись */
   if(e.key==='ArrowDown'){e.preventDefault();logNavStep(1);}
   if(e.key==='ArrowUp'){e.preventDefault();logNavStep(-1);}
 },true);
@@ -3634,7 +3740,7 @@ function renderWorld(spawn,spawnEdge){
       '<div class="n-body">'+nodeCastHtml(n)+'<div class="n-text"></div><div class="n-vars"></div><div class="n-tags"></div></div>'+
       '<i class="port pin" title="вход — потяните, чтобы перенести входящие стрелки"></i>'+
       '<i class="port pin" title="вход — потяните (можно с Ctrl), чтобы отсоединить и перенести входящие стрелки"></i>'+
-'<i class="port pout" title="'+(n.type==='dialog'?'выход диалога (правая грань, внизу) · Ctrl+тянуть — перенести исходящие':'выход — тяните к другому узлу · Ctrl+тянуть — отсоединить и перенести исходящие стрелки')+'"></i>';
+'<i class="port pout" title="'+((n.type==='dialog'||n.type==='action'||n.type==='branch')?(n.type==='dialog'?'выход диалога (правая грань, внизу)':'выход (правая грань, внизу)'):'выход — тяните к другому узлу')+' · Ctrl+тянуть — отсоединить и перенести исходящие"></i>';
     el.querySelector('.n-title').textContent=n.title;
     if(n.type==='dialog'){
       var cntEl=el.querySelector('.n-reply-cnt');
@@ -3811,7 +3917,7 @@ function edgeAnchors(e){
     }
   }else{
     var a=nodeEls.get(na.id);if(!a)return null;
-    if(na.type==='dialog'){
+    if(na.type==='dialog'||na.type==='action'||na.type==='branch'){
       var mm=dlgMainAnchor(na,a);
       x1=mm.x;y1=mm.y;
     }else{
@@ -7851,7 +7957,7 @@ function startConnect(e,nodeEl){
   var prev=svgEl('path');prev.setAttribute('class','preview');
   edgesSvg.appendChild(prev);
   var x1,y1;
-  if(n.type==='dialog'){
+  if(n.type==='dialog'||n.type==='action'||n.type==='branch'){
     var mm=dlgMainAnchor(n,nodeEl);
     x1=mm.x;y1=mm.y;
   }else{
@@ -9443,6 +9549,7 @@ var HK_DEFS=[
   {id:'save',name:'Сохранить проект (JSON)',def:'Mod+KeyS'},
   {id:'saveAs',name:'Сохранить как… (JSON)',def:'Mod+Shift+KeyS'},
   {id:'projects',name:'Менеджер проектов',def:'Mod+KeyO'},
+  {id:'search',name:'Поиск по проекту',def:'Mod+KeyF'},
   {id:'newProject',name:'Новый проект',def:'Mod+Alt+KeyN'},
   {id:'duplicate',name:'Дублировать выделение',def:'Mod+KeyD'},
   {id:'exportSel',name:'Экспорт выделенных нод (JSON)',def:'Mod+KeyE'},
@@ -9455,9 +9562,13 @@ var HK_DEFS=[
   {id:'deleteSel',name:'Удалить выделенное',def:'Delete',alias:['Backspace']},
   {id:'centerSel',name:'Центрировать на выделенной ноде',def:'KeyF'},
   {id:'play',name:'Проиграть диалог',def:'KeyP'},
+  {id:'playNode',name:'Проиграть только эту ноду',def:'Alt+KeyP'},
+  {id:'plRestart',name:'Плеер: заново (кнопка «Заново»)',def:'KeyR'},
+  {id:'plShow',name:'Плеер: к ноде на холсте (кнопка «К ноде»)',def:'KeyG'},
   {id:'fitView',name:'Вписать весь проект',def:'Digit0'},
   {id:'zoomIn',name:'Приблизить',def:'Equal',alias:['Shift+Equal']},
-  {id:'zoomOut',name:'Отдалить',def:'Minus'}
+  {id:'zoomOut',name:'Отдалить',def:'Minus'},
+  {id:'patchnotes',name:'Что нового (патчноут)',def:'Mod+KeyH'}
 ];
 var hkUser={};
 /* личные настройки: сочетания хранятся отдельно для каждого пользователя
@@ -9557,12 +9668,234 @@ function hkRefreshStatic(){
     else{var base=el.getAttribute('data-hk-base')||'';el.title=base?base+' ('+t+')':t;}
   });
 }
-var hkCap=null;
+/* ═══ патчноут: окно «Что нового» — журнал изменений проекта ═══
+   Открывается горячей клавишей «patchnotes» (по умолчанию Ctrl+H / ⌘H).
+   Версия приложения — APP_VERSION; после каждого обновления её повышаем:
+   +0.0.1 — точечные исправления, +0.1.0 — новые возможности.
+   Новые записи добавлять в НАЧАЛО списка PATCHNOTES (свежая версия сверху);
+   в окне есть фильтр по тексту записей и номеру версии.
+   k — тип записи: add = «новое», fix = «исправлено», chg = «изменено». */
+var APP_VERSION='1.3.0';
+var PATCHNOTES=[
+  {ver:'1.3.0',items:[
+    {k:'add',t:'Поиск в «Журнале действий»: записи фильтруются по тексту действия, автору, именам нод, групп и переменных, старым и новым значениям, а также по дате. Совпадения подсвечиваются, фильтр срабатывает после паузы в вводе, Enter открывает первую найденную запись, Esc в поле сначала очищает запрос.'}
+  ]},
+  {ver:'1.2.0',items:[
+    {k:'fix',t:'Горячие клавиши больше не молчат, пока курсор стоит в поле ввода: глобальные сочетания — поиск по проекту, патчноут, сохранение, «сохранить как», менеджер проектов — работают в любой момент. Раньше хоткеи не срабатывали до щелчка мимо поля ввода (например, после правки реплики), поэтому казалось, что клавиши «оживают» только после открытия настроек.'},
+    {k:'add',t:'Фильтр в окне горячих клавиш (настройки): список быстро сужается по названию действия или по клавишам.'},
+    {k:'add',t:'Поиск по журналу изменений: в патчноуте записи фильтруются по тексту или номеру версии.'},
+    {k:'chg',t:'Поиск по проекту запускается после паузы в вводе, а не на каждом символе — меньше лишних проходов по всем нодам.'},
+    {k:'chg',t:'Патчноут переведён с дат на версии приложения; версия повышается с каждым обновлением и показывается в окне журнала.'}
+  ]},
+  {ver:'1.1.0',items:[
+    {k:'add',t:'Поиск по проекту ('+hkHuman('Mod+KeyF')+'): ищет по всем содержимым полям нод — реплики и говорящие диалогов, названия и тексты, описания, заметки, метки, исходы развилок с их условиями, кнопки действий, значения переменных и участники. Список находок с подсветкой совпадений; клик по находке — переход к ноде на холсте (свёрнутые группы разворачиваются), найденная реплика мигает, как «К ноде» в плеере. Сочетание переназначается в настройках клавиш.'},
+    {k:'chg',t:'Сервер совместного редактирования: хранилище переведено с общего JSON-файла на SQLite — комната и каждая merge-заявка хранятся отдельными записями, сохранение одного проекта больше не перезаписывает данные всех комнат. Старый store.json мигрируется в базу автоматически при первом запуске (копия сохраняется рядом как store.json.backup-…), пароли комнат теперь корректно переживают перезапуск сервера.'},
+    {k:'add',t:'Окно патчноута «Что нового» — журнал того, что добавлено и изменено. Открывается сочетанием '+hkHuman('Mod+KeyH')+' (кнопок для него пока нет; сочетание переназначается в настройках клавиш).'},
+    {k:'add',t:'Горячие клавиши кнопок проигрывателя: «К ноде» ('+hkHuman('KeyG')+') и «Заново» ('+hkHuman('KeyR')+') — работают в плеере и на экране «КОНЕЦ», переназначаются в настройках клавиш; подсказки на кнопках показывают актуальное сочетание.'},
+    {k:'fix',t:'«К ноде» в проигрывателе теперь подсвечивает текущую реплику на карточке ноды и в режиме «проигрывать подряд» — раньше в этом режиме реплика не подсвечивалась.'},
+    {k:'chg',t:'У нод «Действие» и «Развилка» главный выход перенесён вниз правой грани — как у «Диалога»; добавлен отступ снизу, чтобы пин не висел поверх внутренних узлов, а стрелки от блока выходили из нижней точки.'}
+  ]},
+  {ver:'1.0.0',items:[
+    {k:'add',t:'Проигрыватель: «К ноде» подсвечивает текущую реплику на карточке — нода при надобности разворачивается, вид наводится на реплику, реплика мигает пару секунд.'},
+    {k:'add',t:'Проигрыватель по P стартует с ноды под курсором (или с выделенной, если курсор не над нодой) — как «Играть отсюда» из контекстного меню; Alt+P проигрывает только эту ноду.'},
+    {k:'chg',t:'Поле ввода реплики при редактировании подстраивается под текст: в фокусе виден весь текст и поле растёт при вводе, вне фокуса — обычная высота.'},
+    {k:'add',t:'Подписи горячих клавиш в меню и подсказках обновляются сразу после переназначения; двойной клик по реплике в редакторе — переход к ней на холсте.'},
+    {k:'add',t:'Настройки: разделы отдельными окнами; личные горячие клавиши для каждого пользователя; выбор хранилища localStorage / IndexedDB.'},
+    {k:'add',t:'Экспорт выделенных нод в JSON (Ctrl+E) через контекстные меню нод, групп и цепочек.'},
+    {k:'chg',t:'Палитра цветов: свой цвет попадает в начало списка, свотчи сворачиваются; у новых нод яркость цвета по умолчанию −60%.'},
+    {k:'add',t:'Плеер: зацикливание диалога («повтор» на реплике), нода «Действие», иконки вкладок, кадрирование аватаров.'}
+  ]}
+];
+function patchOpen(){var el=$('#patchModal');return !!(el&&el.classList.contains('show'));}
+var patchFilter='',patchTimer=null;
+function patchRender(){
+  var el=$('#patchBody');if(!el)return;
+  var TAGS={add:'новое',fix:'исправлено',chg:'изменено'};
+  var info=$('#patchVerInfo');if(info)info.textContent='Текущая версия: v'+APP_VERSION;
+  var q=patchFilter.replace(/\s+/g,' ').trim().toLowerCase();
+  var html='',shown=0;
+  PATCHNOTES.forEach(function(v,i){
+    var items=(v.items||[]).filter(function(it){
+      if(!q)return true;
+      return String(it.t||'').toLowerCase().indexOf(q)>=0
+        ||String(TAGS[it.k||'chg']).indexOf(q)>=0
+        ||String(v.ver||'').toLowerCase().indexOf(q)===0; /* версия — по началу: «1.0» не должен ловить v1.1.0 */
+    });
+    if(q&&!items.length)return;
+    shown++;
+    html+='<div class="patch-ver"><div class="patch-ver-head"><span class="patch-ver-v">v'+esc(v.ver)+'</span>'+(i===0&&!q?'<span class="patch-latest">актуально</span>':'')+'</div>';
+    items.forEach(function(it){
+      var k=it.k||'chg';
+      html+='<div class="patch-item"><span class="patch-tag '+esc(k)+'">'+esc(TAGS[k]||k)+'</span><span>'+esc(it.t)+'</span></div>';
+    });
+    html+='</div>';
+  });
+  el.innerHTML=html||'<div class="patch-empty">'+(q?'По «'+esc(patchFilter.trim())+'» в журнале ничего нет':'Записей пока нет')+'</div>';
+}
+function openPatchModal(){
+  patchFilter='';
+  var pinp=$('#patchInp');if(pinp)pinp.value='';
+  patchRender();
+  $('#patchModal').classList.add('show');
+  setTimeout(function(){if(pinp)pinp.focus();},30);
+}
+function closePatchModal(){$('#patchModal').classList.remove('show');}
+$('#patchModalClose').onclick=closePatchModal;
+$('#patchDone').onclick=closePatchModal;
+$('#patchModal').addEventListener('click',function(e){if(e.target===this)closePatchModal();});
+/* фильтр журнала: срабатывает после паузы в вводе, а не на каждый символ */
+$('#patchInp').addEventListener('input',function(e){
+  clearTimeout(patchTimer);
+  var v=e.target.value;
+  patchTimer=setTimeout(function(){patchFilter=v;patchRender();},300);
+});
+/* ═══ поиск по проекту: по всем содержимым полям нод (Mod+F) ═══
+   Открывается горячей клавишей «search» (по умолчанию Ctrl+F / ⌘F).
+   Ищет по названиям и текстам нод, репликам диалогов и говорящим, описаниям,
+   заметкам, меткам, исходам развилок (включая текст условий), кнопкам действий,
+   значениям переменных и участникам. Список находок с подсветкой совпадений;
+   клик — переход к ноде на холсте (свёрнутые группы разворачиваются),
+   найденная реплика мигает, как «К ноде» в проигрывателе. */
+function searchOpen(){var el=$('#searchModal');return !!(el&&el.classList.contains('show'));}
+var searchTimer=null;
+function searchPlainHtml(html){
+  return String(html==null?'':html)
+    .replace(/<br\s*\/?>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;/gi,' ')
+    .replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&quot;/gi,'"')
+    .replace(/\s+/g,' ').trim();
+}
+function searchFragHtml(s,q){
+  s=String(s==null?'':s).replace(/\s+/g,' ').trim();
+  if(!s)return '';
+  var i=q?s.toLowerCase().indexOf(q.toLowerCase()):-1;
+  if(i<0)return esc(s.length>120?s.slice(0,120)+'…':s);
+  var w=48,a=Math.max(0,i-w),b=Math.min(s.length,i+q.length+w),frag=s.slice(a,b),rel=i-a;
+  return (a>0?'…':'')+esc(frag.slice(0,rel))+'<mark class="search-mark">'+esc(frag.slice(rel,rel+q.length))+'</mark>'+esc(frag.slice(rel+q.length))+(b<s.length?'…':'');
+}
+function searchHitsOf(n,q){
+  var ql=q.toLowerCase(),hits=[];
+  function add(kind,text,rid,plain){
+    if(text==null)return;
+    var s=plain?searchPlainHtml(text):String(text);
+    s=s.replace(/\s+/g,' ').trim();
+    if(!s||s.toLowerCase().indexOf(ql)<0)return;
+    hits.push({kind:kind,text:s,rid:rid||null});
+  }
+  add('Название',n.title);
+  add('Текст',n.text);
+  (Array.isArray(n.tags)?n.tags:[]).forEach(function(t){add('Метка',t);});
+  ensureNotes(n);
+  (n.notes||[]).forEach(function(nt){if(!nt)return;add('Заметка',nt.title);add('Заметка',nt.html,null,true);});
+  if(n.type==='dialog'){
+    ensureDialog(n);
+    add('Описание',n.dialog.description);
+    (n.dialog.participants||[]).forEach(function(pid){var c=charById(pid);if(c&&c.name)add('Участник',c.name);});
+    (function walk(reps){
+      (reps||[]).forEach(function(r){
+        if(!r)return;
+        add('Реплика',r.text,r.id);
+        var sp=r.speaker?charById(r.speaker):null;
+        if(sp&&sp.name)add('Говорящий',sp.name,r.id);
+        walk(r.children);
+      });
+    })(n.dialog.replies);
+  }
+  if(n.type==='branch'){
+    ensureBranch(n);
+    (n.outcomes||[]).forEach(function(o,i){
+      if(!o)return;
+      add('Исход '+(i+1),o.label);
+      if(o.cond)add('Условие исхода',condText(o.cond));
+    });
+  }
+  if(n.type==='action'){
+    ensureActions(n);
+    (n.actions||[]).forEach(function(a,i){if(!a)return;add('Кнопка '+(i+1),a.label);});
+  }
+  if(n.type==='varnode')add('Значение переменной',n.varVal);
+  return hits;
+}
+function searchRun(q){
+  var box=$('#searchResults'),hint=$('#searchHint');
+  if(!box)return;
+  q=String(q||'').replace(/\s+/g,' ').trim();
+  if(q.length<2){
+    box.innerHTML='<div class="search-empty">Введите минимум два символа — поиск идёт по всем нодам проекта</div>';
+    if(hint)hint.textContent='';
+    return;
+  }
+  var groups=[],nodeCount=0,total=0;
+  project.nodes.forEach(function(n){
+    if(!n)return;
+    var hits=searchHitsOf(n,q);
+    if(!hits.length)return;
+    nodeCount++;total+=hits.length;
+    if(groups.length<80)groups.push({n:n,hits:hits.slice(0,5),more:Math.max(0,hits.length-5)});
+  });
+  if(hint)hint.textContent=nodeCount?('Найдено: нод — '+nodeCount+', совпадений — '+total+(total>400?' (показаны первые)':'')):'';
+  if(!groups.length){box.innerHTML='<div class="search-empty">Ничего не найдено по «'+esc(q)+'»</div>';return;}
+  var html='';
+  groups.forEach(function(g){
+    var vis=nodeVisual(g.n);
+    html+='<div class="search-node-row">'
+      +'<button class="search-node-head" data-nid="'+esc(g.n.id)+'">'
+      +'<span class="search-nico" style="color:'+esc(vis.baseColor)+'">'+ic(vis.icon,13)+'</span>'
+      +'<span class="search-ntitle">'+esc(g.n.title||'Без названия')+'</span>'
+      +'<span class="search-ntype">'+esc(vis.name)+'</span></button>';
+    g.hits.forEach(function(h){
+      html+='<button class="search-hit" data-nid="'+esc(g.n.id)+'"'+(h.rid?' data-rid="'+esc(h.rid)+'"':'')+'">'
+        +'<span class="search-kind">'+esc(h.kind)+'</span>'
+        +'<span class="search-frag">'+searchFragHtml(h.text,q)+'</span></button>';
+    });
+    if(g.more)html+='<div class="search-more">ещё совпадений: '+g.more+'</div>';
+    html+='</div>';
+  });
+  box.innerHTML=html;
+  $all('#searchResults [data-nid]').forEach(function(b){
+    b.onclick=function(){searchGo(b.dataset.nid,b.dataset.rid||null);};
+  });
+}
+function searchGo(nid,rid){
+  var n=nodeById(nid);
+  if(!n){toast('Нода не найдена — возможно, она удалена','warn');return;}
+  closeSearchModal();
+  revealNode(n);
+  selectOnly(n.id);
+  centerOn(n);
+  if(rid&&n.type==='dialog')plFlashReplyOnNode(n.id,rid);
+}
+function openSearchModal(){
+  $('#searchModal').classList.add('show');
+  searchRun($('#searchInp')?$('#searchInp').value:'');
+  setTimeout(function(){var inp=$('#searchInp');if(inp){inp.focus();inp.select();}},30);
+}
+function closeSearchModal(){$('#searchModal').classList.remove('show');}
+$('#searchModalClose').onclick=closeSearchModal;
+$('#searchDone').onclick=closeSearchModal;
+$('#searchModal').addEventListener('click',function(e){if(e.target===this)closeSearchModal();});
+$('#searchInp').addEventListener('input',function(e){
+  clearTimeout(searchTimer);
+  var v=e.target.value;
+  searchTimer=setTimeout(function(){searchRun(v);},400);
+});
+$('#searchInp').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){e.preventDefault();var f=$('#searchResults .search-hit,#searchResults .search-node-head');if(f)f.click();}
+  if(e.key==='Escape'){e.preventDefault();closeSearchModal();}
+});
+var hkCap=null,hkFilter='',hkSearchT=null;
+function hkFilteredDefs(){
+  var q=hkFilter.replace(/\s+/g,' ').trim().toLowerCase();
+  if(!q)return HK_DEFS;
+  return HK_DEFS.filter(function(d){
+    if(d.name.toLowerCase().indexOf(q)>=0)return true;
+    return hkHuman(hkBound(d.id)).toLowerCase().indexOf(q)>=0;
+  });
+}
 function hkMsg(t,cls){var el=$('#hkMsg');if(!el)return;el.textContent=t||'';el.className='set-store-msg'+(cls?' '+cls:'');}
 function hkRenderList(){
   var el=$('#hkList');if(!el)return;
-  var html='';
-  HK_DEFS.forEach(function(d){
+  var html='',list=hkFilteredDefs();
+  list.forEach(function(d){
     var isCap=(hkCap===d.id);
     html+='<div class="hk-row'+(isCap?' cap':'')+'" data-id="'+d.id+'">'
       +'<span class="hk-name">'+esc(d.name)+'</span>';
@@ -9579,11 +9912,17 @@ function hkRenderList(){
     }
     html+='</div>';
   });
-  el.innerHTML=html;
+  el.innerHTML=html||'<div class="hk-empty">Ничего не найдено по «'+esc(hkFilter.trim())+'»</div>';
   $all('#hkList [data-hk-set]').forEach(function(b){b.onclick=function(){hkCap=b.closest('.hk-row').dataset.id;hkMsg('','');hkRenderList();};});
   $all('#hkList [data-hk-cancel]').forEach(function(b){b.onclick=function(){hkCapDone(null);hkMsg('Захват отменён','');};});
   $all('#hkList [data-hk-reset]').forEach(function(b){b.onclick=function(){var id=b.closest('.hk-row').dataset.id;delete hkUser[id];hkSaveUser();hkRenderList();hkRefreshStatic();hkMsg('«'+hkDef(id).name+'» возвращено к значению по умолчанию','ok');};});
 }
+/* фильтр по списку хоткеев: срабатывает после паузы в вводе */
+$('#hkSearch').addEventListener('input',function(e){
+  clearTimeout(hkSearchT);
+  var v=e.target.value;
+  hkSearchT=setTimeout(function(){hkFilter=v;hkRenderList();},300);
+});
 function hkCapDone(combo){
   var id=hkCap;hkCap=null;hkRenderList();
   if(id&&combo)toast('«'+hkDef(id).name+'» — '+hkHuman(combo),'ok');
@@ -9608,14 +9947,36 @@ window.addEventListener('keydown',function(e){
   hkMsg('«'+hkDef(targetId).name+'» — назначено '+hkHuman(combo),'ok');
 },true);
 window.addEventListener('keydown',function(e){
+  var lw=$('#lockWrap');if(lw&&lw.classList.contains('show'))return; /* экран пароля комнаты — ждём пароль, хоткеи глушим */
   if(plIsOpen()){plKey(e);return;}
+  /* окно патчноута открыто: закрывается по Esc или повторному сочетанию, остальное глушится */
+  if(patchOpen()){
+    if(e.key==='Escape'||hkIs(e,'patchnotes')){e.preventDefault();closePatchModal();return;}
+    return;
+  }
+  /* окно поиска открыто: закрывается по Esc или повторному сочетанию, остальное глушится */
+  if(searchOpen()){
+    if(e.key==='Escape'||hkIs(e,'search')){e.preventDefault();closeSearchModal();return;}
+    return;
+  }
   if(e.key==='Alt'&&!isTyping())document.body.classList.add('knife');
   if((e.key==='Control'||e.key==='Meta')&&!isTyping())document.body.classList.add('ctrlpan');
   if(isTyping()){
+    /* курсор в поле ввода: обычные клавиши (реплики, метки, зум) не трогаем,
+       но глобальные Mod-сочетания работают всегда — раньше хоткеи молчали,
+       пока не щёлкнешь мимо поля (казалось, что «оживают» только после
+       открытия настроек); Escape по-прежнему снимает фокус с поля */
+    if(hkIs(e,'search')){e.preventDefault();openSearchModal();return;}
+    if(hkIs(e,'patchnotes')){e.preventDefault();openPatchModal();return;}
+    if(hkIs(e,'save')){e.preventDefault();save();return;}
+    if(hkIs(e,'saveAs')){e.preventDefault();saveAs();return;}
+    if(hkIs(e,'projects')){e.preventDefault();showProjectsModal();return;}
     if(e.key==='Escape')document.activeElement.blur();
     return;
   }
   if(e.code==='Space'){spaceDown=true;document.body.classList.add('space');e.preventDefault();return;}
+  if(hkIs(e,'patchnotes')){e.preventDefault();openPatchModal();return;}
+  if(hkIs(e,'search')){e.preventDefault();openSearchModal();return;}
   if(hkIs(e,'rename')&&sel.size===1){
     e.preventDefault();
     var elF=nodeEls.get(sel.values().next().value);
@@ -9658,7 +10019,14 @@ window.addEventListener('keydown',function(e){
     clearSel();return;
   }
   if(hkIs(e,'centerSel')){if(sel.size===1)centerOn(nodeById(sel.values().next().value));return;}
-  if(hkIs(e,'play')){e.preventDefault();plStart();return;}
+  if(hkIs(e,'play')){e.preventDefault();var ph=plPointerNodeId();plStart(ph);return;}
+  if(hkIs(e,'playNode')){
+    e.preventDefault();
+    var pn=plPointerNodeId();
+    if(!pn){toast('Наведите курсор на ноду или выделите одну ноду — и её можно проиграть отдельно','warn');return;}
+    plStart(pn,true);
+    return;
+  }
   if(hkIs(e,'fitView')){fitView(true);return;}
   if(hkIs(e,'zoomIn')){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1.15);return;}
   if(hkIs(e,'zoomOut')){zoomAt(canvas.clientWidth/2,canvas.clientHeight/2,1/1.15);return;}
@@ -10595,7 +10963,10 @@ $('#bHelp').onclick=function(){
       '<div>входная точка узла (левая)</div><div>потянуть — перенести все входящие стрелки</div>'+
       '<div>выходная точка в пустоту</div><div>меню: создать элемент и сразу подключить</div>'+
       '<div><kbd>Alt</kbd>+перенос узла · <kbd>'+hkText('rename')+'</kbd> · <kbd>'+hkText('deleteSel')+'</kbd></div><div>выдернуть · переименовать · удалить</div>'+
-      '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без выделения — весь сюжет (ПКМ на блоке — «Играть отсюда»); в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
+      '<div><kbd>'+hkText('play')+'</kbd></div><div>режим новеллы: наведите курсор на блок — проигрывание пойдёт с него до конца цепочки (или выделите блок — с него, если курсор не над нодой); выделите блоки или группу — проигрывание пойдёт только по выбранным в диалогах веткам (невыбранные ветки пропускаются); без наведения и выделения — весь сюжет; ПКМ на блоке — «Играть отсюда»; в проигрывании: клик/пробел — далее, ← — назад, 1–9 — выбор, '+hkText('plRestart')+' — заново, '+hkText('plShow')+' — к ноде, Esc — выход; переключатель на карточке диалога — все реплики идут подряд, без выбора ответа</div>'+
+      '<div><kbd>'+hkText('playNode')+'</kbd></div><div>проиграть только эту ноду (под курсором или выделенную); переходы к другим блокам отсекаются — реплики самой ноды доступны; если ни на что не навели и ничего не выделено — ничего не запускается</div>'+
+      '<div><kbd>'+hkText('patchnotes')+'</kbd></div><div>окно патчноута «Что нового» — журнал изменений: что добавлено и что изменено; Esc или повторное сочетание — закрыть</div>'+
+      '<div><kbd>'+hkText('search')+'</kbd></div><div>поиск по проекту — по всем содержимым полям нод: реплики и говорящие диалогов, названия и тексты, описания, заметки, метки, исходы и условия развилок, кнопки действий, переменные; клик по находке — переход к ноде, найденная реплика мигает; Esc или повторное сочетание — закрыть</div>'+
     '</div>',
     buttons:[{label:'Понятно',primary:1}]});
 };
@@ -10901,8 +11272,11 @@ function openSetStore(){
   }
 }
 function openHk(){
-  hkCap=null;hkLoad();hkMsg('','');hkRenderList();
+  hkCap=null;hkFilter='';
+  var hinp=$('#hkSearch');if(hinp)hinp.value='';
+  hkLoad();hkMsg('','');hkRenderList();
   $('#hkModal').classList.add('show');
+  setTimeout(function(){if(hinp)hinp.focus();},30);
 }
 $('#bSettings').onclick=openSettings;
 $('#setModalClose').onclick=closeSettings;
@@ -12326,7 +12700,7 @@ function initSync(){
    Переключатель на карточке диалога («проигрывать подряд», поле linear) — все
    реплики идут по порядку одна за другой, без выбора ответа.
    Ноды переменных срабатывают молча и не выводятся как слайды. */
-var PL={open:false,nodeId:null,replyId:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null,seqList:null,seqIdx:-1};
+var PL={open:false,nodeId:null,replyId:null,lastReply:null,intro:false,startId:null,typing:false,full:'',timer:null,hist:[],path:[],mode:'graph',list:[],idx:-1,vars:null,varChanged:null,set:null,visited:null,dead:null,seqList:null,seqIdx:-1};
 function plIsOpen(){return PL.open;}
 function plPickStartNode(){
   if(sel&&sel.size===1){
@@ -12338,6 +12712,19 @@ function plPickStartNode(){
   });
   var sc=roots.filter(function(n){return n.type==='scene';});
   return sc[0]||roots[0]||project.nodes[0]||null;
+}
+/* нода для запуска проигрывания по горячей клавише: под курсором мыши;
+   если курсор не над нодой — единственная выделенная; иначе null */
+function plPointerNodeId(){
+  var elp=null;
+  try{elp=document.elementFromPoint(lastPtr.x,lastPtr.y);}catch(e){}
+  var nel=elpp(elp);
+  if(nel&&nel.dataset.id&&nodeById(nel.dataset.id))return nel.dataset.id;
+  if(sel.size===1){
+    var id=sel.values().next().value;
+    if(nodeById(id))return id;
+  }
+  return null;
 }
 /* блоки текущего выделения: узлы + содержимое выделенных групп (включая вложенные) */
 function plSelectionIds(){
@@ -12381,11 +12768,15 @@ function plBuildPlaylist(nodes){
   arr.filter(function(n){return !done.has(n.id);}).sort(byPos).forEach(function(n){out.push(n);}); /* циклы — в конец */
   return out;
 }
-function plStart(nodeId){
+function plStart(nodeId,onlyThis){
   if(PL.open)return;
   /* есть выделение (блоки/группа) — проигрываем только его списком по порядку */
   var list=null;
-  if(!nodeId){
+  if(onlyThis&&nodeId){
+    /* «только эта нода»: список из одной ноды — переходы к другим блокам отсекаются */
+    var one=nodeById(nodeId);
+    if(one)list=[one];
+  }else if(!nodeId){
     var s=plSelectionIds();
     if(s&&s.length){
       list=plBuildPlaylist(s);
@@ -12697,6 +13088,7 @@ function plLinearShow(n){
   while(PL.seqIdx>=0&&PL.seqIdx<ids.length&&!findReply(n.dialog.replies,ids[PL.seqIdx]))PL.seqIdx++;
   if(PL.seqIdx<0||PL.seqIdx>=ids.length){PL.seqIdx=-1;PL.seqList=null;plAfterNodeFinal(n);return;}
   var r=findReply(n.dialog.replies,ids[PL.seqIdx]);
+  PL.lastReply=r?r.id:null;
   plShowSlide({name:(r.speaker?charName(r.speaker):null),color:(r.speaker?charColor(r.speaker):'#8b929c'),avCid:(r.speaker||null),text:r.text||'…',chapter:n});
 }
 function plLinearBegin(n){
@@ -12797,7 +13189,7 @@ function plSlideAvatar(cid,extra){
   return '<span class="pl-av '+charAvShape(c)+(c.av?'':' empty')+(extra?' '+extra:'')+'" style="border-color:'+esc(c.color||'#9cb878')+'">'+(c.av?'<img src="'+esc(c.av)+'" alt="">':esc(charInitial(c)))+'</span>';
 }
 function plShowReply(r,noHist){
-  PL.replyId=r.id;PL.intro=false;
+  PL.replyId=r.id;PL.lastReply=r.id;PL.intro=false;
   var name=r.speaker?charName(r.speaker):null;
   var color=r.speaker?charColor(r.speaker):'#8b929c';
   var n=nodeById(PL.nodeId);
@@ -13056,7 +13448,8 @@ function plKey(e){
   if(e.key==='Escape'){e.preventDefault();plExit();return;}
   if(e.key===' '||e.key==='Enter'||e.key==='ArrowRight'){e.preventDefault();plAdvance();return;}
   if(e.key==='ArrowLeft'||e.key==='Backspace'){e.preventDefault();plBack();return;}
-  if(hkKeyCode(e)==='KeyR'){e.preventDefault();plRestart();return;}
+  if(hkIs(e,'plRestart')){e.preventDefault();plRestart();return;}
+  if(hkIs(e,'plShow')){e.preventDefault();plShowNodeOnCanvas();return;}
   var m=/^Digit([1-9])$/.exec(e.code);
   if(m){
     var c=$('#plChoices');
@@ -13068,13 +13461,62 @@ $('#player').addEventListener('click',function(e){
   if(e.target.closest&&e.target.closest('button'))return;
   plAdvance();
 });
-/* выйти из проигрывания и показать на холсте ноду текущего текста */
+/* выйти из проигрывания и показать на холсте ноду текущего текста;
+   текущая реплика подсвечивается на карточке ноды, чтобы её было сразу видно */
 function plShowNodeOnCanvas(){
   var n=PL.nodeId?nodeById(PL.nodeId):null;
+  var rid=PL.replyId;
+  /* режим «проигрывать подряд»: текущая реплика хранится в seqList, а не в replyId;
+     после исчерпания цепочки (экран «КОНЕЦ») — последняя показанная реплика */
+  if(!rid&&PL.seqList&&PL.seqIdx>=0&&PL.seqList[PL.seqIdx]!=null)rid=PL.seqList[PL.seqIdx];
+  if(!rid)rid=PL.lastReply;
   plExit();
   if(!n){toast('Нода не найдена','warn');return;}
   selectOnly(n.id);
   centerOn(n);
+  if(rid)plFlashReplyOnNode(n.id,rid);
+}
+/* подсветка реплики на карточке ноды: при надобности развернуть ноду,
+   навести вид на реплику и мигнуть ей пару секунд */
+function plFlashReplyOnNode(nid,rid){
+  if(!rid)return;
+  var n=nodeById(nid);
+  if(!n||n.type!=='dialog')return;
+  ensureDialog(n);
+  if(!findReply(n.dialog.replies,rid))return;
+  var el=nodeEls.get(nid);
+  if(!el)return;
+  if(n.expand===0){ /* нода свёрнута: развернуть, чтобы реплика стала видна */
+    n.expand=1;
+    el.classList.remove('ex-0','ex-1','ex-2');
+    el.classList.add('ex-1');
+    var fold=el.querySelector('.n-fold');
+    if(fold){fold.innerHTML=ic(FOLD_ICONS[1],12);fold.title=FOLD_TITLES[1];}
+    var tree=el.querySelector('.dlg-tree');
+    if(tree)tree.innerHTML=dlgTreeInner(n,1);
+    setNodeText(el,n);
+    var cntEl=el.querySelector('.n-reply-cnt');
+    if(cntEl)cntEl.textContent=countReplies(n.dialog.replies)+' репл.';
+    updateDlgRowStates();
+    updateEdgesFor(nid);
+    setTimeout(function(){updateEdgesFor(nid);},40);
+  }
+  var row=el.querySelector('.dlg-reply-row[data-reply-id="'+rid+'"]');
+  if(!row)return;
+  /* центрируем на самой реплике — нода может быть выше экрана */
+  try{
+    var nr=el.getBoundingClientRect(),rr=row.getBoundingClientRect();
+    if(vp.z>0){
+      var wx=n.x+(rr.left+rr.width/2-nr.left)/vp.z;
+      var wy=n.y+(rr.top+rr.height/2-nr.top)/vp.z;
+      var z=Math.max(vp.z,0.8);
+      animateView(canvas.clientWidth/2-wx*z,canvas.clientHeight/2-wy*z,z);
+    }
+  }catch(e){}
+  row.classList.remove('dlg-flash');
+  void row.offsetWidth; /* перезапуск анимации */
+  row.classList.add('dlg-flash');
+  setTimeout(function(){row.classList.remove('dlg-flash');},2600);
 }
 $('#plExitBtn').onclick=function(e){e.stopPropagation();plExit();};
 $('#plShowBtn').onclick=function(e){e.stopPropagation();plShowNodeOnCanvas();};

@@ -1,50 +1,27 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-
 /**
- * «Ветви» — совместный конструктор нарратива.
- * Приложение (полный функционал vetvi33.html + realtime-слой) живёт в
- * /vetvi/index.html и открывается на весь экран один раз при монтировании.
- * Hash-часть URL (#room=…&project=…) передаётся в iframe при загрузке;
- * дальше приложение само управляет hash-ом родителя (same-origin),
- * поэтому повторно src НЕ присваивается — это вызывало перезагрузку
- * приложения и сброс режима копии.
+ * «Ветви» — React-редактор (ветка react-refactor, этап 1 порта).
+ *
+ * Редактор собран из компонентов src/vetvi/* (ядро без DOM пригодно и для
+ * React Native). Классическая версия по-прежнему доступна целиком:
+ * /vetvi/index.html — ссылка есть в тулбаре React-версии.
  */
-export default function Home() {
-  const frameRef = useRef<HTMLIFrameElement>(null);
-  const bootedRef = useRef(false);
 
+import { useEffect } from 'react';
+
+import './vetvi-react.css';
+import VetviApp from '@/vetvi/web/VetviApp';
+import { getStore } from '@/vetvi/web/store';
+
+export default function Home() {
+  // Восстановить последний вид при загрузке (хранится в автосохранении).
   useEffect(() => {
-    if (bootedRef.current) return;
-    bootedRef.current = true;
-    if (frameRef.current) {
-      frameRef.current.src = '/vetvi/index.html' + window.location.hash;
-    }
+    const store = getStore();
+    const save = () => store.flushSave();
+    window.addEventListener('pagehide', save);
+    return () => window.removeEventListener('pagehide', save);
   }, []);
 
-  return (
-    <main
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: '#0c0d0f',
-      }}
-      aria-label="Ветви — конструктор нарратива"
-    >
-      <iframe
-        ref={frameRef}
-        title="Ветви — конструктор нарратива"
-        allow="clipboard-write; clipboard-read"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          border: '0',
-          display: 'block',
-        }}
-      />
-    </main>
-  );
+  return <VetviApp />;
 }
