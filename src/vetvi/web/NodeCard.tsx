@@ -304,6 +304,7 @@ export function NodeCard(props: {
           className={'dlg-reply-row' + (connected ? ' has-out' : '') + (flashing ? ' dlg-flash' : '')}
           data-reply-id={r.id}
           onDoubleClick={(e) => {
+            e.stopPropagation(); /* не даём нодному dblclick затереть flash реплики */
             const t = e.target as HTMLElement;
             if (t.closest('[data-pin]') || t.closest('button')) return;
             props.onReplyDbl(n.id, r.id);

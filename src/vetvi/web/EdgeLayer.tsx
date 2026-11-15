@@ -50,7 +50,12 @@ export function buildEdgeItems(
       x1 = cr.x + cr.w;
       y1 = cr.y + cr.h * memberFrac(cr.rows, na.id);
     } else if (na.type === 'dialog' && e.fromReply) {
-      const p = ports.get(na.id + ':reply:' + e.fromReply);
+      /* свёрнутая нода: исходы реплик сходятся в .dlg-collapse-pin
+         (edgeGeom оригинала 3895–3903: ex===0 → dlgCollapsePortPos) */
+      const exA = (na.expand === 0 || na.expand === 1 || na.expand === 2) ? na.expand : 1;
+      const p = exA === 0
+        ? ports.get(na.id + ':collapse') || null
+        : ports.get(na.id + ':reply:' + e.fromReply) || null;
       const m = mainAnchor(na, sizes.get(na.id));
       x1 = p ? p.x : m.x;
       y1 = p ? p.y : m.y;

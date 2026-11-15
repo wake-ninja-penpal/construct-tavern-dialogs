@@ -296,7 +296,7 @@ export default function VetviApp() {
       if (hkIs(e, 'deleteSel')) { e.preventDefault(); store.deleteSelected(); return; }
 
       if (e.key === 'Escape') {
-        if (store.carry) { store.cancelCarry(); store.toast('Перенос дубликата отменён', 'warn'); return; }
+        if (store.carry) { store.cancelCarry(); return; }
         if (dlgOpen) { store.commitReplyEdit(null); store.closeDialogEditor(); return; }
         if (store.confirm) { store.closeConfirm(); return; }
         if (store.ctx) { store.closeCtx(); return; }

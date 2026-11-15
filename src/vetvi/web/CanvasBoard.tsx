@@ -1222,6 +1222,21 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return () => { document.body.classList.remove('carry'); };
   }, [store.carry]);
 
+  /* перенос дубликата (canvas pointerdown 8094–8099 оригинала): клик — поставить,
+     ПКМ — отменить; проверка идёт раньше любых нод/групп/связей — поэтому capture-фаза */
+  const carryOn = !!store.carry;
+  useEffect(() => {
+    if (!carryOn) return;
+    const el = canvasRef.current;
+    if (!el) return;
+    const down = (e: PointerEvent) => {
+      if (e.button === 0) { e.preventDefault(); e.stopPropagation(); store.placeCarry(); }
+      else if (e.button !== 1) { e.preventDefault(); e.stopPropagation(); store.cancelCarry(); }
+    };
+    el.addEventListener('pointerdown', down, true);
+    return () => el.removeEventListener('pointerdown', down, true);
+  }, [carryOn, store]);
+
   /* ── drag&drop из палитры на холст (порт 9148–9267 оригинала) ──
      dropready — рамка на #canvas; dropping — на document.body (body.dropping .port в CSS);
      drop-hover — карточка ноды под курсором (palHover); drop-target — связь-цель
@@ -1393,6 +1408,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
   /* ПКМ по холсту/нодам/связям/группам → контекстные меню */
   const onCtx = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    /* перенос дубликата: ПКМ отменяет (contextmenu оригинала, 9414–9415) */
+    if (store.carry) { store.cancelCarry(); return; }
     const t = e.target as HTMLElement;
     const menus = ctxMenus(store);
     const nodeEl = t.closest('[data-node-id]') as HTMLElement | null;

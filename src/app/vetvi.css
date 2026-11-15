@@ -707,9 +707,9 @@ body.connecting .vpinn{cursor:copy}
 @keyframes dlgFlash{0%{background:rgba(226,165,78,.35);border-color:var(--acc);box-shadow:0 0 0 3px rgba(226,165,78,.25)}55%{background:rgba(226,165,78,.16);border-color:rgba(226,165,78,.75)}100%{background:rgba(255,255,255,.02);border-color:transparent;box-shadow:none}}
 .dlg-reply-row-ed{display:flex;gap:6px;align-items:center;margin-bottom:4px}
 .dlg-reply-row-ed select{flex:0 0 auto;width:auto;min-width:90px;height:26px;font-size:11px;padding:0 6px;background:#1a1d22;border:1px solid var(--line2);border-radius:5px;color:var(--tx)}
-.dlg-reply-row-ed textarea{flex:1;min-height:32px;max-height:120px;resize:vertical;font-size:11.5px;line-height:1.45;padding:5px 8px;background:#1a1d22;border:1px solid var(--line2);border-radius:5px;color:var(--tx);font-family:var(--body)}
+.dlg-reply-row-ed textarea{flex:1;min-height:32px;max-height:120px;resize:vertical;font-size:11.5px;line-height:1.45;padding:5px 8px;background:#1a1d22;border:1px solid var(--line2);border-radius:5px;color:var(--tx);font-family:var(--body);transition:height .22s ease,max-height .22s ease}
 .dlg-reply-row-ed textarea:focus{outline:none;border-color:var(--acc)}
-/* активная реплика: поле раскрывается под весь текст, чтобы он был виден целиком */
+/* активная реплика: поле плавно раскрывается под весь текст, чтобы он был виден целиком */
 .dlg-reply-row-ed textarea.grow{max-height:none;overflow:hidden;resize:none}
 .dlg-reply-acts{display:flex;gap:4px;justify-content:flex-end;margin-top:3px}
 /* ═══ кадрирование аватара ═══ */

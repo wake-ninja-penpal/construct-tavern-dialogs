@@ -885,7 +885,7 @@ export class VetviStore {
   }
 
   duplicateSelection(): { ids: string[]; pre: string } | null {
-    if (!this.sel.size) return null;
+    if (!this.sel.size) { this.toast('Нет узлов для дублирования', 'warn'); return null; }
     const pre = this.serialize();
     const ids: string[] = [];
     const map = new Map<string, string>();
@@ -912,10 +912,11 @@ export class VetviStore {
         newEdges.push(ne);
       }
     }
+    /* оригинал (6547–6565): история пишется один раз — при размещении переносимого дубликата */
     this.mutate((doc) => {
       doc.nodes.push(...clones);
       doc.edges.push(...newEdges);
-    }, { label: 'Дублирование (' + clones.length + ')' });
+    }, { history: false, label: 'Дублирование (' + clones.length + ')' });
     this.sel = new Set(ids);
     this.selEdges.clear();
     this.selGroups.clear();
@@ -1756,52 +1757,138 @@ export class VetviStore {
   }
 
   /** Разбить диалог на цепочку нод по репликам (splitDialogNode, 7463–7563).
-   *  Если нода внутри цепочки — созданные реплики входят в неё на место исходной. */
+   *  Если нода внутри цепочки — созданные реплики входят в неё на место исходной.
+   *  После создания: горизонтальный ряд реальными ширинами, вытеснение соседей
+   *  из полосы ряда (вверх/вниз — что ближе) и общий resolveOverlaps. */
   splitDialogNode(id: string, deep: boolean): void {
     const n = this.nodeById(id);
     if (!n || n.type !== 'dialog' || !n.dialog) return;
-    const flat: VetviReply[] = deep ? this.flatReplies(n.dialog.replies) : n.dialog.replies.filter((r) => !!r);
-    if (flat.length < 2) return;
-    const pre = this.serialize();
-    /* нода в цепочке: запоминаем группу и позицию для якорения созданных нод (7472–7473) */
+    const reps = deep ? this.flatReplies(n.dialog.replies) : n.dialog.replies.filter((r) => !!r);
+    if (reps.length < 2) {
+      this.toast(deep ? 'Нужен диалог минимум с двумя репликами' : 'Нужен диалог минимум с двумя репликами верхнего уровня', 'warn');
+      return;
+    }
+    const lk = this.lockBlockedBy([id]);
+    if (lk) { this.showLockTip(this.lastPtr.x, this.lastPtr.y, lk); return; }
+    const dlg = n.dialog;
     const gS = this.stackGroupOf(n);
     const kS = gS ? stackOrderIds(this.doc, gS).indexOf(id) : -1;
-    const created: string[] = [];
-    let prevId: string | null = null;
-    for (let i = 0; i < flat.length; i++) {
-      const r = flat[i];
-      const c = JSON.parse(JSON.stringify(n)) as VetviNode;
-      c.id = uid();
-      c.gid = null;
-      c.x = n.x + i * 260;
-      c.y = n.y;
-      c.dialog = { participants: n.dialog.participants.slice(), description: i === 0 ? n.dialog.description : '', replies: [{ ...r, children: undefined }] };
-      c.expand = 1;
+    const pre = this.serialize();
+    /* созданные ноды якорятся в левый верхний угол исходной ноды (7475–7476) */
+    const baseX = Math.round(n.x);
+    const baseY = Math.round(n.y);
+    const createdIds: string[] = [];
+    reps.forEach((r, i) => {
+      const t = (i === 0) ? (n.title || 'Диалог') : ((r.text || ('Реплика ' + (i + 1))).slice(0, 42));
+      const rc = JSON.parse(JSON.stringify(r)) as VetviReply;
+      if (deep) rc.children = []; /* при разбивке на все реплики дети уходят в свои ноды */
+      const c: VetviNode = {
+        id: uid(),
+        type: 'dialog',
+        gid: null,
+        x: baseX,
+        y: baseY + i * 175,
+        title: t,
+        text: '',
+        status: n.status || 'idea',
+        tags: (n.tags || []).slice(),
+        expand: 1,
+        color: n.color || null,
+        tint: n.tint || 0,
+        dlgWidth: n.dlgWidth || null,
+        notes: i === 0 ? (n.notes || []) : [],
+        linear: (i === 0 && n.linear === true) ? true : undefined,
+        dialog: {
+          participants: (dlg.participants || []).slice(),
+          description: i === 0 ? (dlg.description || '') : '',
+          replies: [rc],
+        },
+      };
       this.doc.nodes.push(c);
-      created.push(c.id);
-      if (prevId && !gS) this.doc.edges.push(stackChainEdgeObj(prevId, c.id));
-      prevId = c.id;
+      createdIds.push(c.id);
+    });
+    /* входящие — на первую копию (7486–7488) */
+    for (const e of this.doc.edges) {
+      if (e.to === id) e.to = createdIds[0];
     }
-    // входящие на первую копию, исходящие с последней
-    for (const e of this.doc.edges.slice()) {
-      if (e.to === id) e.to = created[0];
-      if (e.from === id) { e.from = created[created.length - 1]; e.fromReply = null; e.fromOut = null; }
+    /* исходящие: по реплике — в её ноду; обычный выход — последней ноде (7489–7498) */
+    for (const e of this.doc.edges) {
+      if (e.from === id && e.fromReply) {
+        let idx = -1;
+        for (let i = 0; i < reps.length; i++) {
+          if (deep ? (reps[i].id === e.fromReply) : !!findReply([reps[i]], e.fromReply)) { idx = i; break; }
+        }
+        if (idx >= 0) e.from = createdIds[idx];
+      } else if (e.from === id && e.tin !== 'var') {
+        e.from = createdIds[createdIds.length - 1];
+        e.fromOut = null;
+      }
     }
     this.doc.nodes = this.doc.nodes.filter((x) => x.id !== id);
     this.doc.edges = this.doc.edges.filter((e) => e.from !== id && e.to !== id);
     if (gS) {
       /* созданные ноды занимают место исходной в цепочке (7501–7507) */
       const newOrder = stackOrderIds(this.doc, gS).filter((x) => x !== id);
-      newOrder.splice(Math.max(0, kS), 0, ...created);
+      newOrder.splice(Math.max(0, kS), 0, ...createdIds);
       gS.order = newOrder;
-      for (const cid of created) {
+      for (const cid of createdIds) {
         const cn = this.nodeById(cid);
         if (cn) cn.gid = gS.id;
       }
       stackRebuildChains(this.doc, gS);
+    } else {
+      for (let ci = 0; ci < createdIds.length - 1; ci++) this.doc.edges.push(stackChainEdgeObj(createdIds[ci], createdIds[ci + 1]));
     }
-    this.commitEdit(pre, 'Разбивка диалога на реплики');
-    this.toast('Диалог разбит на ' + created.length + ' нод' + (gS ? ' (внутри цепочки)' : ''), 'ok');
+    this.sel = new Set([createdIds[0]]);
+    this.selEdges.clear();
+    this.selGroups.clear();
+    this.commitEdit(pre, deep ? 'Разбивка диалога на все реплики' : 'Разбивка диалога на реплики');
+    this.emit(); /* ноды видимы — можно измерить реальные ширины (renderAll, 7512) */
+    /* раскладка ряда и вытеснение соседей — после перерисовки (7513–7560) */
+    setTimeout(() => {
+      let rx = baseX, ry = baseY;
+      if (this.snapOn) { rx = Math.round(rx / GRID) * GRID; ry = Math.round(ry / GRID) * GRID; }
+      const rowNodes: VetviNode[] = [];
+      for (const cid of createdIds) {
+        const cn = this.nodeById(cid);
+        if (!cn) continue;
+        const w = this.dimsOf(cid).w;
+        cn.x = Math.round(rx);
+        cn.y = Math.round(ry);
+        rx += w + 56;
+        rowNodes.push(cn);
+      }
+      const anyVisible = rowNodes.length > 0;
+      if (anyVisible) {
+        const pad = 18;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const c of rowNodes) {
+          const d = this.dimsOf(c.id);
+          const w = d.w > 0 ? d.w : NODE_W;
+          const h = d.h > 0 ? d.h : 150;
+          minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x + w);
+          minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y + h);
+        }
+        minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+        for (const m of this.doc.nodes) {
+          if (createdIds.includes(m.id)) continue;
+          if (collapsedAncestorOf(this.doc, m.id)) continue;
+          const d = this.dimsOf(m.id);
+          const w = d.w > 0 ? d.w : NODE_W;
+          const h = d.h > 0 ? d.h : 150;
+          if (m.x + w > minX && m.x < maxX && m.y + h > minY && m.y < maxY) {
+            /* минимальный сдвиг по вертикали из полосы: вверх или вниз — что ближе */
+            const up = m.y + h - minY;
+            const down = maxY - m.y;
+            m.y = Math.round(m.y + ((up < down) ? -up : down));
+          }
+        }
+        this.resolveOverlaps(new Set(createdIds));
+      }
+      this.scheduleSave();
+      this.emit();
+      this.toast('Диалог разбит на ' + createdIds.length + ' нод' + (deep ? ' — по одной на каждую реплику' : ' — стрелки реплик сохранены') + (gS ? ' (внутри цепочки)' : ''));
+    }, 0);
   }
 
   private flatReplies(arr: VetviReply[], out?: VetviReply[]): VetviReply[] {
@@ -3107,25 +3194,39 @@ export class VetviStore {
   /* ── перенос дубликата (carry) ── */
 
   startCarry(ids: string[], pre: string): void {
+    if (!ids || !ids.length) return;
     this.carry = { ids, pre };
     this.emit();
+    /* тост оригинала (6578) */
+    this.toast('Дубликат следует за курсором: клик — поставить, Esc/ПКМ — отменить');
   }
 
-  placeCarry(x: number, y: number): void {
-    const ids = this.carry?.ids || [];
+  /** placeCarry оригинала (6580–6593): клоны уже следуют за курсором — позиция не меняется,
+   *  назначается gid — глубочайшая группа под центром клона; история «Дублирование (перенос)». */
+  placeCarry(): void {
+    if (!this.carry) return;
+    const ids = this.carry.ids;
+    const pre = this.carry.pre;
     this.carry = null;
-    const dx = x - this.centerOf(ids).x;
-    const dy = y - this.centerOf(ids).y;
+    const sizes = new Map<string, NodeSize>();
+    const cardSizes = new Map<string, { w: number; h: number }>();
+    for (const id of ids) {
+      const d = this.dimsFn ? this.dimsFn(id) : null;
+      if (d) sizes.set(id, { w: d.w, h: d.h });
+    }
     for (const id of ids) {
       const n = this.nodeById(id);
       if (!n) continue;
-      n.x = snapVal(n.x + dx, this.snapOn);
-      n.y = snapVal(n.y + dy, this.snapOn);
+      const s = sizes.get(id);
+      const w = s ? s.w : NODE_W;
+      const h = s ? s.h : 90;
+      const tg = this.deepestGroupAt(n.x + w / 2, n.y + h / 2, sizes, cardSizes);
+      n.gid = tg ? tg.id : null;
     }
-    this.commitEdit(this.carryPre, 'Размещение дубликата');
+    this.commitEdit(pre, 'Дублирование (перенос)');
     this.emit();
+    this.toast('Дубликат размещён');
   }
-  carryPre: string | null = null;
 
   cancelCarry(): void {
     if (!this.carry) return;
@@ -3133,15 +3234,8 @@ export class VetviStore {
     this.carry = null;
     this.doc = docFromParsed(JSON.parse(snap));
     this.emit();
-  }
-
-  private centerOf(ids: string[]): { x: number; y: number } {
-    const ns = ids.map((id) => this.nodeById(id)).filter(Boolean) as VetviNode[];
-    if (!ns.length) return { x: 0, y: 0 };
-    return {
-      x: ns.reduce((s, n) => s + n.x, 0) / ns.length,
-      y: ns.reduce((s, n) => s + n.y, 0) / ns.length,
-    };
+    /* тост оригинала (6601) */
+    this.toast('Дублирование отменено', 'warn');
   }
 
   /* ── setter-методы для UI (мутации только здесь) ── */
