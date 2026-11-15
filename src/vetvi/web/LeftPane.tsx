@@ -43,6 +43,52 @@ function Ic(props: { d: string; size?: number }) {
   );
 }
 
+/** Строка «или ссылка на картинку …» + кнопка ОК (ce-avurl оригинала, 5686–5689):
+ * проверка картинки пробным Image с referrerPolicy=no-referrer (applyUrl, 5788–5806).
+ * Поле — неконтролируемое: при смене аватара извне родитель перемонтирует его через key. */
+function AvatarLinkRow(props: { c: VetviChar; store: VetviStore }) {
+  const { c, store } = props;
+  const inpRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const applyUrl = (): void => {
+    const u = (inpRef.current?.value || '').trim();
+    if (!u) return;
+    if (!/^https?:\/\/\S+$/i.test(u)) {
+      store.toast('Ссылка должна начинаться с http:// или https://', 'warn');
+      return;
+    }
+    setBusy(true);
+    const probe = new Image();
+    probe.onload = () => {
+      setBusy(false);
+      store.updateChar(c.id, { av: u, ...(c.avShape !== 'square' ? { avShape: 'circle' } : null) }, { label: 'Аватар персонажа' });
+      store.toast('Аватар по ссылке установлен');
+    };
+    probe.onerror = () => {
+      setBusy(false);
+      store.toast('По этой ссылке картинка не открылась', 'err');
+    };
+    probe.referrerPolicy = 'no-referrer';
+    probe.src = u;
+  };
+  return (
+    <div className="ce-avurl">
+      <input
+        ref={inpRef}
+        className="inp ce-av-link"
+        placeholder="или ссылка на картинку с другого ресурса (https://…)"
+        defaultValue={c.av && !/^data:/i.test(String(c.av)) ? String(c.av) : ''}
+        maxLength={2000}
+        spellCheck={false}
+        title="Ссылка на картинку — аватар загрузится прямо по ней"
+        aria-label="Ссылка на картинку для аватара"
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyUrl(); } }}
+      />
+      <button type="button" className="ce-av-apply" title="Проверить ссылку и поставить аватар" disabled={busy} onClick={applyUrl}>ОК</button>
+    </div>
+  );
+}
+
 export function LeftPane(props: { store: VetviStore }) {
   const { store } = props;
   const tab = store.leftTab;
@@ -776,6 +822,9 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                       </div>
                     </div>
                   </div>
+                  {/* ссылка на картинку с другого ресурса (ce-avurl оригинала 5686);
+                      key по аватару — перемонтирование поля при смене аватара извне */}
+                  <AvatarLinkRow key={'avurl:' + c.id + ':' + String(c.av || '')} c={c} store={store} />
                   <div>
                     <label>Имя</label>
                     <input

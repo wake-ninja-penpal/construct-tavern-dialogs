@@ -156,6 +156,8 @@ export class VetviStore {
   lockTip: { x: number; y: number; by: { id: string; name: string; color: string } | null } | null = null;
   /** Показан попап участников комнаты. */
   collabPop = false;
+  /** Soft-lock редактируемого объекта (editLockIds оригинала): лок, взятый набором текста. */
+  editLockIds: string[] = [];
 
   /** Клиент realtime-коллаборации (подключается в VetviApp). */
   sync: SyncClient | null = null;
@@ -3240,6 +3242,75 @@ export class VetviStore {
     this.lockTip = { x: clamp(x, 110, (typeof window !== 'undefined' ? window.innerWidth : 800) - 110), y: Math.max(48, y), by };
     this.emit();
     setTimeout(() => { this.lockTip = null; this.emit(); }, 2400);
+  }
+
+  /* ── soft-lock редактируемого объекта (editStart/editEnd оригинала, 2158–2214) ──
+     Пока один участник набирает текст в инспекторе/модалке, объект залочен:
+     другие видят обводку «✏ редактирует …», а попытка правки отбивается тултипом. */
+
+  /** Какой объект сейчас правится (editStartIds оригинала 2160): единственное выделение. */
+  private editStartIds(): string[] {
+    if (!this.sync || !this.sync.enabled) return [];
+    if (this.selEdges && this.selEdges.size === 1 && !this.sel.size && !this.selGroups.size) return [[...this.selEdges][0]];
+    if (this.sel && this.sel.size === 1 && !this.selGroups.size) return [[...this.sel][0]];
+    if (this.selGroups && this.selGroups.size === 1 && !this.sel.size) return [[...this.selGroups][0]];
+    return [];
+  }
+
+  /** Фокус в поле инспектора/модалки: захват soft-lock объекта (editStart оригинала 2188). */
+  editSoftLock(): void {
+    if (!this.sync || !this.sync.enabled) return;
+    const ids = this.editStartIds();
+    for (const id of ids) {
+      if (this.sync.myLocks[id]) continue; /* уже залочено жестом/модалкой — не трогаем */
+      this.editLockIds.push(id);
+      this.sync.lockTake([id]);
+    }
+  }
+
+  /** Активный жест/модалка удерживают лок объекта (lockHeldByGesture оригинала 2170). */
+  private gestureHoldsId(id: string): boolean {
+    if (this.dialogEdit && this.dialogEdit === id) return true; /* модалка реплик */
+    if (this.carry && this.carry.ids.includes(id)) return true; /* «выдернутая» копия */
+    if (this.syncBusyFlag && (this.sel.has(id) || this.selGroups.has(id))) return true; /* канвасный жест */
+    return false;
+  }
+
+  /** Уход фокуса: отдаём лок через 220мс, если не вернулись к вводу и жест не перехватил (editEnd оригинала 2199). */
+  editSoftUnlock(): void {
+    if (!this.editLockIds.length) return;
+    const rel = this.editLockIds.slice();
+    this.editLockIds = [];
+    setTimeout(() => {
+      if (!this.sync) return;
+      const rem: string[] = [];
+      for (const id of rel) {
+        if (this.editLockIds.indexOf(id) >= 0) continue; /* снова печатаем */
+        if (this.gestureHoldsId(id)) continue; /* жест перехватил лок (lockHeldByGesture) */
+        rem.push(id);
+      }
+      if (rem.length) this.sync.lockGive(rem);
+    }, 220);
+  }
+
+  /** Проигранная гонка набора текста: поле теряет фокус (11974–11986 оригинала). true — был наш edit-лок. */
+  editLockDenied(deniedIds: Set<string>): boolean {
+    if (!this.editLockIds.length) return false;
+    const keep: string[] = [];
+    let dropped = false;
+    for (const id of this.editLockIds) {
+      if (deniedIds.has(id)) { dropped = true; if (this.sync) delete this.sync.myLocks[id]; }
+      else keep.push(id);
+    }
+    if (dropped) {
+      this.editLockIds = keep;
+      try {
+        const ae = document.activeElement as HTMLElement | null;
+        if (ae && ae !== document.body) ae.blur();
+      } catch { /* нет доступа */ }
+      return true;
+    }
+    return false;
   }
 
   /* ── вспомогательное ── */

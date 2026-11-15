@@ -22,6 +22,7 @@ import { uid } from '@/vetvi/core/factory';
 import { getMe, setMeName } from '@/vetvi/core/identity';
 import { mergeDocs, mergeStats, type MergeStats } from '@/vetvi/core/merge';
 import { passRandomSalt, sha256hex } from '@/vetvi/core/passlock';
+import { projReadSlot } from '@/vetvi/core/projects';
 import { stItem, stSetItem } from '@/vetvi/core/storage';
 import type { VetviEdge, VetviGroup, VetviNode } from '@/vetvi/core/types';
 import { canvasApi } from './canvasApi';
@@ -251,7 +252,13 @@ export class SyncClient {
           const serverModified = (serverDoc.meta && serverDoc.meta.modified) ? serverDoc.meta.modified : null;
           const localModified = this.store.doc.meta.modified;
           const serverNewer = !!(serverModified && localModified && (serverModified as number) >= (localModified as number));
-          if (localEmpty || (sameProject && serverNewer)) {
+          /* Есть ли данные ЭТОГО проекта локально (слот roomPid). Нет слота и локальный
+             проект ещё ни разу не сохранялся (нет projectId) — проект открывается впервые:
+             молча загружаем состояние комнаты, без модалки (projInitStartup оригинала 11414:
+             чужой проект без данных слота грузится пустым → localEmpty → applyRemote). */
+          const hasLocalSlotForRoom = !!(roomPid && projReadSlot(roomPid));
+          const pristine = !metaPid; /* дефолтный «Без названия», ни одного автосохранения */
+          if (localEmpty || (!hasLocalSlotForRoom && pristine) || (sameProject && serverNewer)) {
             this.applyRemote(serverDoc, true, opts.own === true);
             this.store.toast('Загружено состояние из комнаты');
           } else if (sameProject) {
@@ -567,9 +574,11 @@ export class SyncClient {
     try { this.sock.emit('vetvi:unlock', { roomId: this.room, ids: out }); } catch { /* соединение умерло */ }
   }
 
-  lockGiveAll(): void {
-    const ids = Object.keys(this.myLocks || {});
-    this.myLocks = {};
+  lockGiveAll(except?: string[] | Set<string>): void {
+    const skip = except ? new Set(Array.isArray(except) ? except : [...except]) : null;
+    /* edit-локи (набор текста) переживают конец жеста — их отдаёт editSoftUnlock (11940 оригинала) */
+    const ids = Object.keys(this.myLocks || {}).filter((id) => !skip || !skip.has(id));
+    for (const id of ids) delete this.myLocks[id];
     if (!ids.length || !this.sock || !this.sock.connected) return;
     try { this.sock.emit('vetvi:unlock', { roomId: this.room, ids }); } catch { /* соединение умерло */ }
   }
@@ -588,6 +597,8 @@ export class SyncClient {
     const has = (list: string[] | Set<string>) => [...list].some((id) => ids[id]);
     for (const id of Object.keys(ids)) delete this.myLocks[id];
     let hit = false;
+    /* проигранная гонка набора текста: снимаем фокус с поля (11974–11986 оригинала) */
+    if (this.store.editLockDenied(new Set(Object.keys(ids)))) hit = true;
     /* откат мутаций активного жеста по снимку начала */
     const snap = this.store.dragStartSnapshot;
     if (snap && (this.store.dragMoved || this.store.syncBusyFlag)) {

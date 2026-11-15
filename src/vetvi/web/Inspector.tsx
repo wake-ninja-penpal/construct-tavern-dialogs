@@ -19,6 +19,7 @@ import type { ReactNode } from 'react';
 import { PALETTE_COLORS, TYPES } from '@/vetvi/core/constants';
 import { clamp, typeInfo } from '@/vetvi/core/geometry';
 import { hkText } from '@/vetvi/core/hotkeys';
+import { getMe } from '@/vetvi/core/identity';
 import type { VetviDoc, VetviGroup, VetviNode, VetviNote, VetviReply } from '@/vetvi/core/types';
 import {
   branchVarOverride, condOpsFor, isTrueVal, opsForType,
@@ -184,11 +185,13 @@ function nodeCap(n: VetviNode, cstName: string | null): string {
   return 'Свой тип: ' + (cstName || typeInfo(n.type).name);
 }
 
-/** Блокировка инспектора, если объект редактирует другой участник (lockBlockedBy). */
+/** Блокировка инспектора, если объект редактирует ДРУГОЙ участник (lockBlockedBy оригинала 11912:
+ * свой лок не блокирует — иначе эхо собственного lockTake дизейблит поле под фокусом и сбивает ввод). */
 function lockFor(store: VetviStore, ids: string[]): { id: string; name: string; color: string } | null {
+  const me = getMe().id;
   for (const id of ids) {
     const l = store.syncLocks[id];
-    if (l) return l;
+    if (l && l.id && l.id !== me) return l;
   }
   return null;
 }

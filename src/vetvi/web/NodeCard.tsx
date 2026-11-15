@@ -304,6 +304,9 @@ export function NodeCard(props: {
       onMouseDown={(e) => {
         const t = e.target as HTMLElement;
         if (t.closest('[data-pin]') || t.closest('[data-nodrag]')) return;
+        /* Ctrl/⌘+ЛКМ — пан по холсту, ноды игнорируются (8104 оригинала):
+           не выделяем и не тащим — событие уходит на canvas (обработчик пана) */
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !store.spaceDown) return;
         e.stopPropagation();
         if (e.shiftKey) store.toggleSelect(n.id);
         else if (!selected) store.selectOnly(n.id);

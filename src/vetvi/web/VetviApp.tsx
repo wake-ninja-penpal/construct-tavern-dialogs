@@ -175,6 +175,37 @@ export default function VetviApp() {
     return () => document.removeEventListener('pointerdown', onDoc, true);
   }, [store, store.collabPop]);
 
+  /* soft-lock редактируемого объекта: фокус в поле инспектора/модалки/редактора
+     диалога — editStart (2188 оригинала), уход фокуса — editEnd (2199).
+     Делегировано, как BINDS editStart/editEnd на полях инспектора оригинала. */
+  useEffect(() => {
+    const isEditable = (t: EventTarget | null): boolean => {
+      const el = t as HTMLElement | null;
+      if (!el || !el.isConnected) return false;
+      return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || !!el.isContentEditable;
+    };
+    const inEditorArea = (el: HTMLElement): boolean =>
+      !!(el.closest('#insp') || el.closest('#modalWrap') || el.closest('#dlgModal') || el.closest('#noteModal') || el.closest('.v-edit'));
+    const onFocusIn = (e: FocusEvent) => {
+      if (!isEditable(e.target)) return;
+      const el = e.target as HTMLElement;
+      if (!inEditorArea(el)) return;
+      store.editSoftLock();
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      if (!isEditable(e.target)) return;
+      const el = e.target as HTMLElement;
+      if (!inEditorArea(el)) return;
+      store.editSoftUnlock();
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  }, [store]);
+
   /* ── диспетчер горячих клавиш (цепочка условий оригинала) ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
