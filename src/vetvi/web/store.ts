@@ -34,7 +34,7 @@ import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
 import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
-import type { EdgeGeom, NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
+import type { EdgeGeom, NodeSize, VetviChar, VetviCharGroup, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import { canvasApi } from './canvasApi';
@@ -924,22 +924,60 @@ export class VetviStore {
     return { ids, pre };
   }
 
-  alignH(): void {
-    const ns = this.doc.nodes.filter((n) => this.sel.has(n.id));
-    if (ns.length < 2) return;
-    const y = Math.round(ns.reduce((s, n) => s + n.y, 0) / ns.length);
-    this.mutate((doc) => {
-      for (const n of doc.nodes) if (this.sel.has(n.id)) { n.y = y; n.x = snapVal(n.x, true); }
-    }, { label: 'Выровнять в ряд' });
-  }
+  alignH(): void { this.alignSelAxis(false); }
 
-  alignV(): void {
-    const ns = this.doc.nodes.filter((n) => this.sel.has(n.id));
-    if (ns.length < 2) return;
-    const x = Math.round(ns.reduce((s, n) => s + n.x, 0) / ns.length);
+  alignV(): void { this.alignSelAxis(true); }
+
+  /** alignSelAxis оригинала (6621): ряд/столбец с отступами вокруг общего центра выделения. */
+  private alignSelAxis(vert: boolean): void {
+    const ids: string[] = [];
+    for (const id of this.sel) {
+      const n = this.nodeById(id);
+      if (n && !collapsedAncestorOf(this.doc, id)) ids.push(id);
+    }
+    if (ids.length < 2) { this.toast('Выделите минимум два узла', 'warn'); return; }
+    const dims = (id: string): { w: number; h: number } => {
+      const n = this.nodeById(id);
+      const el = this.dimsFn ? this.dimsFn(id) : null;
+      return { w: el && el.w > 0 ? el.w : this.dlgNodeWidthOf(n!), h: el && el.h > 0 ? el.h : 90 };
+    };
+    const GAP = 70;
+    let bnx = 1e9, bny = 1e9, bxx = -1e9, bxy = -1e9, scx = 0, scy = 0;
+    ids.forEach((id) => {
+      const n = this.nodeById(id)!; const d = dims(id);
+      bnx = Math.min(bnx, n.x); bny = Math.min(bny, n.y);
+      bxx = Math.max(bxx, n.x + d.w); bxy = Math.max(bxy, n.y + d.h);
+      scx += n.x + d.w / 2; scy += n.y + d.h / 2;
+    });
+    const ccx = scx / ids.length, ccy = scy / ids.length;
+    const vertSpread = (bxy - bny) >= (bxx - bnx); /* стояли вертикально → порядок сверху вниз (и наоборот) */
+    const order = ids.slice().sort((p, q) => {
+      const a = this.nodeById(p)!, b = this.nodeById(q)!, da = dims(p), db = dims(q); let d: number;
+      if (vertSpread) {
+        d = (a.y + da.h / 2) - (b.y + db.h / 2);
+        if (d) return d;
+        return (a.x + da.w / 2) - (b.x + db.w / 2);
+      }
+      d = (a.x + da.w / 2) - (b.x + db.w / 2);
+      if (d) return d;
+      return (a.y + da.h / 2) - (b.y + db.h / 2);
+    });
+    let total = 0;
+    order.forEach((id) => { total += dims(id)[vert ? 'h' : 'w']; });
+    total += GAP * (order.length - 1);
+    const cursor0 = vert ? ((bny + bxy) / 2 - total / 2) : ((bnx + bxx) / 2 - total / 2);
     this.mutate((doc) => {
-      for (const n of doc.nodes) if (this.sel.has(n.id)) { n.x = x; n.y = snapVal(n.y, true); }
-    }, { label: 'Выровнять в столбец' });
+      let cursor = cursor0;
+      for (const id of order) {
+        const n = doc.nodes.find((m) => m.id === id);
+        if (!n) continue;
+        const d = dims(id);
+        if (vert) { n.x = Math.round(ccx - d.w / 2); n.y = Math.round(cursor); cursor += d.h + GAP; }
+        else { n.x = Math.round(cursor); n.y = Math.round(ccy - d.h / 2); cursor += d.w + GAP; }
+        if (this.snapOn) { n.x = Math.round(n.x / GRID) * GRID; n.y = Math.round(n.y / GRID) * GRID; }
+      }
+    }, { label: vert ? 'Выравнивание нод по вертикали' : 'Выравнивание нод по горизонтали' });
+    this.toast(vert ? 'Выровнено по вертикали — столбец с отступами' : 'Выровнено по горизонтали — ряд с отступами');
   }
 
   /* ── связи ── */
@@ -1734,6 +1772,74 @@ export class VetviStore {
       }
     }, { label: 'Удаление персонажа' });
     this.toast('Персонаж удалён', 'warn');
+  }
+
+  /* ── группы персонажей (сортировка списка) ── */
+
+  charGroups(): VetviCharGroup[] {
+    return this.doc.charGroups || [];
+  }
+
+  addCharGroup(): VetviCharGroup {
+    const g: VetviCharGroup = {
+      id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 10000).toString(36),
+      name: 'Новая группа',
+      collapsed: false,
+    };
+    this.mutate((doc) => {
+      if (!Array.isArray(doc.charGroups)) doc.charGroups = [];
+      doc.charGroups.push(g);
+    }, { label: 'Создание группы персонажей' });
+    this.toast('Группа «' + g.name + '» создана', 'ok');
+    return g;
+  }
+
+  updateCharGroup(id: string, patch: Partial<VetviCharGroup>, opts?: { history?: boolean; label?: string }): void {
+    this.mutate((doc) => {
+      const g = (doc.charGroups || []).find((x) => x.id === id);
+      if (g) Object.assign(g, patch);
+    }, opts);
+  }
+
+  /** Удаление группы: сами персонажи не удаляются — выкидываются из группы (groupId → null). */
+  deleteCharGroup(id: string): void {
+    const g = (this.doc.charGroups || []).find((x) => x.id === id);
+    this.mutate((doc) => {
+      doc.charGroups = (doc.charGroups || []).filter((x) => x.id !== id);
+      for (const c of doc.chars || []) {
+        if (c.groupId === id) c.groupId = null;
+      }
+    }, { label: 'Удаление группы персонажей' });
+    this.toast('Группа «' + (g ? g.name : '') + '» удалена — персонажи выведены из неё', 'warn');
+  }
+
+  /** Перенос персонажа в группу (null — без группы). */
+  setCharGroup(cid: string, gid: string | null, opts?: { history?: boolean; label?: string }): void {
+    const cur = this.charById(cid);
+    if (!cur) return;
+    if ((cur.groupId || null) === (gid || null)) return;
+    const gname = gid ? ((this.doc.charGroups || []).find((g) => g.id === gid)?.name || '') : '';
+    this.updateChar(cid, { groupId: gid || null }, opts || { label: gid ? 'Перенос персонажа в группу' : 'Персонаж без группы' });
+    if (!opts) this.toast(gid ? 'Персонаж перенесён в группу «' + gname + '»' : 'Персонаж выведен из группы', 'ok');
+  }
+
+  toggleCharGroupCollapsed(id: string): void {
+    const g = (this.doc.charGroups || []).find((x) => x.id === id);
+    if (g) this.updateCharGroup(id, { collapsed: !g.collapsed }, { history: false });
+  }
+
+  /** Перестановка группы на позицию toIndex (индекс в текущем массиве до переноса). */
+  moveCharGroup(id: string, toIndex: number): void {
+    this.mutate((doc) => {
+      const arr = doc.charGroups || [];
+      const from = arr.findIndex((g) => g.id === id);
+      if (from < 0 || toIndex < 0 || toIndex > arr.length) return;
+      const [g] = arr.splice(from, 1);
+      let idx = toIndex;
+      if (idx > from) idx -= 1;
+      idx = Math.max(0, Math.min(arr.length, idx));
+      arr.splice(idx, 0, g);
+    }, { label: 'Перестановка групп персонажей' });
   }
 
   charById(id: string | null | undefined): VetviChar | null {

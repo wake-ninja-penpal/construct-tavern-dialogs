@@ -124,6 +124,19 @@ export interface VetviChar {
   id: string;
   name: string;
   color?: string;
+  /** Роль персонажа — выводится в списке под именем. */
+  role?: string;
+  /** Идентификатор группы персонажей (null/undefined — без группы). */
+  groupId?: string | null;
+  [k: string]: unknown;
+}
+
+/** Группа персонажей (для сортировки списка). */
+export interface VetviCharGroup {
+  id: string;
+  name: string;
+  /** Свернута ли группа в списке. */
+  collapsed?: boolean;
   [k: string]: unknown;
 }
 
@@ -146,6 +159,7 @@ export interface VetviDoc {
   groups: VetviGroup[];
   vars?: VetviVar[];
   chars?: VetviChar[];
+  charGroups?: VetviCharGroup[];
   customTypes?: unknown[];
   palette?: string[];
   listHidden?: Record<string, unknown>;

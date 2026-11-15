@@ -9,13 +9,13 @@
  * Классы, id и структура DOM совпадают с оригиналом — стили vetvi.css применяются как есть.
  */
 
-import { Fragment, useCallback, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties, DragEvent, ReactNode } from 'react';
 
 import { NODE_W, PALETTE_COLORS, STATUS_RU, TYPES } from '@/vetvi/core/constants';
 import { nodeColor, typeInfo } from '@/vetvi/core/geometry';
 import { opsForType, VAR_TYPES, varCastVal, varType, isTrueVal } from '@/vetvi/core/vars';
-import type { VetviChar, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vetvi/core/types';
+import type { VetviChar, VetviCharGroup, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vetvi/core/types';
 import { condOpsFor, varById } from '@/vetvi/core/vars';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
@@ -738,10 +738,18 @@ function varUseText(store: VetviStore, vid: string): string {
 }
 
 /* ── Персонажи ── */
+
+const P_USER_PLUS = '<circle cx="10" cy="8" r="3.4"/><path d="M3.5 19.5c1-3.2 3.6-4.9 6.5-4.9 1.6 0 3.1.5 4.3 1.4"/><path d="M17 13v6M14 16h6"/>';
+const P_FOLDER_PLUS = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>';
+
 function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; active: boolean; onFile: (cid: string, file: File | null) => void; onRecrop: (cid: string) => void }) {
   const chars = store.doc.chars || [];
+  const groups = store.charGroups();
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [renGid, setRenGid] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ kind: 'root' } | { kind: 'group'; id: string } | { kind: 'ghead'; id: string } | null>(null);
   const editPreRef = useRef<string | null>(null);
+  const renRef = useRef<HTMLInputElement | null>(null);
 
   const toggleOpen = (id: string) => {
     const s = new Set(open);
@@ -754,12 +762,169 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
   const nameBlur = () => { store.commitEdit(editPreRef.current, 'Правка персонажа'); editPreRef.current = null; };
   const descFocus = () => { editPreRef.current = store.beginEdit(); };
   const descBlur = () => { store.commitEdit(editPreRef.current, 'Описание персонажа'); editPreRef.current = null; };
+  const roleFocus = () => { editPreRef.current = store.beginEdit(); };
+  const roleBlur = () => { store.commitEdit(editPreRef.current, 'Роль персонажа'); editPreRef.current = null; };
+
+  /* ── drag & drop: персонаж → группа, группа → позиция в списке ── */
+  const dtHas = (e: DragEvent, t: string) => Array.from(e.dataTransfer.types).includes(t);
+  const markOver = (next: { kind: 'root' } | { kind: 'group'; id: string } | { kind: 'ghead'; id: string } | null) =>
+    setDragOver((p) => {
+      if (p === next) return p;
+      if (p && next && p.kind === next.kind && (p as { id?: string }).id === (next as { id?: string }).id) return p;
+      return next;
+    });
+
+  const commitRenG = (g: VetviCharGroup) => {
+    const v = (renRef.current?.value || '').trim();
+    if (v && v !== g.name) store.updateCharGroup(g.id, { name: v }, { label: 'Переименование группы' });
+    setRenGid(null);
+  };
+
+  /** строка персонажа — можно перетащить на группу (или на зону «без группы») */
+  const charRow = (c: VetviChar) => {
+    const isOpen = open.has(c.id);
+    const shape = c.avShape === 'square' ? 'square' : 'circle';
+    const roleText = String(c.role || '').trim();
+    return (
+      <div key={c.id} data-cid={c.id} className={'v-item' + (isOpen ? ' open' : '')}>
+        <div
+          className="v-row c-dragrow"
+          draggable
+          title="Перетащите на группу, чтобы переместить персонажа (на область над группами — вывести из группы)"
+          onDragStart={(e) => { e.dataTransfer.setData('text/vetvi-char', c.id); e.dataTransfer.effectAllowed = 'move'; }}
+          onDragEnd={() => markOver(null)}
+        >
+          <label className="c-avpick" title={c.av ? 'Сменить аватар' : 'Задать аватар — загрузить картинку'}>
+            <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' row'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
+              {c.av ? <img src={String(c.av)} alt={'Аватар: ' + c.name} /> : (c.name || '?')[0].toUpperCase()}
+            </span>
+            <input type="file" className="c-av-pick" accept="image/*" hidden onChange={(e) => { const el = e.currentTarget; onFile(c.id, el.files?.[0] || null); el.value = ''; }} />
+          </label>
+          <div className="c-namewrap">
+            <input
+              className="inp v-name c-name"
+              maxLength={60}
+              value={String(c.name || '')}
+              title="Имя персонажа"
+              placeholder="имя персонажа"
+              aria-label="Имя персонажа"
+              onFocus={nameFocus}
+              onChange={(e) => store.updateChar(c.id, { name: e.target.value }, { history: false })}
+              onBlur={nameBlur}
+            />
+            {roleText ? <div className="c-role" title={'Роль: ' + roleText}>{roleText}</div> : null}
+          </div>
+          <button type="button" className="v-del" title="Удалить персонажа" onClick={() => store.deleteChar(c.id)}><Ic d={P_X} size={12} /></button>
+          <button type="button" className="v-fold" title={isOpen ? 'Свернуть' : 'Развернуть для редактирования'} onClick={() => toggleOpen(c.id)}><Ic d={P_CHEV} size={12} /></button>
+        </div>
+        {isOpen && (
+          <div className="v-edit">
+            <div className="ce-avrow">
+              <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' big'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
+                {c.av ? <img src={String(c.av)} alt="" /> : (c.name || '?')[0].toUpperCase()}
+              </span>
+              <div className="ce-avctl">
+                <div className="ce-avbtns">
+                  <label className="ce-av-up" title="Загрузить картинку — откроется кадрирование">
+                    Загрузить…
+                    <input type="file" className="ce-av-file" accept="image/*" hidden onChange={(e) => { const el = e.currentTarget; onFile(c.id, el.files?.[0] || null); el.value = ''; }} />
+                  </label>
+                  {!!c.av && (
+                    <button type="button" className="ce-av-crop" title="Открыть текущий аватар и кадрировать заново" onClick={() => onRecrop(c.id)}>Кадрировать</button>
+                  )}
+                  {!!c.av && (
+                    <button type="button" className="ce-av-rm" title="Убрать аватар" onClick={() => store.updateChar(c.id, { av: null }, { label: 'Убрать аватар' })}>Убрать</button>
+                  )}
+                </div>
+                <div className="ce-av-shape">
+                  <button type="button" className={'shp' + (shape === 'circle' ? ' on' : '')} title="Аватар-круг" onClick={() => store.updateChar(c.id, { avShape: 'circle' }, { history: false })}><i className="shp-ic circle" />круг</button>
+                  <button type="button" className={'shp' + (shape === 'square' ? ' on' : '')} title="Аватар-квадрат со скруглёнными углами" onClick={() => store.updateChar(c.id, { avShape: 'square' }, { history: false })}><i className="shp-ic square" />квадрат</button>
+                </div>
+              </div>
+            </div>
+            {/* ссылка на картинку с другого ресурса (ce-avurl оригинала 5686);
+                key по аватару — перемонтирование поля при смене аватара извне */}
+            <AvatarLinkRow key={'avurl:' + c.id + ':' + String(c.av || '')} c={c} store={store} />
+            <div>
+              <label>Имя</label>
+              <input
+                className="inp ce-name"
+                maxLength={60}
+                value={String(c.name || '')}
+                placeholder="имя персонажа"
+                aria-label="Имя персонажа (расширенный редактор)"
+                onFocus={nameFocus}
+                onChange={(e) => store.updateChar(c.id, { name: e.target.value }, { history: false })}
+                onBlur={nameBlur}
+              />
+            </div>
+            <div>
+              <label>Цвет</label>
+              <div className="swatches">
+                {PALETTE_COLORS.map((col) => (
+                  <button
+                    key={col}
+                    type="button"
+                    className={'swatch' + (c.color === col ? ' on' : '')}
+                    style={{ background: col }}
+                    title={col}
+                    aria-label={'Цвет ' + col}
+                    onClick={() => store.updateChar(c.id, { color: col }, { label: 'Цвет персонажа' })}
+                  />
+                ))}
+              </div>
+            </div>
+            <div>
+              <label>Роль</label>
+              <input
+                className="inp ce-role"
+                maxLength={80}
+                value={String(c.role || '')}
+                placeholder="например: главный герой"
+                aria-label="Роль персонажа"
+                onFocus={roleFocus}
+                onChange={(e) => store.updateChar(c.id, { role: e.target.value }, { history: false })}
+                onBlur={roleBlur}
+              />
+            </div>
+            <div>
+              <label>Группа</label>
+              <CharGroupCombo store={store} c={c} />
+            </div>
+            <div>
+              <label>Описание</label>
+              <textarea
+                className="inp ce-desc"
+                placeholder="Кто это, какова его роль в истории…"
+                style={{ minHeight: 52 }}
+                aria-label="Описание персонажа"
+                onFocus={descFocus}
+                onChange={(e) => store.updateChar(c.id, { text: e.target.value }, { history: false })}
+                onBlur={descBlur}
+              />
+            </div>
+            <div className="ve-use">{charUseText(store, c.id)}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ungrouped = chars.filter((c) => !c.groupId || !groups.some((g) => g.id === c.groupId));
+  const groupOf = (gid: string) => chars.filter((c) => c.groupId === gid);
 
   return (
     <div className={'tabpane' + (active ? ' active' : '')} id="paneChars">
       <div className="v-head">
         <span>Персонажи истории</span>
-        <button type="button" className="btn primary" title="Создать персонажа" onClick={() => { const c = store.addChar(); setOpen(new Set([...open, c.id])); }}>+ Персонаж</button>
+        <div className="v-head-btns">
+          <button type="button" className="btn ibtn" title="Создать персонажа" aria-label="Создать персонажа" onClick={() => { const c = store.addChar(); setOpen(new Set([...open, c.id])); }}>
+            <Ic d={P_USER_PLUS} size={15} />
+          </button>
+          <button type="button" className="btn ibtn" title="Создать группу персонажей" aria-label="Создать группу персонажей" onClick={() => store.addCharGroup()}>
+            <Ic d={P_FOLDER_PLUS} size={15} />
+          </button>
+        </div>
       </div>
       {!chars.length && (
         <div className="v-hint">
@@ -770,110 +935,156 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
           3. Имя и цвет меняются в любой момент — плашки на холсте обновятся сами.
         </div>
       )}
-      <div id="cRows">
-        {chars.map((c: VetviChar) => {
-          const isOpen = open.has(c.id);
-          const shape = c.avShape === 'square' ? 'square' : 'circle';
+      <div
+        id="cRows"
+        className={dragOver?.kind === 'root' ? 'drop-ok' : ''}
+        onDragOver={(e) => {
+          if (!dtHas(e, 'text/vetvi-char')) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          markOver({ kind: 'root' });
+        }}
+        onDrop={(e) => {
+          const cid = e.dataTransfer.getData('text/vetvi-char');
+          if (cid) { e.preventDefault(); store.setCharGroup(cid, null); }
+          markOver(null);
+        }}
+      >
+        {ungrouped.map(charRow)}
+        {groups.map((g) => {
+          const members = groupOf(g.id);
           return (
-            <div key={c.id} data-cid={c.id} className={'v-item' + (isOpen ? ' open' : '')}>
-              <div className="v-row">
-                <label className="c-avpick" title={c.av ? 'Сменить аватар' : 'Задать аватар — загрузить картинку'}>
-                  <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' row'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
-                    {c.av ? <img src={String(c.av)} alt={'Аватар: ' + c.name} /> : (c.name || '?')[0].toUpperCase()}
-                  </span>
-                  <input type="file" className="c-av-pick" accept="image/*" hidden onChange={(e) => { const el = e.currentTarget; onFile(c.id, el.files?.[0] || null); el.value = ''; }} />
-                </label>
-                <input
-                  className="inp v-name c-name"
-                  maxLength={60}
-                  value={String(c.name || '')}
-                  title="Имя персонажа"
-                  placeholder="имя персонажа"
-                  aria-label="Имя персонажа"
-                  onFocus={nameFocus}
-                  onChange={(e) => store.updateChar(c.id, { name: e.target.value }, { history: false })}
-                  onBlur={nameBlur}
-                />
-                <button type="button" className="v-del" title="Удалить персонажа" onClick={() => store.deleteChar(c.id)}><Ic d={P_X} size={12} /></button>
-                <button type="button" className="v-fold" title={isOpen ? 'Свернуть' : 'Развернуть для редактирования'} onClick={() => toggleOpen(c.id)}><Ic d={P_CHEV} size={12} /></button>
+            <div
+              key={g.id}
+              data-gid={g.id}
+              className={'cgroup' + (g.collapsed ? '' : ' open') + (dragOver?.kind === 'group' && dragOver.id === g.id ? ' drop-ok' : '')}
+              onDragOver={(e) => {
+                if (!dtHas(e, 'text/vetvi-char')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'move';
+                markOver({ kind: 'group', id: g.id });
+              }}
+              onDrop={(e) => {
+                const cid = e.dataTransfer.getData('text/vetvi-char');
+                if (cid) { e.preventDefault(); e.stopPropagation(); store.setCharGroup(cid, g.id); }
+                markOver(null);
+              }}
+            >
+              <div
+                className={'cgroup-head' + (dragOver?.kind === 'ghead' && dragOver.id === g.id ? ' drop-ok' : '')}
+                draggable
+                title="Перетащите, чтобы сменить порядок групп"
+                onDragStart={(e) => { e.dataTransfer.setData('text/vetvi-chargroup', g.id); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragEnd={() => markOver(null)}
+                onDragOver={(e) => {
+                  if (!dtHas(e, 'text/vetvi-chargroup') && !dtHas(e, 'text/vetvi-char')) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = 'move';
+                  markOver({ kind: 'ghead', id: g.id });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const gid = e.dataTransfer.getData('text/vetvi-chargroup');
+                  const cid = e.dataTransfer.getData('text/vetvi-char');
+                  if (cid) store.setCharGroup(cid, g.id);
+                  else if (gid && gid !== g.id) {
+                    const tIdx = store.charGroups().findIndex((x) => x.id === g.id);
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    const before = e.clientY < rect.top + rect.height / 2;
+                    store.moveCharGroup(gid, before ? tIdx : tIdx + 1);
+                  }
+                  markOver(null);
+                }}
+              >
+                <span className="cgroup-grip" title="Перетащите, чтобы сменить порядок групп"><Ic d={P_GRIP} size={12} /></span>
+                {renGid === g.id ? (
+                  <input
+                    ref={renRef}
+                    className="inp cgroup-name-inp"
+                    defaultValue={g.name}
+                    maxLength={60}
+                    aria-label="Название группы"
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitRenG(g); if (e.key === 'Escape') setRenGid(null); }}
+                    onBlur={() => commitRenG(g)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="cgroup-name" title="Двойной клик — переименовать группу" onDoubleClick={(e) => { e.stopPropagation(); setRenGid(g.id); }}>{g.name}</span>
+                )}
+                <span className="cgroup-cnt">{members.length} перс.</span>
+                <button type="button" className="v-del cgroup-del" title="Удалить группу — персонажи останутся без группы" onClick={() => store.deleteCharGroup(g.id)}><Ic d={P_X} size={12} /></button>
+                <button type="button" className="v-fold" title={g.collapsed ? 'Развернуть группу' : 'Свернуть группу'} onClick={() => store.toggleCharGroupCollapsed(g.id)}><Ic d={P_CHEV} size={12} /></button>
               </div>
-              {isOpen && (
-                <div className="v-edit">
-                  <div className="ce-avrow">
-                    <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' big'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
-                      {c.av ? <img src={String(c.av)} alt="" /> : (c.name || '?')[0].toUpperCase()}
-                    </span>
-                    <div className="ce-avctl">
-                      <div className="ce-avbtns">
-                        <label className="ce-av-up" title="Загрузить картинку — откроется кадрирование">
-                          Загрузить…
-                          <input type="file" className="ce-av-file" accept="image/*" hidden onChange={(e) => { const el = e.currentTarget; onFile(c.id, el.files?.[0] || null); el.value = ''; }} />
-                        </label>
-                        {!!c.av && (
-                          <button type="button" className="ce-av-crop" title="Открыть текущий аватар и кадрировать заново" onClick={() => onRecrop(c.id)}>Кадрировать</button>
-                        )}
-                        {!!c.av && (
-                          <button type="button" className="ce-av-rm" title="Убрать аватар" onClick={() => store.updateChar(c.id, { av: null }, { label: 'Убрать аватар' })}>Убрать</button>
-                        )}
-                      </div>
-                      <div className="ce-av-shape">
-                        <button type="button" className={'shp' + (shape === 'circle' ? ' on' : '')} title="Аватар-круг" onClick={() => store.updateChar(c.id, { avShape: 'circle' }, { history: false })}><i className="shp-ic circle" />круг</button>
-                        <button type="button" className={'shp' + (shape === 'square' ? ' on' : '')} title="Аватар-квадрат со скруглёнными углами" onClick={() => store.updateChar(c.id, { avShape: 'square' }, { history: false })}><i className="shp-ic square" />квадрат</button>
-                      </div>
-                    </div>
-                  </div>
-                  {/* ссылка на картинку с другого ресурса (ce-avurl оригинала 5686);
-                      key по аватару — перемонтирование поля при смене аватара извне */}
-                  <AvatarLinkRow key={'avurl:' + c.id + ':' + String(c.av || '')} c={c} store={store} />
-                  <div>
-                    <label>Имя</label>
-                    <input
-                      className="inp ce-name"
-                      maxLength={60}
-                      value={String(c.name || '')}
-                      placeholder="имя персонажа"
-                      aria-label="Имя персонажа (расширенный редактор)"
-                      onFocus={nameFocus}
-                      onChange={(e) => store.updateChar(c.id, { name: e.target.value }, { history: false })}
-                      onBlur={nameBlur}
-                    />
-                  </div>
-                  <div>
-                    <label>Цвет</label>
-                    <div className="swatches">
-                      {PALETTE_COLORS.map((col) => (
-                        <button
-                          key={col}
-                          type="button"
-                          className={'swatch' + (c.color === col ? ' on' : '')}
-                          style={{ background: col }}
-                          title={col}
-                          aria-label={'Цвет ' + col}
-                          onClick={() => store.updateChar(c.id, { color: col }, { label: 'Цвет персонажа' })}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label>Описание</label>
-                    <textarea
-                      className="inp ce-desc"
-                      placeholder="Кто это, какова его роль в истории…"
-                      style={{ minHeight: 52 }}
-                      aria-label="Описание персонажа"
-                      onFocus={descFocus}
-                      onChange={(e) => store.updateChar(c.id, { text: e.target.value }, { history: false })}
-                      onBlur={descBlur}
-                    />
-                  </div>
-                  <div className="ve-use">{charUseText(store, c.id)}</div>
-                </div>
-              )}
+              {!g.collapsed && <div className="cgroup-body">{members.map(charRow)}</div>}
             </div>
           );
         })}
       </div>
       {!!chars.length && <div className="v-hint" />}
+    </div>
+  );
+}
+
+/** Выпадающий список групп с поиском (параметр «Группа» в редакторе персонажа). */
+function CharGroupCombo({ store, c }: { store: VetviStore; c: VetviChar }) {
+  const [openList, setOpenList] = useState(false);
+  const [q, setQ] = useState('');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  void store.revision; /* перерисовываться при изменении групп/персонажа */
+  const groups = store.charGroups();
+  const current = c.groupId ? groups.find((g) => g.id === c.groupId) || null : null;
+
+  useEffect(() => {
+    if (!openList) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (!wrapRef.current || !(ev.target instanceof Node) || !wrapRef.current.contains(ev.target)) setOpenList(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [openList]);
+
+  const pick = (gid: string | null) => {
+    store.setCharGroup(c.id, gid, { label: gid ? 'Перенос персонажа в группу' : 'Персонаж без группы' });
+    setOpenList(false);
+  };
+
+  const nq = q.trim().toLowerCase();
+  const filtered = nq ? groups.filter((g) => String(g.name || '').toLowerCase().includes(nq)) : groups;
+
+  return (
+    <div className="cgcombo" ref={wrapRef}>
+      <button type="button" className="inp cgcombo-btn" title="Группа персонажа" aria-label="Группа персонажа" onClick={() => { setOpenList(!openList); setQ(''); }}>
+        <span className={current ? '' : 'placeholder'}>{current ? current.name : '— без группы —'}</span>
+        <Ic d={P_CHEV} size={11} />
+      </button>
+      {openList && (
+        <div className="cgcombo-pop">
+          <input
+            className="inp cgcombo-q"
+            autoFocus
+            placeholder="Поиск группы…"
+            aria-label="Поиск группы"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setOpenList(false); }}
+          />
+          <div className="cgcombo-list">
+            <button type="button" className={'cgcombo-it' + (!current ? ' on' : '')} onClick={() => pick(null)}>— без группы —</button>
+            {filtered.map((g) => (
+              <button key={g.id} type="button" className={'cgcombo-it' + (current && current.id === g.id ? ' on' : '')} onClick={() => pick(g.id)}>
+                <Ic d={P_FOLDER} size={11} />
+                <span>{g.name}</span>
+              </button>
+            ))}
+            {!filtered.length && <div className="cgcombo-empty">Группы не найдены</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

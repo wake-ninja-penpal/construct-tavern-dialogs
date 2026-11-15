@@ -60,10 +60,39 @@ function CharAvatar({ c, extra }: { c: VetviChar; extra?: string }) {
   );
 }
 
-/* авторазмер поля реплики (dlgTaGrow оригинала) */
+/* плавное раскрытие поля реплики: высота анимируется px→px (auto↔px не интерполируется,
+   а height:auto у textarea не растёт с содержимым) — при фокусе поле плавно
+   раскрывается под весь текст, при blur плавно схлопывается к авто-высоте */
 function taGrow(ta: HTMLTextAreaElement) {
-  ta.style.height = 'auto';
   ta.style.height = (ta.scrollHeight + 2) + 'px'; /* +2 — верхняя и нижняя границы */
+}
+
+function taFocusGrow(ta: HTMLTextAreaElement) {
+  const from = ta.offsetHeight;
+  ta.style.transition = 'none';
+  ta.style.height = from + 'px';
+  void ta.offsetWidth; /* фиксируем стартовую высоту — дальше анимация px→px */
+  ta.style.transition = '';
+  taGrow(ta);
+}
+
+function taBlurGrow(ta: HTMLTextAreaElement) {
+  const from = ta.offsetHeight;
+  ta.style.transition = 'none';
+  ta.style.height = from + 'px';
+  void ta.offsetWidth;
+  ta.style.height = 'auto';
+  const to = ta.offsetHeight; /* авто-высота вне фокуса */
+  ta.style.height = from + 'px';
+  void ta.offsetWidth;
+  ta.style.transition = '';
+  ta.style.height = to + 'px';
+  window.setTimeout(() => {
+    if (document.activeElement !== ta) {
+      ta.style.height = '';
+      ta.classList.remove('grow'); /* возврат к CSS: max-height:120px, overflow:auto */
+    }
+  }, 260);
 }
 
 /* ═══ перетаскивание реплик — порядок среди соседей одного уровня (dlgDragRid оригинала 4887–4949) ═══ */
@@ -282,16 +311,16 @@ export function DialogModal({ store }: { store: VetviStore }) {
             aria-label={'Текст реплики ' + r.id}
             onFocus={(e) => {
               editPreRef.current = editPreRef.current || store.beginEdit();
-              e.currentTarget.classList.add('grow');
-              taGrow(e.currentTarget);
+              const ta = e.currentTarget;
+              ta.classList.add('grow');
+              taFocusGrow(ta);
             }}
             onChange={(e) => {
               store.updateReply(n.id, r.id, { text: e.target.value }, { history: false });
               taGrow(e.currentTarget);
             }}
             onBlur={(e) => {
-              e.currentTarget.classList.remove('grow');
-              e.currentTarget.style.height = '';
+              taBlurGrow(e.currentTarget); /* .grow снимается по завершении схлопывания */
               const pre = editPreRef.current;
               if (pre) { store.commitReplyEdit(pre); editPreRef.current = store.beginEdit(); }
             }}
