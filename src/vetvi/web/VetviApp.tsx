@@ -7,9 +7,10 @@
  * (строгая цепочка условий, как в оригинале, строки 9949–10033).
  */
 
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { hkIs, hkLoad, hkText } from '@/vetvi/core/hotkeys';
+import { fmtWhenLong, fmtWhenShort } from '@/vetvi/core/projects';
 import { getStore, type VetviStore } from './store';
 import { SyncClient } from './sync';
 import { TopBar } from './TopBar';
@@ -35,6 +36,106 @@ function useMounted(): boolean {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
 
+/* ── всплывашка над «✓ автосохранение»: кто и когда менял проект (editTip оригинала) ──
+   Кликабельна: курсор можно перевести на неё; кнопка открывает «Журнал действий». */
+interface EditLogRec { id?: string; name?: string; color?: string; at?: number | string }
+
+function EditTipHost({ store }: { store: VetviStore }) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const tipHover = useRef(false);
+  const hideT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  void store.revision;
+
+  const meta = store.doc.meta as VetviStore['doc']['meta'] & { editLog?: unknown[]; modified?: number };
+  const when = fmtWhenShort(meta.modified);
+
+  const show = () => {
+    if (hideT.current) { clearTimeout(hideT.current); hideT.current = null; }
+    const el = document.getElementById('stAuto');
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({
+      left: Math.max(150, Math.min(window.innerWidth - 150, r.left + r.width / 2)),
+      top: Math.max(70, r.top - 8),
+    });
+  };
+  const hide = () => setPos(null);
+  const lateHide = () => {
+    if (hideT.current) clearTimeout(hideT.current);
+    hideT.current = setTimeout(() => { if (!tipHover.current) hide(); }, 110);
+  };
+
+  useEffect(() => {
+    const onWinBlur = () => hide();
+    window.addEventListener('blur', onWinBlur);
+    return () => {
+      window.removeEventListener('blur', onWinBlur);
+      if (hideT.current) clearTimeout(hideT.current);
+    };
+  }, []);
+
+  /* схлопывание подряд идущих записей одного человека (как collapseEditLog оригинала) */
+  const rows: EditLogRec[] = [];
+  const rawLog = Array.isArray(meta.editLog) ? (meta.editLog as EditLogRec[]) : [];
+  for (const e of rawLog) {
+    const p = rows[rows.length - 1];
+    if (p && ((p.id && p.id === e.id) || (p.name && p.name === e.name))) continue;
+    rows.push(e);
+    if (rows.length >= 6) break;
+  }
+
+  return (
+    <>
+      <span
+        id="stAuto"
+        tabIndex={0}
+        aria-label="Когда проект изменён последний раз и кто это сделал"
+        onMouseEnter={show}
+        onMouseLeave={lateHide}
+        onFocus={show}
+        onBlur={lateHide}
+      >
+        {'✓ автосохранение' + (when ? ' · ' + when : '')}
+      </span>
+      {pos && (
+        <div
+          id="editTip"
+          className="show"
+          role="tooltip"
+          style={{ left: pos.left, top: pos.top }}
+          onMouseEnter={() => { tipHover.current = true; }}
+          onMouseLeave={() => { tipHover.current = false; hide(); }}
+        >
+          <div className="et-cap">Последнее изменение</div>
+          {rows.length
+            ? rows.map((e, i) => (
+              <div className="et-row" key={i}>
+                <span className="et-dot" style={{ background: e.color || '#8b929c', color: e.color || '#8b929c' }} />
+                <span className="et-who">{e.name || '—'}</span>
+                <span className="et-when">{fmtWhenLong(e.at)}</span>
+              </div>
+            ))
+            : (
+              <div className="et-row">
+                <span>{meta.modified ? 'Изменён: ' + fmtWhenLong(meta.modified) : 'Изменений пока не было'}</span>
+              </div>
+            )}
+          <button
+            type="button"
+            className="et-btn"
+            onClick={() => { hide(); store.setLogFilters(null, null); store.openModal('log'); }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" width={11} height={11} aria-hidden="true">
+              <path d="M4 5h16M4 12h16M4 19h10" />
+            </svg>
+            Журнал действий
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function VetviApp() {
   const store = useMemo(() => getStore(), []);
   useStoreRevision(store);
@@ -56,6 +157,8 @@ export default function VetviApp() {
       store.setSyncClient(new SyncClient(store));
       store.sync!.init();
     }
+    /* свой проект с комнатой — тихо переподключиться после перезагрузки (projInitStartup) */
+    store.bootReconnectRoom();
   }, [store]);
 
   /* попап участников закрывается кликом мимо (capture, как bindSyncUI оригинала) */
@@ -242,7 +345,7 @@ export default function VetviApp() {
           <span id="stCounts">
             узлов: {store.doc.nodes.length} · связей: {store.doc.edges.length} · групп: {store.doc.groups.length}
           </span>
-          <span id="stAuto" tabIndex={0} aria-label="Когда проект изменён последний раз и кто это сделал">✓ автосохранение</span>
+          <EditTipHost store={store} />
         </div>
       </footer>
 

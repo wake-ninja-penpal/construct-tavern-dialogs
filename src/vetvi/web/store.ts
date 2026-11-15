@@ -32,11 +32,12 @@ import { pathPoint } from '@/vetvi/core/edgepath';
 import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
-import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSlotKey } from '@/vetvi/core/projects';
+import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
 import type { EdgeGeom, NodeSize, VetviChar, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
+import { canvasApi } from './canvasApi';
 import type { SyncClient } from './sync';
 
 type Listener = () => void;
@@ -70,13 +71,30 @@ export interface LogEntry {
   snap?: string | null;
 }
 
-export function editIdentity(): MeIdentity {
-  /* та же личность, что и в комнатах совместного редактирования (vetvi-me-v1) */
-  return getMe();
+/**
+ * Личность редактора (editIdentity оригинала, 2850): в комнате совместного доступа —
+ * участник синхронизации (имя/цвет, под которым его видят другие), локально — «вы».
+ */
+export function editIdentity(inRoom = false): MeIdentity {
+  if (inRoom) return getMe();
+  return { id: 'вы', name: 'вы', color: '#8b929c' };
 }
 
 export function renameMe(name: string): MeIdentity {
   return setMeName(name);
+}
+
+/** Схлопывание подряд идущих записей об одном редакторе (collapseEditLog оригинала). */
+function collapseEditLog(log: Record<string, unknown>[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const e of log || []) {
+    const p = out[out.length - 1] as { id?: string; name?: string } | undefined;
+    const c = e as { id?: string; name?: string };
+    if (p && ((p.id && p.id === c.id) || (p.name && p.name === c.name))) continue;
+    out.push(e);
+    if (out.length >= 6) break;
+  }
+  return out;
 }
 
 const LOG_LIMIT = 60;
@@ -199,6 +217,40 @@ export class VetviStore {
 
   /* ── журналы действий ── */
 
+  /** Личность для журналов: в комнате — мой профиль, локально — «вы». */
+  private identity(): MeIdentity {
+    const inRoom = !!(this.sync && this.sync.enabled && this.syncMode !== 'copy');
+    return editIdentity(inRoom);
+  }
+
+  /**
+   * Кто и когда последним менял проект (noteEditor оригинала, 2857–2871):
+   * meta.editLog — последние редакторы (переносится с документом комнаты),
+   * meta.lastEditBy — последний. Вызывается из mutate/commitEdit/… как markDirty оригинала.
+   */
+  noteEditor(): void {
+    try {
+      const me = this.identity();
+      const now = Date.now();
+      this.doc.meta.modified = now;
+      const log = Array.isArray(this.doc.meta.editLog)
+        ? (this.doc.meta.editLog as Record<string, unknown>[]).slice()
+        : [];
+      const first = log[0] as { id?: string; name?: string; color?: string; at?: number } | undefined;
+      /* тот же человек (по id или имени) — обновить верхнюю запись, а не добавлять новую */
+      if (first && (first.id === me.id || (me.name && first.name === me.name))) {
+        first.id = me.id;
+        first.name = me.name;
+        first.color = me.color;
+        first.at = now;
+      } else {
+        log.unshift({ id: me.id, name: me.name, color: me.color, at: now });
+      }
+      this.doc.meta.editLog = collapseEditLog(log);
+      this.doc.meta.lastEditBy = { id: me.id, name: me.name, color: me.color, at: now };
+    } catch { /* журнал — необязательное поле */ }
+  }
+
   private scheduleLogFlush(): void {
     if (this.logFlushT) clearTimeout(this.logFlushT);
     this.logFlushT = setTimeout(() => this.flushPendingLog(), 700);
@@ -215,7 +267,7 @@ export class VetviStore {
     this.logActionEntry({
       id: uid() + uid(),
       t: Date.now(),
-      by: editIdentity(),
+      by: this.identity(),
       act: label || logDiffSummary(diff),
       diff,
       snap: pre.length <= LOG_SNAP_ONE ? pre : null,
@@ -249,7 +301,7 @@ export class VetviStore {
 
   logManual(act: string): void {
     this.flushPendingLog();
-    this.logActionEntry({ id: uid() + uid(), t: Date.now(), by: editIdentity(), act, diff: null, snap: null });
+    this.logActionEntry({ id: uid() + uid(), t: Date.now(), by: this.identity(), act, diff: null, snap: null });
   }
 
   logUndoRedo(pre: string, word: string): void {
@@ -259,7 +311,7 @@ export class VetviStore {
     this.logActionEntry({
       id: uid() + uid(),
       t: Date.now(),
-      by: editIdentity(),
+      by: this.identity(),
       act: word + (diff ? ' — ' + logDiffSummary(diff) : ''),
       diff,
       snap: pre.length <= LOG_SNAP_ONE ? pre : null,
@@ -306,6 +358,7 @@ export class VetviStore {
     this.past.push(pre);
     if (this.past.length > HISTORY_LIMIT) this.past.shift();
     this.future.length = 0;
+    this.noteEditor();
     this.scheduleSave();
     this.emit();
   }
@@ -337,6 +390,7 @@ export class VetviStore {
   mutate(fn: (doc: VetviDoc) => void, opts?: { history?: boolean; label?: string }): void {
     if (!opts || opts.history !== false) this.pushHistory(opts?.label);
     fn(this.doc);
+    this.noteEditor();
     this.scheduleSave();
     this.emit();
   }
@@ -345,6 +399,7 @@ export class VetviStore {
   mutateManual(fn: (doc: VetviDoc) => void, act: string, debounceMs = 900): void {
     this.flushPendingLog();
     fn(this.doc);
+    this.noteEditor();
     if (this._manT) clearTimeout(this._manT);
     this._manT = setTimeout(() => this.logManual(act), debounceMs);
     this.scheduleSave();
@@ -362,6 +417,7 @@ export class VetviStore {
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
+    this.noteEditor();
     this.logUndoRedo(pre, 'Отмена');
     this.toast('Отменено', 'warn');
     this.scheduleSave();
@@ -378,6 +434,7 @@ export class VetviStore {
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
+    this.noteEditor();
     this.logUndoRedo(pre, 'Повтор');
     this.toast('Повторено', 'ok');
     this.scheduleSave();
@@ -396,6 +453,7 @@ export class VetviStore {
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
+    this.noteEditor();
     this.scheduleSave();
     this.emit();
   }
@@ -2315,6 +2373,11 @@ export class VetviStore {
   }
 
   openProject(id: string): void {
+    /* как projOpen оригинала: текущий проект уже открыт — нечего делать */
+    if (id === String(this.doc.meta.projectId || '') && this.syncMode !== 'copy') {
+      this.toast('Этот проект уже открыт');
+      return;
+    }
     const slot = projReadSlot(id);
     if (!slot) {
       const left = projList().filter((e) => e.id !== id);
@@ -2324,6 +2387,9 @@ export class VetviStore {
       return;
     }
     this.flushSave();
+    /* смена проекта — всегда выход из текущей комнаты (loadProject → syncLeaveIfRoom оригинала):
+       без этого новый проект публикуется в чужую комнату, и у соавторов пустеет холст */
+    if (this.sync) this.sync.leaveIfRoom();
     this.doc = slot.doc;
     this.vp = slot.vp;
     this.bend = slot.bend as BendMode;
@@ -2347,12 +2413,19 @@ export class VetviStore {
         this.sync!.connect(roomId, id, { own: true, silent: true });
         this.sync!.setHash(roomId, id);
       });
+    } else if (this.sync) {
+      /* проект вне комнаты — обязательно сбрасываем хэш, чтобы не цепляться к комнате предыдущего проекта */
+      this.sync.setHash(null);
     }
     this.emit();
   }
 
   createProject(): void {
     this.flushSave();
+    /* projCreate/loadProject оригинала: новый проект пока вне комнаты — выходим из текущей
+       и сбрасываем хэш, чтобы не наследовать комнату и не публиковать пустой проект соавторам */
+    if (this.sync) this.sync.leaveIfRoom();
+    if (this.sync) this.sync.setHash(null);
     const now = Date.now();
     const pid = uid() + uid();
     const n = newNode('scene', 0, 0);
@@ -2376,17 +2449,22 @@ export class VetviStore {
     this.past = [];
     this.future = [];
     this.selectOnly(n.id);
+    this.noteEditor();
     this.persist();
     this.toast('Создан новый проект — предыдущий сохранён в списке', 'ok');
     this.emit();
   }
 
   deleteProject(id: string): void {
+    /* projSkipSaveId оригинала: удаляемый проект не должен «воскреснуть» через
+       flushSave внутри openProject/createProject при переключении на следующий */
+    projSkipSaveId(id);
     const list = projDelete(id);
-    if (id === this.doc.meta.projectId) {
+    if (id === String(this.doc.meta.projectId || '')) {
       if (list.length) this.openProject(list[0].id);
-      else { this.createProject(); return; }
+      else { this.createProject(); projSkipSaveId(null); return; }
     }
+    projSkipSaveId(null);
     this.emit();
   }
 
@@ -2811,26 +2889,66 @@ export class VetviStore {
 
 
   importProject(parsed: unknown, filename?: string): void {
+    /* файл обязан содержать массивы nodes/edges («bad»-проверка openProject оригинала) —
+       без неё docFromParsed от мусора вернёт defaultDoc и «импортируется» пустой проект */
+    const raw = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>;
+    const projRaw = (raw.nodes && raw.edges)
+      ? raw
+      : (raw.project && typeof raw.project === 'object' ? (raw.project as Record<string, unknown>) : null);
+    if (!projRaw || !Array.isArray(projRaw.nodes) || !Array.isArray(projRaw.edges)) {
+      this.toast('Файл не похож на проект Ветвей', 'err');
+      return;
+    }
     const doc = docFromParsed(parsed);
     if (!doc.nodes.length && !doc.edges.length) {
       this.toast('Файл не похож на проект Ветвей', 'err');
       return;
     }
     this.flushSave();
-    if (filename) doc.meta.name = filename.replace(/\.json$/i, '').slice(0, 80);
-    const pid = uid() + uid();
+    /* импорт = загрузка другого проекта: выходим из комнаты и сбрасываем хэш
+       (loadProject → syncLeaveIfRoom оригинала) */
+    if (this.sync) this.sync.leaveIfRoom();
+    if (this.sync) this.sync.setHash(null);
+    /* имя файла — только если в проекте нет осмысленного названия (loadProject оригинала
+       держал fileName отдельно и не портил meta.name) */
+    if (filename && (!doc.meta.name || doc.meta.name === 'Без названия')) {
+      doc.meta.name = filename.replace(/\.json$/i, '').slice(0, 80);
+    }
+    /* projectId из файла сохраняем (projSaveCurrent оригинала): повторный импорт
+       того же файла обновляет тот же проект, а не плодит копии */
+    const filePid = typeof doc.meta.projectId === 'string' ? doc.meta.projectId : '';
+    const pid = filePid || (uid() + uid());
     doc.meta.projectId = pid;
+    /* viewport/bend из экспортированного файла (loadProject оригинала) */
+    const vpRaw = (raw.viewport && typeof raw.viewport === 'object' ? raw.viewport : {}) as Record<string, unknown>;
+    const hasVp = typeof vpRaw.x === 'number' && typeof vpRaw.y === 'number' && typeof vpRaw.z === 'number' && (vpRaw.z as number) > 0;
+    const bRaw = raw.bend;
     this.doc = doc;
-    this.vp = defaultViewport();
+    this.vp = hasVp
+      ? { x: vpRaw.x as number, y: vpRaw.y as number, z: vpRaw.z as number }
+      : defaultViewport();
+    this.bend = (bRaw === 'ortho90' || bRaw === 'ortho45' || bRaw === 'smooth') ? bRaw : 'smooth';
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
     this.past = [];
     this.future = [];
+    /* импортированный проект может быть запаролен (lockApplyState оригинала) */
+    this.lockUnlocked = false;
+    const pv = this.passSessionLookup();
+    if (pv) { this.syncProjPass = pv; this.lockUnlocked = true; }
+    this.noteEditor();
     this.persist();
-    this.logManual('Импорт текстов из JSON');
+    this.logManual('Импорт проекта из JSON');
     this.toast('Проект импортирован: ' + (doc.meta.name || 'Без названия'), 'ok');
     this.emit();
+    /* если в файле нет viewport — вписать проект в окно (иначе ноды далеко за экраном:
+       «после импорта ничего не видно, пока не кликнешь ноду в списке») */
+    if (!hasVp) {
+      const api = canvasApi.current;
+      const r = api ? api.getRect() : null;
+      if (r && api) this.fitView(r.width, r.height, api.sizes);
+    }
   }
 
   /* ── перенос дубликата (carry) ── */
@@ -3145,10 +3263,32 @@ export class VetviStore {
   applyHashProject(): boolean {
     const m = /project=([A-Za-z0-9_-]+)/.exec(window.location.hash || '');
     if (m && projReadSlot(m[1])) {
+      /* конструктор уже загрузил этот слот по хешу (loadAutosave) — не «переоткрывать» */
+      if (m[1] === String(this.doc.meta.projectId || '')) return true;
       this.openProject(m[1]);
       return true;
     }
     return false;
+  }
+
+  /**
+   * Перезапуск страницы: у открытого проекта есть комната — тихо переподключиться
+   * (projInitStartup оригинала: «подключаемся только к комнате этого проекта»).
+   */
+  bootReconnectRoom(): void {
+    if (!this.sync || this.sync.enabled) return;
+    const hp = this.sync.hashParams();
+    if (hp.room) return; /* комната из хеша обрабатывается в sync.init() */
+    const pid = String(this.doc.meta.projectId || '');
+    if (!pid) return;
+    const entry = projList().find((e) => e.id === pid);
+    if (!entry || !entry.roomId) return;
+    this.sync.mode = 'room';
+    const roomId = entry.roomId;
+    this.lockAfterUnlock(() => {
+      this.sync!.connect(roomId, pid, { own: true, silent: true });
+      this.sync!.setHash(roomId, pid);
+    });
   }
 
   setVarDefaultOnVarNode(n: VetviNode): void {

@@ -57,7 +57,9 @@ export function projSkipSaveId(id: string | null): void {
 }
 let skipSaveId: string | null = null;
 
-/** Запись текущего проекта в слот + реестр (projSaveCurrent). */
+/** Запись текущего проекта в слот + реестр (projSaveCurrent).
+ * roomId «липкий» (как в оригинале): пишется только когда проект реально в комнате —
+ * иначе запись сохраняет прежнюю привязку и проект переподключается после перезагрузки. */
 export function projSaveCurrent(doc: VetviDoc, vp: VetviViewport, bend: string, roomId: string | null = null): void {
   let pid = typeof doc.meta.projectId === 'string' ? doc.meta.projectId : '';
   if (!pid) {
@@ -76,9 +78,9 @@ export function projSaveCurrent(doc: VetviDoc, vp: VetviViewport, bend: string, 
     created: (i >= 0 ? list[i].created : undefined) || now,
     modified: doc.meta.modified ? new Date(doc.meta.modified).toISOString() : now,
     nodes: doc.nodes.length,
-    roomId,
     at: now,
   };
+  if (roomId) entry.roomId = roomId;
   if (i >= 0) list[i] = { ...list[i], ...entry };
   else list.push(entry);
   list.sort((a, b) => String(b.modified || b.at || '').localeCompare(String(a.modified || a.at || '')));
@@ -153,6 +155,36 @@ export function projFmtDate(iso: string | undefined): string {
       d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   } catch {
     return '—';
+  }
+}
+
+/* Короткое/длинное время правки (fmtWhenShort/fmtWhenLong оригинала, 1373–1391).
+ * В статусбаре «✓ автосохранение · 14:32», во всплывашке редакторов — «сегодня в 14:32». */
+export function fmtWhenShort(iso: string | number | undefined): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso), n = new Date();
+    const t = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    if (d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()) return t;
+    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + t;
+  } catch {
+    return '';
+  }
+}
+
+export function fmtWhenLong(iso: string | number | undefined): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso), n = new Date();
+    const t = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const today = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+    const diff = Math.round((today.getTime() - day.getTime()) / 864e5);
+    if (diff === 0) return 'сегодня в ' + t;
+    if (diff === -1) return 'вчера в ' + t;
+    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) + ', в ' + t;
+  } catch {
+    return '';
   }
 }
 
