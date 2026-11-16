@@ -12,7 +12,8 @@
  * подсветка целевой реплики (.dlg-flash) с автопрокруткой.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { PALETTE_COLORS } from '@/vetvi/core/constants';
 import { hkIs } from '@/vetvi/core/hotkeys';
@@ -65,7 +66,8 @@ function CharAvatar({ c, extra }: { c: VetviChar; extra?: string }) {
 
 /* плавное раскрытие поля реплики: высота анимируется px→px (auto↔px не интерполируется,
    а height:auto у textarea не растёт с содержимым) — при фокусе поле плавно
-   раскрывается под весь текст, при blur плавно схлопывается к авто-высоте */
+   раскрывается под весь текст; схлопывание по blur — отложенно и мгновенно
+   (taCollapseNow + scheduleReplyBlur: не сдвигать раскладку под идущим кликом) */
 function taGrow(ta: HTMLTextAreaElement) {
   ta.style.height = (ta.scrollHeight + 2) + 'px'; /* +2 — верхняя и нижняя границы */
 }
@@ -79,44 +81,108 @@ function taFocusGrow(ta: HTMLTextAreaElement) {
   taGrow(ta);
 }
 
-function taBlurGrow(ta: HTMLTextAreaElement) {
-  const from = ta.offsetHeight;
+/* мгновенное схлопывание поля к авто-высоте (без анимации): анимация .22s
+   держала бы раскладку «плавающей» ещё 220 мс — клик, начатый в этот
+   промежуток, промахивался бы мимо сдвинувшейся кнопки (см. scheduleReplyBlur) */
+function taCollapseNow(ta: HTMLTextAreaElement) {
   ta.style.transition = 'none';
-  ta.style.height = from + 'px';
-  void ta.offsetWidth;
-  ta.style.height = 'auto';
-  const to = ta.offsetHeight; /* авто-высота вне фокуса */
-  ta.style.height = from + 'px';
+  ta.style.height = '';
+  ta.classList.remove('grow'); /* возврат к CSS: max-height:120px, overflow:auto */
   void ta.offsetWidth;
   ta.style.transition = '';
-  ta.style.height = to + 'px';
-  window.setTimeout(() => {
-    if (document.activeElement !== ta) {
-      ta.style.height = '';
-      ta.classList.remove('grow'); /* возврат к CSS: max-height:120px, overflow:auto */
-    }
-  }, 260);
+}
+
+/* зажата ли сейчас кнопка мыши/пера (глобальный счётчик) — пока нажатие идёт,
+   клик считается «в полёте» и раскладку двигать нельзя (scheduleReplyBlur) */
+let vetviPtrDown = 0;
+let vetviPtrInstalled = false;
+function ptrButtonsDown(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!vetviPtrInstalled) {
+    vetviPtrInstalled = true;
+    window.addEventListener('pointerdown', () => { vetviPtrDown++; }, true);
+    window.addEventListener('pointerup', () => { vetviPtrDown = Math.max(0, vetviPtrDown - 1); }, true);
+    window.addEventListener('pointercancel', () => { vetviPtrDown = Math.max(0, vetviPtrDown - 1); }, true);
+  }
+  return vetviPtrDown > 0;
 }
 
 /* ═══ панель форматирования реплики (Ж/К/Цвет + эффекты) ═══
    Появляется над полем текста, пока оно активно (жёлтая рамка). Кнопки НЕ
    забирают фокус (preventDefault на mousedown) — курсор в поле жив, эффект
-   применяется к слову под курсором или к выделению. */
+   применяется к слову под курсором или к выделению.
+   Всплывашки (цвета/эффекты) рендерятся порталом в body с position:fixed:
+   раньше они жили внутри .dlg-modal-body и резались его прокруткой —
+   появлялся общий скролл, часть эффектов была видна только после прокрутки
+   списка реплик. Теперь список всегда поверх всего (z выше модалки). */
+
+const RT_POP_Z = 1200; /* выше .dlg-modal (110) и всего его содержимого */
 
 function ReplyFmtBar(props: {
   apply: (kind: 'b' | 'i' | 'c' | 'fx', fxId: string | null, colorHex: string | null) => void;
 }) {
   const { apply } = props;
   const [pop, setPop] = useState<'' | 'color' | 'fx'>('');
+  const [popXY, setPopXY] = useState<{ x: number; y: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const cBtnRef = useRef<HTMLButtonElement | null>(null);
+  const fxBtnRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  const closePop = () => { setPop(''); setPopXY(null); };
+
+  /* открытие: первичная позиция — под кнопкой; точная подгонка (замер,
+     переворот вверх у нижнего края, отсечение правого) — после монтирования */
+  const togglePop = (kind: 'color' | 'fx') => {
+    if (pop === kind) { closePop(); return; }
+    const btn = kind === 'fx' ? fxBtnRef.current : cBtnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setPopXY({ x: r.left, y: r.bottom + 6 });
+    setPop(kind);
+  };
+
+  useLayoutEffect(() => {
+    const el = popRef.current;
+    if (!pop || !el || !popXY) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const anchor = pop === 'fx' ? fxBtnRef.current : cBtnRef.current;
+    const ar = anchor ? anchor.getBoundingClientRect() : null;
+    let x = Math.max(8, Math.min(popXY.x, vw - w - 8));
+    let y = popXY.y;
+    if (y + h > vh - 8) {
+      y = ar ? ar.top - h - 6 : vh - h - 8; /* снизу не хватает — раскрываем вверх */
+      if (y < 8) y = Math.max(8, vh - h - 8);
+    }
+    if (x === popXY.x && y === popXY.y) return;
+    setPopXY({ x, y });
+  }, [pop, popXY]);
 
   useEffect(() => {
     if (!pop) return;
+    const insidePop = (t: Node | null) =>
+      !!(t && ((wrapRef.current && wrapRef.current.contains(t)) || (popRef.current && popRef.current.contains(t))));
     const onDoc = (ev: MouseEvent) => {
-      if (!wrapRef.current || !(ev.target instanceof Node) || !wrapRef.current.contains(ev.target)) setPop('');
+      if (!insidePop(ev.target instanceof Node ? ev.target : null)) closePop();
     };
+    const onScroll = (ev: Event) => {
+      /* скролл внутри самого списка эффектов не закрывает его; любой другой —
+         закрывает: всплывашка фиксирована к экрану и «отклеилась» бы от кнопки */
+      if (ev.target instanceof Node && popRef.current && popRef.current.contains(ev.target)) return;
+      closePop();
+    };
+    const onResize = () => closePop();
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
   }, [pop]);
 
   const noFocus = (e: React.MouseEvent) => e.preventDefault(); /* фокус остаётся в поле */
@@ -142,60 +208,75 @@ function ReplyFmtBar(props: {
       <span className="rt-sep" />
       <button
         type="button"
+        ref={cBtnRef}
         className="rt-btn c"
         title="Цвет слова (маркер {#hex}текст{/})
 Можно комбинировать с эффектами"
         aria-label="Цвет"
-        onClick={() => setPop(pop === 'color' ? '' : 'color')}
+        aria-expanded={pop === 'color'}
+        onClick={() => togglePop('color')}
       >Ц<i className="rt-cbar" /></button>
       <button
         type="button"
+        ref={fxBtnRef}
         className={'rt-btn fx' + (pop === 'fx' ? ' on' : '')}
         title="Эффекты: применяются к слову под курсором.
 Эффекты между собой не комбинируются"
-        onClick={() => setPop(pop === 'fx' ? '' : 'fx')}
+        aria-expanded={pop === 'fx'}
+        onClick={() => togglePop('fx')}
       >Эффекты<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
-      {pop === 'color' && (
-        <div className="rt-pop rt-colors" role="menu" aria-label="Цвет слова">
-          {PALETTE_COLORS.map((col) => (
-            <button
-              key={col}
-              type="button"
-              className="rt-swatch"
-              style={{ background: col }}
-              title={col}
-              aria-label={'Цвет ' + col}
-              onClick={() => { apply('c', null, col); setPop(''); }}
-            />
-          ))}
-          <button
-            type="button"
-            className="rt-swatch rt-swatch-auto"
-            title="Убрать цвет"
-            aria-label="Убрать цвет"
-            onClick={() => { apply('c', null, ''); setPop(''); }}
-          >×</button>
-        </div>
-      )}
-      {pop === 'fx' && (
-        <div className="rt-pop rt-fxlist" role="menu" aria-label="Эффекты текста">
-          {RTFX_EFFECTS.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              className={'rt-fx-it rtfx-prev-' + e.id}
-              title={e.hint}
-              onClick={() => { apply('fx', e.id, null); setPop(''); }}
-            >
-              <span className={'rt-fx-lbl rtfx-fx ' + e.css}>{e.label}</span>
-              <span className="rt-fx-hint">
-                <code>{e.open}слово{e.close}</code>
-                {e.hint}
-              </span>
-            </button>
-          ))}
-          <div className="rt-fx-note">Эффект применяется к слову под курсором (или к выделению). Повторный выбор снимает эффект; эффекты между собой не комбинируются, но сочетаются с жирностью/курсивом/цветом. В поле эффект виден маркерами — вручную их тоже можно ввести.</div>
-        </div>
+      {pop && popXY && createPortal(
+        <div
+          ref={popRef}
+          className={'rt-pop ' + (pop === 'fx' ? 'rt-fxlist' : 'rt-colors')}
+          role="menu"
+          aria-label={pop === 'fx' ? 'Эффекты текста' : 'Цвет слова'}
+          style={{ position: 'fixed', left: popXY.x, top: popXY.y, zIndex: RT_POP_Z }}
+          onMouseDown={noFocus}
+        >
+          {pop === 'color' ? (
+            <>
+              {PALETTE_COLORS.map((col) => (
+                <button
+                  key={col}
+                  type="button"
+                  className="rt-swatch"
+                  style={{ background: col }}
+                  title={col}
+                  aria-label={'Цвет ' + col}
+                  onClick={() => { apply('c', null, col); closePop(); }}
+                />
+              ))}
+              <button
+                type="button"
+                className="rt-swatch rt-swatch-auto"
+                title="Убрать цвет"
+                aria-label="Убрать цвет"
+                onClick={() => { apply('c', null, ''); closePop(); }}
+              >×</button>
+            </>
+          ) : (
+            <>
+              {RTFX_EFFECTS.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  className={'rt-fx-it rtfx-prev-' + e.id}
+                  title={e.hint}
+                  onClick={() => { apply('fx', e.id, null); closePop(); }}
+                >
+                  <span className={'rt-fx-lbl rtfx-fx ' + e.css}>{e.label}</span>
+                  <span className="rt-fx-hint">
+                    <code>{e.open}слово{e.close}</code>
+                    {e.hint}
+                  </span>
+                </button>
+              ))}
+              <div className="rt-fx-note">Эффект применяется к слову под курсором (или к выделению). Повторный выбор снимает эффект; эффекты между собой не комбинируются, но сочетаются с жирностью/курсивом/цветом. В поле эффект виден маркерами — вручную их тоже можно ввести.</div>
+            </>
+          )}
+        </div>,
+        document.body
       )}
     </div>
   );}
@@ -269,6 +350,30 @@ export function DialogModal({ store }: { store: VetviStore }) {
      taRef — само поле (курсор), editRid — какая реплика редактируется */
   const [editRid, setEditRid] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /* таймер отложенного blur-коллапса поля (см. комментарий в scheduleReplyBlur) */
+  const blurTRef = useRef<number>(0);
+  useEffect(() => () => { if (blurTRef.current) window.clearTimeout(blurTRef.current); }, []);
+
+  /* ── отложенное схлопывание поля реплики при blur ──
+     Карточка модалки центрируется flex'ом: «мгновенный» коллапс по blur
+     (снятие панели формата + возврат высоты поля) сдвигает содержимое между
+     mousedown и mouseup нажатия — click уходит общему предку, и кнопки
+     («добавить реплику», «закрыть» и прочие) не срабатывают с первого раза.
+     Поэтому коллапс откладывается: пока кнопка мыши зажата (клик ещё «в
+     полёте») — ждём; выполняем без анимации, чтобы раскладка сразу стала
+     стабильной для следующих нажатий. */
+  const scheduleReplyBlur = (ta: HTMLTextAreaElement, rid: string) => {
+    if (blurTRef.current) window.clearTimeout(blurTRef.current);
+    blurTRef.current = window.setTimeout(function collapse() {
+      blurTRef.current = 0;
+      if (document.activeElement === ta) return; /* фокус вернулся в то же поле */
+      if (ptrButtonsDown()) { blurTRef.current = window.setTimeout(collapse, 120); return; } /* клик ещё в полёте */
+      taCollapseNow(ta);
+      if (taRef.current === ta) taRef.current = null;
+      setEditRid((cur) => (cur === rid ? null : cur));
+    }, 260);
+  };
 
   /** Применение разметки (Ж/К/Цвет/эффект) к слову под курсором активного поля. */
   const applyFmt = (kind: 'b' | 'i' | 'c' | 'fx', fxId: string | null, colorHex: string | null) => {
@@ -459,11 +564,12 @@ export function DialogModal({ store }: { store: VetviStore }) {
               if (hkIs(ke, 'fmtItalic')) { e.preventDefault(); applyFmt('i', null, null); }
             }}
             onBlur={(e) => {
-              taBlurGrow(e.currentTarget); /* .grow снимается по завершении схлопывания */
-              if (taRef.current === e.currentTarget) taRef.current = null;
-              setEditRid((cur) => (cur === r.id ? null : cur));
+              /* история правки — сразу (на раскладку не влияет); схлопывание поля
+                 и снятие панели формата — отложенно (scheduleReplyBlur), иначе
+                 клик по кнопкам модалки «теряется» между mousedown и mouseup */
               const pre = editPreRef.current;
               if (pre) { store.commitReplyEdit(pre); editPreRef.current = store.beginEdit(); }
+              scheduleReplyBlur(e.currentTarget, r.id);
             }}
           />
         </div>
