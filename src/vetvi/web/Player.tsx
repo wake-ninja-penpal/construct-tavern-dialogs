@@ -63,9 +63,12 @@ interface PlState {
   end: boolean;
   varFlash: { txt: string; t: number } | null;
   /* chainVars — переменные, задействованные в проигрываемой цепочке (varnode'ы,
-     условия исходов и условия связей): выводятся в HUD с первой реплики.
+     условия исходов и условий связей): выводятся в HUD с первой реплики.
      Закреплённые (pinned) показываются всегда независимо от этого набора. */
   chainVars: Set<string>;
+  /* startId — нода, от которой стартовало проигрывание: от неё считается
+     достижимость цепочки (обход по стрелкам) при пересчёте chainVars */
+  startId: string | null;
   /* avCid — персонаж аватара слайда (аналог содержимого #plAv оригинала);
      hintOverride — подсказка «путь закрыт: … · ← назад» после заблокированного шага */
   avCid: string | null;
@@ -76,13 +79,36 @@ const PL_LIMIT = 120;
 
 /** Переменные, задействованные в проигрываемой цепочке: varnode'ы, условия
  *  исходов развилок (включая несколько условий с И/ИЛИ) и условия связей.
- *  Для list — по нодам выделенной цепочки; для graph — весь сюжет.
- *  Считается один раз при старте плеера — такие переменные видны в HUD
- *  с первой реплики, не только после прохождения по ним. */
-function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[]): Set<string> {
+ *  Раньше для graph-режима брались ВСЕ ноды проекта — из-за этого в HUD лезли
+ *  переменные из посторонних веток. Теперь цепочка — достижимые ноды: обход от
+ *  стартовой ноды по стрелкам (list — сами ноды списка), мёртвые ветки (dead)
+ *  исключаются: выбрал исход — переменные непройденных альтернативов исчезают.
+ *  Пересчитывается на старте и при появлении мёртвых веток (pick/back) —
+ *  такие переменные видны в HUD с первой реплики. */
+function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[], startId: string | null, dead?: Set<string>): Set<string> {
   const inv = new Set<string>();
-  const nodeIds = mode === 'list' ? list : doc.nodes.map((n) => n.id);
-  const idSet = new Set(nodeIds);
+  let nodeIds: string[] = [];
+  let fromSet: Set<string> | null = null;
+  if (mode === 'list') {
+    nodeIds = dead && dead.size ? list.filter((id) => !dead.has(id)) : list;
+    fromSet = new Set(nodeIds);
+  } else {
+    /* graph: достижимые от стартовой ноды (все возможные пути цепочки) */
+    const seen = new Set<string>();
+    if (startId) {
+      const q = [startId];
+      while (q.length) {
+        const id = q.shift() as string;
+        if (seen.has(id) || (dead && dead.has(id))) continue;
+        seen.add(id);
+        nodeIds.push(id);
+        for (const e of doc.edges) {
+          if (e.from === id && e.tin !== 'var' && !seen.has(e.to)) q.push(e.to);
+        }
+      }
+    }
+    fromSet = seen;
+  }
   for (const nid of nodeIds) {
     const nn = doc.nodes.find((x) => x.id === nid);
     if (!nn) continue;
@@ -95,7 +121,7 @@ function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[]): S
   }
   for (const e of doc.edges) {
     const c = (e as unknown as { cond?: { vid?: string } }).cond;
-    if (c && c.vid && (idSet.has(e.from) || idSet.has(e.to))) inv.add(c.vid);
+    if (c && c.vid && fromSet && fromSet.has(e.from)) inv.add(c.vid);
   }
   return inv;
 }
@@ -507,12 +533,16 @@ export function Player(props: { store: VetviStore }) {
     const cur = stRef.current;
     if (!cur || !cur.hist.length) return;
     const snap = cur.hist.pop() as Snap;
+    const deadBack = new Set(snap.dead || []);
     const restored: PlState = {
       ...cur,
       nodeId: snap.nodeId, replyId: snap.replyId, intro: snap.intro, seqIdx: snap.seqIdx,
       vars: snap.vars ? { ...snap.vars } : { ...cur.vars },
       varChanged: new Set(snap.varChanged || []),
-      dead: new Set(snap.dead || []),
+      dead: deadBack,
+      /* chainVars откатывается вместе с dead: вернулись назад — переменные
+         непройденных тогда веток снова видимы (пересчёт по стартовой ноде) */
+      chainVars: plChainVarIds(doc, cur.mode, cur.list, cur.startId, deadBack),
       visited: new Set(snap.visited || []),
       choices: null, end: false, typing: false, shown: '', full: '',
       path: cur.path.slice(0, -1),
@@ -566,6 +596,8 @@ export function Player(props: { store: VetviStore }) {
       full: '', shown: '', typing: false,
       hist: [], path: [], idx: cur.mode === 'list' ? 0 : -1,
       vars, varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
+      chainVars: plChainVarIds(doc, cur.mode, cur.list, n.id),
+      startId: n.id,
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
       avCid: null, hintOverride: null,
     };
@@ -607,7 +639,14 @@ export function Player(props: { store: VetviStore }) {
       if (o === it) continue;
       for (const t of o.targets || []) markDead(doc, dead, t, alive);
     }
-    actRef.current((c) => ({ ...c, dead, choices: null }));
+    /* переменные мёртвых веток исчезают из HUD: пересчитываем цепочку с учётом dead.
+       Мутация cur — как в pushHist выше: React-батчинг откладывает commit, и
+       goNode внутри it.fn() собирает next из ТОГО ЖЕ объекта состояния; если бы
+       dead лежал только в setSt, следующий spread {...cur} затер бы его устаревшим
+       значением (ветки «оживали», переменные мёртвых веток возвращались в HUD). */
+    cur.dead = dead;
+    cur.chainVars = plChainVarIds(doc, cur.mode, cur.list, cur.startId, dead);
+    actRef.current((c) => ({ ...c, dead: new Set(cur.dead), chainVars: new Set(cur.chainVars), choices: null }));
     it.fn();
   };
   const pickRef = useRef(pick);
@@ -653,7 +692,8 @@ export function Player(props: { store: VetviStore }) {
       full: '', shown: '', typing: false,
       hist: [], path: [], mode, list, listSet: new Set(list), idx: mode === 'list' ? 0 : -1,
       vars, varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
-      chainVars: plChainVarIds(doc, mode, list),
+      chainVars: plChainVarIds(doc, mode, list, startNode.id),
+      startId: startNode.id,
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
       avCid: null, hintOverride: null,
     };

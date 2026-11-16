@@ -132,6 +132,8 @@ export interface VetviVar {
   pinned?: boolean;
   /** Идентификатор группы переменных (null/undefined — без группы). */
   groupId?: string | null;
+  /** Пометка — для чего переменная; тег рядом с именем в списке (синхронизируется). */
+  note?: string | null;
   [k: string]: unknown;
 }
 

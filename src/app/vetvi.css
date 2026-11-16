@@ -545,7 +545,8 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .out-cond-item{display:flex;align-items:center;gap:4px;margin-bottom:4px}
 .out-cond-item .out-cond-row{flex:1;min-width:0}
 .out-cond-del{flex:0 0 26px;height:28px}
-.out-cond-add{margin-top:2px}
+/* кнопка «добавить условие» — иконка с тултипом (текст не влезал) */
+.out-cond-add{margin-top:4px}
 .out-cond-add:hover{color:var(--acc)}
 /* ── вход переменной у развилки ── */
 .br-vin{position:relative;display:flex;align-items:center;gap:6px;background:rgba(183,178,106,.07);border:1px dashed rgba(183,178,106,.38);border-radius:7px;padding:3px 9px 3px 8px;margin-right:2px}
@@ -633,6 +634,27 @@ body.connecting .vpinn{cursor:copy}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
 .v-row .v-type{flex:0 1 78px;min-width:54px;padding:0 2px;font-size:10.5px}
 #paneVars .v-row .v-val{flex:0 1 58px;min-width:46px}
+/* ── строка переменной в два ряда: имя-текст + тег-пометка, ниже тип и значение ── */
+#paneVars .v-row{align-items:center}
+.v-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.v-line1{display:flex;align-items:center;gap:6px;min-width:0}
+.v-line2{display:flex;align-items:center;gap:6px;min-width:0}
+.v-nametxt{flex:1;min-width:0;font-weight:700;font-size:12px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default;user-select:none}
+.v-line1 .v-name{flex:1;min-width:0;height:26px;font-weight:700;font-size:12px}
+.v-line2 .v-type{flex:0 0 92px;min-width:0;padding:0 2px;font-size:10.5px}
+#paneVars .v-line2 .v-val{flex:1;min-width:60px}
+.v-tag{flex:none;max-width:52%;font:600 9px var(--mono);letter-spacing:.3px;color:#cfc98a;background:rgba(183,178,106,.13);border:1px solid rgba(183,178,106,.32);border-radius:6px;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ve-note{width:100%;box-sizing:border-box}
+/* «используется на холсте» — кликабельный саммари + список нод с переходом */
+button.ve-use{display:block;width:100%;text-align:left;background:none;border:none;border-top:1px dashed #2a2f38;padding:7px 0 0;font:500 10.5px var(--body);color:var(--tx3);line-height:1.5;cursor:default}
+button.ve-use.clickable{cursor:pointer}
+button.ve-use.clickable:hover{color:var(--acc2)}
+.ve-use-list{display:flex;flex-direction:column;gap:4px;margin-top:2px;max-height:180px;overflow-y:auto}
+.ve-use-node{display:flex;align-items:center;gap:7px;width:100%;text-align:left;background:#1b1f25;border:1px solid #2e333c;border-radius:8px;padding:6px 8px;cursor:pointer;transition:.15s;color:var(--tx2)}
+.ve-use-node:hover{border-color:#54462a;background:#332c20;color:var(--tx)}
+.ve-use-ico{flex:none;display:flex;align-items:center;color:var(--tx3)}
+.ve-use-t{flex:1;min-width:0;font:600 11px var(--body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ve-use-k{flex:none;max-width:55%;font:500 9.5px var(--mono);color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .v-add-btn{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .v-add-btn:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
 .dlg-children{margin-left:9px;padding-left:14px;position:relative;margin-top:3px}

@@ -16,7 +16,7 @@ import { NODE_W, PALETTE_COLORS, STATUS_RU, TYPES } from '@/vetvi/core/constants
 import { nodeColor, typeInfo } from '@/vetvi/core/geometry';
 import { opsForType, VAR_TYPES, varCastVal, varType, isTrueVal } from '@/vetvi/core/vars';
 import type { VetviChar, VetviCharGroup, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vetvi/core/types';
-import { condOpsFor, varById } from '@/vetvi/core/vars';
+import { condOpsFor, outConds, varById } from '@/vetvi/core/vars';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
 import { CropModal, type CropReq } from './CropModal';
@@ -520,9 +520,14 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
   const [dragReady, setDragReady] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [renGid, setRenGid] = useState<string | null>(null);
+  /* переименование переменной двойным кликом по имени (renVid) и раскрытый
+     список нод использования (useOpen — клик по строке «используется на холсте») */
+  const [renVid, setRenVid] = useState<string | null>(null);
+  const [useOpen, setUseOpen] = useState<Set<string>>(new Set());
   const dragVid = useRef<string | null>(null);
   const editPreRef = useRef<string | null>(null);
   const renRef = useRef<HTMLInputElement | null>(null);
+  const renVRef = useRef<HTMLInputElement | null>(null);
 
   const toggleOpen = (id: string) => {
     const s = new Set(open);
@@ -569,12 +574,29 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
   const nameBlur = () => { store.commitEdit(editPreRef.current, 'Правка переменной'); editPreRef.current = null; };
   const valFocus = () => { editPreRef.current = store.beginEdit(); };
   const valBlur = () => { store.commitEdit(editPreRef.current, 'Значение переменной'); editPreRef.current = null; };
+  const noteFocus = () => { editPreRef.current = store.beginEdit(); };
+  const noteBlur = () => { store.commitEdit(editPreRef.current, 'Пометка переменной'); editPreRef.current = null; };
+
+  const commitRenV = (v: VetviVar) => {
+    const val = (renVRef.current?.value || '').trim().slice(0, 40);
+    if (val && val !== v.name) store.updateVar(v.id, { name: val }, { label: 'Переименование переменной' });
+    setRenVid(null);
+  };
+
+  const toggleUse = (id: string) => {
+    const s = new Set(useOpen);
+    if (s.has(id)) s.delete(id);
+    else s.add(id);
+    setUseOpen(s);
+  };
 
   /** строка переменной — можно перетащить на группу или между строками (позиционная вставка);
       тянется за grip (dragReady), бросок на холст создаёт ноду (CanvasBoard) */
   const varRow = (v: VetviVar, zoneGid: string | null) => {
     const isOpen = open.has(v.id);
     const t = varType(v);
+    const noteText = String((v as { note?: unknown }).note || '').trim();
+    const uses = varUseEntries(store, v.id);
     const hint = dropHint && dropHint.kind === 'row' && dropHint.refVid === v.id ? dropHint.place : null;
     return (
       <div
@@ -614,49 +636,68 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
             onMouseDown={() => setDragReady(v.id)}
             onDoubleClick={(e) => e.preventDefault()}
           ><Ic d={P_GRIP} size={12} /></span>
-          <input
-            className="inp v-name"
-            maxLength={40}
-            value={String(v.name || '')}
-            title="Название переменной"
-            placeholder="название"
-            aria-label="Имя переменной"
-            onFocus={nameFocus}
-            onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
-            onBlur={nameBlur}
-          />
-          <select
-            className="inp v-type"
-            value={t}
-            title="Тип переменной"
-            aria-label="Тип переменной"
-            onChange={(e) => store.updateVar(v.id, { type: e.target.value, val: varCastVal(e.target.value, v.val) }, { label: 'Тип переменной' })}
-          >
-            {Object.entries(VAR_TYPES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </select>
-          {t === 'bool' ? (
-            <select
-              className="inp v-val"
-              title="Начальное значение"
-              aria-label="Значение"
-              value={isTrueVal(v.val) ? '1' : '0'}
-              onChange={(e) => store.updateVar(v.id, { val: e.target.value === '1' }, { label: 'Значение переменной' })}
-            >
-              <option value="1">true</option>
-              <option value="0">false</option>
-            </select>
-          ) : (
-            <input
-              className="inp v-val"
-              value={String(v.val ?? '')}
-              title="Начальное значение"
-              placeholder={t === 'num' ? '0' : 'текст'}
-              aria-label="Значение по умолчанию"
-              onFocus={valFocus}
-              onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
-              onBlur={valBlur}
-            />
-          )}
+          {/* раскладка в два ряда: имя (текст, двойной клик — переименовать) + пометка-тег,
+              ниже — тип и значение; кнопки булавки/удаления/редактора — справа */}
+          <div className="v-main">
+            <div className="v-line1">
+              {renVid === v.id ? (
+                <input
+                  ref={renVRef}
+                  className="inp v-name"
+                  defaultValue={String(v.name || '')}
+                  maxLength={40}
+                  aria-label="Имя переменной"
+                  autoFocus
+                  title="Название переменной — Enter или клик мимо, чтобы сохранить"
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitRenV(v); if (e.key === 'Escape') setRenVid(null); }}
+                  onBlur={() => commitRenV(v)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span
+                  className="v-nametxt"
+                  title="Двойной клик — переименовать переменную"
+                  onDoubleClick={(e) => { e.stopPropagation(); setRenVid(v.id); }}
+                >{String(v.name || '') || 'без названия'}</span>
+              )}
+              {noteText && <span className="v-tag" title={'Пометка: ' + noteText}>{noteText}</span>}
+            </div>
+            <div className="v-line2">
+              <select
+                className="inp v-type"
+                value={t}
+                title="Тип переменной"
+                aria-label="Тип переменной"
+                onChange={(e) => store.updateVar(v.id, { type: e.target.value, val: varCastVal(e.target.value, v.val) }, { label: 'Тип переменной' })}
+              >
+                {Object.entries(VAR_TYPES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              {t === 'bool' ? (
+                <select
+                  className="inp v-val"
+                  title="Начальное значение"
+                  aria-label="Значение"
+                  value={isTrueVal(v.val) ? '1' : '0'}
+                  onChange={(e) => store.updateVar(v.id, { val: e.target.value === '1' }, { label: 'Значение переменной' })}
+                >
+                  <option value="1">true</option>
+                  <option value="0">false</option>
+                </select>
+              ) : (
+                <input
+                  className="inp v-val"
+                  value={String(v.val ?? '')}
+                  title="Начальное значение"
+                  placeholder={t === 'num' ? '0' : 'текст'}
+                  aria-label="Значение по умолчанию"
+                  onFocus={valFocus}
+                  onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
+                  onBlur={valBlur}
+                />
+              )}
+            </div>
+          </div>
           <button
             type="button"
             className={'v-pin' + (v.pinned ? ' on' : '')}
@@ -734,7 +775,48 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
               <label>Группа</label>
               <VarGroupCombo store={store} v={v} />
             </div>
-            <div className="ve-use">{varUseText(store, v.id)}</div>
+            <div>
+              <label>Пометка</label>
+              <input
+                className="inp ve-note"
+                maxLength={80}
+                value={String((v as { note?: unknown }).note || '')}
+                placeholder="для чего эта переменная"
+                aria-label="Пометка переменной"
+                title="Короткая пометка — для чего эта переменная. Видна в списке рядом с именем (тег) и синхронизируется между соавторами"
+                onFocus={noteFocus}
+                onChange={(e) => store.updateVar(v.id, { note: e.target.value }, { history: false })}
+                onBlur={noteBlur}
+              />
+            </div>
+            {/* использование на холсте: клик по строке раскрывает список нод,
+                клик по ноде — переход к ней (selectOnly + requestCenter) */}
+            <button
+              type="button"
+              className={'ve-use' + (uses.length ? ' clickable' : '')}
+              disabled={!uses.length}
+              title={uses.length ? 'Нажмите — покажем ноды, где используется переменная' : 'На холсте не используется'}
+              onClick={() => { if (uses.length) toggleUse(v.id); }}
+            >
+              {varUseSummary(uses)}
+            </button>
+            {useOpen.has(v.id) && !!uses.length && (
+              <div className="ve-use-list">
+                {uses.map((e) => (
+                  <button
+                    key={e.id + '|' + e.kind}
+                    type="button"
+                    className="ve-use-node"
+                    title="Клик — перейти к ноде на холсте"
+                    onClick={() => { store.selectOnly(e.id); store.requestCenter(e.id); }}
+                  >
+                    <span className="ve-use-ico"><TypeIcon type={e.type} size={14} /></span>
+                    <span className="ve-use-t">{e.title}</span>
+                    <span className="ve-use-k">{e.kind}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -948,25 +1030,44 @@ function VarGroupCombo({ store, v }: { store: VetviStore; v: VetviVar }) {
     </div>
   );
 }
-function varUseText(store: VetviStore, vid: string): string {
-  let nodes = 0;
-  let conds = 0;
-  let vin = false;
+/** Где переменная задействована на холсте: ноды переменных, условия исходов
+ *  развилок (включая несколько условий с И/ИЛИ), условия стрелок и вход развилки.
+ *  Одна нода — одна запись, kind — перечень ролей («условие стрелки · вход развилки»). */
+function varUseEntries(store: VetviStore, vid: string): { id: string; title: string; type: string; kind: string }[] {
+  const map = new Map<string, { id: string; title: string; type: string; kinds: string[] }>();
+  const push = (n: VetviNode | null | undefined, kind: string) => {
+    if (!n) return;
+    let e = map.get(n.id);
+    if (!e) {
+      e = { id: n.id, title: n.title || typeInfo(n.type).name, type: n.type, kinds: [] };
+      map.set(n.id, e);
+    }
+    if (!e.kinds.includes(kind)) e.kinds.push(kind);
+  };
   for (const n of store.doc.nodes) {
-    if (n.type === 'varnode' && n.vid === vid) nodes++;
+    if (n.type === 'varnode' && n.vid === vid) push(n, 'нода переменной');
     if (n.type === 'branch' && Array.isArray(n.outcomes)) {
-      for (const o of n.outcomes) if ((o as { cond?: { vid?: string } }).cond?.vid === vid) conds++;
+      for (const o of n.outcomes) {
+        if (outConds(o).some((c) => c.vid === vid)) push(n, 'условие исхода «' + (o.label || '…') + '»');
+      }
     }
   }
   for (const e of store.doc.edges) {
     const c = (e as unknown as { cond?: { vid?: string } }).cond;
-    if (c && c.vid === vid) conds++;
+    if (c && c.vid === vid) push(store.nodeById(e.from), 'условие стрелки');
     if (e.tin === 'var') {
       const src = store.nodeById(e.from);
-      if (src && src.type === 'varnode' && src.vid === vid) vin = true;
+      if (src && src.type === 'varnode' && src.vid === vid) push(store.nodeById(e.to), 'вход развилки');
     }
   }
-  return 'используется на холсте — ноды: ' + nodes + ' · условия: ' + conds + (vin ? ' · вход развилки: да' : '');
+  return [...map.values()].map((e) => ({ id: e.id, title: e.title, type: e.type, kind: e.kinds.join(' · ') }));
+}
+
+/** Строка-саммари для блока «использование» в редакторе переменной. */
+function varUseSummary(uses: { id: string; kind: string }[]): string {
+  if (!uses.length) return 'на холсте не используется';
+  const conds = uses.filter((u) => u.kind !== 'нода переменной').length;
+  return 'используется на холсте — нод: ' + uses.length + (conds ? ' · условий: ' + conds : '') + ' — нажмите, чтобы показать';
 }
 
 /* ── Персонажи ── */

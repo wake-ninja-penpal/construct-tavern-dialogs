@@ -949,13 +949,16 @@ function OutcomesEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviN
                         )}
                       </div>
                     ))}
+                    {/* иконка вместо текста: текстовая кнопка не влезала в узкую колонку условий.
+                        Тултип — название + описание (перенос строки внутри title). */}
                     <button
                       type="button"
                       className="mini-btn out-cond-add"
-                      title="Добавить ещё одно условие (например: var1 = true и var2 = 10)"
+                      aria-label="Добавить условие"
+                      title={'Добавить условие\nДобавляет ещё одну строку проверки переменной. Условия исхода объединяются переключателем выше: «все (И)» — выполняются все сразу, «любое (ИЛИ)» — достаточно одного (например: var1 = true и var2 = 10).'}
                       onClick={() => store.setOutcomeConds(n.id, o.id, [...cs, branchCondDefault(doc)], join, 'Добавление условия исхода')}
                     >
-                      <Ico name="plus" size={12} /> условие
+                      <Ico name="plus" size={14} />
                     </button>
                   </>
                 )}
