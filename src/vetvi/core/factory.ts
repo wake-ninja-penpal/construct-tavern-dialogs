@@ -94,6 +94,7 @@ export function defaultDoc(): VetviDoc {
     groups: [],
     vars: [],
     chars: [],
+    charGroups: [],
     customTypes: [],
     palette: [],
     listHidden: {},

@@ -1178,3 +1178,33 @@ body{overflow:hidden;background:var(--bg)}
 .sd-row.more::before{display:none}
 .sd-empty{font-size:12px;color:var(--tx3)}
 .sd-stats{margin-top:2px}
+
+/* ══════════ drag&drop: раздвижка списков (dnd-gap) и grip персонажей ══════════
+   Пока объект тащат, соседи «расступаются»: у строки-цели появляется слот вставки
+   (отступ + акцентная линия) — видно, между какими блоками объект окажется. */
+.c-grip{flex:none;color:var(--tx3);display:flex;cursor:grab}
+.cgroup,.v-item,.br-out,.out-ed,.dlg-reply-ed{transition:margin .16s ease}
+.dnd-gap-above{margin-top:16px!important;position:relative}
+.dnd-gap-below{margin-bottom:16px!important;position:relative}
+.v-item.dnd-gap-above::before,.v-item.dnd-gap-below::after{
+  content:'';position:absolute;left:8px;right:8px;height:2px;border-radius:1px;
+  background:var(--acc);box-shadow:0 0 6px rgba(226,165,78,.55)}
+.v-item.dnd-gap-above::before{top:-9px}
+.v-item.dnd-gap-below::after{bottom:-9px}
+/* группы персонажей: линия снаружи (overflow:hidden не режет box-shadow) */
+.cgroup.dnd-gap-above{box-shadow:0 -8px 0 -6px var(--acc)}
+.cgroup.dnd-gap-below{box-shadow:0 8px 0 -6px var(--acc)}
+/* строки исходов/кнопок/реплик: тоже раздвигаются, линия уже была (inset-тень) */
+.br-out.drop-above,.out-ed.drop-above,.dlg-reply-ed.drop-above{margin-top:14px!important}
+.br-out.drop-below,.out-ed.drop-below,.dlg-reply-ed.drop-below{margin-bottom:14px!important}
+
+/* ══════════ присутствие: соавтор выделил ноду («работает здесь») ══════════ */
+.node.foc{outline:1.5px dashed var(--fc,#e2a54e);outline-offset:1.5px}
+.n-focus-chip{
+  position:absolute;top:-12px;right:9px;display:flex;align-items:center;gap:5px;
+  padding:2px 8px;border-radius:10px;background:#171a21;border:1px solid var(--fc,#e2a54e);
+  color:var(--fc,#e2a54e);font-size:10px;font-weight:600;line-height:1.4;letter-spacing:.2px;
+  z-index:6;pointer-events:none;white-space:nowrap;max-width:132px;overflow:hidden;
+  box-shadow:0 3px 10px rgba(0,0,0,.45)}
+.n-focus-chip .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.n-focus-chip .nm{overflow:hidden;text-overflow:ellipsis}

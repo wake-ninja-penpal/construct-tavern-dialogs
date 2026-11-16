@@ -25,7 +25,7 @@ import { mergeDocs, mergeStats, type MergeStats } from '@/vetvi/core/merge';
 import { passRandomSalt, sha256hex } from '@/vetvi/core/passlock';
 import { projReadSlot } from '@/vetvi/core/projects';
 import { stItem, stSetItem } from '@/vetvi/core/storage';
-import type { VetviEdge, VetviGroup, VetviNode } from '@/vetvi/core/types';
+import type { VetviChar, VetviCharGroup, VetviEdge, VetviGroup, VetviNode } from '@/vetvi/core/types';
 import { canvasApi } from './canvasApi';
 import type { VetviStore } from './store';
 
@@ -137,6 +137,7 @@ function canonDocJson(d: unknown): string {
     listHidden: canonVal(doc.listHidden || {}),
     vars: canonVal(doc.vars || []),
     chars: canonVal(doc.chars || []),
+    charGroups: canonVal((doc as { charGroups?: unknown[] }).charGroups || []),
     palette: canonVal(doc.palette || []),
   });
 }
@@ -586,6 +587,7 @@ export class SyncClient {
     const lMeta = (local.meta || {}) as Record<string, unknown>;
     const vars = byIdUnion((server.vars || []) as { id?: string }[], (local.vars || []) as { id?: string }[]);
     const chars = byIdUnion((server.chars || []) as { id?: string }[], (local.chars || []) as { id?: string }[]);
+    const charGroups = byIdUnion((server.charGroups || []) as { id?: string }[], (local.charGroups || []) as { id?: string }[]);
     const merged: SyncDoc = {
       app: 'vetvi-room',
       version: 1,
@@ -597,6 +599,7 @@ export class SyncClient {
       listHidden: result.listHidden || {},
       vars,
       chars,
+      charGroups,
       palette: (Array.isArray(server.palette) ? server.palette : (Array.isArray(local.palette) ? local.palette : [])) as string[],
     };
     this.applyRemote(merged, false);
@@ -1228,6 +1231,11 @@ export class SyncClient {
     this.store.doc.customTypes = result.customTypes;
     if (result.listHidden) this.store.doc.listHidden = result.listHidden;
     if (result.name) this.store.doc.meta.name = result.name;
+    /* персонажи и их группы: объединение по id — добавления копии и комнаты не теряются */
+    const cChars = (Array.isArray(cur.chars) ? cur.chars : []) as { id?: string }[];
+    this.store.doc.chars = byIdUnion(this.store.doc.chars as { id?: string }[], cChars) as unknown as VetviChar[];
+    const cGroups = (Array.isArray(cur.charGroups) ? cur.charGroups : []) as { id?: string }[];
+    this.store.doc.charGroups = byIdUnion(this.store.doc.charGroups as { id?: string }[], cGroups) as unknown as VetviCharGroup[];
     this.store.scheduleSave();
     this.store.emit();
     this.store.toast('Merge применён · бэкап сохранён локально');

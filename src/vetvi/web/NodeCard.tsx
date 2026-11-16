@@ -136,7 +136,9 @@ export function NodeCard(props: {
   store: VetviStore;
   sink: MeasureSink;
   flash: { nodeId: string; replyId: string | null; t: number } | null;
-  lockedBy?: { name: string; color: string } | null;
+  lockedBy?: { id?: string; name: string; color: string } | null;
+  /** Соавтор выделил эту ноду (просто рамка выделения у него) — показываем «работает здесь». */
+  focusBy?: { id: string; name: string; color: string } | null;
   onDragStart: (e: React.MouseEvent, id: string) => void;
   onPinDown: (e: React.MouseEvent, id: string, out: string | null, reply: string | null) => void;
   onPinReattach: (e: React.MouseEvent, id: string) => void;
@@ -191,6 +193,8 @@ export function NodeCard(props: {
   /* чужой лок: обводка цветом участника (lkb оригинала) */
   const lkRaw = props.lockedBy as { id?: string; name?: string; color?: string } | null | undefined;
   const lk = (lkRaw && lkRaw.id && lkRaw.id !== getMe().id) ? lkRaw : null;
+  /* чужое выделение: мягкая пунктирная рамка + плашка с именем участника */
+  const focusBy = (props.focusBy && props.focusBy.id !== getMe().id) ? props.focusBy : null;
   const lockBlocked = (): boolean => {
     if (!lk) return false;
     store.toast('Ноду сейчас правит ' + lk.name, 'warn');
@@ -352,6 +356,7 @@ export function NodeCard(props: {
     ...(cc ? { background: 'linear-gradient(' + shadeHex(cc, 10) + ',' + shadeHex(cc, -8) + ')', borderColor: shadeHex(cc, -30) } : null),
     ...(paint ? { background: 'linear-gradient(' + shadeHex(paint, 10) + ',' + shadeHex(paint, -8) + ')', borderColor: shadeHex(paint, -30) } : null),
     ...(lk ? { ['--lkc']: lk.color } : null),
+    ...(focusBy ? { ['--fc']: focusBy.color } : null),
   } as CSSProperties;
 
   return (
@@ -359,7 +364,7 @@ export function NodeCard(props: {
       ref={rootRef}
       data-node-id={n.id}
       data-id={n.id}
-      className={'node t-' + n.type + ' st-' + status + ' ex-' + ex + (selected ? ' sel' : '') + (lk ? ' lkb' : '')}
+      className={'node t-' + n.type + ' st-' + status + ' ex-' + ex + (selected ? ' sel' : '') + (lk ? ' lkb' : '') + (focusBy ? ' foc' : '')}
       style={rootStyle}
       onMouseDown={(e) => {
         const t = e.target as HTMLElement;
@@ -383,6 +388,12 @@ export function NodeCard(props: {
         store.openCtx(e.clientX, e.clientY, ctxMenus(store).node(n.id));
       }}
     >
+      {focusBy && (
+        <span className="n-focus-chip" title={(focusBy.name || 'Участник') + ' работает с этой нодой'}>
+          <i className="dot" style={{ background: focusBy.color || '#8b929c' }} />
+          <span className="nm">{focusBy.name || 'участник'}</span>
+        </span>
+      )}
       <div className="n-head">
         <span className="n-ico"><TypeIcon type={n.type} size={15} /></span>
         {renaming ? (

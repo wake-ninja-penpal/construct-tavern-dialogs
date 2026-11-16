@@ -543,6 +543,8 @@ export class VetviStore {
     if (this.sel.has(id)) this.sel.delete(id);
     else this.sel.add(id);
     this.emit();
+    /* выделение (даже Shift/Ctrl-добавление) — тоже «работаю здесь» для соавторов */
+    if (this.sync) this.sync.focusTrack(id);
   }
 
   selectEdgeOnly(id: string): void {
@@ -1828,6 +1830,40 @@ export class VetviStore {
     if (g) this.updateCharGroup(id, { collapsed: !g.collapsed }, { history: false });
   }
 
+  /**
+   * Позиционная перестановка персонажа (для drag&drop списка): вставить рядом
+   * с refCid (before/after) внутри зоны группы gid, или в конец зоны (refCid=null).
+   * Порядок членов группы определяется порядком в doc.chars — поэтому перестановка
+   * делается именно в общем массиве, с одновременной сменой groupId.
+   */
+  placeCharInList(cid: string, gid: string | null, refCid: string | null, place: 'before' | 'after'): void {
+    const cur = this.charById(cid);
+    if (!cur) return;
+    const same = (cur.groupId || null) === (gid || null);
+    const ref = refCid ? this.charById(refCid) : null;
+    if (same && !ref) return; /* бросили в пустое место своей же зоны — нечего делать */
+    this.mutate((doc) => {
+      const arr = doc.chars || (doc.chars = []);
+      const meIdx = arr.findIndex((c) => c.id === cid);
+      if (meIdx < 0) return;
+      const [me] = arr.splice(meIdx, 1);
+      (me as { groupId?: string | null }).groupId = gid || null;
+      let inserted = false;
+      if (refCid && refCid !== cid && arr.some((c) => c.id === refCid)) {
+        const idx = arr.findIndex((c) => c.id === refCid);
+        arr.splice(place === 'after' ? idx + 1 : idx, 0, me);
+        inserted = true;
+      }
+      if (!inserted && gid) {
+        let last = -1;
+        arr.forEach((c, i) => { if ((c as { groupId?: string | null }).groupId === gid) last = i; });
+        arr.splice(last >= 0 ? last + 1 : arr.length, 0, me);
+        inserted = true;
+      }
+      if (!inserted) arr.splice(Math.min(meIdx, arr.length), 0, me); /* без группы — вернуть на прежнее место */
+    }, { label: 'Перестановка персонажа' });
+  }
+
   /** Перестановка группы на позицию toIndex (индекс в текущем массиве до переноса). */
   moveCharGroup(id: string, toIndex: number): void {
     this.mutate((doc) => {
@@ -2782,6 +2818,7 @@ export class VetviStore {
       groups: [],
       vars: [],
       chars: [],
+      charGroups: [],
       customTypes: [],
       palette: [],
       listHidden: {},
@@ -3432,7 +3469,11 @@ export class VetviStore {
    *  источником «прыгающих» отложенных применений). */
   busyNow(): boolean {
     const t = typeof document !== 'undefined' ? document.activeElement : null;
-    const typing = !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
+    /* ввод в модалках синхронизацию не держит: в оригинале #modalWrap не входит
+       в syncBusy — иначе (фокус в поле ссылки «Совместного доступа» и т.п.)
+       чужие снимки зависают в pendingRemote, пока окно открыто */
+    const inModal = !!t && !!(t.closest('.modal-wrap') || t.closest('#dlgModal') || t.closest('#noteModal'));
+    const typing = !inModal && !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
     return typing || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag || this.busyAnim || noteModalOpen();
   }
 
@@ -3450,6 +3491,7 @@ export class VetviStore {
       listHidden: this.doc.listHidden && typeof this.doc.listHidden === 'object' ? this.doc.listHidden : {},
       vars: Array.isArray(this.doc.vars) ? this.doc.vars : [],
       chars: Array.isArray(this.doc.chars) ? this.doc.chars : [],
+      charGroups: Array.isArray(this.doc.charGroups) ? this.doc.charGroups : [],
       palette: (Array.isArray(this.doc.palette) ? this.doc.palette : []).slice(0, 24),
     };
   }
@@ -3477,6 +3519,7 @@ export class VetviStore {
       listHidden?: unknown;
       vars?: VetviVar[];
       chars?: VetviChar[];
+      charGroups?: VetviCharGroup[];
       palette?: unknown[];
     };
     const localMeta = this.doc.meta as Record<string, unknown>;
@@ -3595,6 +3638,9 @@ export class VetviStore {
     this.doc.listHidden = (d.listHidden && typeof d.listHidden === 'object') ? d.listHidden as Record<string, unknown> : {};
     this.doc.vars = Array.isArray(d.vars) ? d.vars : [];
     this.doc.chars = Array.isArray(d.chars) ? d.chars : [];
+    /* группы персонажей: снимок без поля (старый клиент/старый слот) локальные не затирает —
+       иначе чужой снимок стирает созданные группы до их первой публикации */
+    if (Array.isArray(d.charGroups)) this.doc.charGroups = d.charGroups;
     this.doc.palette = (Array.isArray(d.palette) ? d.palette : []).filter((c) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c as string)).slice(0, 24) as string[];
     /* снимок от старой версии: ноды персонажей → список */
     this.migrateCharNodesInPlace();

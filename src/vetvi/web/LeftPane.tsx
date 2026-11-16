@@ -747,7 +747,6 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
   const groups = store.charGroups();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [renGid, setRenGid] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<{ kind: 'root' } | { kind: 'group'; id: string } | { kind: 'ghead'; id: string } | null>(null);
   const editPreRef = useRef<string | null>(null);
   const renRef = useRef<HTMLInputElement | null>(null);
 
@@ -765,14 +764,31 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
   const roleFocus = () => { editPreRef.current = store.beginEdit(); };
   const roleBlur = () => { store.commitEdit(editPreRef.current, 'Роль персонажа'); editPreRef.current = null; };
 
-  /* ── drag & drop: персонаж → группа, группа → позиция в списке ── */
+  /* ── drag & drop: персонаж → группа/позиция, группа → позиция в списке ──
+     dropHint показывает, между какими блоками встанет перетаскиваемый объект:
+     соседи «расступаются» (классы dnd-gap-…), строка-цель подсвечивает слот вставки. */
   const dtHas = (e: DragEvent, t: string) => Array.from(e.dataTransfer.types).includes(t);
-  const markOver = (next: { kind: 'root' } | { kind: 'group'; id: string } | { kind: 'ghead'; id: string } | null) =>
-    setDragOver((p) => {
+  type CharDropHint =
+    | { kind: 'root' }
+    | { kind: 'group'; id: string }
+    | { kind: 'row'; gid: string | null; refCid: string; place: 'before' | 'after' }
+    | { kind: 'ghead'; id: string; place: 'before' | 'after' }
+    | null;
+  const [dropHint, setDropHint] = useState<CharDropHint>(null);
+  const markOver = (next: CharDropHint) =>
+    setDropHint((p) => {
       if (p === next) return p;
-      if (p && next && p.kind === next.kind && (p as { id?: string }).id === (next as { id?: string }).id) return p;
+      if (p && next && p.kind === next.kind
+        && (p as { id?: string }).id === (next as { id?: string }).id
+        && (p as { refCid?: string }).refCid === (next as { refCid?: string }).refCid
+        && (p as { place?: string }).place === (next as { place?: string }).place) return p;
       return next;
     });
+  /** до или после середины строки упал курсор — туда и вставляем */
+  const placeOf = (el: HTMLElement, clientY: number): 'before' | 'after' => {
+    const r = el.getBoundingClientRect();
+    return (clientY - r.top) > r.height / 2 ? 'after' : 'before';
+  };
 
   const commitRenG = (g: VetviCharGroup) => {
     const v = (renRef.current?.value || '').trim();
@@ -780,20 +796,40 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
     setRenGid(null);
   };
 
-  /** строка персонажа — можно перетащить на группу (или на зону «без группы») */
-  const charRow = (c: VetviChar) => {
+  /** строка персонажа — можно перетащить на группу или между строками (позиционная вставка) */
+  const charRow = (c: VetviChar, zoneGid: string | null) => {
     const isOpen = open.has(c.id);
     const shape = c.avShape === 'square' ? 'square' : 'circle';
     const roleText = String(c.role || '').trim();
+    const hint = dropHint && dropHint.kind === 'row' && dropHint.refCid === c.id ? dropHint.place : null;
     return (
-      <div key={c.id} data-cid={c.id} className={'v-item' + (isOpen ? ' open' : '')}>
+      <div
+        key={c.id}
+        data-cid={c.id}
+        className={'v-item' + (isOpen ? ' open' : '') + (hint === 'before' ? ' dnd-gap-above' : hint === 'after' ? ' dnd-gap-below' : '')}
+      >
         <div
           className="v-row c-dragrow"
           draggable
-          title="Перетащите на группу, чтобы переместить персонажа (на область над группами — вывести из группы)"
+          title="Перетащите: на группу — переместить в неё, между строками — вставить в это место, на область над группами — вывести из группы"
           onDragStart={(e) => { e.dataTransfer.setData('text/vetvi-char', c.id); e.dataTransfer.effectAllowed = 'move'; }}
           onDragEnd={() => markOver(null)}
+          onDragOver={(e) => {
+            if (!dtHas(e, 'text/vetvi-char')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            markOver({ kind: 'row', gid: zoneGid, refCid: c.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+          }}
+          onDrop={(e) => {
+            const cid = e.dataTransfer.getData('text/vetvi-char');
+            e.preventDefault();
+            e.stopPropagation();
+            if (cid && cid !== c.id) store.placeCharInList(cid, zoneGid, c.id, placeOf(e.currentTarget as HTMLElement, e.clientY));
+            markOver(null);
+          }}
         >
+          <span className="c-grip" title="Перетащите — сменить группу или порядок в списке"><Ic d={P_GRIP} size={12} /></span>
           <label className="c-avpick" title={c.av ? 'Сменить аватар' : 'Задать аватар — загрузить картинку'}>
             <span className={'c-av ' + shape + (c.av ? '' : ' empty') + ' row'} style={{ borderColor: c.color || '#9cb878' }} title="Аватар персонажа">
               {c.av ? <img src={String(c.av)} alt={'Аватар: ' + c.name} /> : (c.name || '?')[0].toUpperCase()}
@@ -937,7 +973,7 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
       )}
       <div
         id="cRows"
-        className={dragOver?.kind === 'root' ? 'drop-ok' : ''}
+        className={dropHint?.kind === 'root' ? 'drop-ok' : ''}
         onDragOver={(e) => {
           if (!dtHas(e, 'text/vetvi-char')) return;
           e.preventDefault();
@@ -950,14 +986,17 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
           markOver(null);
         }}
       >
-        {ungrouped.map(charRow)}
+        {ungrouped.map((c) => charRow(c, null))}
         {groups.map((g) => {
           const members = groupOf(g.id);
+          const gHint = dropHint?.kind === 'ghead' && dropHint.id === g.id ? dropHint.place : null;
           return (
             <div
               key={g.id}
               data-gid={g.id}
-              className={'cgroup' + (g.collapsed ? '' : ' open') + (dragOver?.kind === 'group' && dragOver.id === g.id ? ' drop-ok' : '')}
+              className={'cgroup' + (g.collapsed ? '' : ' open')
+                + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')
+                + (gHint === 'before' ? ' dnd-gap-above' : gHint === 'after' ? ' dnd-gap-below' : '')}
               onDragOver={(e) => {
                 if (!dtHas(e, 'text/vetvi-char')) return;
                 e.preventDefault();
@@ -967,34 +1006,36 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
               }}
               onDrop={(e) => {
                 const cid = e.dataTransfer.getData('text/vetvi-char');
-                if (cid) { e.preventDefault(); e.stopPropagation(); store.setCharGroup(cid, g.id); }
+                if (cid) { e.preventDefault(); e.stopPropagation(); store.placeCharInList(cid, g.id, null, 'after'); }
                 markOver(null);
               }}
             >
               <div
-                className={'cgroup-head' + (dragOver?.kind === 'ghead' && dragOver.id === g.id ? ' drop-ok' : '')}
+                className={'cgroup-head' + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')}
                 draggable
                 title="Перетащите, чтобы сменить порядок групп"
                 onDragStart={(e) => { e.dataTransfer.setData('text/vetvi-chargroup', g.id); e.dataTransfer.effectAllowed = 'move'; }}
                 onDragEnd={() => markOver(null)}
                 onDragOver={(e) => {
-                  if (!dtHas(e, 'text/vetvi-chargroup') && !dtHas(e, 'text/vetvi-char')) return;
+                  const isChar = dtHas(e, 'text/vetvi-char');
+                  const isGroup = dtHas(e, 'text/vetvi-chargroup');
+                  if (!isChar && !isGroup) return;
                   e.preventDefault();
                   e.stopPropagation();
                   e.dataTransfer.dropEffect = 'move';
-                  markOver({ kind: 'ghead', id: g.id });
+                  if (isGroup && !isChar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+                  else markOver({ kind: 'group', id: g.id });
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   const gid = e.dataTransfer.getData('text/vetvi-chargroup');
                   const cid = e.dataTransfer.getData('text/vetvi-char');
-                  if (cid) store.setCharGroup(cid, g.id);
+                  if (cid) store.placeCharInList(cid, g.id, null, 'after');
                   else if (gid && gid !== g.id) {
                     const tIdx = store.charGroups().findIndex((x) => x.id === g.id);
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    const before = e.clientY < rect.top + rect.height / 2;
-                    store.moveCharGroup(gid, before ? tIdx : tIdx + 1);
+                    const place = placeOf(e.currentTarget as HTMLElement, e.clientY);
+                    store.moveCharGroup(gid, place === 'before' ? tIdx : tIdx + 1);
                   }
                   markOver(null);
                 }}
@@ -1020,7 +1061,7 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                 <button type="button" className="v-del cgroup-del" title="Удалить группу — персонажи останутся без группы" onClick={() => store.deleteCharGroup(g.id)}><Ic d={P_X} size={12} /></button>
                 <button type="button" className="v-fold" title={g.collapsed ? 'Развернуть группу' : 'Свернуть группу'} onClick={() => store.toggleCharGroupCollapsed(g.id)}><Ic d={P_CHEV} size={12} /></button>
               </div>
-              {!g.collapsed && <div className="cgroup-body">{members.map(charRow)}</div>}
+              {!g.collapsed && <div className="cgroup-body">{members.map((c) => charRow(c, g.id))}</div>}
             </div>
           );
         })}

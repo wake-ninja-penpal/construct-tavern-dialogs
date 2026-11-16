@@ -1726,6 +1726,17 @@ export function CanvasBoard(props: { store: VetviStore }) {
     });
   }
   const meId = getMe().id;
+  /* соавторы, которые сейчас выделили ноду (syncFocus): «работает здесь» даже без правок */
+  const focusInfoFor = (nid: string): { id: string; name: string; color: string } | null => {
+    for (const uid of Object.keys(store.syncFocus || {})) {
+      if (uid === meId) continue;
+      if (store.syncFocus[uid] !== nid) continue;
+      const u = (store.syncUsers || []).find((x) => x.id === uid);
+      if (u) return { id: uid, name: u.name || 'участник', color: u.color || '#8b929c' };
+      return { id: uid, name: 'участник', color: '#8b929c' };
+    }
+    return null;
+  };
   for (const oid of Object.keys(store.syncLocks)) {
     const l = store.syncLocks[oid];
     if (!l || !l.id || l.id === meId) continue;
@@ -1827,6 +1838,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             sink={sink}
             flash={store.flash}
             lockedBy={store.syncLocks[n.id] || null}
+            focusBy={focusInfoFor(n.id)}
             onDragStart={onNodeDragStart}
             onPinDown={onPinDown}
             onPinReattach={onPinReattach}
