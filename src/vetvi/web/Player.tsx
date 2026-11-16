@@ -64,7 +64,11 @@ interface PlState {
   varFlash: { txt: string; t: number } | null;
   /* chainVars — переменные, задействованные в проигрываемой цепочке (varnode'ы,
      условия исходов и условий связей): выводятся в HUD с первой реплики.
-     Закреплённые (pinned) показываются всегда независимо от этого набора. */
+     Набор фиксируется на старте проигрывания и НЕ пересчитывается до конца
+     сессии — переменные цепочки видны в HUD на протяжении всего проигрывания
+     (раньше набор пересчитывался с учётом мёртвых веток и исчезал после
+     первого диалога). Закреплённые (pinned) показываются всегда независимо
+     от этого набора. */
   chainVars: Set<string>;
   /* startId — нода, от которой стартовало проигрывание: от неё считается
      достижимость цепочки (обход по стрелкам) при пересчёте chainVars */
@@ -81,17 +85,17 @@ const PL_LIMIT = 120;
  *  исходов развилок (включая несколько условий с И/ИЛИ) и условия связей.
  *  Раньше для graph-режима брались ВСЕ ноды проекта — из-за этого в HUD лезли
  *  переменные из посторонних веток. Теперь цепочка — достижимые ноды: обход от
- *  стартовой ноды по стрелкам (list — сами ноды списка), мёртвые ветки (dead)
- *  исключаются: выбрал исход — переменные непройденных альтернативов исчезают.
- *  Пересчитывается на старте и при появлении мёртвых веток (pick/back) —
- *  такие переменные видны в HUD с первой реплики. */
-function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[], startId: string | null, dead?: Set<string>): Set<string> {
+ *  стартовой ноды по стрелкам (list — сами ноды списка).
+ *  Вызывается ОДИН РАЗ при старте проигрывания: набор не зависит от мёртвых
+ *  веток и не пересчитывается на выборах/«Назад» — переменные отображаются
+ *  в HUD на протяжении всего проигрывания цепочки диалогов. */
+function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[], startId: string | null): Set<string> {
   const inv = new Set<string>();
   let nodeIds: string[] = [];
   let fromSet: Set<string> | null = null;
   if (mode === 'list') {
-    nodeIds = dead && dead.size ? list.filter((id) => !dead.has(id)) : list;
-    fromSet = new Set(nodeIds);
+    nodeIds = list;
+    fromSet = new Set(list);
   } else {
     /* graph: достижимые от стартовой ноды (все возможные пути цепочки) */
     const seen = new Set<string>();
@@ -99,7 +103,7 @@ function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[], st
       const q = [startId];
       while (q.length) {
         const id = q.shift() as string;
-        if (seen.has(id) || (dead && dead.has(id))) continue;
+        if (seen.has(id)) continue;
         seen.add(id);
         nodeIds.push(id);
         for (const e of doc.edges) {
@@ -126,6 +130,7 @@ function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[], st
   return inv;
 }
 
+
 export function Player(props: { store: VetviStore }) {
   const { store } = props;
   const doc = store.doc;
@@ -136,9 +141,15 @@ export function Player(props: { store: VetviStore }) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [, forceTick] = useState(0);
 
-  /* ── эффекты-обёртки: всегда работают с актуальным состоянием ── */
+  /* ── эффекты-обёртки: всегда работают с актуальным состоянием ──
+     mountedRef восстанавливается в теле эффекта: после Fast Refresh React
+     выполняет cleanup и запуск эффекта заново — без сброса в true обёртка
+     actRef «умирала» после каждой правки в dev-режиме */
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const actRef = useRef<(fn: (cur: PlState) => PlState | null | void) => void>(() => undefined);
   actRef.current = (fn) => {
     if (!mountedRef.current) return;
@@ -246,7 +257,10 @@ export function Player(props: { store: VetviStore }) {
     const r = findReplyDeep(n.dialog?.replies || [], ids[idx]);
     if (!r) { afterNodeFinal(cur, n); return; }
     actRef.current((c) => ({
-      ...c,
+      /* cur, а не c: goNode передаёт собранный s — visited уже с новой нодой.
+       Spread c (stRef.current) затирал бы «пройдено» старым набором — в списке
+       нода считалась непройденной и проигрывание зацикливалось. */
+      ...cur,
       nodeId: n.id, replyId: null, intro: false,
       full: r.text || '…', shown: '', typing: true,
       choices: null, end: false,
@@ -258,7 +272,8 @@ export function Player(props: { store: VetviStore }) {
 
   const showReply = (cur: PlState, n: VetviNode, r: VetviReply): void => {
     actRef.current((c) => ({
-      ...c,
+      /* cur, а не c — см. комментарий в linearShow (сохранение visited из goNode) */
+      ...cur,
       nodeId: n.id, replyId: r.id, intro: false,
       full: r.text || '…', shown: '', typing: true,
       choices: null, end: false,
@@ -540,9 +555,8 @@ export function Player(props: { store: VetviStore }) {
       vars: snap.vars ? { ...snap.vars } : { ...cur.vars },
       varChanged: new Set(snap.varChanged || []),
       dead: deadBack,
-      /* chainVars откатывается вместе с dead: вернулись назад — переменные
-         непройденных тогда веток снова видимы (пересчёт по стартовой ноде) */
-      chainVars: plChainVarIds(doc, cur.mode, cur.list, cur.startId, deadBack),
+      /* chainVars не трогаем: набор зафиксирован на старте проигрывания —
+         переменные цепочки видны в HUD и после возврата назад */
       visited: new Set(snap.visited || []),
       choices: null, end: false, typing: false, shown: '', full: '',
       path: cur.path.slice(0, -1),
@@ -582,7 +596,11 @@ export function Player(props: { store: VetviStore }) {
   const restart = (): void => {
     const cur = stRef.current;
     if (!cur) return;
-    const startId = cur.mode === 'list' ? cur.list[0] : (cur.path[0] || cur.nodeId);
+    /* «Заново» всегда идёт к стартовой ноде проигрывания (cur.startId), а не к
+       path[0]: после «Назад» path обрезан (varnode'ы и переходы после них не
+       пишутся в path), и рестарт уходил в текущую ноду — цепочка и её
+       переменные сокращались. startId зафиксирован при старте проигрывания. */
+    const startId = cur.mode === 'list' ? cur.list[0] : (cur.startId || cur.path[0] || cur.nodeId);
     const n = startId ? doc.nodes.find((x) => x.id === startId) : null;
     if (!n) return;
     /* «Заново» — переменные с чистого листа: без сброса значения, изменённые
@@ -596,8 +614,8 @@ export function Player(props: { store: VetviStore }) {
       full: '', shown: '', typing: false,
       hist: [], path: [], idx: cur.mode === 'list' ? 0 : -1,
       vars, varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
-      chainVars: plChainVarIds(doc, cur.mode, cur.list, n.id),
-      startId: n.id,
+      chainVars: plChainVarIds(doc, cur.mode, cur.list, cur.startId || n.id),
+      startId: cur.startId || n.id,
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
       avCid: null, hintOverride: null,
     };
@@ -637,16 +655,22 @@ export function Player(props: { store: VetviStore }) {
     const dead = new Set(cur.dead);
     for (const o of list) {
       if (o === it) continue;
-      for (const t of o.targets || []) markDead(doc, dead, t, alive);
+      for (const t of o.targets || []) {
+        /* «остаться на ноде» (реплика без стрелок — fallback [n.id] в replyTargets)
+           не делает ноду мёртвой: раньше помечалась мёртвой сама нода диалога,
+           и переменные цепочки исчезали из HUD после первого же выбора */
+        if (!t || t === cur.nodeId) continue;
+        markDead(doc, dead, t, alive);
+      }
     }
-    /* переменные мёртвых веток исчезают из HUD: пересчитываем цепочку с учётом dead.
-       Мутация cur — как в pushHist выше: React-батчинг откладывает commit, и
-       goNode внутри it.fn() собирает next из ТОГО ЖЕ объекта состояния; если бы
-       dead лежал только в setSt, следующий spread {...cur} затер бы его устаревшим
-       значением (ветки «оживали», переменные мёртвых веток возвращались в HUD). */
+    /* chainVars НЕ пересчитывается: набор зафиксирован на старте проигрывания,
+       переменные цепочки видны в HUD на протяжении всей цепочки диалогов.
+       Мутация cur.dead — как в pushHist выше: React-батчинг откладывает commit,
+       и goNode внутри it.fn() собирает next из ТОГО ЖЕ объекта состояния; если
+       бы dead лежал только в setSt, следующий spread {...cur} затер бы его
+       устаревшим значением (ветки «оживали»). */
     cur.dead = dead;
-    cur.chainVars = plChainVarIds(doc, cur.mode, cur.list, cur.startId, dead);
-    actRef.current((c) => ({ ...c, dead: new Set(cur.dead), chainVars: new Set(cur.chainVars), choices: null }));
+    actRef.current((c) => ({ ...c, dead: new Set(cur.dead), choices: null }));
     it.fn();
   };
   const pickRef = useRef(pick);
@@ -786,7 +810,8 @@ export function Player(props: { store: VetviStore }) {
   const pathTail = st ? st.path.slice(-4) : [];
   const hasCnt = !!(st && st.mode === 'list' && st.list.length);
   /* HUD переменных: показываются с первой реплики те, что участвуют в
-     проигрываемой цепочке (chainVars — varnode'ы, условия исходов и связей),
+     проигрываемой цепочке (chainVars — varnode'ы, условия исходов и связей;
+     набор зафиксирован на старте и не меняется до конца проигрывания),
      плюс закреплённые (pinned) — они видны всегда. Значения — живые, из
      состояния проигрывания; chg — значение менялось в этом проигрывании. */
   const varsHud = useMemo(() => {
