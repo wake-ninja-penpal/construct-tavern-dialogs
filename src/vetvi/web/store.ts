@@ -34,7 +34,7 @@ import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
 import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
-import type { EdgeGeom, NodeSize, VetviChar, VetviCharGroup, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviViewport } from '@/vetvi/core/types';
+import type { EdgeGeom, NodeSize, VetviChar, VetviCharGroup, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviVarGroup, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import { canvasApi } from './canvasApi';
@@ -155,6 +155,10 @@ export class VetviStore {
   spaceDown = false;
   ctrlDown = false;
   saveMenuOpen = false;
+
+  /* локальные свёрнутые группы списков (НЕ синхронизируются — у каждого юзера своё) */
+  charGroupsFold = new Set<string>();
+  varGroupsFold = new Set<string>();
 
   /* ── импорт текстов (окно 2-шаговое: окно → сверка) ── */
   /** Сохранённый текст после ошибки парсинга (keep в openTextsImport оригинала). */
@@ -471,6 +475,7 @@ export class VetviStore {
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
+    this.noteSelFocus();
     this.noteEditor();
     this.logUndoRedo(pre, 'Отмена');
     this.toast('Отменено', 'warn');
@@ -488,6 +493,7 @@ export class VetviStore {
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
+    this.noteSelFocus();
     this.noteEditor();
     this.logUndoRedo(pre, 'Повтор');
     this.toast('Повторено', 'ok');
@@ -528,13 +534,23 @@ export class VetviStore {
 
   /* ── выделение ── */
 
+  /** Трансляция «работаю здесь» соавторам после любого изменения выделения:
+   *  выделена нода — показываем её, выделения нет (клик по пустому месту холста,
+   *  снятие галочки, рамка) — метка снимается (focusTrack(null) → сервер удаляет
+   *  фокус участника, плашка на чужой стороне исчезает). */
+  private noteSelFocus(): void {
+    if (!this.sync) return;
+    const first = this.sel.size ? (this.sel.values().next().value as string) : null;
+    this.sync.focusTrack(first || null);
+  }
+
   selectOnly(id: string): void {
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
     this.sel.add(id);
     this.emit();
-    if (this.sync) this.sync.focusTrack(id);
+    this.noteSelFocus();
   }
 
   toggleSelect(id: string): void {
@@ -544,7 +560,7 @@ export class VetviStore {
     else this.sel.add(id);
     this.emit();
     /* выделение (даже Shift/Ctrl-добавление) — тоже «работаю здесь» для соавторов */
-    if (this.sync) this.sync.focusTrack(id);
+    this.noteSelFocus();
   }
 
   selectEdgeOnly(id: string): void {
@@ -553,6 +569,7 @@ export class VetviStore {
     this.selGroups.clear();
     this.selEdges.add(id);
     this.emit();
+    this.noteSelFocus();
   }
 
   toggleEdge(id: string): void {
@@ -561,6 +578,7 @@ export class VetviStore {
     if (this.selEdges.has(id)) this.selEdges.delete(id);
     else this.selEdges.add(id);
     this.emit();
+    this.noteSelFocus();
   }
 
   selectGroupOnly(id: string): void {
@@ -569,6 +587,7 @@ export class VetviStore {
     this.selGroups.clear();
     this.selGroups.add(id);
     this.emit();
+    this.noteSelFocus();
   }
 
   toggleGroup(id: string): void {
@@ -577,6 +596,7 @@ export class VetviStore {
     if (this.selGroups.has(id)) this.selGroups.delete(id);
     else this.selGroups.add(id);
     this.emit();
+    this.noteSelFocus();
   }
 
   setSel(nodes: string[], groups: string[] = []): void {
@@ -584,6 +604,7 @@ export class VetviStore {
     this.sel = new Set(nodes);
     this.selGroups = new Set(groups);
     this.emit();
+    this.noteSelFocus();
   }
 
   clearSelection(): void {
@@ -592,6 +613,8 @@ export class VetviStore {
     this.selEdges.clear();
     this.selGroups.clear();
     this.emit();
+    /* снятие выделения (клик по пустому месту) — снимаем и метку «работаю здесь» */
+    this.noteSelFocus();
   }
 
   selectAll(): void {
@@ -599,6 +622,7 @@ export class VetviStore {
     this.selGroups.clear();
     this.sel = new Set(this.doc.nodes.map((n) => n.id));
     this.emit();
+    this.noteSelFocus();
   }
 
   /* ── UI ── */
@@ -1730,6 +1754,117 @@ export class VetviStore {
     this.toast('Переменная удалена (привязки очищены)', 'warn');
   }
 
+  /* ── группы переменных (сортировка списка, аналог групп персонажей) ── */
+
+  varGroups(): VetviVarGroup[] {
+    return this.doc.varGroups || [];
+  }
+
+  addVarGroup(): VetviVarGroup {
+    const g: VetviVarGroup = {
+      id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 10000).toString(36),
+      name: 'Новая группа',
+    };
+    this.mutate((doc) => {
+      if (!Array.isArray(doc.varGroups)) doc.varGroups = [];
+      doc.varGroups.push(g);
+    }, { label: 'Создание группы переменных' });
+    this.toast('Группа «' + g.name + '» создана', 'ok');
+    return g;
+  }
+
+  updateVarGroup(id: string, patch: Partial<VetviVarGroup>, opts?: { history?: boolean; label?: string }): void {
+    this.mutate((doc) => {
+      const g = (doc.varGroups || []).find((x) => x.id === id);
+      if (g) Object.assign(g, patch);
+    }, opts);
+  }
+
+  /** Удаление группы: сами переменные не удаляются — выкидываются из группы (groupId → null). */
+  deleteVarGroup(id: string): void {
+    const g = (this.doc.varGroups || []).find((x) => x.id === id);
+    this.mutate((doc) => {
+      doc.varGroups = (doc.varGroups || []).filter((x) => x.id !== id);
+      for (const v of doc.vars || []) {
+        if ((v as { groupId?: string | null }).groupId === id) (v as { groupId?: string | null }).groupId = null;
+      }
+    }, { label: 'Удаление группы переменных' });
+    this.toast('Группа «' + (g ? g.name : '') + '» удалена — переменные выведены из неё', 'warn');
+  }
+
+  /** Сворачивание группы переменных — ЛОКАЛЬНОЕ действие, соавторам не транслируется. */
+  toggleVarGroupCollapsed(id: string): void {
+    if (this.varGroupsFold.has(id)) this.varGroupsFold.delete(id);
+    else this.varGroupsFold.add(id);
+    this.emit();
+  }
+
+  charGroupFolded(id: string): boolean {
+    return this.charGroupsFold.has(id);
+  }
+
+  varGroupFolded(id: string): boolean {
+    return this.varGroupsFold.has(id);
+  }
+
+  /** Перенос переменной в группу (null — без группы). */
+  setVarGroup(vid: string, gid: string | null, opts?: { history?: boolean; label?: string }): void {
+    const cur = (this.doc.vars || []).find((x) => x.id === vid);
+    if (!cur) return;
+    if (((cur as { groupId?: string | null }).groupId || null) === (gid || null)) return;
+    const gname = gid ? ((this.doc.varGroups || []).find((g) => g.id === gid)?.name || '') : '';
+    this.updateVar(vid, { groupId: gid || null }, opts || { label: gid ? 'Перенос переменной в группу' : 'Переменная без группы' });
+    if (!opts) this.toast(gid ? 'Переменная перенесена в группу «' + gname + '»' : 'Переменная выведена из группы', 'ok');
+  }
+
+  /**
+   * Позиционная перестановка переменной (для drag&drop списка): вставить рядом
+   * с refVid (before/after) внутри зоны группы gid, или в конец зоны (refVid=null).
+   * Порядок членов группы определяется порядком в doc.vars — перестановка делается
+   * именно в общем массиве, с одновременной сменой groupId.
+   */
+  placeVarInList(vid: string, gid: string | null, refVid: string | null, place: 'before' | 'after'): void {
+    const cur = (this.doc.vars || []).find((x) => x.id === vid);
+    if (!cur) return;
+    const same = ((cur as { groupId?: string | null }).groupId || null) === (gid || null);
+    const ref = refVid ? (this.doc.vars || []).find((x) => x.id === refVid) : null;
+    if (same && !ref) return; /* бросили в пустое место своей же зоны — нечего делать */
+    this.mutate((doc) => {
+      const arr = doc.vars || (doc.vars = []);
+      const meIdx = arr.findIndex((x) => x.id === vid);
+      if (meIdx < 0) return;
+      const [me] = arr.splice(meIdx, 1);
+      (me as { groupId?: string | null }).groupId = gid || null;
+      let inserted = false;
+      if (refVid && refVid !== vid && arr.some((x) => x.id === refVid)) {
+        const idx = arr.findIndex((x) => x.id === refVid);
+        arr.splice(place === 'after' ? idx + 1 : idx, 0, me);
+        inserted = true;
+      }
+      if (!inserted && gid) {
+        let last = -1;
+        arr.forEach((x, i) => { if ((x as { groupId?: string | null }).groupId === gid) last = i; });
+        arr.splice(last >= 0 ? last + 1 : arr.length, 0, me);
+        inserted = true;
+      }
+      if (!inserted) arr.splice(Math.min(meIdx, arr.length), 0, me); /* без группы — вернуть на прежнее место */
+    }, { label: 'Перестановка переменной' });
+  }
+
+  /** Перестановка группы переменных на позицию toIndex (индекс в текущем массиве до переноса). */
+  moveVarGroup(id: string, toIndex: number): void {
+    this.mutate((doc) => {
+      const arr = doc.varGroups || [];
+      const from = arr.findIndex((g) => g.id === id);
+      if (from < 0 || toIndex < 0 || toIndex > arr.length) return;
+      const [g] = arr.splice(from, 1);
+      let idx = toIndex;
+      if (idx > from) idx -= 1;
+      idx = Math.max(0, Math.min(arr.length, idx));
+      arr.splice(idx, 0, g);
+    }, { label: 'Перестановка групп переменных' });
+  }
+
   /* ── персонажи ── */
 
   addChar(): VetviChar {
@@ -1786,7 +1921,6 @@ export class VetviStore {
     const g: VetviCharGroup = {
       id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 10000).toString(36),
       name: 'Новая группа',
-      collapsed: false,
     };
     this.mutate((doc) => {
       if (!Array.isArray(doc.charGroups)) doc.charGroups = [];
@@ -1825,9 +1959,12 @@ export class VetviStore {
     if (!opts) this.toast(gid ? 'Персонаж перенесён в группу «' + gname + '»' : 'Персонаж выведен из группы', 'ok');
   }
 
+  /** Сворачивание группы персонажей — ЛОКАЛЬНОЕ действие, соавторам не транслируется:
+   *  у каждого юзера свой вид списка. */
   toggleCharGroupCollapsed(id: string): void {
-    const g = (this.doc.charGroups || []).find((x) => x.id === id);
-    if (g) this.updateCharGroup(id, { collapsed: !g.collapsed }, { history: false });
+    if (this.charGroupsFold.has(id)) this.charGroupsFold.delete(id);
+    else this.charGroupsFold.add(id);
+    this.emit();
   }
 
   /**
@@ -3490,6 +3627,7 @@ export class VetviStore {
       groups: this.doc.groups,
       listHidden: this.doc.listHidden && typeof this.doc.listHidden === 'object' ? this.doc.listHidden : {},
       vars: Array.isArray(this.doc.vars) ? this.doc.vars : [],
+      varGroups: Array.isArray(this.doc.varGroups) ? this.doc.varGroups : [],
       chars: Array.isArray(this.doc.chars) ? this.doc.chars : [],
       charGroups: Array.isArray(this.doc.charGroups) ? this.doc.charGroups : [],
       palette: (Array.isArray(this.doc.palette) ? this.doc.palette : []).slice(0, 24),
@@ -3518,6 +3656,7 @@ export class VetviStore {
       customTypes?: unknown[];
       listHidden?: unknown;
       vars?: VetviVar[];
+      varGroups?: VetviVarGroup[];
       chars?: VetviChar[];
       charGroups?: VetviCharGroup[];
       palette?: unknown[];
@@ -3637,6 +3776,8 @@ export class VetviStore {
     }
     this.doc.listHidden = (d.listHidden && typeof d.listHidden === 'object') ? d.listHidden as Record<string, unknown> : {};
     this.doc.vars = Array.isArray(d.vars) ? d.vars : [];
+    /* группы переменных: снимок без поля (старый клиент/старый слот) локальные не затирает */
+    if (Array.isArray(d.varGroups)) this.doc.varGroups = d.varGroups;
     this.doc.chars = Array.isArray(d.chars) ? d.chars : [];
     /* группы персонажей: снимок без поля (старый клиент/старый слот) локальные не затирает —
        иначе чужой снимок стирает созданные группы до их первой публикации */

@@ -16,6 +16,7 @@ import type { VetviDoc, VetviNode, VetviReply } from '@/vetvi/core/types';
 import { condMet, condText, condWithOverride, opSym, varApplyOp, varById, varName, varType, varValText } from '@/vetvi/core/vars';
 import { linearIds } from '@/vetvi/core/dialog';
 import { hkIs } from '@/vetvi/core/hotkeys';
+import { RtfxView } from './RtfxView';
 import type { VetviStore } from './store';
 
 interface Choice {
@@ -132,7 +133,9 @@ export function Player(props: { store: VetviStore }) {
         seqIdx: -1,
         path: keepPath ? cur.path : (n.type === 'varnode' ? cur.path : trackPath(cur, n.id)),
       };
-      if (s.mode === 'list') s.visited = new Set([...s.visited, n.id]);
+      /* «пройдено» для HUD переменных (задействованные в цепочке): добавляем ВСЕ
+         ноды цепочки, включая varnode'ы (в path они не попадают) */
+      s.visited = new Set([...s.visited, n.id]);
       if (n.type === 'varnode') {
         // применение переменной без слайда
         const v = varById(doc, n.vid);
@@ -696,15 +699,40 @@ export function Player(props: { store: VetviStore }) {
 
   const pathTail = st ? st.path.slice(-4) : [];
   const hasCnt = !!(st && st.mode === 'list' && st.list.length);
+  /* переменные задействованной цепочки: всё, что уже пройдено (visited+path+текущая
+     нода) — varnode'ы, условия развилок и условий связей; закреплённые (pinned)
+     выводятся всегда, остальные — только если участвуют в цепочке */
   const varsHud = useMemo(() => {
     if (!st) return [];
-    return (doc.vars || []).map((v) => ({
-      v,
-      cur: st.vars[v.id] !== undefined && st.vars[v.id] !== null ? st.vars[v.id] : v.val,
-      chg: st.varChanged.has(v.id),
-    }));
+    const seen = new Set<string>(st.visited);
+    if (st.nodeId) seen.add(st.nodeId);
+    for (const pid of st.path) seen.add(pid);
+    const inv = new Set<string>();
+    for (const nid of seen) {
+      const nn = doc.nodes.find((x) => x.id === nid);
+      if (!nn) continue;
+      if (nn.type === 'varnode' && nn.vid) inv.add(nn.vid);
+      if (nn.type === 'branch' && Array.isArray(nn.outcomes)) {
+        for (const o of nn.outcomes) {
+          const c = (o as { cond?: { vid?: string } }).cond;
+          if (c && c.vid) inv.add(c.vid);
+        }
+      }
+    }
+    for (const e of doc.edges) {
+      const c = (e as unknown as { cond?: { vid?: string } }).cond;
+      if (c && c.vid && (seen.has(e.from) || seen.has(e.to))) inv.add(c.vid);
+    }
+    return (doc.vars || [])
+      .filter((v) => v.pinned || inv.has(v.id))
+      .map((v) => ({
+        v,
+        pin: !!v.pinned,
+        cur: st.vars[v.id] !== undefined && st.vars[v.id] !== null ? st.vars[v.id] : v.val,
+        chg: st.varChanged.has(v.id),
+      }));
 
-  }, [st, doc.vars]);
+  }, [st, doc.vars, doc.nodes, doc.edges]);
 
   if (!st) return null;
 
@@ -738,11 +766,11 @@ export function Player(props: { store: VetviStore }) {
         </div>
       </div>
       <div className="pl-vars" id="plVars" style={{ display: varsHud.length ? 'flex' : 'none' }}>
-        {varsHud.map(({ v, cur, chg }) => (
+        {varsHud.map(({ v, cur, chg, pin }) => (
           <span
-            className={'pl-var' + (chg ? ' chg' : '')}
+            className={'pl-var' + (chg ? ' chg' : '') + (pin ? ' pin' : '')}
             key={v.id + '|' + String(cur) + (chg ? '|chg' : '')}
-            title={chg ? 'значение изменилось в проигрывании' : undefined}
+            title={(chg ? 'значение изменилось в проигрывании' : undefined) || (pin ? 'закреплена — показывается всегда' : undefined)}
           >
             <i>{v.name}</i>
             <b>{varValText(cur, v)}</b>
@@ -767,7 +795,7 @@ export function Player(props: { store: VetviStore }) {
                   </span>
                 )}
                 <span className="lbl">
-                  {c.label}
+                  <RtfxView text={c.label} />
                   {!c.ok && c.why && <i className="why">путь закрыт — {c.why}</i>}
                 </span>
               </button>
@@ -794,7 +822,7 @@ export function Player(props: { store: VetviStore }) {
               <div className={'pl-name' + (nameStr ? '' : ' hidden')} id="plName">
                 {nameStr && <span className="pl-t">{nameStr}</span>}
               </div>
-              <div className="pl-text" id="plText">{st.shown}{st.typing && <span className="caret" />}</div>
+              <div className="pl-text" id="plText"><RtfxView text={st.shown} />{st.typing && <span className="caret" />}</div>
               <div className="pl-hint" id="plHint" style={{ display: hintVisible ? undefined : 'none' }}>{hint}</div>
             </div>
           </div>

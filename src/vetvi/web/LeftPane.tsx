@@ -32,6 +32,9 @@ const P_GRIP = '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 
 const P_EYE = '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
 const P_EYE_OFF = '<path d="M2.5 12S6 5.8 12 5.8c1.2 0 2.3.3 3.3.7M21.5 12S18 18.2 12 18.2c-1.2 0-2.3-.3-3.3-.7"/><path d="M4 4l16 16"/>';
 const P_PENCIL = '<path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>';
+const P_PIN = '<path d="M9 3.5h6l-1 5 3 3.2V14h-4.2l-.3 6.5L12 17l-.5 3.5L11.2 14H7v-2.3l3-3.2z"/>';
+const P_USER_PLUS = '<circle cx="10" cy="8" r="3.4"/><path d="M3.5 19.5c1-3.2 3.6-4.9 6.5-4.9 1.6 0 3.1.5 4.3 1.4"/><path d="M17 13v6M14 16h6"/>';
+const P_FOLDER_PLUS = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>';
 
 /** ic(name,size) оригинала — svg-обёртка над путём иконки. */
 function Ic(props: { d: string; size?: number }) {
@@ -512,11 +515,14 @@ function ListPane({ store, active }: { store: VetviStore; active: boolean }) {
 /* ── Переменные ── */
 function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
   const vars = store.doc.vars || [];
+  const groups = store.varGroups();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [dragReady, setDragReady] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [renGid, setRenGid] = useState<string | null>(null);
   const dragVid = useRef<string | null>(null);
   const editPreRef = useRef<string | null>(null);
+  const renRef = useRef<HTMLInputElement | null>(null);
 
   const toggleOpen = (id: string) => {
     const s = new Set(open);
@@ -525,25 +531,38 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
     setOpen(s);
   };
 
-  const dropToCanvas = (e: React.DragEvent) => {
-    e.preventDefault();
-    const vid = e.dataTransfer.getData('text/vetvi-var') || dragVid.current;
-    if (!vid) return;
-    const el = document.querySelector('.rn-canvas');
-    const r = el ? el.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
-    const wx = (e.clientX - r.left - store.vp.x) / store.vp.z - NODE_W / 2;
-    const wy = (e.clientY - r.top - store.vp.y) / store.vp.z - 20;
-    const v = varById(store.doc, vid);
-    const pre = store.beginEdit();
-    const n = store.addNodeAtRaw('varnode', wx, wy);
-    if (n) {
-      n.varMode = 'set';
-      n.varOp = '=';
-      n.varVal = v ? (typeof v.val === 'number' ? v.val : 0) : 0;
-      n.vid = vid;
-    }
-    store.commitEdit(pre, 'Нода переменной');
-    store.toast('Нода переменной создана', 'ok');
+  /* ── drag & drop: переменная → группа/позиция, группа → позиция в списке ──
+     та же раздвижка-подсказка, что у персонажей: dropHint показывает, между
+     какими блоками встанет перетаскиваемая строка (классы dnd-gap-…).
+     Бросок на ХОЛСТ (вне панели) по-прежнему создаёт ноду переменной —
+     drop обрабатывает CanvasBoard; в списках — перестановка/перенос. */
+  const dtHas = (e: DragEvent, t: string) => Array.from(e.dataTransfer.types).includes(t);
+  type VarDropHint =
+    | { kind: 'root' }
+    | { kind: 'group'; id: string }
+    | { kind: 'row'; gid: string | null; refVid: string; place: 'before' | 'after' }
+    | { kind: 'ghead'; id: string; place: 'before' | 'after' }
+    | null;
+  const [dropHint, setDropHint] = useState<VarDropHint>(null);
+  const markOver = (next: VarDropHint) =>
+    setDropHint((p) => {
+      if (p === next) return p;
+      if (p && next && p.kind === next.kind
+        && (p as { id?: string }).id === (next as { id?: string }).id
+        && (p as { refVid?: string }).refVid === (next as { refVid?: string }).refVid
+        && (p as { place?: string }).place === (next as { place?: string }).place) return p;
+      return next;
+    });
+  /** до или после середины строки упал курсор — туда и вставляем */
+  const placeOf = (el: HTMLElement, clientY: number): 'before' | 'after' => {
+    const r = el.getBoundingClientRect();
+    return (clientY - r.top) > r.height / 2 ? 'after' : 'before';
+  };
+
+  const commitRenG = (g: { id: string; name: string }) => {
+    const v = (renRef.current?.value || '').trim();
+    if (v && v !== g.name) store.updateVarGroup(g.id, { name: v }, { label: 'Переименование группы' });
+    setRenGid(null);
   };
 
   const nameFocus = () => { editPreRef.current = store.beginEdit(); };
@@ -551,11 +570,190 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
   const valFocus = () => { editPreRef.current = store.beginEdit(); };
   const valBlur = () => { store.commitEdit(editPreRef.current, 'Значение переменной'); editPreRef.current = null; };
 
+  /** строка переменной — можно перетащить на группу или между строками (позиционная вставка);
+      тянется за grip (dragReady), бросок на холст создаёт ноду (CanvasBoard) */
+  const varRow = (v: VetviVar, zoneGid: string | null) => {
+    const isOpen = open.has(v.id);
+    const t = varType(v);
+    const hint = dropHint && dropHint.kind === 'row' && dropHint.refVid === v.id ? dropHint.place : null;
+    return (
+      <div
+        key={v.id}
+        data-vid={v.id}
+        className={'v-item' + (isOpen ? ' open' : '') + (draggingId === v.id ? ' dragging' : '')
+          + (hint === 'before' ? ' dnd-gap-above' : hint === 'after' ? ' dnd-gap-below' : '')}
+        draggable={dragReady === v.id}
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/vetvi-var', v.id);
+          e.dataTransfer.effectAllowed = 'copyMove'; /* холст — копия (нода), списки — перенос */
+          dragVid.current = v.id;
+          setDraggingId(v.id);
+        }}
+        onDragEnd={() => { setDragReady(null); setDraggingId(null); markOver(null); }}
+      >
+        <div
+          className="v-row"
+          onDragOver={(e) => {
+            if (!dtHas(e, 'text/vetvi-var')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            markOver({ kind: 'row', gid: zoneGid, refVid: v.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+          }}
+          onDrop={(e) => {
+            const vid = e.dataTransfer.getData('text/vetvi-var');
+            e.preventDefault();
+            e.stopPropagation();
+            if (vid && vid !== v.id) store.placeVarInList(vid, zoneGid, v.id, placeOf(e.currentTarget as HTMLElement, e.clientY));
+            markOver(null);
+          }}
+        >
+          <span
+            className="v-grip"
+            title="Перетащите — на холст: создать ноду переменной, в списке: сменить группу или порядок"
+            onMouseDown={() => setDragReady(v.id)}
+            onDoubleClick={(e) => e.preventDefault()}
+          ><Ic d={P_GRIP} size={12} /></span>
+          <input
+            className="inp v-name"
+            maxLength={40}
+            value={String(v.name || '')}
+            title="Название переменной"
+            placeholder="название"
+            aria-label="Имя переменной"
+            onFocus={nameFocus}
+            onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
+            onBlur={nameBlur}
+          />
+          <select
+            className="inp v-type"
+            value={t}
+            title="Тип переменной"
+            aria-label="Тип переменной"
+            onChange={(e) => store.updateVar(v.id, { type: e.target.value, val: varCastVal(e.target.value, v.val) }, { label: 'Тип переменной' })}
+          >
+            {Object.entries(VAR_TYPES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+          {t === 'bool' ? (
+            <select
+              className="inp v-val"
+              title="Начальное значение"
+              aria-label="Значение"
+              value={isTrueVal(v.val) ? '1' : '0'}
+              onChange={(e) => store.updateVar(v.id, { val: e.target.value === '1' }, { label: 'Значение переменной' })}
+            >
+              <option value="1">true</option>
+              <option value="0">false</option>
+            </select>
+          ) : (
+            <input
+              className="inp v-val"
+              value={String(v.val ?? '')}
+              title="Начальное значение"
+              placeholder={t === 'num' ? '0' : 'текст'}
+              aria-label="Значение по умолчанию"
+              onFocus={valFocus}
+              onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
+              onBlur={valBlur}
+            />
+          )}
+          <button
+            type="button"
+            className={'v-pin' + (v.pinned ? ' on' : '')}
+            title={v.pinned ? 'Открепить — переменная показывается в проигрывании только в задействованных цепочках' : 'Закрепить — переменная всегда выводится в проигрывании, даже если не задействована в цепочке'}
+            aria-label={v.pinned ? 'Открепить переменную' : 'Закрепить переменную'}
+            onClick={() => store.updateVar(v.id, { pinned: !v.pinned }, { label: v.pinned ? 'Открепление переменной' : 'Закрепление переменной' })}
+          ><Ic d={P_PIN} size={12} /></button>
+          <button type="button" className="v-del" title="Удалить переменную" onClick={() => store.deleteVar(v.id)}><Ic d={P_X} size={12} /></button>
+          <button type="button" className="v-fold" title={isOpen ? 'Свернуть' : 'Развернуть для редактирования'} onClick={() => toggleOpen(v.id)}><Ic d={P_CHEV} size={12} /></button>
+        </div>
+        {isOpen && (
+          <div className="v-edit">
+            <div>
+              <label>Название</label>
+              <input
+                className="inp ve-name"
+                maxLength={40}
+                value={String(v.name || '')}
+                placeholder="название переменной"
+                aria-label="Имя переменной (расширенный редактор)"
+                onFocus={nameFocus}
+                onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
+                onBlur={nameBlur}
+              />
+            </div>
+            <div>
+              <label>Тип</label>
+              <div className="ve-types">
+                {Object.keys(VAR_TYPES).map((tk) => (
+                  <button
+                    key={tk}
+                    type="button"
+                    className={t === tk ? 'on' : ''}
+                    onClick={() => {
+                      if (varType(v) === tk) return;
+                      store.updateVar(v.id, { type: tk, val: varCastVal(tk, v.val) }, { label: 'Тип переменной' });
+                    }}
+                  >{VAR_TYPES[tk]}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label>Начальное значение</label>
+              {t === 'num' ? (
+                <div className="ve-valrow">
+                  <button type="button" className="ve-step" title="−1" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) - 1 }, { history: false })}>−</button>
+                  <input
+                    className="inp ve-val"
+                    value={String(v.val ?? '')}
+                    title="Начальное значение"
+                    onFocus={valFocus}
+                    onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
+                    onBlur={valBlur}
+                  />
+                  <button type="button" className="ve-step" title="+1" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) + 1 }, { history: false })}>+</button>
+                </div>
+              ) : t === 'bool' ? (
+                <div className="ve-bools">
+                  <button type="button" className={isTrueVal(v.val) ? 'on' : ''} onClick={() => store.updateVar(v.id, { val: true }, { history: false })}>true</button>
+                  <button type="button" className={!isTrueVal(v.val) ? 'on' : ''} onClick={() => store.updateVar(v.id, { val: false }, { history: false })}>false</button>
+                </div>
+              ) : (
+                <input
+                  className="inp ve-val"
+                  value={String(v.val == null ? '' : v.val)}
+                  title="Начальное значение"
+                  placeholder="текст"
+                  onFocus={valFocus}
+                  onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
+                  onBlur={valBlur}
+                />
+              )}
+            </div>
+            <div>
+              <label>Группа</label>
+              <VarGroupCombo store={store} v={v} />
+            </div>
+            <div className="ve-use">{varUseText(store, v.id)}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ungrouped = vars.filter((v) => !v.groupId || !groups.some((g) => g.id === v.groupId));
+  const groupOf = (gid: string) => vars.filter((v) => v.groupId === gid);
+
   return (
-    <div className={'tabpane' + (active ? ' active' : '')} id="paneVars" onDragOver={(e) => e.preventDefault()} onDrop={dropToCanvas}>
+    <div className={'tabpane' + (active ? ' active' : '')} id="paneVars">
       <div className="v-head">
         <span>Переменные сюжета</span>
-        <button type="button" className="btn primary" title="Создать переменную" onClick={() => { const v = store.addVar(); setOpen(new Set([...open, v.id])); }}>+ Переменная</button>
+        <div className="v-head-btns">
+          <button type="button" className="btn primary" title="Создать переменную" onClick={() => { const v = store.addVar(); setOpen(new Set([...open, v.id])); }}>+ Переменная</button>
+          <button type="button" className="btn ibtn" title="Создать группу переменных" aria-label="Создать группу переменных" onClick={() => store.addVarGroup()}>
+            <Ic d={P_FOLDER_PLUS} size={15} />
+          </button>
+        </div>
       </div>
       {!vars.length && (
         <div className="v-hint">
@@ -566,156 +764,169 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
           3. У <b>«Развилки»</b> добавляйте исходы и привязывайте к ним переменную — исход сработает при совпадении значения.
         </div>
       )}
-      <div id="vRows">
-        {vars.map((v: VetviVar) => {
-          const isOpen = open.has(v.id);
-          const t = varType(v);
+      <div
+        id="vRows"
+        className={dropHint?.kind === 'root' ? 'drop-ok' : ''}
+        onDragOver={(e) => {
+          if (!dtHas(e, 'text/vetvi-var')) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          markOver({ kind: 'root' });
+        }}
+        onDrop={(e) => {
+          const vid = e.dataTransfer.getData('text/vetvi-var');
+          if (vid) { e.preventDefault(); store.placeVarInList(vid, null, null, 'after'); }
+          markOver(null);
+        }}
+      >
+        {ungrouped.map((v) => varRow(v, null))}
+        {groups.map((g) => {
+          const members = groupOf(g.id);
+          const folded = store.varGroupFolded(g.id);
+          const gHint = dropHint?.kind === 'ghead' && dropHint.id === g.id ? dropHint.place : null;
           return (
             <div
-              key={v.id}
-              data-vid={v.id}
-              className={'v-item' + (isOpen ? ' open' : '') + (draggingId === v.id ? ' dragging' : '')}
-              draggable={dragReady === v.id}
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/vetvi-var', v.id);
-                e.dataTransfer.effectAllowed = 'copy';
-                dragVid.current = v.id;
-                setDraggingId(v.id);
+              key={g.id}
+              data-gid={g.id}
+              className={'vargroup' + (folded ? '' : ' open')
+                + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')
+                + (gHint === 'before' ? ' dnd-gap-above' : gHint === 'after' ? ' dnd-gap-below' : '')}
+              onDragOver={(e) => {
+                if (!dtHas(e, 'text/vetvi-var')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'move';
+                markOver({ kind: 'group', id: g.id });
               }}
-              onDragEnd={() => { setDragReady(null); setDraggingId(null); }}
+              onDrop={(e) => {
+                const vid = e.dataTransfer.getData('text/vetvi-var');
+                if (vid) { e.preventDefault(); e.stopPropagation(); store.placeVarInList(vid, g.id, null, 'after'); }
+                markOver(null);
+              }}
             >
-              <div className="v-row">
-                <span
-                  className="v-grip"
-                  title="Перетащите на холст — создать ноду переменной"
-                  onMouseDown={() => setDragReady(v.id)}
-                  onDoubleClick={(e) => e.preventDefault()}
-                ><Ic d={P_GRIP} size={12} /></span>
-                <input
-                  className="inp v-name"
-                  maxLength={40}
-                  value={String(v.name || '')}
-                  title="Название переменной"
-                  placeholder="название"
-                  aria-label="Имя переменной"
-                  onFocus={nameFocus}
-                  onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
-                  onBlur={nameBlur}
-                />
-                <select
-                  className="inp v-type"
-                  value={t}
-                  title="Тип переменной"
-                  aria-label="Тип переменной"
-                  onChange={(e) => store.updateVar(v.id, { type: e.target.value, val: varCastVal(e.target.value, v.val) }, { label: 'Тип переменной' })}
-                >
-                  {Object.entries(VAR_TYPES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-                </select>
-                {t === 'bool' ? (
-                  <select
-                    className="inp v-val"
-                    title="Начальное значение"
-                    aria-label="Значение"
-                    value={isTrueVal(v.val) ? '1' : '0'}
-                    onChange={(e) => store.updateVar(v.id, { val: e.target.value === '1' }, { label: 'Значение переменной' })}
-                  >
-                    <option value="1">true</option>
-                    <option value="0">false</option>
-                  </select>
-                ) : (
+              <div
+                className={'vargroup-head' + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')}
+                draggable
+                title="Перетащите, чтобы сменить порядок групп"
+                onDragStart={(e) => { e.dataTransfer.setData('text/vetvi-vargroup', g.id); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragEnd={() => markOver(null)}
+                onDragOver={(e) => {
+                  const isVar = dtHas(e, 'text/vetvi-var');
+                  const isGroup = dtHas(e, 'text/vetvi-vargroup');
+                  if (!isVar && !isGroup) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (isGroup && !isVar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+                  else markOver({ kind: 'group', id: g.id });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const gid = e.dataTransfer.getData('text/vetvi-vargroup');
+                  const vid = e.dataTransfer.getData('text/vetvi-var');
+                  if (vid) store.placeVarInList(vid, g.id, null, 'after');
+                  else if (gid && gid !== g.id) {
+                    const tIdx = store.varGroups().findIndex((x) => x.id === g.id);
+                    const place = placeOf(e.currentTarget as HTMLElement, e.clientY);
+                    store.moveVarGroup(gid, place === 'before' ? tIdx : tIdx + 1);
+                  }
+                  markOver(null);
+                }}
+              >
+                <span className="cgroup-grip" title="Перетащите, чтобы сменить порядок групп"><Ic d={P_GRIP} size={12} /></span>
+                {renGid === g.id ? (
                   <input
-                    className="inp v-val"
-                    value={String(v.val ?? '')}
-                    title="Начальное значение"
-                    placeholder={t === 'num' ? '0' : 'текст'}
-                    aria-label="Значение по умолчанию"
-                    onFocus={valFocus}
-                    onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
-                    onBlur={valBlur}
+                    ref={renRef}
+                    className="inp cgroup-name-inp"
+                    defaultValue={g.name}
+                    maxLength={60}
+                    aria-label="Название группы"
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitRenG(g); if (e.key === 'Escape') setRenGid(null); }}
+                    onBlur={() => commitRenG(g)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
                   />
+                ) : (
+                  <span className="cgroup-name" title="Двойной клик — переименовать группу" onDoubleClick={(e) => { e.stopPropagation(); setRenGid(g.id); }}>{g.name}</span>
                 )}
-                <button type="button" className="v-del" title="Удалить переменную" onClick={() => store.deleteVar(v.id)}><Ic d={P_X} size={12} /></button>
-                <button type="button" className="v-fold" title={isOpen ? 'Свернуть' : 'Развернуть для редактирования'} onClick={() => toggleOpen(v.id)}><Ic d={P_CHEV} size={12} /></button>
+                <span className="cgroup-cnt">{members.length} перем.</span>
+                <button type="button" className="v-del cgroup-del" title="Удалить группу — переменные останутся без группы" onClick={() => store.deleteVarGroup(g.id)}><Ic d={P_X} size={12} /></button>
+                <button type="button" className="v-fold" title={folded ? 'Развернуть группу' : 'Свернуть группу — виден только у вас, не синхронизируется'} onClick={() => store.toggleVarGroupCollapsed(g.id)}><Ic d={P_CHEV} size={12} /></button>
               </div>
-              {isOpen && (
-                <div className="v-edit">
-                  <div>
-                    <label>Название</label>
-                    <input
-                      className="inp ve-name"
-                      maxLength={40}
-                      value={String(v.name || '')}
-                      placeholder="название переменной"
-                      aria-label="Имя переменной (расширенный редактор)"
-                      onFocus={nameFocus}
-                      onChange={(e) => store.updateVar(v.id, { name: e.target.value }, { history: false })}
-                      onBlur={nameBlur}
-                    />
-                  </div>
-                  <div>
-                    <label>Тип</label>
-                    <div className="ve-types">
-                      {Object.keys(VAR_TYPES).map((tk) => (
-                        <button
-                          key={tk}
-                          type="button"
-                          className={t === tk ? 'on' : ''}
-                          onClick={() => {
-                            if (varType(v) === tk) return;
-                            store.updateVar(v.id, { type: tk, val: varCastVal(tk, v.val) }, { label: 'Тип переменной' });
-                          }}
-                        >{VAR_TYPES[tk]}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label>Начальное значение</label>
-                    {t === 'num' ? (
-                      <div className="ve-valrow">
-                        <button type="button" className="ve-step" title="−1" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) - 1 }, { history: false })}>−</button>
-                        <input
-                          className="inp ve-val"
-                          value={String(v.val ?? '')}
-                          title="Начальное значение"
-                          onFocus={valFocus}
-                          onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
-                          onBlur={valBlur}
-                        />
-                        <button type="button" className="ve-step" title="+1" onClick={() => store.updateVar(v.id, { val: (typeof v.val === 'number' ? v.val : 0) + 1 }, { history: false })}>+</button>
-                      </div>
-                    ) : t === 'bool' ? (
-                      <div className="ve-bools">
-                        <button type="button" className={isTrueVal(v.val) ? 'on' : ''} onClick={() => store.updateVar(v.id, { val: true }, { history: false })}>true</button>
-                        <button type="button" className={!isTrueVal(v.val) ? 'on' : ''} onClick={() => store.updateVar(v.id, { val: false }, { history: false })}>false</button>
-                      </div>
-                    ) : (
-                      <input
-                        className="inp ve-val"
-                        value={String(v.val == null ? '' : v.val)}
-                        title="Начальное значение"
-                        placeholder="текст"
-                        onFocus={valFocus}
-                        onChange={(e) => store.updateVar(v.id, { val: e.target.value }, { history: false })}
-                        onBlur={valBlur}
-                      />
-                    )}
-                  </div>
-                  <div className="ve-use">{varUseText(store, v.id)}</div>
-                </div>
-              )}
+              {!folded && <div className="cgroup-body">{members.map((v) => varRow(v, g.id))}</div>}
             </div>
           );
         })}
       </div>
       {!!vars.length && (
         <div className="v-hint">
-          <b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). В режиме новеллы ноды не показываются как слайды: нода изменения применяет операцию и ведёт дальше, нода чтения считывает значение. Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов.
+          <b>Как пользоваться:</b> перетащите строку на холст — появится <b>нода переменной</b> (в инспекторе переключается «чтение / изменение»). Тяните связь от ноды переменной ко входу «переменная» у <b>развилки</b> — она перебьёт переменные в условиях исходов. Кнопка-булавка <b>закрепляет</b> переменную — она всегда видна в проигрывании.
         </div>
       )}
     </div>
   );
 }
 
+/** Выпадающий список групп переменных с поиском (параметр «Группа» в редакторе переменной). */
+function VarGroupCombo({ store, v }: { store: VetviStore; v: VetviVar }) {
+  const [openList, setOpenList] = useState(false);
+  const [q, setQ] = useState('');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  void store.revision; /* перерисовываться при изменении групп/переменной */
+  const groups = store.varGroups();
+  const current = v.groupId ? groups.find((g) => g.id === v.groupId) || null : null;
+
+  useEffect(() => {
+    if (!openList) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (!wrapRef.current || !(ev.target instanceof Node) || !wrapRef.current.contains(ev.target)) setOpenList(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [openList]);
+
+  const pick = (gid: string | null) => {
+    store.setVarGroup(v.id, gid, { label: gid ? 'Перенос переменной в группу' : 'Переменная без группы' });
+    setOpenList(false);
+  };
+
+  const nq = q.trim().toLowerCase();
+  const filtered = nq ? groups.filter((g) => String(g.name || '').toLowerCase().includes(nq)) : groups;
+
+  return (
+    <div className="cgcombo" ref={wrapRef}>
+      <button type="button" className="inp cgcombo-btn" title="Группа переменной" aria-label="Группа переменной" onClick={() => { setOpenList(!openList); setQ(''); }}>
+        <span className={current ? '' : 'placeholder'}>{current ? current.name : '— без группы —'}</span>
+        <Ic d={P_CHEV} size={11} />
+      </button>
+      {openList && (
+        <div className="cgcombo-pop">
+          <input
+            className="inp cgcombo-q"
+            autoFocus
+            placeholder="Поиск группы…"
+            aria-label="Поиск группы"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setOpenList(false); }}
+          />
+          <div className="cgcombo-list">
+            <button type="button" className={'cgcombo-it' + (!current ? ' on' : '')} onClick={() => pick(null)}>— без группы —</button>
+            {filtered.map((g) => (
+              <button key={g.id} type="button" className={'cgcombo-it' + (current && current.id === g.id ? ' on' : '')} onClick={() => pick(g.id)}>
+                <Ic d={P_FOLDER} size={11} />
+                <span>{g.name}</span>
+              </button>
+            ))}
+            {!filtered.length && <div className="cgcombo-empty">Группы не найдены</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function varUseText(store: VetviStore, vid: string): string {
   let nodes = 0;
   let conds = 0;
@@ -738,9 +949,6 @@ function varUseText(store: VetviStore, vid: string): string {
 }
 
 /* ── Персонажи ── */
-
-const P_USER_PLUS = '<circle cx="10" cy="8" r="3.4"/><path d="M3.5 19.5c1-3.2 3.6-4.9 6.5-4.9 1.6 0 3.1.5 4.3 1.4"/><path d="M17 13v6M14 16h6"/>';
-const P_FOLDER_PLUS = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>';
 
 function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; active: boolean; onFile: (cid: string, file: File | null) => void; onRecrop: (cid: string) => void }) {
   const chars = store.doc.chars || [];
@@ -989,12 +1197,13 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
         {ungrouped.map((c) => charRow(c, null))}
         {groups.map((g) => {
           const members = groupOf(g.id);
+          const folded = store.charGroupFolded(g.id);
           const gHint = dropHint?.kind === 'ghead' && dropHint.id === g.id ? dropHint.place : null;
           return (
             <div
               key={g.id}
               data-gid={g.id}
-              className={'cgroup' + (g.collapsed ? '' : ' open')
+              className={'cgroup' + (folded ? '' : ' open')
                 + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')
                 + (gHint === 'before' ? ' dnd-gap-above' : gHint === 'after' ? ' dnd-gap-below' : '')}
               onDragOver={(e) => {
@@ -1059,9 +1268,9 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                 )}
                 <span className="cgroup-cnt">{members.length} перс.</span>
                 <button type="button" className="v-del cgroup-del" title="Удалить группу — персонажи останутся без группы" onClick={() => store.deleteCharGroup(g.id)}><Ic d={P_X} size={12} /></button>
-                <button type="button" className="v-fold" title={g.collapsed ? 'Развернуть группу' : 'Свернуть группу'} onClick={() => store.toggleCharGroupCollapsed(g.id)}><Ic d={P_CHEV} size={12} /></button>
+                <button type="button" className="v-fold" title={folded ? 'Развернуть группу' : 'Свернуть группу — виден только у вас, не синхронизируется'} onClick={() => store.toggleCharGroupCollapsed(g.id)}><Ic d={P_CHEV} size={12} /></button>
               </div>
-              {!g.collapsed && <div className="cgroup-body">{members.map((c) => charRow(c, g.id))}</div>}
+              {!folded && <div className="cgroup-body">{members.map((c) => charRow(c, g.id))}</div>}
             </div>
           );
         })}

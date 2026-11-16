@@ -93,6 +93,7 @@ export function defaultDoc(): VetviDoc {
     edges: [],
     groups: [],
     vars: [],
+    varGroups: [],
     chars: [],
     charGroups: [],
     customTypes: [],

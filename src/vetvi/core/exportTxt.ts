@@ -7,6 +7,7 @@
 import { KIND_RU, MAX_DLG_DEPTH, STATUS_RU, TYPES } from './constants';
 import { countReplies, findReply } from './dialog';
 import { ensureDialog } from './factory';
+import { stripRtfx } from './rtfx';
 import type { VetviDoc, VetviNode, VetviReply } from './types';
 
 /* ── свои типы документа: id/name/color/icon (customTypes pass-through) ── */
@@ -107,7 +108,7 @@ function dlgExportText(doc: VetviDoc, n: VetviNode): string[] {
       let pad = '    ';
       for (let i = 0; i < depth; i++) pad += '  ';
       const name = r.speaker ? charNameOf(doc, r.speaker) : '(неизвестный)';
-      L.push(pad + '▸ ' + name + ': ' + (r.text || '(пусто)'));
+      L.push(pad + '▸ ' + name + ': ' + (stripRtfx(r.text || '') || '(пусто)'));
       const outs = doc.edges.filter((e) => e.from === n.id && e.fromReply === r.id);
       outs.forEach((e) => {
         const t = doc.nodes.find((x) => x.id === e.to);
@@ -222,7 +223,7 @@ export function buildTxtExport(doc: VetviDoc): string {
     if (a && a.type === 'dialog' && e.fromReply) {
       ensureDialog(a);
       const r = findReply(a.dialog!.replies, e.fromReply);
-      if (r) fromLabel = a.title + ' / «' + (r.text || '').slice(0, 30) + '»';
+      if (r) fromLabel = a.title + ' / «' + stripRtfx(r.text || '').slice(0, 30) + '»';
     }
     L.push(fromLabel + ' → ' + (b ? b.title : '?') + (e.label ? '  [' + e.label + ']' : '') + (e.pts && e.pts.length ? '  (изломов: ' + e.pts.length + ')' : ''));
   });

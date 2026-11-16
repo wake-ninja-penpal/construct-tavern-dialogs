@@ -20,6 +20,7 @@ import type { VetviStore } from './store';
 import type { MeasureSink } from './measure';
 import { ctxMenus } from './ctxMenus';
 import { noteBus } from './NoteModals';
+import { RtfxView } from './RtfxView';
 
 const STATUS_TITLE: Record<string, string> = { idea: 'Идея', draft: 'В работе', done: 'Готово' };
 
@@ -321,7 +322,7 @@ export function NodeCard(props: {
           )}
           <span className="t">
             <span className="speaker" style={{ color: speakerColor }}>{speakerName}:</span>
-            {String(r.text || '')}
+            <RtfxView text={String(r.text || '')} />
           </span>
           <button
             type="button"

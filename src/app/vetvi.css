@@ -1208,3 +1208,114 @@ body{overflow:hidden;background:var(--bg)}
   box-shadow:0 3px 10px rgba(0,0,0,.45)}
 .n-focus-chip .dot{width:7px;height:7px;border-radius:50%;flex:none}
 .n-focus-chip .nm{overflow:hidden;text-overflow:ellipsis}
+
+/* ══════════ группы переменных (аналог групп персонажей) ══════════ */
+.vargroup{border:1px solid #2b2f37;border-radius:12px;margin:8px 0;background:rgba(255,255,255,.015);overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.vargroup.drop-ok{border-color:var(--acc);box-shadow:inset 0 0 0 1px rgba(226,165,78,.25)}
+.vargroup-head{display:flex;align-items:center;gap:7px;padding:8px 9px;cursor:grab;background:rgba(255,255,255,.03);border-bottom:1px solid transparent;user-select:none}
+.vargroup.open .vargroup-head{border-bottom-color:#2b2f37}
+.vargroup-head:active{cursor:grabbing}
+.vargroup-head.drop-ok{box-shadow:inset 0 0 0 1.5px var(--acc);border-radius:10px}
+.vargroup .cgroup-grip{flex:none;color:var(--tx3);display:flex}
+.vargroup .cgroup-name{flex:1;min-width:0;font-weight:700;font-size:12px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vargroup .cgroup-cnt{flex:none;font-size:10.5px;color:var(--tx3)}
+.vargroup .cgroup-del{opacity:.7}
+.vargroup .cgroup-del:hover{opacity:1;color:var(--bad);border-color:rgba(207,107,90,.45)}
+.vargroup .cgroup-body{padding:6px}
+.vargroup:not(.open) .v-fold{transform:rotate(-90deg)}
+.vargroup.open .v-fold{color:var(--acc)}
+.vargroup,.cgroup{transition:margin .16s ease}
+.vargroup.dnd-gap-above{box-shadow:0 -8px 0 -6px var(--acc)}
+.vargroup.dnd-gap-below{box-shadow:0 8px 0 -6px var(--acc)}
+
+/* закрепление переменной (булавка) — всегда показывать в проигрывании */
+.v-pin{flex:0 0 22px;width:22px;height:28px;border:none;background:none;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:color .15s,background .15s;padding:0}
+.v-pin:hover{color:var(--tx);background:#262b33}
+.v-pin.on{color:var(--acc)}
+.v-pin.on:hover{color:var(--acc);background:#332c20}
+.pl-var.pin i::after{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--acc);margin-left:5px;vertical-align:1px;opacity:.85}
+
+/* ══════════ панель форматирования реплики (Ж/К/Цвет + эффекты) ══════════ */
+.dlg-fmt{display:flex;align-items:center;gap:3px;flex-wrap:wrap;position:relative;margin:0 0 6px;padding:4px;border:1px solid #363b45;border-radius:8px;background:rgba(255,255,255,.02);user-select:none}
+.rt-btn{flex:none;height:24px;min-width:24px;padding:0 6px;border:1px solid #363b45;border-radius:6px;background:#1f232b;color:var(--tx2);font:700 12px var(--body);cursor:pointer;display:flex;align-items:center;gap:3px;justify-content:center;transition:.15s}
+.rt-btn:hover{color:var(--tx);border-color:#4a505c;background:#262b33}
+.rt-btn.on{color:var(--acc);border-color:#54462a;background:#332c20}
+.rt-btn.c{position:relative}
+.rt-btn .rt-cbar{position:absolute;left:5px;right:5px;bottom:2px;height:3px;border-radius:2px;background:linear-gradient(90deg,#e2a54e,#9cb878,#c9857a,#7fb5a2);pointer-events:none}
+.rt-sep{width:1px;height:16px;background:#363b45;margin:0 2px;flex:none}
+.rt-pop{position:absolute;top:calc(100% + 6px);left:4px;z-index:30;background:#1f232b;border:1px solid #3a4049;border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.5);padding:8px;display:flex;gap:4px;flex-wrap:wrap;animation:mIn .16s ease}
+.rt-colors{max-width:236px}
+.rt-swatch{width:20px;height:20px;border-radius:6px;border:1px solid rgba(255,255,255,.18);cursor:pointer;transition:transform .12s;padding:0}
+.rt-swatch:hover{transform:scale(1.15);border-color:rgba(255,255,255,.5)}
+.rt-swatch-auto{background:#262b33;color:var(--tx2);font:700 12px var(--body);display:flex;align-items:center;justify-content:center}
+.rt-fxlist{flex-direction:column;gap:2px;min-width:300px;max-width:360px;padding:6px}
+.rt-fx-it{display:flex;flex-direction:column;gap:2px;border:none;background:none;text-align:left;padding:6px 8px;border-radius:8px;cursor:pointer;transition:background .13s}
+.rt-fx-it:hover{background:rgba(226,165,78,.09)}
+.rt-fx-lbl{font:700 12.5px var(--body);color:var(--tx)}
+.rt-fx-hint{font:400 10.5px var(--body);color:var(--tx3);display:flex;flex-direction:column;gap:1px}
+.rt-fx-hint code{font:600 10px ui-monospace,monospace;color:#b3a06d;background:rgba(226,165,78,.08);border-radius:4px;padding:1px 5px;width:max-content}
+.rt-fx-note{font:400 10px var(--body);color:var(--tx3);border-top:1px solid #2e333c;margin-top:4px;padding-top:6px;line-height:1.45}
+
+/* превью эффекта в списке */
+.rtfx-prev-shake .rt-fx-lbl{animation:rtfxShake .34s linear infinite}
+.rtfx-prev-jitter .rt-fx-lbl{animation:rtfxJitter .8s linear infinite}
+.rtfx-prev-wave .rt-fx-lbl{animation:rtfxWave 1.15s ease-in-out infinite}
+.rtfx-prev-flicker .rt-fx-lbl{animation:rtfxFlicker 2.1s ease-in-out infinite}
+
+/* ══════════ текстовые эффекты (rtfx) — поле реплики, ноды, проигрыватель ══════════ */
+.rtfx{white-space:pre-wrap}
+.rtfx .rt-b{font-weight:800}
+.rtfx .rt-i{font-style:italic}
+.rtfx-fx{display:inline-block}
+.rtfx-ch{display:inline-block;white-space:pre}
+
+/* тряска всего слова — агрессия */
+@keyframes rtfxShake{
+  0%{transform:translate(0,0) rotate(0)}
+  12.5%{transform:translate(1.7px,-1.2px) rotate(.9deg)}
+  25%{transform:translate(-1.4px,1px) rotate(-.8deg)}
+  37.5%{transform:translate(1.5px,1.3px) rotate(.7deg)}
+  50%{transform:translate(-1.7px,-.9px) rotate(-1deg)}
+  62.5%{transform:translate(1.2px,1.5px) rotate(.8deg)}
+  75%{transform:translate(-1.3px,-1.4px) rotate(-.7deg)}
+  87.5%{transform:translate(1.6px,-1.1px) rotate(1deg)}
+  100%{transform:translate(0,0) rotate(0)}
+}
+.rtfx-shake{animation:rtfxShake .34s linear infinite;color:#e8b26a}
+
+/* мелкая дрожь каждой буквы с разной амплитудой — страх (по-буквенно:
+   фаза через --i, амплитуда через --a — у каждой буквы свои) */
+@keyframes rtfxJitter{
+  0%{transform:translate(0,0)}
+  20%{transform:translate(calc(var(--a,0.7)*1.1px),calc(var(--a,0.7)*-0.9px))}
+  40%{transform:translate(calc(var(--a,0.7)*-0.8px),calc(var(--a,0.7)*1px))}
+  60%{transform:translate(calc(var(--a,0.7)*0.9px),calc(var(--a,0.7)*0.7px))}
+  80%{transform:translate(calc(var(--a,0.7)*-1px),calc(var(--a,0.7)*-0.8px))}
+  100%{transform:translate(0,0)}
+}
+.rtfx-jitter .rtfx-ch{animation:rtfxJitter .58s linear infinite;animation-delay:calc(var(--i,0)*-.13s);color:#a8c4d6}
+
+/* волнообразное искажение — растягивание слова во фразе (по-буквенно) */
+@keyframes rtfxWave{
+  0%{transform:translateY(0)}
+  25%{transform:translateY(calc(var(--a,0.7)*-2.6px))}
+  50%{transform:translateY(0)}
+  75%{transform:translateY(calc(var(--a,0.7)*2.6px))}
+  100%{transform:translateY(0)}
+}
+.rtfx-wave .rtfx-ch{animation:rtfxWave 1.1s ease-in-out infinite;animation-delay:calc(var(--i,0)*-.11s);color:#c9d8a8}
+
+/* мерцание прозрачности — призрачный голос */
+@keyframes rtfxFlicker{
+  0%,100%{opacity:1}
+  18%{opacity:.42}
+  32%{opacity:.86}
+  46%{opacity:.34}
+  58%{opacity:.92}
+  74%{opacity:.5}
+}
+.rtfx-flicker{animation:rtfxFlicker 2.4s ease-in-out infinite;color:#cfd6de}
+
+/* на нодах холста эффекты видны, но сдержанно (не отвлекают от правки) */
+.node .rtfx-shake{color:inherit}
+.node .rtfx-jitter .rtfx-ch,.node .rtfx-wave .rtfx-ch{color:inherit}

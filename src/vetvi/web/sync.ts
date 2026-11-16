@@ -136,6 +136,7 @@ function canonDocJson(d: unknown): string {
     customTypes: canonVal(doc.customTypes || []),
     listHidden: canonVal(doc.listHidden || {}),
     vars: canonVal(doc.vars || []),
+    varGroups: canonVal((doc as { varGroups?: unknown[] }).varGroups || []),
     chars: canonVal(doc.chars || []),
     charGroups: canonVal((doc as { charGroups?: unknown[] }).charGroups || []),
     palette: canonVal(doc.palette || []),
@@ -586,6 +587,7 @@ export class SyncClient {
     const sMeta = (server.meta || {}) as Record<string, unknown>;
     const lMeta = (local.meta || {}) as Record<string, unknown>;
     const vars = byIdUnion((server.vars || []) as { id?: string }[], (local.vars || []) as { id?: string }[]);
+    const varGroups = byIdUnion((server.varGroups || []) as { id?: string }[], (local.varGroups || []) as { id?: string }[]);
     const chars = byIdUnion((server.chars || []) as { id?: string }[], (local.chars || []) as { id?: string }[]);
     const charGroups = byIdUnion((server.charGroups || []) as { id?: string }[], (local.charGroups || []) as { id?: string }[]);
     const merged: SyncDoc = {
@@ -598,6 +600,7 @@ export class SyncClient {
       customTypes: result.customTypes,
       listHidden: result.listHidden || {},
       vars,
+      varGroups,
       chars,
       charGroups,
       palette: (Array.isArray(server.palette) ? server.palette : (Array.isArray(local.palette) ? local.palette : [])) as string[],
@@ -840,15 +843,18 @@ export class SyncClient {
 
   /* ═══ фокус участников ═══ */
 
-  focusTrack(id: string): void {
-    if (!id) return;
-    this.myFocus = id;
+  /** Транслировать «работаю здесь»: id выделенной ноды или null — выделения нет
+   *  (клик по пустому месту холста). null сервер воспринимает как «снять метку»:
+   *  удаляет фокус участника и рассылает обновлённый список — плашка
+   *  «работает здесь» на чужой стороне исчезает. */
+  focusTrack(id: string | null): void {
+    this.myFocus = id || null;
     this.focusEmit();
   }
 
   focusEmit(): void {
-    const id = this.myFocus;
-    if (!this.enabled || !this.sock || !this.sock.connected || !id) return;
+    if (!this.enabled || !this.sock || !this.sock.connected) return;
+    const id = this.myFocus || null;
     if (this.focusSent === id) return;
     this.focusSent = id;
     try { this.sock.emit('vetvi:focus', { roomId: this.room, nodeId: id }); } catch { /* соединение умерло */ }

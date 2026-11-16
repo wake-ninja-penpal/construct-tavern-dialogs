@@ -187,6 +187,7 @@ export function serializeDoc(doc: VetviDoc, vp: VetviViewport, bend: string): st
     groups: doc.groups,
     listHidden: doc.listHidden && typeof doc.listHidden === 'object' ? doc.listHidden : {},
     vars: Array.isArray(doc.vars) ? doc.vars : [],
+    varGroups: Array.isArray(doc.varGroups) ? doc.varGroups : [],
     chars: Array.isArray(doc.chars) ? doc.chars : [],
     charGroups: Array.isArray(doc.charGroups) ? doc.charGroups : [],
     palette: Array.isArray(doc.palette) ? doc.palette : [],

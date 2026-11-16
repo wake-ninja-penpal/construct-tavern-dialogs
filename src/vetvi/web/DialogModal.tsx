@@ -12,8 +12,10 @@
  * подсветка целевой реплики (.dlg-flash) с автопрокруткой.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { PALETTE_COLORS } from '@/vetvi/core/constants';
+import { RTFX_EFFECTS, rtfxWrap } from '@/vetvi/core/rtfx';
 import type { VetviChar, VetviReply } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
 
@@ -95,6 +97,108 @@ function taBlurGrow(ta: HTMLTextAreaElement) {
   }, 260);
 }
 
+/* ═══ панель форматирования реплики (Ж/К/Цвет + эффекты) ═══
+   Появляется над полем текста, пока оно активно (жёлтая рамка). Кнопки НЕ
+   забирают фокус (preventDefault на mousedown) — курсор в поле жив, эффект
+   применяется к слову под курсором или к выделению. */
+
+function ReplyFmtBar(props: {
+  apply: (kind: 'b' | 'i' | 'c' | 'fx', fxId: string | null, colorHex: string | null) => void;
+}) {
+  const { apply } = props;
+  const [pop, setPop] = useState<'' | 'color' | 'fx'>('');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!pop) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (!wrapRef.current || !(ev.target instanceof Node) || !wrapRef.current.contains(ev.target)) setPop('');
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [pop]);
+
+  const noFocus = (e: React.MouseEvent) => e.preventDefault(); /* фокус остаётся в поле */
+
+  return (
+    <div className="dlg-fmt" ref={wrapRef} onMouseDown={noFocus}>
+      <button
+        type="button"
+        className="rt-btn b"
+        title="Жирность (маркер **текст**)
+Можно комбинировать с эффектами"
+        aria-label="Жирность"
+        onClick={() => apply('b', null, null)}
+      >Ж</button>
+      <button
+        type="button"
+        className="rt-btn i"
+        title="Курсив (маркер __текст__)
+Можно комбинировать с эффектами"
+        aria-label="Курсив"
+        onClick={() => apply('i', null, null)}
+      >К</button>
+      <span className="rt-sep" />
+      <button
+        type="button"
+        className="rt-btn c"
+        title="Цвет слова (маркер {#hex}текст{/})
+Можно комбинировать с эффектами"
+        aria-label="Цвет"
+        onClick={() => setPop(pop === 'color' ? '' : 'color')}
+      >Ц<i className="rt-cbar" /></button>
+      <button
+        type="button"
+        className={'rt-btn fx' + (pop === 'fx' ? ' on' : '')}
+        title="Эффекты: применяются к слову под курсором.
+Эффекты между собой не комбинируются"
+        onClick={() => setPop(pop === 'fx' ? '' : 'fx')}
+      >Эффекты<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
+      {pop === 'color' && (
+        <div className="rt-pop rt-colors" role="menu" aria-label="Цвет слова">
+          {PALETTE_COLORS.map((col) => (
+            <button
+              key={col}
+              type="button"
+              className="rt-swatch"
+              style={{ background: col }}
+              title={col}
+              aria-label={'Цвет ' + col}
+              onClick={() => { apply('c', null, col); setPop(''); }}
+            />
+          ))}
+          <button
+            type="button"
+            className="rt-swatch rt-swatch-auto"
+            title="Убрать цвет"
+            aria-label="Убрать цвет"
+            onClick={() => { apply('c', null, ''); setPop(''); }}
+          >×</button>
+        </div>
+      )}
+      {pop === 'fx' && (
+        <div className="rt-pop rt-fxlist" role="menu" aria-label="Эффекты текста">
+          {RTFX_EFFECTS.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              className={'rt-fx-it rtfx-prev-' + e.id}
+              title={e.hint}
+              onClick={() => { apply('fx', e.id, null); setPop(''); }}
+            >
+              <span className={'rt-fx-lbl rtfx-fx ' + e.css}>{e.label}</span>
+              <span className="rt-fx-hint">
+                <code>{e.open}слово{e.close}</code>
+                {e.hint}
+              </span>
+            </button>
+          ))}
+          <div className="rt-fx-note">Эффект применяется к слову под курсором (или к выделению). Повторный выбор снимает эффект; эффекты между собой не комбинируются, но сочетаются с жирностью/курсивом/цветом. В поле эффект виден маркерами — вручную их тоже можно ввести.</div>
+        </div>
+      )}
+    </div>
+  );}
+
 /* ═══ перетаскивание реплик — порядок среди соседей одного уровня (dlgDragRid оригинала 4887–4949) ═══ */
 
 let dlgDragRid: string | null = null;
@@ -159,6 +263,30 @@ export function DialogModal({ store }: { store: VetviStore }) {
   const editPreRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   void store.revision;
+
+  /* активное поле реплики: показывает панель Ж/К/Цвет + эффекты над текстом.
+     taRef — само поле (курсор), editRid — какая реплика редактируется */
+  const [editRid, setEditRid] = useState<string | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /** Применение разметки (Ж/К/Цвет/эффект) к слову под курсором активного поля. */
+  const applyFmt = (kind: 'b' | 'i' | 'c' | 'fx', fxId: string | null, colorHex: string | null) => {
+    const ta = taRef.current;
+    if (!ta || !node) return;
+    const s = ta.selectionStart ?? 0;
+    const epos = ta.selectionEnd ?? s;
+    const res = rtfxWrap(ta.value, s, epos, kind, fxId, colorHex);
+    if (res.text === ta.value) return;
+    store.updateReply(node.id, editRid as string, { text: res.text } as Partial<VetviReply>, { history: false });
+    taGrow(ta);
+    /* курсор обратно в поле: контролируемое значение доедет после рендера */
+    window.setTimeout(() => {
+      const t = taRef.current;
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(res.start, res.end);
+    }, 0);
+  };
 
   useEffect(() => {
     if (store.dialogEdit) editPreRef.current = store.beginEdit();
@@ -288,6 +416,7 @@ export function DialogModal({ store }: { store: VetviStore }) {
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
+        {editRid === r.id && <ReplyFmtBar apply={applyFmt} />}
         <div className="dlg-reply-row-ed">
           <select
             data-f="speaker"
@@ -312,6 +441,8 @@ export function DialogModal({ store }: { store: VetviStore }) {
             onFocus={(e) => {
               editPreRef.current = editPreRef.current || store.beginEdit();
               const ta = e.currentTarget;
+              taRef.current = ta;
+              setEditRid(r.id);
               ta.classList.add('grow');
               taFocusGrow(ta);
             }}
@@ -321,6 +452,8 @@ export function DialogModal({ store }: { store: VetviStore }) {
             }}
             onBlur={(e) => {
               taBlurGrow(e.currentTarget); /* .grow снимается по завершении схлопывания */
+              if (taRef.current === e.currentTarget) taRef.current = null;
+              setEditRid((cur) => (cur === r.id ? null : cur));
               const pre = editPreRef.current;
               if (pre) { store.commitReplyEdit(pre); editPreRef.current = store.beginEdit(); }
             }}

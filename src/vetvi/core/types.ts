@@ -116,6 +116,17 @@ export interface VetviGroup {
 export interface VetviVar {
   id: string;
   name: string;
+  /** Закреплена ли переменная — всегда выводится в проигрывании (даже вне цепочки). */
+  pinned?: boolean;
+  /** Идентификатор группы переменных (null/undefined — без группы). */
+  groupId?: string | null;
+  [k: string]: unknown;
+}
+
+/** Группа переменных (для сортировки списка, аналог групп персонажей). */
+export interface VetviVarGroup {
+  id: string;
+  name: string;
   [k: string]: unknown;
 }
 
@@ -158,6 +169,7 @@ export interface VetviDoc {
   edges: VetviEdge[];
   groups: VetviGroup[];
   vars?: VetviVar[];
+  varGroups?: VetviVarGroup[];
   chars?: VetviChar[];
   charGroups?: VetviCharGroup[];
   customTypes?: unknown[];
