@@ -220,8 +220,22 @@ export class VetviStore {
   }
 
   revision = 0;
+  /* ── каналы перерисовки (оптимизация) ──
+   * docRev — изменилось содержимое документа; uiRev — UI-состояние (выделение,
+   * модалки, тосты); geomRev — «геометрические» кадры (перетаскивание, панорама,
+   * анимации). Корневой компонент подписан на doc+ui и НЕАТИВЕН к geom-кадрам:
+   * во время жестов перерисовывается только холст. */
+  docRev = 0;
+  uiRev = 0;
+  geomRev = 0;
+  /** Версия «ссылочных» данных карточек: персонажи/переменные/свои типы/палитра/связи. */
+  refVer = 0;
   saveState: SaveState = 'idle';
   lastSavedAt = 0;
+
+  getDocRev = (): number => this.docRev;
+  getUiRev = (): number => this.uiRev;
+  getGeomRev = (): number => this.geomRev;
 
   /** Последняя позиция курсора (lastPtr оригинала) — для showLockTip вне жестов. */
   lastPtr: { x: number; y: number } = { x: 0, y: 0 };
@@ -233,6 +247,15 @@ export class VetviStore {
   private listeners = new Set<Listener>();
   private saveT: ReturnType<typeof setTimeout> | null = null;
   private toastSeq = 1;
+  private notifyScheduled = false;
+  private notifyFallbackT: ReturnType<typeof setTimeout> | null = null;
+  private viewSaveT: ReturnType<typeof setTimeout> | null = null;
+
+  /* ── сигнатуры объектов (для memo-карточек при мутабельном документе) ── */
+  private sigDocRef: VetviDoc | null = null;
+  private sigNodes = new Map<string, string>();
+  private sigChars = new Map<string, string>();
+  private sigAux = '';
 
   constructor() {
     const isClient = typeof window !== 'undefined';
@@ -255,9 +278,98 @@ export class VetviStore {
 
   getSnapshot = (): number => this.revision;
 
-  emit(): void {
+  /** Эмит с каналом: 'all' (по умолчанию) трогает все счётчики — поведение как раньше;
+   *  'doc'/'ui'/'geom' — точечные кадры. Подписчики (useSyncExternalStore) перерисовываются
+   *  только если изменился ИХ счётчик. */
+  emit(ch: 'all' | 'doc' | 'ui' | 'geom' = 'all'): void {
     this.revision++;
-    this.listeners.forEach((l) => l());
+    if (ch === 'all' || ch === 'doc') this.docRev++;
+    if (ch === 'all' || ch === 'ui') this.uiRev++;
+    if (ch === 'all' || ch === 'geom') this.geomRev++;
+    this.scheduleNotify();
+  }
+
+  /** Одно уведомление подписчиков на кадр: высокочастотные пути (перетаскивание нод,
+   *  панорама, зум колесом 1000+ событий/сек, печать) больше не создают очередь
+   *  рендеров — все эмитты одного кадра сливаются в один проход React.
+   *  rAF + fallback-таймер: в скрытой вкладке rAF замирает. */
+  private scheduleNotify(): void {
+    if (this.notifyScheduled) return;
+    this.notifyScheduled = true;
+    const notify = () => {
+      if (!this.notifyScheduled) return;
+      this.notifyScheduled = false;
+      if (this.notifyFallbackT) { clearTimeout(this.notifyFallbackT); this.notifyFallbackT = null; }
+      this.listeners.forEach((l) => l());
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(notify);
+      this.notifyFallbackT = setTimeout(notify, 50);
+    } else {
+      queueMicrotask(notify);
+    }
+  }
+
+  /**
+   * Сигнатуры объектов документа: после каждой мутации нода/персонаж с изменившимся
+   * содержимым ЗАМЕНЯЕТСЯ новым объектом ({...n}). Мутабельный документ остаётся
+   * правдой, но React.memo карточек получает честный сигнал «данные изменились»
+   * (сравнение по ссылке объекта). Дешевле полной перерисовки всех карточек на
+   * каждое движение на порядки.
+   */
+  private refreshSigs(): void {
+    const doc = this.doc;
+    if (this.sigDocRef !== doc) {
+      this.sigDocRef = doc;
+      this.sigNodes.clear();
+      this.sigChars.clear();
+      this.sigAux = '';
+    }
+    const nodes = doc.nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const sig = JSON.stringify(n);
+      if (this.sigNodes.get(n.id) !== sig) {
+        this.sigNodes.set(n.id, sig);
+        nodes[i] = { ...n };
+      }
+    }
+    if (this.sigNodes.size > nodes.length + 32) {
+      const alive = new Set(nodes.map((x) => x.id));
+      for (const k of Array.from(this.sigNodes.keys())) if (!alive.has(k)) this.sigNodes.delete(k);
+    }
+    const chars = Array.isArray(doc.chars) ? doc.chars : [];
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i];
+      const sig = JSON.stringify(c);
+      if (this.sigChars.get(c.id) !== sig) {
+        this.sigChars.set(c.id, sig);
+        chars[i] = { ...c };
+      }
+    }
+    if (this.sigChars.size > chars.length + 32) {
+      const aliveC = new Set(chars.map((x) => x.id));
+      for (const k of Array.from(this.sigChars.keys())) if (!aliveC.has(k)) this.sigChars.delete(k);
+    }
+    /* ссылочные данные карточек: переменные/группы/свои типы/палитра + состав связей
+       (pts исключены — меняются только жестами с явной заменой объекта связи) */
+    const aux = JSON.stringify([
+      doc.vars || null,
+      doc.varGroups || null,
+      doc.customTypes || null,
+      doc.palette || null,
+      (doc.edges || []).map((e) => [
+        e.id, e.from, e.to, e.kind || null, e.label ?? null,
+        (e as unknown as { cond?: unknown }).cond ?? null,
+        e.fromReply ?? null, e.fromOut ?? null, (e as unknown as { tin?: unknown }).tin ?? null,
+        (e as unknown as { lt?: number | null }).lt ?? null, (e as unknown as { lp?: number | null }).lp ?? null,
+        e.bd ? e.bd.dy : null,
+      ]),
+    ]);
+    if (aux !== this.sigAux) {
+      this.sigAux = aux;
+      this.refVer++;
+    }
   }
 
   /* ── журналы действий ── */
@@ -406,6 +518,9 @@ export class VetviStore {
     this.noteEditor();
     if (this.syncDiff && this.syncDiff.kind === 'local-server') this.syncDiff = null;
     this.scheduleSave();
+    /* прямые мутации между beginEdit и commitEdit могли изменить ноды —
+       обновить сигнатуры (замена объектов) до перерисовки memo-карточек */
+    this.refreshSigs();
     this.emit();
   }
 
@@ -442,15 +557,16 @@ export class VetviStore {
   }
 
   /** Мутация с записью в историю. fn меняет this.doc напрямую. */
-  mutate(fn: (doc: VetviDoc) => void, opts?: { history?: boolean; label?: string }): void {
+  mutate(fn: (doc: VetviDoc) => void, opts?: { history?: boolean; label?: string; ch?: 'all' | 'doc' | 'ui' | 'geom' }): void {
     if (!opts || opts.history !== false) this.pushHistory(opts?.label);
     fn(this.doc);
+    this.refreshSigs();
     this.noteEditor();
     /* правка после входа в комнату: локальная копия начинает следовать за серверной
        версией — блок «данные отличаются» (local-server) больше не актуален */
     if (this.syncDiff && this.syncDiff.kind === 'local-server') this.syncDiff = null;
     this.scheduleSave();
-    this.emit();
+    this.emit(opts?.ch || 'all');
   }
 
   /** Одноразовое «ручное» действие без diff (переименование проекта и т.п.). */
@@ -743,7 +859,7 @@ export class VetviStore {
     return n;
   }
 
-  updateNode(id: string, patch: Partial<VetviNode>, opts?: { history?: boolean; label?: string }): void {
+  updateNode(id: string, patch: Partial<VetviNode>, opts?: { history?: boolean; label?: string; ch?: 'all' | 'doc' | 'ui' | 'geom' }): void {
     this.mutate((doc) => {
       const n = doc.nodes.find((x) => x.id === id);
       if (n) Object.assign(n, patch);
@@ -767,7 +883,7 @@ export class VetviStore {
   }
 
   setDlgWidth(id: string, w: number): void {
-    this.updateNode(id, { dlgWidth: clamp(Math.round(w), 216, 1200) }, { history: false });
+    this.updateNode(id, { dlgWidth: clamp(Math.round(w), 216, 1200) }, { history: false, ch: 'geom' });
     this.touchPos('n:' + id);
     const n = this.nodeById(id);
     if (n && this.sync) this.sync.liveDlg(n);
@@ -829,14 +945,16 @@ export class VetviStore {
   dragMoveBy(dx: number, dy: number): void {
     if (!dx && !dy) return;
     this.dragMoved = true;
+    const nodes = this.doc.nodes;
     for (const id of this.sel) {
-      const n = this.doc.nodes.find((x) => x.id === id);
-      if (!n) continue;
-      n.x += dx;
-      n.y += dy;
+      const i = nodes.findIndex((x) => x.id === id);
+      if (i < 0) continue;
+      const n = nodes[i];
+      /* новый объект — честный сигнал перерисовки для memo-карточки */
+      nodes[i] = { ...n, x: n.x + dx, y: n.y + dy };
       this.touchPos('n:' + id);
     }
-    this.emit();
+    this.emit('geom');
     if (this.sync) this.sync.liveDrag({ ids: this.sel });
   }
 
@@ -846,11 +964,12 @@ export class VetviStore {
       this.dragStartSnapshot = null;
       this.dragMoved = false;
       if (this.snapOn) {
+        const nodes = this.doc.nodes;
         for (const id of this.sel) {
-          const n = this.doc.nodes.find((x) => x.id === id);
-          if (!n) continue;
-          n.x = snapVal(n.x, true);
-          n.y = snapVal(n.y, true);
+          const i = nodes.findIndex((x) => x.id === id);
+          if (i < 0) continue;
+          const n = nodes[i];
+          nodes[i] = { ...n, x: snapVal(n.x, true), y: snapVal(n.y, true) };
         }
       }
       this.flushPendingLog();
@@ -1075,12 +1194,16 @@ export class VetviStore {
   }
 
   moveWaypointLive(id: string, index: number, x: number, y: number): void {
-    const e = this.doc.edges.find((x2) => x2.id === id);
-    if (!e || !Array.isArray(e.pts) || !e.pts[index]) return;
-    e.pts[index] = { x: Math.round(x), y: Math.round(y) };
+    const edges = this.doc.edges;
+    const i = edges.findIndex((x2) => x2.id === id);
+    if (i < 0) return;
+    const e = edges[i];
+    if (!Array.isArray(e.pts) || !e.pts[index]) return;
+    /* новый массив + новый объект связи — сигнал пересборки геометрии */
+    edges[i] = { ...e, pts: e.pts.map((p, pi) => (pi === index ? { x: Math.round(x), y: Math.round(y) } : p)) };
     this.touchPos('e:' + id);
-    this.emit();
-    if (this.sync) this.sync.livePts(e);
+    this.emit('geom');
+    if (this.sync) this.sync.livePts(edges[i]);
   }
 
   /** Старые снимки: ноды «Персонаж» → записи списка персонажей (migrateCharNodesInPlace). */
@@ -1144,11 +1267,13 @@ export class VetviStore {
   }
 
   bridgeDragLive(id: string, dl: number, dy: number, dr: number): void {
-    const e = this.doc.edges.find((x) => x.id === id);
-    if (!e) return;
-    e.bd = { dl: Math.round(dl), dy: Math.round(dy), dr: Math.round(dr) };
+    const edges = this.doc.edges;
+    const i = edges.findIndex((x2) => x2.id === id);
+    if (i < 0) return;
+    const e = edges[i];
+    edges[i] = { ...e, bd: { dl: Math.round(dl), dy: Math.round(dy), dr: Math.round(dr) } };
     this.touchPos('e:' + id);
-    this.emit();
+    this.emit('geom');
   }
 
   bridgeDragEnd(pre: string): void {
@@ -1465,19 +1590,32 @@ export class VetviStore {
       const k = Math.min(1, (t - t0) / dur);
       const e2 = 1 - Math.pow(1 - k, 3);
       for (const g of targets) {
-        g.n.x = g.fromX + (g.toX - g.fromX) * e2;
-        g.n.y = g.fromY + (g.toY - g.fromY) * e2;
+        this.setNodePos(g.n.id, g.fromX + (g.toX - g.fromX) * e2, g.fromY + (g.toY - g.fromY) * e2);
       }
-      this.emit();
+      this.emit('geom');
       if (k < 1) {
         requestAnimationFrame(step);
       } else {
         this.busyAnim = false;
         this.scheduleSave();
-        this.emit();
+        this.emit('all');
       }
     };
     requestAnimationFrame(step);
+  }
+
+  /**
+   * Позиция ноды без истории (жесты/анимация/перенос дубликата): замена объекта
+   * ноды — сигнал перерисовки memo-карточки. Без эмита (жест эмитит один раз за кадр).
+   */
+  setNodePos(id: string, x: number, y: number): void {
+    const nodes = this.doc.nodes;
+    const i = nodes.findIndex((x2) => x2.id === id);
+    if (i < 0) return;
+    const n = nodes[i];
+    if (n.x === x && n.y === y) return;
+    nodes[i] = { ...n, x, y };
+    this.touchPos('n:' + id);
   }
 
 
@@ -2136,49 +2274,51 @@ export class VetviStore {
     this.selGroups.clear();
     this.commitEdit(pre, deep ? 'Разбивка диалога на все реплики' : 'Разбивка диалога на реплики');
     this.emit(); /* ноды видимы — можно измерить реальные ширины (renderAll, 7512) */
-    /* раскладка ряда и вытеснение соседей — после перерисовки (7513–7560) */
+    /* раскладка ряда и вытеснение соседей — после перерисовки (7513–7560).
+       Через mutate: замена объектов нод (сигнатуры) → memo-карточки честно
+       перерисуются на новые позиции. */
     setTimeout(() => {
-      let rx = baseX, ry = baseY;
-      if (this.snapOn) { rx = Math.round(rx / GRID) * GRID; ry = Math.round(ry / GRID) * GRID; }
-      const rowNodes: VetviNode[] = [];
-      for (const cid of createdIds) {
-        const cn = this.nodeById(cid);
-        if (!cn) continue;
-        const w = this.dimsOf(cid).w;
-        cn.x = Math.round(rx);
-        cn.y = Math.round(ry);
-        rx += w + 56;
-        rowNodes.push(cn);
-      }
-      const anyVisible = rowNodes.length > 0;
-      if (anyVisible) {
-        const pad = 18;
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const c of rowNodes) {
-          const d = this.dimsOf(c.id);
-          const w = d.w > 0 ? d.w : NODE_W;
-          const h = d.h > 0 ? d.h : 150;
-          minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x + w);
-          minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y + h);
+      this.mutate(() => {
+        let rx = baseX, ry = baseY;
+        if (this.snapOn) { rx = Math.round(rx / GRID) * GRID; ry = Math.round(ry / GRID) * GRID; }
+        const rowNodes: VetviNode[] = [];
+        for (const cid of createdIds) {
+          const cn = this.nodeById(cid);
+          if (!cn) continue;
+          const w = this.dimsOf(cid).w;
+          cn.x = Math.round(rx);
+          cn.y = Math.round(ry);
+          rx += w + 56;
+          rowNodes.push(cn);
         }
-        minX -= pad; maxX += pad; minY -= pad; maxY += pad;
-        for (const m of this.doc.nodes) {
-          if (createdIds.includes(m.id)) continue;
-          if (collapsedAncestorOf(this.doc, m.id)) continue;
-          const d = this.dimsOf(m.id);
-          const w = d.w > 0 ? d.w : NODE_W;
-          const h = d.h > 0 ? d.h : 150;
-          if (m.x + w > minX && m.x < maxX && m.y + h > minY && m.y < maxY) {
-            /* минимальный сдвиг по вертикали из полосы: вверх или вниз — что ближе */
-            const up = m.y + h - minY;
-            const down = maxY - m.y;
-            m.y = Math.round(m.y + ((up < down) ? -up : down));
+        const anyVisible = rowNodes.length > 0;
+        if (anyVisible) {
+          const pad = 18;
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const c of rowNodes) {
+            const d = this.dimsOf(c.id);
+            const w = d.w > 0 ? d.w : NODE_W;
+            const h = d.h > 0 ? d.h : 150;
+            minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x + w);
+            minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y + h);
           }
+          minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+          for (const m of this.doc.nodes) {
+            if (createdIds.includes(m.id)) continue;
+            if (collapsedAncestorOf(this.doc, m.id)) continue;
+            const d = this.dimsOf(m.id);
+            const w = d.w > 0 ? d.w : NODE_W;
+            const h = d.h > 0 ? d.h : 150;
+            if (m.x + w > minX && m.x < maxX && m.y + h > minY && m.y < maxY) {
+              /* минимальный сдвиг по вертикали из полосы: вверх или вниз — что ближе */
+              const up = m.y + h - minY;
+              const down = maxY - m.y;
+              m.y = Math.round(m.y + ((up < down) ? -up : down));
+            }
+          }
+          this.resolveOverlaps(new Set(createdIds));
         }
-        this.resolveOverlaps(new Set(createdIds));
-      }
-      this.scheduleSave();
-      this.emit();
+      }, { history: false, ch: 'geom' });
       this.toast('Диалог разбит на ' + createdIds.length + ' нод' + (deep ? ' — по одной на каждую реплику' : ' — стрелки реплик сохранены') + (gS ? ' (внутри цепочки)' : ''));
     }, 0);
   }
@@ -2356,11 +2496,12 @@ export class VetviStore {
     const newOrder = rest.slice(0, idx).concat([nid], rest.slice(idx));
     if (newOrder.join('\u0001') === ids.join('\u0001')) return;
     this.pushHistory('Перестановка строк цепочки');
-    g.order = newOrder;
-    stackRebuildChains(this.doc, g);
-    stackSyncParks(this.doc, g);
-    this.scheduleSave();
-    this.emit();
+    /* через mutate: замена объектов нод (парки/строки) для memo-карточек */
+    this.mutate(() => {
+      g.order = newOrder;
+      stackRebuildChains(this.doc, g);
+      stackSyncParks(this.doc, g);
+    }, { history: false });
     this.toast('Порядок цепочки изменён — связи «кто за кем» перестроены');
   }
 
@@ -2385,26 +2526,27 @@ export class VetviStore {
     const prev = idx > 0 ? order0[idx - 1] : null;
     const next = idx >= 0 && idx < order0.length - 1 ? order0[idx + 1] : null;
     this.pushHistory('Вывод из цепочки');
-    const doc = this.doc;
-    doc.edges = doc.edges.filter((ed) => !(ed.q && (ed.from === nid || ed.to === nid)));
-    n.gid = g.parent || null;
-    g.order = order0.filter((x) => x !== nid);
-    if (prev && next && !doc.edges.some((ed) => ed.from === prev && ed.to === next && ed.tin !== 'var')) {
-      doc.edges.push(stackChainEdgeObj(prev, next));
-    }
-    /* ширина карточки диалога (dlgNodeWidth оригинала): своя ширина + отступы вложенности */
-    const w0 = n.type === 'dialog'
-      ? ((n.dlgWidth || NODE_W) + dlgMaxDepth((n.dialog && n.dialog.replies) || [], 0) * 23)
-      : NODE_W;
-    n.x = Math.round(wp.x - w0 / 2);
-    n.y = Math.round(wp.y - 24);
-    this.resolveOverlaps(new Set([nid]));
-    if (!g.order.length) {
-      doc.groups = doc.groups.filter((x) => x.id !== gid);
-      this.selGroups.delete(gid);
-    }
-    this.scheduleSave();
-    this.emit();
+    /* через mutate: замена объектов нод для memo-карточек */
+    this.mutate(() => {
+      const doc = this.doc;
+      doc.edges = doc.edges.filter((ed) => !(ed.q && (ed.from === nid || ed.to === nid)));
+      n.gid = g.parent || null;
+      g.order = order0.filter((x) => x !== nid);
+      if (prev && next && !doc.edges.some((ed) => ed.from === prev && ed.to === next && ed.tin !== 'var')) {
+        doc.edges.push(stackChainEdgeObj(prev, next));
+      }
+      /* ширина карточки диалога (dlgNodeWidth оригинала): своя ширина + отступы вложенности */
+      const w0 = n.type === 'dialog'
+        ? ((n.dlgWidth || NODE_W) + dlgMaxDepth((n.dialog && n.dialog.replies) || [], 0) * 23)
+        : NODE_W;
+      n.x = Math.round(wp.x - w0 / 2);
+      n.y = Math.round(wp.y - 24);
+      this.resolveOverlaps(new Set([nid]));
+      if (!g.order.length) {
+        doc.groups = doc.groups.filter((x) => x.id !== gid);
+        this.selGroups.delete(gid);
+      }
+    }, { history: false });
     this.toast('Нода выведена из цепочки — связи с соседями склеены');
   }
 
@@ -2512,41 +2654,42 @@ export class VetviStore {
       ? ms.slice().sort((a, b) => a.x - b.x || a.y - b.y).map((n) => n.id)
       : ms.slice().sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.id);
     this.pushHistory('Группа → цепочка');
-    const doc = this.doc;
-    g.stack = true;
-    g.fold = 1;
-    g.order = ids.slice();
-    const gr = g as unknown as Record<string, unknown>;
-    gr.bbox = null;
-    gr.hh = null;
-    /* карточка цепочки — в левый верхний угол области группы (7080) */
-    g.x = Math.round(x0);
-    g.y = Math.round(y0);
-    ids.forEach((id, i) => {
-      const n = this.nodeById(id);
-      if (!n) return;
-      if (i > 0) stackDetachEdges(doc, id);
-      const pk = stackParkPos(g, i);
-      n.x = pk.x;
-      n.y = pk.y;
-    });
-    const set = new Set(ids);
-    const consec: Record<string, boolean> = {};
-    for (let ci = 0; ci < ids.length - 1; ci++) consec[ids[ci] + '>' + ids[ci + 1]] = true;
-    doc.edges = doc.edges.filter((e) => {
-      if (e.q && set.has(e.from) && set.has(e.to)) return !!consec[e.from + '>' + e.to];
-      return true;
-    });
-    for (let cj = 0; cj < ids.length - 1; cj++) {
-      const aC = ids[cj];
-      const bC = ids[cj + 1];
-      if (!doc.edges.some((e) => e.from === aC && e.to === bC && e.q)) doc.edges.push(stackChainEdgeObj(aC, bC));
-    }
-    this.sel.clear();
-    this.selEdges.clear();
-    this.selGroups = new Set([g.id]);
-    this.scheduleSave();
-    this.emit();
+    /* через mutate: замена объектов нод (парк-позиции) для memo-карточек */
+    this.mutate(() => {
+      const doc = this.doc;
+      g.stack = true;
+      g.fold = 1;
+      g.order = ids.slice();
+      const gr = g as unknown as Record<string, unknown>;
+      gr.bbox = null;
+      gr.hh = null;
+      /* карточка цепочки — в левый верхний угол области группы (7080) */
+      g.x = Math.round(x0);
+      g.y = Math.round(y0);
+      ids.forEach((id, i) => {
+        const n = this.nodeById(id);
+        if (!n) return;
+        if (i > 0) stackDetachEdges(doc, id);
+        const pk = stackParkPos(g, i);
+        n.x = pk.x;
+        n.y = pk.y;
+      });
+      const set = new Set(ids);
+      const consec: Record<string, boolean> = {};
+      for (let ci = 0; ci < ids.length - 1; ci++) consec[ids[ci] + '>' + ids[ci + 1]] = true;
+      doc.edges = doc.edges.filter((e) => {
+        if (e.q && set.has(e.from) && set.has(e.to)) return !!consec[e.from + '>' + e.to];
+        return true;
+      });
+      for (let cj = 0; cj < ids.length - 1; cj++) {
+        const aC = ids[cj];
+        const bC = ids[cj + 1];
+        if (!doc.edges.some((e) => e.from === aC && e.to === bC && e.q)) doc.edges.push(stackChainEdgeObj(aC, bC));
+      }
+      this.sel.clear();
+      this.selEdges.clear();
+      this.selGroups = new Set([g.id]);
+    }, { history: false });
     this.toast('Группа «' + g.name + '» преобразована в цепочку (' + ids.length + '): порядок — по раскладке, у нод кроме первой старые связи убраны');
   }
 
@@ -2567,38 +2710,39 @@ export class VetviStore {
       return;
     }
     this.pushHistory('Сборка цепочки из выделения');
-    const doc = this.doc;
-    const first = this.nodeById(ids[0]) as VetviNode;
-    const g: VetviGroup = {
-      id: uid(),
-      name: 'Цепочка',
-      fold: 1,
-      x: Math.round(first.x),
-      y: Math.round(first.y),
-      parent: first.gid || null,
-      color: null,
-      alpha: 0.55,
-      badge: null,
-      auto: false,
-      stack: true,
-      order: ids.slice(),
-    };
-    doc.groups.push(g);
-    ids.forEach((id, i) => {
-      const n = this.nodeById(id) as VetviNode;
-      n.gid = g.id;
-      /* первая нода — якорь: её связи сохраняются; остальные — старые связи убираются */
-      if (i > 0) stackDetachEdges(doc, id);
-      const pk = stackParkPos(g, i);
-      n.x = pk.x;
-      n.y = pk.y;
-    });
-    stackRebuildChains(doc, g);
-    this.sel.clear();
-    this.selEdges.clear();
-    this.selGroups = new Set([g.id]);
-    this.scheduleSave();
-    this.emit();
+    /* через mutate: замена объектов нод (парк-позиции) для memo-карточек */
+    this.mutate(() => {
+      const doc = this.doc;
+      const first = this.nodeById(ids[0]) as VetviNode;
+      const g: VetviGroup = {
+        id: uid(),
+        name: 'Цепочка',
+        fold: 1,
+        x: Math.round(first.x),
+        y: Math.round(first.y),
+        parent: first.gid || null,
+        color: null,
+        alpha: 0.55,
+        badge: null,
+        auto: false,
+        stack: true,
+        order: ids.slice(),
+      };
+      doc.groups.push(g);
+      ids.forEach((id, i) => {
+        const n = this.nodeById(id) as VetviNode;
+        n.gid = g.id;
+        /* первая нода — якорь: её связи сохраняются; остальные — старые связи убираются */
+        if (i > 0) stackDetachEdges(doc, id);
+        const pk = stackParkPos(g, i);
+        n.x = pk.x;
+        n.y = pk.y;
+      });
+      stackRebuildChains(doc, g);
+      this.sel.clear();
+      this.selEdges.clear();
+      this.selGroups = new Set([g.id]);
+    }, { history: false });
     this.toast('Цепочка из ' + ids.length + ' нод собрана: связи перестроены по порядку (как «кто за кем»), вход в первую ноду сохранён');
   }
 
@@ -2840,14 +2984,26 @@ export class VetviStore {
     return false;
   }
 
-  /* ── вид ── */
+  /* ── вид ──
+   * Панорама/зум — САМЫЕ высокочастотные события (колесо мыши до 1000 Гц).
+   * Они НЕ эмитят полную перерисовку: вид применяется императивно через
+   * canvasApi.applyVp (transform #world, сетка, миникарта, %, ярлыки), а React
+   * догоняет при следующей перерисовке по store.vp. Сохранение — с отложкой. */
+
+  /** Отложенное сохранение вида: таймер перезапускается на каждом событии. */
+  private viewChanged(): void {
+    canvasApi.current?.applyVp(this.vp);
+    if (this.viewSaveT) clearTimeout(this.viewSaveT);
+    this.viewSaveT = setTimeout(() => { this.viewSaveT = null; this.scheduleSave(); }, 500);
+  }
 
   setViewport(vp: Partial<VetviViewport>): void {
     if (typeof vp.x === 'number') this.vp.x = vp.x;
     if (typeof vp.y === 'number') this.vp.y = vp.y;
     if (typeof vp.z === 'number') this.vp.z = clampZoom(vp.z);
+    canvasApi.current?.applyVp(this.vp);
     this.scheduleSave();
-    this.emit();
+    this.emit('geom');
   }
 
   zoomAt(screenX: number, screenY: number, factor: number): void {
@@ -2858,19 +3014,23 @@ export class VetviStore {
     this.vp.z = z1;
     this.vp.x = screenX - w.x * z1;
     this.vp.y = screenY - w.y * z1;
-    this.scheduleSave();
-    this.emit();
+    canvasApi.current?.applyVp(this.vp);
+    /* порты пинов измеряются в экранных px и делятся на z — при смене зума
+       пересчитать (императивно, без перерисовки карточек) */
+    canvasApi.current?.measurePorts();
+    this.viewChanged();
+    this.emit('geom');
   }
 
   panBy(dx: number, dy: number): void {
     this.vp.x += dx;
     this.vp.y += dy;
-    this.emit();
+    this.viewChanged();
   }
 
   panEnd(): void {
-    this.scheduleSave();
-    this.emit();
+    if (this.viewSaveT) { clearTimeout(this.viewSaveT); this.viewSaveT = null; this.scheduleSave(); }
+    this.emit('geom');
   }
 
   fitView(vw: number, vh: number, sizes: Map<string, NodeSize>): void {
@@ -2884,8 +3044,9 @@ export class VetviStore {
     this.vp.z = z;
     this.vp.x = vw / 2 - (b.x + b.w / 2) * z;
     this.vp.y = vh / 2 - (b.y + b.h / 2) * z;
+    canvasApi.current?.applyVp(this.vp);
     this.scheduleSave();
-    this.emit();
+    this.emit('geom');
   }
 
   toggleSnap(): void { this.snapOn = !this.snapOn; this.emit(); }

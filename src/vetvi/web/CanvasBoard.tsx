@@ -10,7 +10,7 @@
  * в пустоту, нода переменной + подсветки drop-hover/drop-target и автораздвижка.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { snapVal, newNode } from '@/vetvi/core/factory';
 import { GRID, NODE_W, QCARD_W } from '@/vetvi/core/constants';
@@ -22,6 +22,7 @@ import { getMe } from '@/vetvi/core/identity';
 import { defValOf, varById } from '@/vetvi/core/vars';
 import type { NodeSize, VetviDoc, VetviGroup, VetviNode, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
+import { useStoreRev } from './rev';
 import { canvasApi } from './canvasApi';
 import { NodeCard } from './NodeCard';
 import { GroupLayer } from './GroupLayer';
@@ -32,11 +33,11 @@ import { SyncDiffBadge } from './SyncModals';
 
 type Gest =
   | { mode: 'pan'; sx: number; sy: number; lx: number; ly: number }
-  | { mode: 'marquee'; sx: number; sy: number; add: boolean; preN: Set<string>; preG: Set<string> }
+  | { mode: 'marquee'; sx: number; sy: number; add: boolean; preN: Set<string>; preG: Set<string>; markN?: Set<string>; markG?: Set<string> }
   | { mode: 'gcreate'; sx: number; sy: number; cx: number; cy: number }
   | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number; wx: number; wy: number }
   | { mode: 'node'; lx: number; ly: number; stackHl: string | null; dropEdge: string | null }
-  | { mode: 'group'; gid: string; lx: number; ly: number; base: Map<string, { x: number; y: number }> }
+  | { mode: 'group'; gid: string; lx: number; ly: number; base: Map<string, { x: number; y: number }>; adx?: number; ady?: number }
   | { mode: 'gresize'; gid: string; dir: 'r' | 'b' | 'br'; sx: number; sy: number; fw: number; fh: number }
   | { mode: 'link'; from: string; out: string | null; reply: string | null; wx: number; wy: number; sx: number; sy: number; target: string | null; varin: boolean }
   | { mode: 'reattachOut'; from: string; lx: number; ly: number; target: string | null }
@@ -46,6 +47,19 @@ type Gest =
   | { mode: 'bridge'; eid: string; part: 'l' | 'r' | 'h'; lx: number; ly: number; dl: number; dy: number; dr: number }
   | { mode: 'dlgW'; id: string; startX: number; startW: number }
   | null;
+
+/** rAF-троттлинг setState: высокочастотные жесты (рисование связи/ножа, hover)
+ *  пишут в React не чаще кадра. Отложенное значение — всегда последнее. */
+function rafSet<T>(setter: (v: T) => void): (v: T) => void {
+  let f = false;
+  let v: T | undefined;
+  return (nv: T) => {
+    v = nv;
+    if (f) return;
+    f = true;
+    requestAnimationFrame(() => { f = false; setter(v as T); });
+  };
+}
 
 /* ═══ мини-карта: mmFit/mmRebuild/mmGeom/mmRender оригинала (строки 9269–9372 index.html) ═══
    Оригинал НЕ сохраняет размер карты в localStorage — ресайз живёт до перезагрузки (1:1). */
@@ -145,17 +159,26 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const doc = store.doc;
   const vp = store.vp;
 
+  /* каналы стора: geom — жесты/анимации (панели в этот момент не перерисовываются),
+     doc/ui — контент и UI. Пан/зум колесом не эмитят вовсе (императивный вид). */
+  useStoreRev(store, 'geom');
+  useStoreRev(store, 'doc');
+  useStoreRev(store, 'ui');
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const [sizesMap] = useState(() => new Map<string, NodeSize>());
   const [portsMap] = useState(() => new Map<string, { x: number; y: number }>());
   const [cardSizes] = useState(() => new Map<string, { w: number; h: number }>());
   const [tick, setTick] = useState(0);
   const gestRef = useRef<Gest>(null);
-  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number; g?: boolean } | null>(null);
-  /* линия «ножа» в мировых координатах (оригинал кладёт path.cutline в #edges) */
+  const marqueeRef = useRef<HTMLDivElement>(null);
+  /* рамка выделения/группы и подсветки жестов — императивно (без setState в кадре) */
   const [cutline, setCutline] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ from: string; out: string | null; reply: string | null; x: number; y: number; startX: number; startY: number } | null>(null);
   const [hoverTarget, setHoverTarget] = useState<string | null>(null);
+  const setCutlineR = useMemo(() => rafSet(setCutline), [setCutline]);
+  const setPendingLinkR = useMemo(() => rafSet(setPendingLink), [setPendingLink]);
+  const setHoverTargetR = useMemo(() => rafSet(setHoverTarget), [setHoverTarget]);
   const [altDown, setAltDown] = useState(false);
   /* dropready — перетаскивание из палитры над холстом; panning — активный пан; animv — анимация вида */
   const [dropReady, setDropReady] = useState(false);
@@ -163,6 +186,47 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const worldRef = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<HTMLDivElement>(null);
   const animT = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* рамка выделения (#marquee) — императивный показ/скрытие в жестах:
+   * per-move setState пересобирал бы весь холст на каждое движение мыши */
+  const showMarquee = useCallback((x: number, y: number, w: number, h: number, group = false) => {
+    const el = marqueeRef.current;
+    if (!el) return;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    el.style.display = 'block';
+    el.className = group ? 'mg' : '';
+  }, []);
+  const hideMarquee = useCallback(() => {
+    const el = marqueeRef.current;
+    if (el) el.style.display = 'none';
+  }, []);
+  /** Императивное применение выделения рамкой: класс .sel на изменившихся нодах/группах
+   *  (реестр состояния придёт в стор на pointerup — один emit вместо потока). */
+  const applyMarqueeSel = useCallback((g: { markN?: Set<string>; markG?: Set<string> }, ids: string[], gids: string[]) => {
+    const prevN = g.markN || new Set<string>();
+    const prevG = g.markG || new Set<string>();
+    const nextN = new Set(ids);
+    const nextG = new Set(gids);
+    for (const id of nextN) if (!prevN.has(id)) {
+      const el = document.querySelector('.node[data-node-id="' + id + '"]');
+      if (el) el.classList.add('sel');
+    }
+    for (const id of prevN) if (!nextN.has(id)) {
+      const el = document.querySelector('.node[data-node-id="' + id + '"]');
+      if (el) el.classList.remove('sel');
+    }
+    for (const gid of nextG) if (!prevG.has(gid)) {
+      document.querySelectorAll('[data-gid="' + gid + '"]').forEach((el) => el.classList.add('sel'));
+    }
+    for (const gid of prevG) if (!nextG.has(gid)) {
+      document.querySelectorAll('[data-gid="' + gid + '"]').forEach((el) => el.classList.remove('sel'));
+    }
+    g.markN = nextN;
+    g.markG = nextG;
+  }, []);
 
   const sink = useMemo(
     () => ({
@@ -181,6 +245,175 @@ export function CanvasBoard(props: { store: VetviStore }) {
     }),
     [sizesMap, portsMap, cardSizes],
   );
+
+  /* ── императивное применение вида (пан/зум без перерисовки React) ──
+     #world transform + сетка + % зума + миникарта + ярлыки над группами.
+     Те же значения React выставит при следующей перерисовке — рассинхрона нет. */
+  const applyCanvasVp = useCallback((v: VetviViewport) => {
+    const cv = canvasRef.current;
+    const world = worldRef.current;
+    if (cv) {
+      cv.style.backgroundSize = GRID * v.z + 'px ' + GRID * v.z + 'px';
+      cv.style.backgroundPosition = v.x + 'px ' + v.y + 'px';
+    }
+    if (world) world.style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.z + ')';
+    const zp = document.getElementById('zPct');
+    if (zp) zp.textContent = Math.round(v.z * 100) + '%';
+  }, []);
+
+  /* пересчёт портов пинов при смене зума: позиции меряются в экранных px и делятся
+     на z — без пересчёта стрелки к репликам/исходам отрываются от пинов.
+     Пишет в portsMap напрямую (без tick) — геометрию связей пересоберёт
+     следующий geom-кадр (items зависят от geomRev). */
+  const lastPortZRef = useRef<number>(-1);
+  const measurePorts = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    const z = store.vp.z || 1;
+    if (lastPortZRef.current === z) return;
+    lastPortZRef.current = z;
+    const cards = world.querySelectorAll<HTMLElement>('.node[data-node-id]');
+    cards.forEach((card) => {
+      const nid = card.getAttribute('data-node-id') || '';
+      const n = store.nodeById(nid);
+      if (!n) return;
+      const cr = card.getBoundingClientRect();
+      card.querySelectorAll<HTMLElement>('[data-pin]').forEach((pin) => {
+        const pr = pin.getBoundingClientRect();
+        const key = nid + ':' + String(pin.dataset.pin || '');
+        portsMap.set(key, { x: n.x + (pr.left + pr.width / 2 - cr.left) / z, y: n.y + (pr.top + pr.height / 2 - cr.top) / z });
+      });
+    });
+  }, [store, portsMap]);
+
+  /* ── мини-карта и ярлыки: императивные обновления при пан/зум (без React) ──
+     Вид карты живёт в ref: жесты карты и автоследование пишут DOM напрямую,
+     после каждой перерисовки useLayoutEffect восстанавливает актуальные значения. */
+  const mmRef = useRef<HTMLDivElement>(null);
+  const mmViewRef = useRef({ x: 0, y: 0, z: 0.2 });
+  const mmDimRef = useRef<{ w: number; h: number } | null>(null);
+  /* null — CSS-размер по умолчанию (260×180 / 170×120 в узких окнах), как в оригинале до ресайза */
+  const [mmDim, setMmDim] = useState<{ w: number; h: number } | null>(null);
+  const mmReadyRef = useRef(false);
+  const mmFrameDragRef = useRef<{ wx: number; wy: number; cx: number; cy: number } | null>(null);
+  const mmPanRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
+  const mmResizeRef = useRef<{ sw: number; sh: number; cx: number; cy: number } | null>(null);
+  /* кулдаун ручных жестов карты (пан СКМ/колесо): автоследование подождёт, пока пользователь
+     сам рассматривает карту — mmManualFollow оригинала не было, это доработка по фидбеку */
+  const mmManualTRef = useRef(0);
+  useEffect(() => { mmDimRef.current = mmDim; }, [mmDim]);
+
+  const applyMmView = useCallback(() => {
+    const mv = mmViewRef.current;
+    const content = document.getElementById('mmContent');
+    const viewRect = document.getElementById('mmView');
+    const el = canvasRef.current;
+    if (content) content.setAttribute('transform', 'scale(' + mv.z + ') translate(' + (-mv.x) + ',' + (-mv.y) + ')');
+    if (viewRect && el && el.clientWidth) {
+      const vb = mmViewportBoxOf(store.vp, el.clientWidth, el.clientHeight);
+      viewRect.setAttribute('x', String((vb.x1 - mv.x) * mv.z));
+      viewRect.setAttribute('y', String((vb.y1 - mv.y) * mv.z));
+      viewRect.setAttribute('width', String((vb.x2 - vb.x1) * mv.z));
+      viewRect.setAttribute('height', String((vb.y2 - vb.y1) * mv.z));
+    }
+  }, [store]);
+
+  const setMmViewI = useCallback((next: { x: number; y: number; z: number }) => {
+    mmViewRef.current = next;
+    applyMmView();
+  }, [applyMmView]);
+
+  /* Автоследование карты за видом холста (mmFollow оригинала): если рамка вида ушла
+     за пределы окна карты — обзор доцентрируется, масштаб ужмётся. Вызывается и из
+     applyVp (пан/зум без перерисовки), и из rAF-эффекта при перерисовках.
+     ПЛАНОВО обычная функция (не useCallback): мутируемые в жестах рефы не должны
+     попадать в «захваты» хуков — правило react-hooks/immutability запрещает их
+     менять после этого. Все данные читаются из рефов/стора — замыкание всегда свежее. */
+  const followMm = () => {
+    if (!mmReadyRef.current) return;
+    if (mmFrameDragRef.current || mmPanRef.current || mmResizeRef.current) return;
+    if (Date.now() - mmManualTRef.current < 2500) return;
+    const el = canvasRef.current;
+    if (!el || !el.clientWidth) return;
+    const mv = mmViewRef.current;
+    const v = mmViewportBoxOf(store.vp, el.clientWidth, el.clientHeight);
+    const vw = Math.max(1, v.x2 - v.x1);
+    const vh = Math.max(1, v.y2 - v.y1);
+    const md = mmDimRef.current;
+    const mw0 = md ? md.w : MM_DEF_W;
+    const mh0 = md ? md.h : MM_DEF_H;
+    const mw = mw0 / mv.z;
+    const mh = mh0 / mv.z;
+    /* покрытие рамки вида окном карты: видимы ≥60% — не мешаем; меньше — догоняем */
+    const ix = Math.max(0, Math.min(v.x2, mv.x + mw) - Math.max(v.x1, mv.x));
+    const iy = Math.max(0, Math.min(v.y2, mv.y + mh) - Math.max(v.y1, mv.y));
+    if ((ix * iy) / (vw * vh) >= 0.6) return;
+    let nz = mv.z;
+    if (vw > mw * 0.9 || vh > mh * 0.9) nz = clamp(Math.min((mw0 * 0.9) / vw, (mh0 * 0.9) / vh), 0.02, 6);
+    const vcx = (v.x1 + v.x2) / 2;
+    const vcy = (v.y1 + v.y2) / 2;
+    setMmViewI({ x: vcx - mw0 / (2 * nz), y: vcy - mh0 / (2 * nz), z: nz });
+  };
+
+  /* ── ярлыки над группами/чужими правками: единый источник для рендера и applyVp ── */
+  const computeHiddenGids = useCallback(() => {
+    const set = new Set<string>();
+    for (const g of store.doc.groups) {
+      if ((g.fold === undefined ? 2 : g.fold) < 2) {
+        let p: string | null | undefined = g.parent;
+        const seen = new Set<string>();
+        while (p && !seen.has(p)) { seen.add(p); set.add(p); p = store.groupById(p)?.parent || null; }
+      }
+    }
+    return set;
+  }, [store]);
+
+  const computeLabelBadges = useCallback(() => {
+    const d = store.doc;
+    const v = store.vp;
+    const hidden = computeHiddenGids();
+    const out: { key: string; x: number; y: number; color: string; text: string; lbadge?: boolean }[] = [];
+    for (const g of d.groups) {
+      if (!g.badge) continue;
+      if ((g.fold === undefined ? 2 : g.fold) !== 2) continue;
+      if (hidden.has(g.id)) continue;
+      if (!d.nodes.some((nn) => nn.gid === g.id)) continue;
+      const r = groupFrameRect(d, g, sizesMap, cardSizes);
+      out.push({ key: 'g:' + g.id, x: v.x + (r.x + r.w / 2) * v.z, y: v.y + r.y * v.z - 8, color: g.color || '#9aa1ac', text: g.name || '' });
+    }
+    const meId = getMe().id;
+    for (const oid of Object.keys(store.syncLocks || {})) {
+      const l = store.syncLocks[oid];
+      if (!l || !l.id || l.id === meId) continue;
+      const nn = d.nodes.find((x) => x.id === oid);
+      if (nn && !collapsedAncestorOf(d, nn.id)) {
+        const w = nodeWidth(nn, sizesMap.get(nn.id));
+        out.push({ key: 'l:' + oid, x: v.x + (nn.x + w / 2) * v.z, y: v.y + nn.y * v.z - 8, color: l.color || '#8b929c', text: '✏ редактирует ' + (l.name || '…'), lbadge: true });
+        continue;
+      }
+      const g2 = d.groups.find((x) => x.id === oid);
+      if (g2 && !groupInsideCollapsed(d, g2)) {
+        const r = (g2.fold === undefined ? 2 : g2.fold) === 2
+          ? groupFrameRect(d, g2, sizesMap, cardSizes)
+          : groupCardRect(d, g2, cardSizes);
+        out.push({ key: 'l:' + oid, x: v.x + (r.x + r.w / 2) * v.z, y: v.y + r.y * v.z - 8, color: l.color || '#8b929c', text: '✏ редактирует ' + (l.name || '…'), lbadge: true });
+      }
+    }
+    return out;
+  }, [store, sizesMap, cardSizes, computeHiddenGids]);
+
+  /* Императивное позиционирование ярлыков при пан/зуме (цвета/текст не меняются). */
+  const updateLabelsVp = useCallback(() => {
+    const cont = labelsRef.current;
+    if (!cont) return;
+    const badges = computeLabelBadges();
+    if (badges.length !== cont.children.length) return;
+    for (let i = 0; i < badges.length; i++) {
+      const el = cont.children[i] as HTMLElement;
+      el.style.left = badges[i].x + 'px';
+      el.style.top = badges[i].y + 'px';
+    }
+  }, [computeLabelBadges]);
 
   /* ── регистрация API для глобальных хоткеев ── */
   useEffect(() => {
@@ -207,9 +440,16 @@ export function CanvasBoard(props: { store: VetviStore }) {
           z,
         });
       },
+      applyVp: (v) => {
+        applyCanvasVp(v);
+        applyMmView();
+        followMm();
+        updateLabelsVp();
+      },
+      measurePorts: () => measurePorts(),
     };
     return () => { canvasApi.current = null; };
-  }, [store, sizesMap]);
+  }, [store, sizesMap, applyCanvasVp, measurePorts]);
 
   /* ── центрирование по запросу (плавная анимация — animateView оригинала 7716):
        класс .animv вешается на DOM ДО изменения вида (в обход React — как в
@@ -234,8 +474,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   const items = useMemo(
     () => buildEdgeItems(doc, doc.edges, sizesMap, portsMap, cardSizes, store.bend),
-     
-    [doc, doc.edges, sizesMap, portsMap, cardSizes, store.bend, store.revision, tick],
+
+    [doc, doc.edges, sizesMap, portsMap, cardSizes, store.bend, store.geomRev, store.refVer, tick],
   );
 
   /* ── скрытые группы (внутри свёрнутых предков — groupInsideCollapsed оригинала 3028):
@@ -254,7 +494,12 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
     })();
 
-  const visibleNodes = doc.nodes.filter((n) => !collapsedAncestorOf(doc, n.id));
+  /* видимые ноды: useMemo — новая фильтрация на каждый рендер (в т.ч. UI-кадры)
+     ломала мемоизацию мини-карты; fold групп меняется через mutate ('all' → geomRev) */
+  const visibleNodes = useMemo(
+    () => doc.nodes.filter((n) => !collapsedAncestorOf(doc, n.id)),
+    [doc, doc.nodes, store.geomRev],
+  );
 
   /* ── колесо: зум к курсору / Shift — пан. Нативный слушатель passive:false —
      делегированный React onWheel пассивен, preventDefault в нём не работает ── */
@@ -299,13 +544,13 @@ export function CanvasBoard(props: { store: VetviStore }) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const w = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
       gestRef.current = { mode: 'gcreate', sx: w.x, sy: w.y, cx: e.clientX, cy: e.clientY };
-      setMarquee({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: 0, h: 0, g: true });
+      showMarquee(e.clientX - rect.left, e.clientY - rect.top, 0, 0, true);
       e.preventDefault();
       return true;
     }
     startPanGesture(e);
     return true;
-  }, [store, startPanGesture]);
+  }, [store, startPanGesture, showMarquee]);
 
   const onCanvasDown = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
@@ -334,7 +579,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const w = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
       gestRef.current = { mode: 'gcreate', sx: w.x, sy: w.y, cx: e.clientX, cy: e.clientY };
-      setMarquee({ x: e.clientX, y: e.clientY, w: 0, h: 0, g: true });
+      showMarquee(e.clientX - rect.left, e.clientY - rect.top, 0, 0, true);
       e.preventDefault();
       return;
     }
@@ -345,10 +590,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (!e.shiftKey) store.clearSelection();
     {
       const rect = canvasRef.current!.getBoundingClientRect();
-      setMarquee({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: 0, h: 0 });
+      showMarquee(e.clientX - rect.left, e.clientY - rect.top, 0, 0);
     }
     e.preventDefault();
-  }, [store, altDown, modGestureInstead, startPanGesture]);
+  }, [store, altDown, modGestureInstead, startPanGesture, showMarquee]);
 
   /* ── ноды ── */
   const onNodeDragStart = useCallback((e: React.MouseEvent, id: string) => {
@@ -645,12 +890,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
         const dx = w.x - c.x;
         const dy = w.y - c.y;
         for (const id of store.carry.ids) {
-          const n = store.nodeById(id);
-          if (!n) continue;
           const b = carryBase.get(id);
-          if (b) { n.x = snapVal(b.x + dx, store.snapOn); n.y = snapVal(b.y + dy, store.snapOn); }
+          if (b) store.setNodePos(id, snapVal(b.x + dx, store.snapOn), snapVal(b.y + dy, store.snapOn));
         }
-        store.emit();
+        store.emit('geom');
         return;
       }
       if (!g) return;
@@ -662,7 +905,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
           break;
         }
         case 'marquee': {
-          /* рамка рисуется в координатах контейнера холста (e.clientX-cr0.left оригинала 8352) */
+          /* рамка рисуется в координатах контейнера холста (e.clientX-cr0.left оригинала 8352);
+             рамка и подсветка выделения — императивно: React подключится один раз на pointerup */
           const crect = canvasRef.current?.getBoundingClientRect();
           const ox = crect ? crect.left : 0;
           const oy = crect ? crect.top : 0;
@@ -672,7 +916,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const y = ay - oy;
           const w = Math.abs(e.clientX - g.sx);
           const h = Math.abs(e.clientY - g.sy);
-          setMarquee({ x, y, w, h });
+          showMarquee(x, y, w, h);
           // пересечение с нодами в экранных координатах
           if (crect) {
             const wa = screenToWorld(store.vp, ax - ox, ay - oy);
@@ -691,7 +935,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
               const cr = groupCardRect(doc, gr, cardSizes);
               if (gr.x < wb.x && gr.x + cr.w > wa.x && gr.y < wb.y && gr.y + cr.h > wa.y) gids.push(gr.id);
             }
-            store.setMarqueeSel(g.add ? [...g.preN, ...ids] : ids, g.add ? [...g.preG, ...gids] : gids);
+            applyMarqueeSel(g, g.add ? [...g.preN, ...ids] : ids, g.add ? [...g.preG, ...gids] : gids);
           }
           break;
         }
@@ -699,7 +943,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const grect = canvasRef.current?.getBoundingClientRect();
           const x = Math.min(g.cx, e.clientX) - (grect ? grect.left : 0);
           const y = Math.min(g.cy, e.clientY) - (grect ? grect.top : 0);
-          setMarquee({ x, y, w: Math.abs(e.clientX - g.cx), h: Math.abs(e.clientY - g.cy), g: true });
+          showMarquee(x, y, Math.abs(e.clientX - g.cx), Math.abs(e.clientY - g.cy), true);
           break;
         }
         case 'knife': {
@@ -707,7 +951,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           g.ly = e.clientY;
           const rect = canvasRef.current?.getBoundingClientRect();
           const wk = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
-          setCutline({ x1: g.wx, y1: g.wy, x2: wk.x, y2: wk.y });
+          setCutlineR({ x1: g.wx, y1: g.wy, x2: wk.x, y2: wk.y });
           break;
         }
         case 'node': {
@@ -751,19 +995,21 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const dy = (e.clientY - g.ly) / z;
           g.lx = e.clientX;
           g.ly = e.clientY;
+          g.adx = (g.adx || 0) + dx;
+          g.ady = (g.ady || 0) + dy;
           for (const [id, b] of g.base) {
             if (id.startsWith('g:')) {
               const sg = store.groupById(id.slice(2));
               if (sg) { sg.x += dx; sg.y += dy; store.touchPos(id); }
             } else {
-              const n = store.nodeById(id);
-              if (n) { n.x += dx; n.y += dy; store.touchPos('n:' + id); }
+              /* новый объект ноды — сигнал перерисовки memo-карточки */
+              store.setNodePos(id, b.x + (g.adx || 0), b.y + (g.ady || 0));
             }
           }
           /* карточка/цепочка (fold<2) едет вместе с содержимым (8556–8560) */
           const gc = store.groupById(g.gid);
           if (gc && (gc.fold === undefined ? 2 : gc.fold) < 2) { gc.x += dx; gc.y += dy; store.touchPos('g:' + g.gid); }
-          store.emit();
+          store.emit('geom');
           /* живые перетаскивания: члены группы + рамки (включая подгруппы) */
           if (store.sync) {
             const ids = new Set<string>();
@@ -786,7 +1032,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           sg.auto = false;
           if (g.dir !== 'b') sg.fw = Math.max(60, Math.round(g.fw + dx / gz));
           if (g.dir !== 'r') sg.fh = Math.max(50, Math.round(g.fh + dy / gz));
-          store.emit();
+          store.emit('geom');
           break;
         }
         case 'link': {
@@ -794,7 +1040,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
           g.wx = w.x;
           g.wy = w.y;
-          setPendingLink({ from: g.from, out: g.out, reply: g.reply, x: w.x, y: w.y, startX: g.sx, startY: g.sy });
+          setPendingLinkR({ from: g.from, out: g.out, reply: g.reply, x: w.x, y: w.y, startX: g.sx, startY: g.sy });
           const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
           const node = el ? el.closest('[data-node-id]') : null;
           let target = node ? node.getAttribute('data-node-id') : null;
@@ -813,7 +1059,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           }
           g.target = target && target !== g.from ? target : (target === g.from && g.reply ? target : null);
           g.varin = varin && !!g.target;
-          setHoverTarget(g.target);
+          setHoverTargetR(g.target);
           setQCardHl(qHl);
           break;
         }
@@ -834,7 +1080,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             }
           }
           g.target = target && target !== g.from ? target : null;
-          setHoverTarget(g.target);
+          setHoverTargetR(g.target);
           setQCardHl(qHl);
           break;
         }
@@ -888,7 +1134,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             ed.lt = lt;
             ed.lp = clamp(side * Math.min(44, len), -44, 44);
             store.touchPos('e:' + g.eid);
-            store.emit();
+            store.emit('geom');
           }
           break;
         }
@@ -928,9 +1174,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
       setQCardHl(null);
       switch (g.mode) {
         case 'pan': store.panEnd(); break;
-        case 'marquee': setMarquee(null); break;
+        case 'marquee': {
+          hideMarquee();
+          const nIds = g.markN ? Array.from(g.markN) : [];
+          const gIds = g.markG ? Array.from(g.markG) : [];
+          store.setMarqueeSel(g.add ? [...g.preN, ...nIds] : nIds, g.add ? [...g.preG, ...gIds] : gIds);
+          break;
+        }
         case 'gcreate': {
-          setMarquee(null);
+          hideMarquee();
           const rect = canvasRef.current?.getBoundingClientRect();
           if (!rect) break;
           const wa = screenToWorld(store.vp, Math.min(g.cx, g.sx) - rect.left, Math.min(g.cy, g.sy) - rect.top);
@@ -1011,7 +1263,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           /* захват групп/цепочек после переноса (8958–8982): нода над карточкой цепочки
              — в конец цепочки, иначе — gid глубочайшей группы под центром ноды */
           if (movedN) {
-            let changedG = false;
+            const gidSets: { id: string; ngid: string | null }[] = [];
             for (const id of store.sel) {
               const nn = store.nodeById(id);
               if (!nn) continue;
@@ -1027,25 +1279,30 @@ export function CanvasBoard(props: { store: VetviStore }) {
               }
               if (!appended) {
                 const ngid = tg ? tg.id : null;
-                if ((nn.gid || null) !== ngid) { nn.gid = ngid; changedG = true; }
-              } else {
-                changedG = true;
+                if ((nn.gid || null) !== ngid) gidSets.push({ id, ngid });
               }
             }
-            if (changedG) store.emit();
+            /* через mutate: замена объектов нод → memo-карточки честно перерисуются */
+            if (gidSets.length) {
+              store.mutate((doc2) => {
+                for (const gs of gidSets) {
+                  const nn2 = doc2.nodes.find((x) => x.id === gs.id);
+                  if (nn2) nn2.gid = gs.ngid;
+                }
+              }, { history: false });
+            }
           }
           store.dragEnd();
           break;
         }
         case 'group': {
           if (store.snapOn) {
-            for (const [id] of g.base) {
+            for (const [id, b] of g.base) {
               if (id.startsWith('g:')) {
                 const sg = store.groupById(id.slice(2));
                 if (sg) { sg.x = snapVal(sg.x, true); sg.y = snapVal(sg.y, true); }
               } else {
-                const n = store.nodeById(id);
-                if (n) { n.x = snapVal(n.x, true); n.y = snapVal(n.y, true); }
+                store.setNodePos(id, snapVal(b.x + (g.adx || 0), true), snapVal(b.y + (g.ady || 0), true));
               }
             }
             const gcS = store.groupById(g.gid);
@@ -1053,7 +1310,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
               gcS.x = snapVal(gcS.x, true);
               gcS.y = snapVal(gcS.y, true);
             }
-            store.emit();
+            store.emit('geom');
           }
           store.dragEnd();
           store.reparentAfterMove();
@@ -1061,9 +1318,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
              (8918 оригинала: if(ggU.stack)stackSyncParks(ggU)) */
           const gcU = store.groupById(g.gid);
           if (gcU && gcU.stack === true) {
-            stackSyncParks(store.doc, gcU);
-            store.scheduleSave();
-            store.emit();
+            /* парк-ноды через mutate — замена объектов для memo-карточек */
+            store.mutate(() => { stackSyncParks(store.doc, gcU); }, { history: false });
           }
           break;
         }
@@ -1071,23 +1327,27 @@ export function CanvasBoard(props: { store: VetviStore }) {
           store.commitEdit(store.dragStartSnapshot, 'Ресайз группы');
           store.finishGestureDrag();
           store.scheduleSave();
-          store.emit();
-          // ноды, чьи центры вышли за рамку, покидают группу
+          store.emit('all');
+          // ноды, чьи центры вышли за рамку, покидают группу (через mutate — замена объектов)
           const sg = store.groupById(g.gid);
           if (sg) {
             const rect = { x: sg.x, y: sg.y, w: sg.fw || 220, h: sg.fh || 150 };
-            let changed = false;
+            const outIds: string[] = [];
             for (const n of store.doc.nodes) {
               if (n.gid !== g.gid) continue;
               const s = sizesMap.get(n.id);
               const cx = n.x + (s ? s.w : 216) / 2;
               const cy = n.y + (s ? s.h : 90) / 2;
-              if (cx < rect.x || cx > rect.x + rect.w || cy < rect.y || cy > rect.y + rect.h) {
-                n.gid = sg.parent || null;
-                changed = true;
-              }
+              if (cx < rect.x || cx > rect.x + rect.w || cy < rect.y || cy > rect.y + rect.h) outIds.push(n.id);
             }
-            if (changed) { store.scheduleSave(); store.emit(); }
+            if (outIds.length) {
+              store.mutate((doc2) => {
+                for (const id of outIds) {
+                  const nn2 = doc2.nodes.find((x) => x.id === id);
+                  if (nn2) nn2.gid = sg.parent || null;
+                }
+              }, { history: false });
+            }
           }
           break;
         }
@@ -1451,31 +1711,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
   void tick;
 
   /* ═══ мини-карта: состояние вида + жесты (1:1 с окном 9269–9372 оригинала) ═══
-     mmView/mmDim — state (реф-в-рендер запрещён react-hooks/refs), жесты — через рефы */
-  const mmRef = useRef<HTMLDivElement>(null);
-  const [mmView, setMmView] = useState({ x: 0, y: 0, z: 0.2 });
-  /* null — CSS-размер по умолчанию (260×180 / 170×120 в узких окнах), как в оригинале до ресайза */
-  const [mmDim, setMmDim] = useState<{ w: number; h: number } | null>(null);
-  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
-  const mmReadyRef = useRef(false);
-  const mmFrameDragRef = useRef<{ wx: number; wy: number; cx: number; cy: number } | null>(null);
-  const mmPanRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
-  const mmResizeRef = useRef<{ sw: number; sh: number; cx: number; cy: number } | null>(null);
-  /* кулдаун ручных жестов карты (пан СКМ/колесо): автоследование подождёт, пока пользователь
-     сам рассматривает карту — mmManualFollow оригинала не было, это доработка по фидбеку */
-  const mmManualTRef = useRef(0);
-
-  /* размер холста для рамки вида #mmView (canvas.clientWidth оригинала) */
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const measure = () => setCanvasSize({ w: el.clientWidth, h: el.clientHeight });
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    window.addEventListener('resize', measure);
-    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
-  }, []);
+     Вид карты (mmView) живёт в mmViewRef (см. блок императивных обновлений):
+     жесты карты и автоследование не должны вызывать перерисовку React. */
 
   /* mmToLocal/mmToWorld оригинала: координаты в логической системе viewBox (260×180 по умолчанию) */
   const mmToLocal = useCallback((clientX: number, clientY: number) => {
@@ -1502,7 +1739,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const z = clamp(Math.min(((mmDim ? mmDim.w : MM_DEF_W) - pad * 2) / bw, ((mmDim ? mmDim.h : MM_DEF_H) - pad * 2) / bh), 0.02, 4);
     const mvFit = { x: (x1 + x2) / 2 - (mmDim ? mmDim.w : MM_DEF_W) / (2 * z), y: (y1 + y2) / 2 - (mmDim ? mmDim.h : MM_DEF_H) / (2 * z), z };
     /* setState в кадре анимации — не синхронно в эффекте (иначе каскад рендеров) */
-    const raf = requestAnimationFrame(() => { mmReadyRef.current = true; setMmView(mvFit); });
+    const raf = requestAnimationFrame(() => { mmReadyRef.current = true; setMmViewI(mvFit); });
     return () => cancelAnimationFrame(raf);
   });
 
@@ -1513,27 +1750,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
      Эффект без зависимостей: CanvasBoard перерисовывается на каждый emit стора
      (пан/зум/правки) — следование проверяется в кадре rAF, без setState в теле. */
   const mmFollowNow = () => {
-    if (!mmReadyRef.current) return;
-    if (mmFrameDragRef.current || mmPanRef.current || mmResizeRef.current) return;
-    if (Date.now() - mmManualTRef.current < 2500) return;
-    const el = canvasRef.current;
-    if (!el || !el.clientWidth) return;
-    const v = mmViewportBoxOf(store.vp, el.clientWidth, el.clientHeight);
-    const vw = Math.max(1, v.x2 - v.x1);
-    const vh = Math.max(1, v.y2 - v.y1);
-    const mw0 = mmDim ? mmDim.w : MM_DEF_W;
-    const mh0 = mmDim ? mmDim.h : MM_DEF_H;
-    const mw = mw0 / mmView.z;
-    const mh = mh0 / mmView.z;
-    /* покрытие рамки вида окном карты: видимы ≥60% — не мешаем; меньше — догоняем */
-    const ix = Math.max(0, Math.min(v.x2, mmView.x + mw) - Math.max(v.x1, mmView.x));
-    const iy = Math.max(0, Math.min(v.y2, mmView.y + mh) - Math.max(v.y1, mmView.y));
-    if ((ix * iy) / (vw * vh) >= 0.6) return;
-    let nz = mmView.z;
-    if (vw > mw * 0.9 || vh > mh * 0.9) nz = clamp(Math.min((mw0 * 0.9) / vw, (mh0 * 0.9) / vh), 0.02, 6);
-    const vcx = (v.x1 + v.x2) / 2;
-    const vcy = (v.y1 + v.y2) / 2;
-    setMmView({ x: vcx - mw0 / (2 * nz), y: vcy - mh0 / (2 * nz), z: nz });
+    followMm();
   };
   useEffect(() => {
     const raf = requestAnimationFrame(() => mmFollowNow());
@@ -1545,23 +1762,25 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const fd = mmFrameDragRef.current;
     const el = canvasRef.current;
     if (!fd || !el) return;
+    const mv = mmViewRef.current;
     const p = mmToLocal(e.clientX, e.clientY);
-    const wx = mmView.x + p.x / mmView.z;
-    const wy = mmView.y + p.y / mmView.z;
+    const wx = mv.x + p.x / mv.z;
+    const wy = mv.y + p.y / mv.z;
     const ncx = fd.cx + (wx - fd.wx);
     const ncy = fd.cy + (wy - fd.wy);
     const vw = el.clientWidth / store.vp.z;
     const vh = el.clientHeight / store.vp.z;
     store.setViewport({ x: -(ncx - vw / 2) * store.vp.z, y: -(ncy - vh / 2) * store.vp.z });
-  }, [mmToLocal, mmView, store]);
+  }, [mmToLocal, store]);
 
   /* mmPanMove оригинала: СКМ панорамирует обзор самой карты */
   const mmPanMove = useCallback((e: PointerEvent) => {
     const pn = mmPanRef.current;
     if (!pn) return;
     const p = mmToLocal(e.clientX, e.clientY);
-    setMmView((prev) => ({ x: pn.vx - (p.x - pn.sx) / prev.z, y: pn.vy - (p.y - pn.sy) / prev.z, z: prev.z }));
-  }, [mmToLocal]);
+    const prev = mmViewRef.current;
+    setMmViewI({ x: pn.vx - (p.x - pn.sx) / prev.z, y: pn.vy - (p.y - pn.sy) / prev.z, z: prev.z });
+  }, [mmToLocal, setMmViewI]);
 
   /* mmResizeMove оригинала: угол карты — px-размер #miniMap + viewBox #mmSvg, центр обзора на месте */
   const mmResizeMove = useCallback((e: PointerEvent) => {
@@ -1571,13 +1790,12 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const dy = e.clientY - s.cy;
     const nw = clamp(s.sw - dx, MM_MIN_W, 1400);
     const nh = clamp(s.sh + dy, MM_MIN_H, 1000);
+    const prev = mmViewRef.current;
     setMmDim({ w: nw, h: nh });
-    setMmView((prev) => {
-      const cwx = prev.x + s.sw / (2 * prev.z);
-      const cwy = prev.y + s.sh / (2 * prev.z);
-      return { x: cwx - nw / (2 * prev.z), y: cwy - nh / (2 * prev.z), z: prev.z };
-    });
-  }, []);
+    const cwx = prev.x + s.sw / (2 * prev.z);
+    const cwy = prev.y + s.sh / (2 * prev.z);
+    setMmViewI({ x: cwx - nw / (2 * prev.z), y: cwy - nh / (2 * prev.z), z: prev.z });
+  }, [setMmViewI]);
 
   /* глобальные pointermove/pointerup жестов карты (окно 8316/8700 оригинала) */
   useEffect(() => {
@@ -1624,16 +1842,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
       mmManualTRef.current = Date.now(); /* ручной жест — приостановить автоследование */
       const p = mmToLocal(e.clientX, e.clientY);
       const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      setMmView((prev) => {
-        const wx = prev.x + p.x / prev.z;
-        const wy = prev.y + p.y / prev.z;
-        const nz = clamp(prev.z * f, 0.02, 6);
-        return { x: wx - p.x / nz, y: wy - p.y / nz, z: nz };
-      });
+      const prev = mmViewRef.current;
+      const wx = prev.x + p.x / prev.z;
+      const wy = prev.y + p.y / prev.z;
+      const nz = clamp(prev.z * f, 0.02, 6);
+      setMmViewI({ x: wx - p.x / nz, y: wy - p.y / nz, z: nz });
     };
     el.addEventListener('wheel', onMmWheel, { passive: false });
     return () => el.removeEventListener('wheel', onMmWheel);
-  }, [mmToLocal]);
+  }, [mmToLocal, setMmViewI]);
 
   /* pointerdown на карте: ЛКМ — тянет вид, СКМ — пан обзора (обработчик 9318 оригинала) */
   const onMmDown = useCallback((e: React.PointerEvent) => {
@@ -1647,8 +1864,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
       e.stopPropagation();
       const el = canvasRef.current;
       const vb = el && el.clientWidth ? mmViewportBoxOf(store.vp, el.clientWidth, el.clientHeight) : { x1: 0, y1: 0, x2: 0, y2: 0 };
-      const wx = mmView.x + p.x / mmView.z;
-      const wy = mmView.y + p.y / mmView.z;
+      const mv = mmViewRef.current;
+      const wx = mv.x + p.x / mv.z;
+      const wy = mv.y + p.y / mv.z;
       mmFrameDragRef.current = { wx, wy, cx: (vb.x1 + vb.x2) / 2, cy: (vb.y1 + vb.y2) / 2 };
       mb.style.cursor = 'grabbing';
       return;
@@ -1657,10 +1875,11 @@ export function CanvasBoard(props: { store: VetviStore }) {
       e.preventDefault();
       e.stopPropagation();
       mmManualTRef.current = Date.now(); /* ручной жест — приостановить автоследование */
-      mmPanRef.current = { sx: p.x, sy: p.y, vx: mmView.x, vy: mmView.y };
+      const mv = mmViewRef.current;
+      mmPanRef.current = { sx: p.x, sy: p.y, vx: mv.x, vy: mv.y };
       mb.style.cursor = 'grabbing';
     }
-  }, [mmToLocal, mmView, store]);
+  }, [mmToLocal, store]);
 
   /* pointerdown на .mm-resize — старт ресайза карты (9346 оригинала) */
   const onMmResizeDown = useCallback((e: React.PointerEvent) => {
@@ -1676,83 +1895,65 @@ export function CanvasBoard(props: { store: VetviStore }) {
     e.preventDefault();
   }, []);
 
-  /* mmRebuild+mmGeom оригинала — декларативно: группы (пунктир цвета группы) / связи / ноды */
-  const mmGroupRects: React.ReactNode[] = [];
-  for (const g of doc.groups) {
-    if (groupInsideCollapsed(doc, g)) continue;
-    const r = mmGroupWorldRect(doc, g, sizesMap, cardSizes);
-    mmGroupRects.push(
-      <rect key={g.id} data-gid={g.id} fill="none" stroke={g.color || '#9aa1ac'} strokeOpacity="0.7" rx="3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" x={r.x} y={r.y} width={r.w} height={r.h} />,
-    );
-  }
-  const mmEdgeLines: React.ReactNode[] = [];
-  for (const it of items) {
-    const k = it.e.kind;
-    const col = k === 'bridge' ? '#79808d' : k === 'choice' ? '#8a8f99' : k === 'cond' ? '#6f7580' : '#575d68';
-    mmEdgeLines.push(
-      <line key={it.e.id} data-eid={it.e.id} x1={it.g.x1} y1={it.g.y1} x2={it.g.x2} y2={it.g.y2} stroke={col} strokeWidth={k === 'bridge' ? '2.4' : '1.2'} vectorEffect="non-scaling-stroke" />,
-    );
-  }
-  const mmNodeRects: React.ReactNode[] = [];
-  for (const n of visibleNodes) {
-    const s = sizesMap.get(n.id);
-    const w = s ? s.w : NODE_W;
-    const h = s ? s.h : 90;
-    mmNodeRects.push(
-      <rect key={n.id} data-id={n.id} x={n.x} y={n.y} width={w} height={h} fill={mmNodeColor(store, n)} fillOpacity="0.92" stroke="rgba(0,0,0,.45)" strokeWidth="1" rx="2" vectorEffect="non-scaling-stroke" />,
-    );
-  }
+  /* После каждой перерисовки восстановить императивный вид карты (React не знает
+     про mmViewRef — transform/рамку он сбрасывает к дефолтам JSX). */
+  useLayoutEffect(() => {
+    applyMmView();
+  });
 
-  /* значения mmRender оригинала — декларативно из state (mmView/mmDim/canvasSize) */
+  /* mmRebuild+mmGeom оригинала — декларативно: группы (пунктир цвета группы) / связи / ноды.
+     useMemo: на UI-кадры (выделение/тосты/модалки) элементы мини-карты не пересоздаются —
+     React пропускает поддерево по той же ссылке массива. */
+  const mmShapes = useMemo(() => {
+    const groups: React.ReactNode[] = [];
+    for (const g of doc.groups) {
+      if (groupInsideCollapsed(doc, g)) continue;
+      const r = mmGroupWorldRect(doc, g, sizesMap, cardSizes);
+      groups.push(
+        <rect key={g.id} data-gid={g.id} fill="none" stroke={g.color || '#9aa1ac'} strokeOpacity="0.7" rx="3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" x={r.x} y={r.y} width={r.w} height={r.h} />,
+      );
+    }
+    const edges: React.ReactNode[] = [];
+    for (const it of items) {
+      const k = it.e.kind;
+      const col = k === 'bridge' ? '#79808d' : k === 'choice' ? '#8a8f99' : k === 'cond' ? '#6f7580' : '#575d68';
+      edges.push(
+        <line key={it.e.id} data-eid={it.e.id} x1={it.g.x1} y1={it.g.y1} x2={it.g.x2} y2={it.g.y2} stroke={col} strokeWidth={k === 'bridge' ? '2.4' : '1.2'} vectorEffect="non-scaling-stroke" />,
+      );
+    }
+    const nodes: React.ReactNode[] = [];
+    for (const n of visibleNodes) {
+      const s = sizesMap.get(n.id);
+      const w = s ? s.w : NODE_W;
+      const h = s ? s.h : 90;
+      nodes.push(
+        <rect key={n.id} data-id={n.id} x={n.x} y={n.y} width={w} height={h} fill={mmNodeColor(store, n)} fillOpacity="0.92" stroke="rgba(0,0,0,.45)" strokeWidth="1" rx="2" vectorEffect="non-scaling-stroke" />,
+      );
+    }
+    return { groups, edges, nodes };
+  }, [doc, doc.groups, doc.edges, items, visibleNodes, sizesMap, cardSizes, store, store.refVer, store.geomRev, tick]);
+  const mmGroupRects = mmShapes.groups;
+  const mmEdgeLines = mmShapes.edges;
+  const mmNodeRects = mmShapes.nodes;
+
+  /* значения mmRender оригинала — вид карты применён императивно (mmViewRef):
+     transform #mmContent и рамка #mmView восстанавливаются useLayoutEffect после рендера */
   const mmW = mmDim ? mmDim.w : MM_DEF_W;
   const mmH = mmDim ? mmDim.h : MM_DEF_H;
-  const mmTransform = 'scale(' + mmView.z + ') translate(' + (-mmView.x) + ',' + (-mmView.y) + ')';
-  const mmVb = canvasSize.w > 0 ? mmViewportBoxOf(vp, canvasSize.w, canvasSize.h) : null;
 
-  /* ── #labels: ярлыки групп (gbadge) и «✏ редактирует …» (gbadge lbadge) — updateGroupBadges оригинала ── */
-  const labelBadges: { key: string; x: number; y: number; color: string; text: string; lbadge?: boolean }[] = [];
-  for (const g of doc.groups) {
-    if (!g.badge) continue;
-    if ((g.fold === undefined ? 2 : g.fold) !== 2) continue;
-    if (hiddenGids.has(g.id)) continue;
-    if (!doc.nodes.some((nn) => nn.gid === g.id)) continue;
-    const r = groupFrameRect(doc, g, sizesMap, cardSizes);
-    labelBadges.push({
-      key: 'g:' + g.id,
-      x: vp.x + (r.x + r.w / 2) * vp.z,
-      y: vp.y + r.y * vp.z - 8,
-      color: g.color || '#9aa1ac',
-      text: g.name || '',
-    });
-  }
+  /* ── #labels: ярлыки групп (gbadge) и «✏ редактирует …» (gbadge lbadge) — updateGroupBadges оригинала.
+     Единый источник с императивным обновлением при пан/зуме — computeLabelBadges(). ── */
+  const labelBadges = computeLabelBadges();
   const meId = getMe().id;
-  /* соавторы, которые сейчас выделили ноду (syncFocus): «работает здесь» даже без правок */
-  const focusInfoFor = (nid: string): { id: string; name: string; color: string } | null => {
-    for (const uid of Object.keys(store.syncFocus || {})) {
-      if (uid === meId) continue;
-      if (store.syncFocus[uid] !== nid) continue;
-      const u = (store.syncUsers || []).find((x) => x.id === uid);
-      if (u) return { id: uid, name: u.name || 'участник', color: u.color || '#8b929c' };
-      return { id: uid, name: 'участник', color: '#8b929c' };
-    }
-    return null;
-  };
-  for (const oid of Object.keys(store.syncLocks)) {
-    const l = store.syncLocks[oid];
-    if (!l || !l.id || l.id === meId) continue;
-    const nn = doc.nodes.find((x) => x.id === oid);
-    if (nn && !collapsedAncestorOf(doc, nn.id)) {
-      const w = nodeWidth(nn, sizesMap.get(nn.id));
-      labelBadges.push({ key: 'l:' + oid, x: vp.x + (nn.x + w / 2) * vp.z, y: vp.y + nn.y * vp.z - 8, color: l.color || '#8b929c', text: '✏ редактирует ' + (l.name || '…'), lbadge: true });
-      continue;
-    }
-    const g2 = doc.groups.find((x) => x.id === oid);
-    if (g2 && !groupInsideCollapsed(doc, g2)) {
-      const r = (g2.fold === undefined ? 2 : g2.fold) === 2
-        ? groupFrameRect(doc, g2, sizesMap, cardSizes)
-        : groupCardRect(doc, g2, cardSizes);
-      labelBadges.push({ key: 'l:' + oid, x: vp.x + (r.x + r.w / 2) * vp.z, y: vp.y + r.y * vp.z - 8, color: l.color || '#8b929c', text: '✏ редактирует ' + (l.name || '…'), lbadge: true });
-    }
+  /* соавторы, которые сейчас выделили ноду (syncFocus): «работает здесь» даже без правок.
+     Считается один раз за рендер — раньше O(ноды × участники) на каждую карточку. */
+  const focusByNode = new Map<string, { id: string; name: string; color: string }>();
+  for (const uid of Object.keys(store.syncFocus || {})) {
+    if (uid === meId) continue;
+    const nid = store.syncFocus[uid];
+    if (!nid || focusByNode.has(nid)) continue;
+    const u = (store.syncUsers || []).find((x) => x.id === uid);
+    focusByNode.set(nid, { id: uid, name: u ? (u.name || 'участник') : 'участник', color: u ? (u.color || '#8b929c') : '#8b929c' });
   }
 
   return (
@@ -1836,9 +2037,12 @@ export function CanvasBoard(props: { store: VetviStore }) {
             selected={store.sel.has(n.id)}
             store={store}
             sink={sink}
-            flash={store.flash}
+            flashNow={!!(store.flash && store.flash.nodeId === n.id)}
+            flashReplyId={store.flash && store.flash.nodeId === n.id ? store.flash.replyId : null}
+            renaming={store.renameId === n.id}
+            depVer={store.refVer}
             lockedBy={store.syncLocks[n.id] || null}
-            focusBy={focusInfoFor(n.id)}
+            focusBy={focusByNode.get(n.id) || null}
             onDragStart={onNodeDragStart}
             onPinDown={onPinDown}
             onPinReattach={onPinReattach}
@@ -1878,13 +2082,14 @@ export function CanvasBoard(props: { store: VetviStore }) {
       </div>
       <div
         id="marquee"
-        className={marquee && marquee.g ? 'mg' : undefined}
+        ref={marqueeRef}
+        className={undefined}
         style={{
-          left: (marquee ? marquee.x : 0) + 'px',
-          top: (marquee ? marquee.y : 0) + 'px',
-          width: (marquee ? marquee.w : 0) + 'px',
-          height: (marquee ? marquee.h : 0) + 'px',
-          display: marquee ? 'block' : 'none',
+          left: 0,
+          top: 0,
+          width: 0,
+          height: 0,
+          display: 'none',
         }}
       />
       {/* ghost при вытягивании строки из цепочки (#qGhost, 1162 оригинала; текст/позиция — GroupLayer) */}
@@ -1894,18 +2099,12 @@ export function CanvasBoard(props: { store: VetviStore }) {
     </div>
     <div id="miniMap" ref={mmRef} onPointerDown={onMmDown} onContextMenu={onMmCtx} style={mmDim ? { width: mmDim.w + 'px', height: mmDim.h + 'px' } : undefined}>
       <svg id="mmSvg" viewBox={'0 0 ' + mmW + ' ' + mmH} preserveAspectRatio="none">
-        <g id="mmContent" transform={mmTransform}>
+        <g id="mmContent">
           <g id="mmGroups">{mmGroupRects}</g>
           <g id="mmEdges">{mmEdgeLines}</g>
           <g id="mmNodes">{mmNodeRects}</g>
         </g>
-        <rect
-          id="mmView"
-          x={mmVb ? (mmVb.x1 - mmView.x) * mmView.z : 0}
-          y={mmVb ? (mmVb.y1 - mmView.y) * mmView.z : 0}
-          width={mmVb ? (mmVb.x2 - mmVb.x1) * mmView.z : 0}
-          height={mmVb ? (mmVb.y2 - mmVb.y1) * mmView.z : 0}
-        />
+        <rect id="mmView" x={0} y={0} width={0} height={0} />
       </svg>
       <i className="mm-resize" id="mmResize" title="Потяни за угол, чтобы изменить размер карты" onPointerDown={onMmResizeDown} />
     </div>

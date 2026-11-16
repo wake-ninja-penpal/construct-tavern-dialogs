@@ -8,7 +8,7 @@
  * Классы — из оригинального vetvi.css, инлайн-стили — как в el.style оригинала.
  */
 
-import { useLayoutEffect, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { memo, useLayoutEffect, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 import { NODE_W, STATUS_RU } from '@/vetvi/core/constants';
 import { ALL_ICONS } from '@/vetvi/core/icons';
@@ -130,13 +130,20 @@ function textOf(n: VetviNode): string {
   return n.text || '';
 }
 
-export function NodeCard(props: {
+function NodeCardImpl(props: {
   node: VetviNode;
   vp: VetviViewport;
   selected: boolean;
   store: VetviStore;
   sink: MeasureSink;
-  flash: { nodeId: string; replyId: string | null; t: number } | null;
+  /** Мигание «показать реплику» на карточке — булево (объект flash меняется на каждый запрос). */
+  flashNow: boolean;
+  /** Реплика, к которой прокручивает мигание (для подсветки строки диалога). */
+  flashReplyId?: string | null;
+  /** Поле переименования открыто на этой карточке. */
+  renaming: boolean;
+  /** Версия «ссылочных» данных карточек: персонажи/переменные/свои типы/связи (store.refVer). */
+  depVer: number;
   lockedBy?: { id?: string; name: string; color: string } | null;
   /** Соавтор выделил эту ноду (просто рамка выделения у него) — показываем «работает здесь». */
   focusBy?: { id: string; name: string; color: string } | null;
@@ -147,7 +154,7 @@ export function NodeCard(props: {
   onDblClick: (id: string) => void;
   onReplyDbl: (nodeId: string, rid: string) => void;
 }) {
-  const { node: n, vp, selected, sink, store, flash } = props;
+  const { node: n, vp, selected, sink, store, flashNow } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
 
@@ -176,7 +183,7 @@ export function NodeCard(props: {
     });
   });
 
-  const renaming = store.renameId === n.id;
+  const renaming = props.renaming === undefined ? store.renameId === n.id : props.renaming;
 
   useEffect(() => {
     if (renaming && renameRef.current) {
@@ -189,7 +196,7 @@ export function NodeCard(props: {
   const info = typeInfo(n.type, store.doc.customTypes);
   const ex = (n.expand === 0 || n.expand === 1 || n.expand === 2) ? n.expand : 1;
   const status = STATUS_RU[n.status] ? n.status : 'idea';
-  const isFlash = !!(flash && flash.nodeId === n.id);
+  const isFlash = flashNow;
 
   /* чужой лок: обводка цветом участника (lkb оригинала) */
   const lkRaw = props.lockedBy as { id?: string; name?: string; color?: string } | null | undefined;
@@ -301,7 +308,7 @@ export function NodeCard(props: {
     const spAv = spChar ? ((spChar.av as string | null) || null) : null;
     const spShape = spChar && spChar.avShape === 'square' ? 'square' : 'circle';
     const initial = spChar ? ((String(spChar.name || '').trim()[0] || '?').toUpperCase()) : '';
-    const flashing = isFlash && flash?.replyId === r.id;
+    const flashing = isFlash && props.flashReplyId === r.id;
     const connected = replyOutIds.has(r.id);
     return (
       <div className="dlg-item" key={r.id}>
@@ -623,3 +630,23 @@ export function NodeCard(props: {
     </div>
   );
 }
+
+/* ── memo: карточка перерисовывается только когда изменились ЕЁ данные ──
+   node — новый объект при любом изменении содержимого (store.refreshSigs);
+   depVer — персонажи/переменные/свои типы/связи; остальные props — примитивы
+   или стабильные ссылки (store/sink/callbacks). Благодаря этому перетаскивание
+   ноды, панорама, зум и печать в инспекторе не перекатывают сотни карточек. */
+function lockEq(a: { id?: string; name?: string; color?: string } | null | undefined, b: { id?: string; name?: string; color?: string } | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.id === b.id && a.name === b.name && a.color === b.color;
+}
+export const NodeCard = memo(NodeCardImpl, (a, b) =>
+  a.node === b.node
+  && a.selected === b.selected
+  && a.depVer === b.depVer
+  && a.flashNow === b.flashNow
+  && a.renaming === b.renaming
+  && lockEq(a.lockedBy, b.lockedBy)
+  && lockEq(a.focusBy, b.focusBy)
+);

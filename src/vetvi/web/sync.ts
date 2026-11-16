@@ -704,13 +704,10 @@ export class SyncClient {
     let changed = false;
     if (m.nodes) {
       m.nodes.forEach((u) => {
-        const n = this.store.nodeById(u.id);
-        if (!n) return;
-        n.x = u.x;
-        n.y = u.y;
-        /* живой сдвиг соавтора — тоже «свежая» позиция: отложенный снимок,
-           пришедший раньше этих событий, не должен её затереть */
-        this.store.touchPos('n:' + u.id);
+        /* живой сдвиг соавтора — замена объекта ноды (сигнал memo-карточки);
+           это тоже «свежая» позиция: отложенный снимок, пришедший раньше этих
+           событий, не должен её затереть */
+        this.store.setNodePos(u.id, u.x, u.y);
         changed = true;
       });
     }
@@ -736,7 +733,7 @@ export class SyncClient {
         if (n) { n.dlgWidth = u.w; this.store.touchPos('n:' + u.id); changed = true; }
       });
     }
-    if (changed) this.store.emit();
+    if (changed) this.store.emit('geom');
   }
 
   /* ═══ блокировки объектов (soft-lock) ═══ */

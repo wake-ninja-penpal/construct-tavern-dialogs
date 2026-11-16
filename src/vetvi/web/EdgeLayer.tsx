@@ -4,14 +4,19 @@
  * Ветви — слой связей (этап 2): полная геометрия оригинала — smooth/орто/мосты/петли,
  * якоря к свёрнутым группам, изгибы (вейпоинты), подписи с условиями, режимы линий.
  * DOM 1:1 с оригиналом: svg#edges + defs (6 маркеров arw*) + g.edge (hit/line/ep-h/wp/elabel*).
+ *
+ * Оптимизация: buildEdgeItems ищет ноды по Map (не find по массиву на каждую связь) и
+ * переиспользует объекты EdgeRender с неизменной геометрией — memo-строки EdgeItem
+ * перерисовываются только у реально сдвинувшихся связей (перетаскивание ноды/пан/зум
+ * не перекатывают все стрелки заново).
  */
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 
 import { edgePathD, bridgeCorners, pathPoint } from '@/vetvi/core/edgepath';
 import { clamp, mainAnchor, nodeHeight, nodeWidth } from '@/vetvi/core/geometry';
 import { getMe } from '@/vetvi/core/identity';
-import type { EdgeGeom, NodeSize, VetviDoc, VetviEdge } from '@/vetvi/core/types';
+import type { EdgeGeom, NodeSize, VetviDoc, VetviEdge, VetviNode } from '@/vetvi/core/types';
 import { condText, condWithOverride } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, memberFrac } from './ggroups';
 
@@ -24,6 +29,9 @@ export interface EdgeRender {
   pts: { x: number; y: number }[];
 }
 
+/* кэш готовых EdgeRender по объекту связи: переиспользуется, пока геометрия та же */
+const edgeRenderCache = new WeakMap<VetviEdge, EdgeRender>();
+
 export function buildEdgeItems(
   doc: VetviDoc,
   edges: VetviEdge[],
@@ -32,13 +40,23 @@ export function buildEdgeItems(
   cardSizes: Map<string, { w: number; h: number }>,
   bend: string,
 ): EdgeRender[] {
+  /* O(1)-поиск нод: раньше doc.nodes.find на связь дважды — O(связи × ноды) */
+  const nodeMap = new Map<string, VetviNode>();
+  for (const n of doc.nodes) nodeMap.set(n.id, n);
+  const collapsedCache = new Map<string, ReturnType<typeof collapsedAncestorOf>>();
+  const collapsedOf = (id: string) => {
+    let c = collapsedCache.get(id);
+    if (c === undefined) { c = collapsedAncestorOf(doc, id); collapsedCache.set(id, c); }
+    return c;
+  };
+
   const out: EdgeRender[] = [];
   for (const e of edges) {
-    const na = doc.nodes.find((n) => n.id === e.from);
-    const nb = doc.nodes.find((n) => n.id === e.to);
+    const na = nodeMap.get(e.from);
+    const nb = nodeMap.get(e.to);
     if (!na || !nb) continue;
-    const ga = collapsedAncestorOf(doc, na.id);
-    const gb = collapsedAncestorOf(doc, nb.id);
+    const ga = collapsedOf(na.id);
+    const gb = collapsedOf(nb.id);
     if (ga && gb && ga.id === gb.id) continue;
     const isBridge = e.kind === 'bridge';
 
@@ -137,10 +155,105 @@ export function buildEdgeItems(
     const ny = p1.x - p0.x;
     const nl = Math.hypot(nx, ny) || 1;
     const labelPt = { x: p0.x + (nx / nl) * lp, y: p0.y + (ny / nl) * lp };
-    out.push({ e, g, d, labelPt, cond: (e as unknown as { cond?: { vid: string; op: string; val: number | string } }).cond, pts });
+    const cond = (e as unknown as { cond?: { vid: string; op: string; val: number | string } }).cond;
+
+    /* переиспользование кэша: та же связь, та же геометрия и подпись → тот же объект.
+       Мemo-строка EdgeItem не перерисовывается. pts всегда свежие (нож/вейпоинты). */
+    const prev = edgeRenderCache.get(e);
+    if (
+      prev && prev.e === e
+      && prev.d === d
+      && prev.g.x1 === x1 && prev.g.y1 === y1 && prev.g.x2 === x2 && prev.g.y2 === y2
+      && prev.labelPt && prev.labelPt.x === labelPt.x && prev.labelPt.y === labelPt.y
+      && prev.cond === cond
+    ) {
+      prev.pts = pts;
+      out.push(prev);
+      continue;
+    }
+    const item: EdgeRender = { e, g, d, labelPt, cond, pts };
+    edgeRenderCache.set(e, item);
+    out.push(item);
   }
   return out;
 }
+
+/* ── одна связь: memo по (item, sel, тексты, лок) — перерисовка только изменённых ── */
+type EdgeItemProps = {
+  it: EdgeRender;
+  sel: boolean;
+  labelText: string;
+  ct: string;
+  showFrom: boolean;
+  showTo: boolean;
+  showWps: boolean;
+  lockKey: string;
+  lockColor: string | undefined;
+  onEdgeDown: (e: React.MouseEvent, id: string) => void;
+  onBridgeDown: (e: React.MouseEvent, id: string, part: 'l' | 'r' | 'h') => void;
+  onEdgeDbl: (e: React.MouseEvent, id: string) => void;
+  onWpDown: (e: React.MouseEvent, id: string, i: number) => void;
+  onWpDbl: (e: React.MouseEvent, id: string, i: number) => void;
+  onLabelDown: (e: React.MouseEvent, id: string) => void;
+};
+
+const EdgeItem = memo(function EdgeItem(props: EdgeItemProps) {
+  const { it, sel, labelText, ct, showFrom, showTo, showWps, lockKey, lockColor } = props;
+  const e = it.e;
+  const g = it.g;
+  const bridge = (e.kind || 'flow') === 'bridge';
+  const tvar = e.tin === 'var';
+  return (
+    <g key={e.id} data-id={e.id} className={'edge kind-' + (e.kind || 'flow') + (bridge ? ' bridge' : '') + (tvar ? ' tvar' : '') + (sel ? ' sel' : '') + (lockKey ? ' lkb' : '')} style={lockKey ? { ['--lkc' as string]: lockColor } : undefined}>
+      <path
+        className="hit"
+        d={it.d}
+        onMouseDown={bridge
+          ? (ev: React.MouseEvent) => { ev.stopPropagation(); props.onBridgeDown(ev, e.id, bridgePartAt(ev, g)); }
+          : (ev: React.MouseEvent) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }}
+        onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)}
+      />
+      <path className="line" d={it.d} markerEnd="url(#arw)" />
+      <circle className="ep-h" r={6} data-ep="from" cx={g.x1} cy={g.y1} style={showFrom ? undefined : { display: 'none' }} />
+      <circle className="ep-h" r={6} data-ep="to" cx={g.x2} cy={g.y2} style={showTo ? undefined : { display: 'none' }} />
+      {showWps && !bridge && (e.pts || []).map((p, i) => (
+        <circle
+          key={i}
+          className="wp"
+          data-i={i}
+          cx={Math.round(p.x)}
+          cy={Math.round(p.y)}
+          r={5}
+          onMouseDown={(ev) => { ev.stopPropagation(); props.onWpDown(ev, e.id, i); }}
+          onDoubleClick={(ev) => { ev.stopPropagation(); props.onWpDbl(ev, e.id, i); }}
+        />
+      ))}
+      {it.labelPt && (
+        <g onMouseDown={(ev) => { ev.stopPropagation(); props.onLabelDown(ev, e.id); }}>
+          <text className="elabel-hit" x={it.labelPt.x} y={it.labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
+          <text className="elabel" x={it.labelPt.x} y={it.labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
+          <text className="ecnd" x={it.labelPt.x} y={e.label ? it.labelPt.y + 13 : it.labelPt.y - 6} style={ct ? undefined : { display: 'none' }}>{ct}</text>
+        </g>
+      )}
+    </g>
+  );
+}, (a, b) =>
+  a.it === b.it
+  && a.sel === b.sel
+  && a.labelText === b.labelText
+  && a.ct === b.ct
+  && a.showFrom === b.showFrom
+  && a.showTo === b.showTo
+  && a.showWps === b.showWps
+  && a.lockKey === b.lockKey
+  && a.lockColor === b.lockColor
+  && a.onEdgeDown === b.onEdgeDown
+  && a.onBridgeDown === b.onBridgeDown
+  && a.onEdgeDbl === b.onEdgeDbl
+  && a.onWpDown === b.onWpDown
+  && a.onWpDbl === b.onWpDbl
+  && a.onLabelDown === b.onLabelDown
+);
 
 export function EdgeLayer(props: {
   doc: VetviDoc;
@@ -172,6 +285,22 @@ export function EdgeLayer(props: {
     return 'M' + sx + ' ' + sy + ' C ' + (sx + 80) + ' ' + sy + ', ' + (pending.x - 80) + ' ' + pending.y + ', ' + pending.x + ' ' + pending.y;
   }, [pending]);
 
+  /* обычный Map на время рендера (не useMemo — мутабельные хук-значения под
+     запретом react-hooks/immutability): кэш collapsedAncestorOf в рамках прохода */
+  const collapsedCache = new Map<string, boolean>();
+  const collapsedOf = (id: string): boolean => {
+    let c = collapsedCache.get(id);
+    if (c === undefined) { c = !!collapsedAncestorOf(doc, id); collapsedCache.set(id, c); }
+    return c;
+  };
+  /* карта нод для «текст условия — только от развилки» (раньше find на связь) */
+  const nodeMap = useMemo(() => {
+    const m = new Map<string, VetviNode>();
+    for (const n of doc.nodes) m.set(n.id, n);
+    return m;
+  }, [doc, items]);
+  const meId = getMe().id;
+
   return (
     <svg id="edges" width={10} height={10} style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible' }} className="rn-edges">
       <defs>
@@ -182,53 +311,37 @@ export function EdgeLayer(props: {
         <marker id="arwBridgeHi" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#a6adb8" /></marker>
         <marker id="arwBridgeSel" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M10 5 L1.34 0.67 Q0 0 0 1.5 L0 8.5 Q0 10 1.34 9.33 Z" fill="#e2a54e" /></marker>
       </defs>
-      {items.map(({ e, g, d, labelPt, cond }) => {
+      {items.map((it) => {
+        const e = it.e;
+        const cond = it.cond;
         const on = selected.has(e.id);
-        const kind = e.kind || 'flow';
-        const bridge = kind === 'bridge';
-        const tvar = e.tin === 'var';
-        const lkRawE = locks ? locks[e.id] : undefined;
-        const lkE = (lkRawE && lkRawE.id && lkRawE.id !== getMe().id) ? lkRawE : null;
-        // ручки концов скрываем, если нода внутри свёрнутой группы (endCollapsed оригинала)
-        const showFrom = !collapsedAncestorOf(doc, e.from);
-        const showTo = !collapsedAncestorOf(doc, e.to);
-        // текст условия: только у связей от развилки, с учётом перебивающей переменной (condWithOverride оригинала)
-        const fnA = doc.nodes.find((n) => n.id === e.from);
+        const fnA = nodeMap.get(e.from);
         const ct = (cond && fnA && fnA.type === 'branch') ? '⟦ ' + condText(doc, condWithOverride(doc, cond, fnA)) + ' ⟧' : '';
         const labelText = String(e.label || '');
+        const lkRawE = locks ? locks[e.id] : undefined;
+        const lkE = (lkRawE && lkRawE.id && lkRawE.id !== meId) ? lkRawE : null;
+        // ручки концов скрываем, если нода внутри свёрнутой группы (endCollapsed оригинала)
+        const showFrom = !collapsedOf(e.from);
+        const showTo = !collapsedOf(e.to);
         return (
-          <g key={e.id} data-id={e.id} className={'edge kind-' + kind + (bridge ? ' bridge' : '') + (tvar ? ' tvar' : '') + (on ? ' sel' : '') + (lkE ? ' lkb' : '')} style={lkE ? { ['--lkc' as string]: lkE.color } : undefined}>
-            <path
-              className="hit"
-              d={d}
-              onMouseDown={bridge
-                ? (ev: React.MouseEvent) => { ev.stopPropagation(); props.onBridgeDown(ev, e.id, bridgePartAt(ev, g)); }
-                : (ev: React.MouseEvent) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }}
-              onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)}
-            />
-            <path className="line" d={d} markerEnd="url(#arw)" />
-            <circle className="ep-h" r={6} data-ep="from" cx={g.x1} cy={g.y1} style={showFrom ? undefined : { display: 'none' }} />
-            <circle className="ep-h" r={6} data-ep="to" cx={g.x2} cy={g.y2} style={showTo ? undefined : { display: 'none' }} />
-            {props.showWps && !bridge && (e.pts || []).map((p, i) => (
-              <circle
-                key={i}
-                className="wp"
-                data-i={i}
-                cx={Math.round(p.x)}
-                cy={Math.round(p.y)}
-                r={5}
-                onMouseDown={(ev) => { ev.stopPropagation(); props.onWpDown(ev, e.id, i); }}
-                onDoubleClick={(ev) => { ev.stopPropagation(); props.onWpDbl(ev, e.id, i); }}
-              />
-            ))}
-            {labelPt && (
-              <g onMouseDown={(ev) => { ev.stopPropagation(); props.onLabelDown(ev, e.id); }}>
-                <text className="elabel-hit" x={labelPt.x} y={labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
-                <text className="elabel" x={labelPt.x} y={labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
-                <text className="ecnd" x={labelPt.x} y={e.label ? labelPt.y + 13 : labelPt.y - 6} style={ct ? undefined : { display: 'none' }}>{ct}</text>
-              </g>
-            )}
-          </g>
+          <EdgeItem
+            key={e.id}
+            it={it}
+            sel={on}
+            labelText={labelText}
+            ct={ct}
+            showFrom={showFrom}
+            showTo={showTo}
+            showWps={props.showWps}
+            lockKey={lkE ? lkE.id : ''}
+            lockColor={lkE ? lkE.color : undefined}
+            onEdgeDown={props.onEdgeDown}
+            onBridgeDown={props.onBridgeDown}
+            onEdgeDbl={props.onEdgeDbl}
+            onWpDown={props.onWpDown}
+            onWpDbl={props.onWpDbl}
+            onLabelDown={props.onLabelDown}
+          />
         );
       })}
       {pendingD && <path className="preview" d={pendingD} />}

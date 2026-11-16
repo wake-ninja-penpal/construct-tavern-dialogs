@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { hkIs, hkLoad, hkText } from '@/vetvi/core/hotkeys';
 import { fmtWhenLong, fmtWhenShort } from '@/vetvi/core/projects';
 import { getStore, type VetviStore } from './store';
+import { useStoreRev } from './rev';
 import { SyncClient } from './sync';
 import { TopBar } from './TopBar';
 import { CanvasBoard } from './CanvasBoard';
@@ -26,15 +27,13 @@ import { DstWin } from './DstWin';
 import { CollabPopover, LockScreen, LockTipHost } from './SyncModals';
 import { canvasApi } from './canvasApi';
 
-function useStoreRevision(store: VetviStore): number {
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-}
-
 /* Рендер после монтирования: документ читается из localStorage при создании стора. */
 const emptySubscribe = () => () => {};
 function useMounted(): boolean {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
+
+/* useStoreRev импортируется из ./rev (общая подписка на каналы стора). */
 
 /* ── всплывашка над «✓ автосохранение»: кто и когда менял проект (editTip оригинала) ──
    Кликабельна: курсор можно перевести на неё; кнопка открывает «Журнал действий». */
@@ -138,7 +137,10 @@ function EditTipHost({ store }: { store: VetviStore }) {
 
 export default function VetviApp() {
   const store = useMemo(() => getStore(), []);
-  useStoreRevision(store);
+  /* Каналы doc+ui: геометрические кадры (жесты холста) не перерисовывают корень —
+     их подхватывает сам CanvasBoard своей подпиской, панели/модалки не трогаются. */
+  useStoreRev(store, 'doc');
+  useStoreRev(store, 'ui');
   const mounted = useMounted();
 
   /* личные хоткеи + проект из хеша (#project=<id>) + realtime-клиент */
