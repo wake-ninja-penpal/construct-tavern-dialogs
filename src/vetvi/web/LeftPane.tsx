@@ -637,7 +637,7 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
             onDoubleClick={(e) => e.preventDefault()}
           ><Ic d={P_GRIP} size={12} /></span>
           {/* раскладка в два ряда: имя (текст, двойной клик — переименовать) + пометка-тег,
-              ниже — тип и значение; кнопки булавки/удаления/редактора — справа */}
+              ниже — тип и значение; кнопки удаления/булавки — по углам карточки (CSS) */}
           <div className="v-main">
             <div className="v-line1">
               {renVid === v.id ? (

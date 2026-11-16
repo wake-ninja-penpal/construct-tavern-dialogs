@@ -630,7 +630,6 @@ body.connecting .vpinn{cursor:copy}
 .sp-st{font-size:11.5px;color:var(--tx2);line-height:1.5}
 .sp-acts{display:flex;gap:8px;margin-top:8px}
 #paneVars .v-row.dragging{opacity:.45}
-#paneVars .v-row .v-del{margin-right:2px}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
 .v-row .v-type{flex:0 1 78px;min-width:54px;padding:0 2px;font-size:10.5px}
 #paneVars .v-row .v-val{flex:0 1 58px;min-width:46px}
@@ -639,10 +638,13 @@ body.connecting .vpinn{cursor:copy}
 /* карточка переменной — как у персонажей (#paneChars .v-row): каждая переменная
    видимо отделена от соседних рамкой и фоном */
 #paneVars .v-row{background:#14161a;border:1px solid #2b2f37;border-radius:11px;padding:7px 9px;min-height:50px;gap:9px}
-/* булавка переменной — в правом верхнем углу карточки (вне потока flex), чтобы
-   не налезать на поля типа/значения; уголок карточки её «личная» зона */
+/* кнопки карточки переменной — по углам (вне потока flex), чтобы не налезать
+   на поля типа/значения: удаление — правый верхний угол, булавка — правый
+   нижний; уголки карточки — их «личные» зоны */
 #paneVars .v-row{position:relative}
-#paneVars .v-row .v-pin{position:absolute;top:2px;right:3px;flex:none;width:20px;height:20px;border-radius:7px}
+#paneVars .v-row .v-del{position:absolute;top:2px;right:3px;flex:none;width:20px;height:20px;border-radius:7px;margin:0;border:none;background:none;color:var(--tx3);padding:0}
+#paneVars .v-row .v-del:hover{color:#cf6d4f;background:#33272a;border:none}
+#paneVars .v-row .v-pin{position:absolute;bottom:2px;right:3px;flex:none;width:20px;height:20px;border-radius:7px}
 .v-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
 .v-line1{display:flex;align-items:center;gap:6px;min-width:0}
 .v-line2{display:flex;align-items:center;gap:6px;min-width:0}
@@ -1237,9 +1239,15 @@ body{overflow:hidden;background:var(--bg)}
 /* группы персонажей: линия снаружи (overflow:hidden не режет box-shadow) */
 .cgroup.dnd-gap-above{box-shadow:0 -8px 0 -6px var(--acc)}
 .cgroup.dnd-gap-below{box-shadow:0 8px 0 -6px var(--acc)}
-/* строки исходов/кнопок/реплик: тоже раздвигаются, линия уже была (inset-тень) */
-.br-out.drop-above,.out-ed.drop-above,.dlg-reply-ed.drop-above{margin-top:14px!important}
-.br-out.drop-below,.out-ed.drop-below,.dlg-reply-ed.drop-below{margin-bottom:14px!important}
+/* строки исходов/кнопок: раздвигаются, линия уже была (inset-тень).
+   ВАЖНО: для строк реплик (.dlg-reply-ed) раздвижки НЕТ — появившийся отступ
+   сдвигает строку из-под курсора, drop уходит в «мёртвую зону» зазора на
+   контейнер (.dlg-children-ed/#dlgModalBody), зона пересчитывается по родителю
+   («inside» — реплика остаётся у того же родителя) — индикатор показывал одно
+   место, а бросок применял другое. У реплик только линии-индикаторы (как в
+   классической версии), без сдвига раскладки. */
+.br-out.drop-above,.out-ed.drop-above{margin-top:14px!important}
+.br-out.drop-below,.out-ed.drop-below{margin-bottom:14px!important}
 
 /* ══════════ присутствие: соавтор выделил ноду («работает здесь») ══════════ */
 .node.foc{outline:1.5px dashed var(--fc,#e2a54e);outline-offset:1.5px}
