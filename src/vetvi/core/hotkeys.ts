@@ -31,7 +31,7 @@ export const HK_DEFS: HkDef[] = [
   { id: 'fitView', name: 'Вписать весь проект', def: 'Digit0' },
   { id: 'zoomIn', name: 'Приблизить', def: 'Equal', alias: ['Shift+Equal'] },
   { id: 'zoomOut', name: 'Отдалить', def: 'Minus' },
-  { id: 'patchnotes', name: 'Что нового (патчноут)', def: 'Mod+KeyH' },
+  { id: 'patchnotes', name: 'Что нового', def: 'Mod+KeyH' },
   /* разметка реплики (работают в активном поле текста реплики) */
   { id: 'fmtBold', name: 'Реплика: жирный (в поле текста)', def: 'Mod+KeyB' },
   { id: 'fmtItalic', name: 'Реплика: курсив (в поле текста)', def: 'Mod+KeyI' },

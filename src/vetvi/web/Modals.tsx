@@ -514,7 +514,7 @@ export function PatchModal({ store }: { store: VetviStore }) {
     <div className="dlg-modal show" onClick={(e) => { if (e.target === e.currentTarget) store.closeModal(); }} role="dialog" aria-label="Что нового — патчноут">
       <div className="dlg-modal-card patch-card">
         <div className="dlg-modal-head">
-          <span className="dlg-modal-title">Что нового — патчноут</span>
+          <span className="dlg-modal-title">Что нового</span>
           <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
         </div>
         <div className="patch-tools">
