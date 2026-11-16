@@ -286,14 +286,29 @@ function ReplyFmtBar(props: {
   );}
 
 /* ═══ перетаскивание реплик — свободное, с автоподстройкой вложенности ═══
-   Раньше переставлялись только соседи одного уровня. Теперь реплику можно бросить
-   в любое место дерева: выше/ниже цели (уровень берётся от цели — вложенная
-   становится корневой и наоборот) или ВНУТРЬ цели (последним ответом-веткой).
-   Зоны броска по вертикали строки цели: верхние ~28% — выше, средние — внутрь,
-   нижние ~28% — ниже. Бросок на пустое место списка — корневой в конец. */
+   Реплику можно бросить в любое место дерева: выше/ниже цели (уровень берётся
+   от цели — вложенная становится корневой и наоборот) или ВНУТРЬ цели
+   (последним ответом-веткой). Бросок на пустое место списка — корневой в конец.
+
+   Геометрия (единый резолвер для подсветки И броска — индикатор всегда
+   совпадает с результатом): список разбивается на «полосы» строк. Полоса
+   строки — её собственный контент БЕЗ детей: у родителя это верхняя часть
+   карточки до первого ребёнка, у листа — вся карточка. Раньше зоны считались
+   от полного rect строки, куда входят все дети ветки, — из-за этого у родителя
+   с детьми зона «ниже (корень)» начиналась внутри области детей, индикатор
+   прыгал между уровнями, а drop уходил не туда. Теперь:
+   • курсор в полосе строки: лист — 28%/44%/28% → выше/внутрь/ниже;
+     родитель — 40%/60% → выше/внутрь (дальше вниз идут полосы детей);
+   • курсор в зазоре между полосами — граница: выше середины зазора —
+     «после верхней» строки (её уровень), ниже — «перед нижней» (её уровень);
+   • ниже всех полос — корневой в конец списка.
+   Мёртвых зон нет: любая точка списка разрешается в конкретное место, и drop
+   разрешается той же функцией, что и подсветка. */
 
 let dlgDragRid: string | null = null;
-let dlgDropPlace: 'before' | 'inside' | 'after' | null = null;
+let dlgIndRow: HTMLElement | null = null;
+
+type DlgDrop = { rid: string | null; place: 'before' | 'after' | 'inside' | 'root' };
 
 function replyById(arr: VetviReply[], id: string): VetviReply | null {
   for (const r of arr) {
@@ -312,6 +327,62 @@ function replySubtreeHas(root: VetviReply | null, id: string): boolean {
   if (root.id === id) return true;
   for (const ch of root.children || []) if (replySubtreeHas(ch, id)) return true;
   return false;
+}
+
+/** Нижняя граница «полосы» строки — верх первого ребёнка (у родителя)
+ *  или низ самой строки (у листа). */
+function dlgBandOf(row: HTMLElement): { top: number; bot: number; leaf: boolean } {
+  const rc = row.getBoundingClientRect();
+  const fc = row.querySelector(':scope > .dlg-children-ed > .dlg-reply-ed') as HTMLElement | null;
+  return { top: rc.top, bot: fc ? fc.getBoundingClientRect().top : rc.bottom, leaf: !fc };
+}
+
+/** Резолюция курсора (по вертикали) в цель броска. */
+function dlgResolveDrop(y: number): DlgDrop {
+  const body = document.getElementById('dlgModalBody');
+  if (!body) return { rid: null, place: 'root' };
+  const rows = Array.from(body.querySelectorAll('.dlg-reply-ed')) as HTMLElement[];
+  if (!rows.length) return { rid: null, place: 'root' };
+  const bands = rows.map(dlgBandOf);
+  /* полоса, содержащая курсор */
+  for (let i = 0; i < bands.length; i++) {
+    const b = bands[i];
+    if (y >= b.top && y < b.bot) {
+      const rel = (y - b.top) / Math.max(1, b.bot - b.top);
+      if (b.leaf) return { rid: rows[i].dataset.rid || null, place: rel < 0.28 ? 'before' : rel > 0.72 ? 'after' : 'inside' };
+      return { rid: rows[i].dataset.rid || null, place: rel < 0.4 ? 'before' : 'inside' };
+    }
+  }
+  /* зазор: up — последняя полоса выше курсора, down — первая ниже */
+  let up: { r: HTMLElement; bot: number } | null = null;
+  let down: { r: HTMLElement; top: number } | null = null;
+  for (let i = 0; i < bands.length; i++) {
+    if (bands[i].bot <= y) up = { r: rows[i], bot: bands[i].bot };
+    else { down = { r: rows[i], top: bands[i].top }; break; }
+  }
+  if (up && down) {
+    const mid = (up.bot + down.top) / 2;
+    return y < mid ? { rid: up.r.dataset.rid || null, place: 'after' } : { rid: down.r.dataset.rid || null, place: 'before' };
+  }
+  if (down) return { rid: down.r.dataset.rid || null, place: 'before' }; /* выше первой полосы */
+  return { rid: null, place: 'root' }; /* ниже всех полос — корневой в конец */
+}
+
+function dlgClearInd(): void {
+  if (dlgIndRow) { dlgIndRow.classList.remove('drop-above', 'drop-below', 'drop-in'); dlgIndRow = null; }
+  document.getElementById('dlgModalBody')?.classList.remove('drop-root');
+}
+
+function dlgShowInd(res: DlgDrop): void {
+  dlgClearInd();
+  if (!res.rid) {
+    document.getElementById('dlgModalBody')?.classList.add('drop-root');
+    return;
+  }
+  const row = document.querySelector('#dlgModalBody .dlg-reply-ed[data-rid="' + res.rid + '"]') as HTMLElement | null;
+  if (!row) return;
+  row.classList.add(res.place === 'before' ? 'drop-above' : res.place === 'after' ? 'drop-below' : 'drop-in');
+  dlgIndRow = row;
 }
 
 /* автоскролл списка реплик при перетаскивании к краям модалки (dlgAutoScroll оригинала 1601–1626):
@@ -471,8 +542,9 @@ export function DialogModal({ store }: { store: VetviStore }) {
     const isRoot = depth === 0;
     const isFlash = !!(flash && flash.nodeId === n.id && flash.replyId === r.id);
     const loop = !!(r as unknown as { loop?: boolean }).loop;
-    /* перетаскивание реплик (dlgDragRid оригинала): grip по mousedown делает строку draggable,
-       drop выше/ниже цели переставляет; только среди соседей одного уровня */
+    /* перетаскивание реплик: grip по mousedown делает строку draggable.
+       Подсветка и бросок — делегированные, на теле списка (dlgResolveDrop),
+       поэтому на строке только старт/конец перетаскивания */
     const onDragStart = (ev: React.DragEvent) => {
       const row = ev.currentTarget as HTMLElement;
       if (ev.target !== row) return; /* dragstart от вложенной реплики — не мешаем */
@@ -480,65 +552,15 @@ export function DialogModal({ store }: { store: VetviStore }) {
       ev.dataTransfer.effectAllowed = 'move';
       try { ev.dataTransfer.setData('text/plain', r.id); } catch { /* старые браузеры */ }
       dlgDragRid = r.id;
-      dlgDropPlace = null;
       setTimeout(() => row.classList.add('dragging'), 0);
-    };
-    const clearDropMarks = () => {
-      document.querySelectorAll('#dlgModalBody .dlg-reply-ed').forEach((x) => x.classList.remove('drop-above', 'drop-below', 'drop-in'));
     };
     const onDragEnd = (ev: React.DragEvent) => {
       const row = ev.currentTarget as HTMLElement;
       row.removeAttribute('draggable');
       row.classList.remove('dragging');
-      clearDropMarks();
-      document.getElementById('dlgModalBody')?.classList.remove('drop-root');
+      dlgClearInd();
       dlgDragRid = null;
-      dlgDropPlace = null;
       dlgAutoScrollStop();
-    };
-    const zoneOf = (rect: DOMRect, clientY: number): 'before' | 'inside' | 'after' => {
-      const y = clientY - rect.top;
-      if (y < rect.height * 0.28) return 'before';
-      if (y > rect.height * 0.72) return 'after';
-      return 'inside';
-    };
-    const onDragOver = (ev: React.DragEvent) => {
-      if (!dlgDragRid || dlgDragRid === r.id) return;
-      const inner = (ev.target as HTMLElement).closest ? (ev.target as HTMLElement).closest('.dlg-reply-ed') : null;
-      if (inner && inner !== ev.currentTarget) return; /* вложенная реплика обработает сама */
-      /* бросок в собственное поддерево запрещён (реплика исчезла бы из дерева) */
-      const src = replyById(dlg.replies, dlgDragRid);
-      if (replySubtreeHas(src, r.id)) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      ev.dataTransfer.dropEffect = 'move';
-      const place = zoneOf((ev.currentTarget as HTMLElement).getBoundingClientRect(), ev.clientY);
-      dlgDropPlace = place;
-      const row = ev.currentTarget as HTMLElement;
-      row.classList.toggle('drop-above', place === 'before');
-      row.classList.toggle('drop-in', place === 'inside');
-      row.classList.toggle('drop-below', place === 'after');
-    };
-    const onDragLeave = (ev: React.DragEvent) => {
-      (ev.currentTarget as HTMLElement).classList.remove('drop-above', 'drop-below', 'drop-in');
-    };
-    const onDrop = (ev: React.DragEvent) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      dlgAutoScrollStop();
-      const row = ev.currentTarget as HTMLElement;
-      const place = zoneOf(row.getBoundingClientRect(), ev.clientY);
-      row.classList.remove('drop-above', 'drop-below', 'drop-in');
-      const srcRid = dlgDragRid;
-      dlgDragRid = null;
-      dlgDropPlace = null;
-      if (!srcRid || srcRid === r.id) return;
-      const src = replyById(dlg.replies, srcRid);
-      if (replySubtreeHas(src, r.id)) {
-        store.toast('Нельзя переложить реплику внутрь её собственной ветки', 'warn');
-        return;
-      }
-      store.moveReplyTo(n.id, srcRid, r.id, place);
     };
     return (
       <div
@@ -547,9 +569,6 @@ export function DialogModal({ store }: { store: VetviStore }) {
         data-rid={r.id}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
       >
         {editRid === r.id && <ReplyFmtBar apply={applyFmt} />}
         <div className="dlg-reply-row-ed">
@@ -653,29 +672,42 @@ export function DialogModal({ store }: { store: VetviStore }) {
           id="dlgModalBody"
           ref={listRef}
           onDragOver={(ev) => {
-            /* бросок на пустое место списка — реплика становится корневой в конце */
+            /* делегированная подсветка: любая точка списка разрешается резолвером —
+               индикатор всегда на том месте, куда реплика реально попадёт */
             if (!dlgDragRid) return;
-            const t = ev.target as HTMLElement;
-            if (t.closest('.dlg-reply-ed')) return; /* строки реплик обрабатывают сами */
+            const res = dlgResolveDrop(ev.clientY);
+            if (res.rid) {
+              /* на саму себя и в собственное поддерево бросок не разрешаем —
+                 и подсветку снимаем, чтобы старый индикатор не «висел» */
+              if (res.rid === dlgDragRid) { dlgClearInd(); return; }
+              const src = replyById(dlg.replies, dlgDragRid);
+              if (replySubtreeHas(src, res.rid)) { dlgClearInd(); return; }
+            }
             ev.preventDefault();
             ev.dataTransfer.dropEffect = 'move';
-            ev.currentTarget.classList.add('drop-root');
+            dlgShowInd(res);
           }}
           onDragLeave={(ev) => {
             const rt = ev.relatedTarget as Node | null;
             const el = ev.currentTarget as HTMLElement;
-            if (!rt || !el.contains(rt)) el.classList.remove('drop-root');
+            if (!rt || !el.contains(rt)) { dlgClearInd(); dlgAutoScrollStop(); }
           }}
           onDrop={(ev) => {
-            const t = ev.target as HTMLElement;
-            if (t.closest('.dlg-reply-ed')) return; /* drop по строке обработан ею же */
+            const res = dlgResolveDrop(ev.clientY);
             ev.preventDefault();
-            ev.currentTarget.classList.remove('drop-root');
+            dlgAutoScrollStop();
             const srcRid = dlgDragRid;
             dlgDragRid = null;
-            dlgDropPlace = null;
-            dlgAutoScrollStop();
-            if (srcRid) store.moveReplyTo(n.id, srcRid, null, 'root');
+            dlgClearInd();
+            if (!srcRid) return;
+            if (!res.rid) { store.moveReplyTo(n.id, srcRid, null, 'root'); return; }
+            if (res.rid === srcRid) return;
+            const src = replyById(dlg.replies, srcRid);
+            if (replySubtreeHas(src, res.rid)) {
+              store.toast('Нельзя переложить реплику внутрь её собственной ветки', 'warn');
+              return;
+            }
+            store.moveReplyTo(n.id, srcRid, res.rid, res.place);
           }}
         >
           {partChars.length > 0 && (
