@@ -639,6 +639,10 @@ body.connecting .vpinn{cursor:copy}
 /* карточка переменной — как у персонажей (#paneChars .v-row): каждая переменная
    видимо отделена от соседних рамкой и фоном */
 #paneVars .v-row{background:#14161a;border:1px solid #2b2f37;border-radius:11px;padding:7px 9px;min-height:50px;gap:9px}
+/* булавка переменной — в правом верхнем углу карточки (вне потока flex), чтобы
+   не налезать на поля типа/значения; уголок карточки её «личная» зона */
+#paneVars .v-row{position:relative}
+#paneVars .v-row .v-pin{position:absolute;top:2px;right:3px;flex:none;width:20px;height:20px;border-radius:7px}
 .v-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
 .v-line1{display:flex;align-items:center;gap:6px;min-width:0}
 .v-line2{display:flex;align-items:center;gap:6px;min-width:0}
