@@ -768,14 +768,18 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
         id="vRows"
         className={dropHint?.kind === 'root' ? 'drop-ok' : ''}
         onDragOver={(e) => {
-          if (!dtHas(e, 'text/vetvi-var')) return;
+          const isVar = dtHas(e, 'text/vetvi-var');
+          const isGroup = dtHas(e, 'text/vetvi-vargroup');
+          if (!isVar && !isGroup) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           markOver({ kind: 'root' });
         }}
         onDrop={(e) => {
           const vid = e.dataTransfer.getData('text/vetvi-var');
+          const gid = e.dataTransfer.getData('text/vetvi-vargroup');
           if (vid) { e.preventDefault(); store.placeVarInList(vid, null, null, 'after'); }
+          else if (gid) { e.preventDefault(); store.moveVarGroup(gid, store.varGroups().length); }
           markOver(null);
         }}
       >
@@ -792,15 +796,29 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
                 + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')
                 + (gHint === 'before' ? ' dnd-gap-above' : gHint === 'after' ? ' dnd-gap-below' : '')}
               onDragOver={(e) => {
-                if (!dtHas(e, 'text/vetvi-var')) return;
+                const isVar = dtHas(e, 'text/vetvi-var');
+                const isGroup = dtHas(e, 'text/vetvi-vargroup');
+                if (!isVar && !isGroup) return;
                 e.preventDefault();
                 e.stopPropagation();
                 e.dataTransfer.dropEffect = 'move';
-                markOver({ kind: 'group', id: g.id });
+                /* группа тянется и мимо головы (раздвижка сдвигает контейнер под
+                   курсором — бросок часто приходит на тело группы): считаем
+                   позицию по половинам всего контейнера группы */
+                if (isGroup && !isVar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+                else markOver({ kind: 'group', id: g.id });
               }}
               onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const gid = e.dataTransfer.getData('text/vetvi-vargroup');
                 const vid = e.dataTransfer.getData('text/vetvi-var');
-                if (vid) { e.preventDefault(); e.stopPropagation(); store.placeVarInList(vid, g.id, null, 'after'); }
+                if (vid) store.placeVarInList(vid, g.id, null, 'after');
+                else if (gid && gid !== g.id) {
+                  const tIdx = store.varGroups().findIndex((x) => x.id === g.id);
+                  const place = placeOf(e.currentTarget as HTMLElement, e.clientY);
+                  store.moveVarGroup(gid, place === 'before' ? tIdx : tIdx + 1);
+                }
                 markOver(null);
               }}
             >
@@ -817,7 +835,10 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
                   e.preventDefault();
                   e.stopPropagation();
                   e.dataTransfer.dropEffect = 'move';
-                  if (isGroup && !isVar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+                  /* позиция — по половинам КОНТЕЙНЕРА группы (не головы): раздвижка
+                     сдвигает контейнер под курсором, и рассинхрон дал бы бесконечное
+                     дрожание группы вверх-вниз во время перетаскивания */
+                  if (isGroup && !isVar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget.parentElement as HTMLElement, e.clientY) });
                   else markOver({ kind: 'group', id: g.id });
                 }}
                 onDrop={(e) => {
@@ -828,7 +849,7 @@ function VarsPane({ store, active }: { store: VetviStore; active: boolean }) {
                   if (vid) store.placeVarInList(vid, g.id, null, 'after');
                   else if (gid && gid !== g.id) {
                     const tIdx = store.varGroups().findIndex((x) => x.id === g.id);
-                    const place = placeOf(e.currentTarget as HTMLElement, e.clientY);
+                    const place = placeOf(e.currentTarget.parentElement as HTMLElement, e.clientY);
                     store.moveVarGroup(gid, place === 'before' ? tIdx : tIdx + 1);
                   }
                   markOver(null);
@@ -1183,14 +1204,18 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
         id="cRows"
         className={dropHint?.kind === 'root' ? 'drop-ok' : ''}
         onDragOver={(e) => {
-          if (!dtHas(e, 'text/vetvi-char')) return;
+          const isChar = dtHas(e, 'text/vetvi-char');
+          const isGroup = dtHas(e, 'text/vetvi-chargroup');
+          if (!isChar && !isGroup) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           markOver({ kind: 'root' });
         }}
         onDrop={(e) => {
           const cid = e.dataTransfer.getData('text/vetvi-char');
+          const gid = e.dataTransfer.getData('text/vetvi-chargroup');
           if (cid) { e.preventDefault(); store.setCharGroup(cid, null); }
+          else if (gid) { e.preventDefault(); store.moveCharGroup(gid, store.charGroups().length); }
           markOver(null);
         }}
       >
@@ -1207,15 +1232,28 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                 + (dropHint?.kind === 'group' && dropHint.id === g.id ? ' drop-ok' : '')
                 + (gHint === 'before' ? ' dnd-gap-above' : gHint === 'after' ? ' dnd-gap-below' : '')}
               onDragOver={(e) => {
-                if (!dtHas(e, 'text/vetvi-char')) return;
+                const isChar = dtHas(e, 'text/vetvi-char');
+                const isGroup = dtHas(e, 'text/vetvi-chargroup');
+                if (!isChar && !isGroup) return;
                 e.preventDefault();
                 e.stopPropagation();
                 e.dataTransfer.dropEffect = 'move';
-                markOver({ kind: 'group', id: g.id });
+                /* бросок группы часто приходит на тело группы (раздвижка сдвигает
+                   голову под курсором): позиция — по половинам всего контейнера */
+                if (isGroup && !isChar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+                else markOver({ kind: 'group', id: g.id });
               }}
               onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const gid = e.dataTransfer.getData('text/vetvi-chargroup');
                 const cid = e.dataTransfer.getData('text/vetvi-char');
-                if (cid) { e.preventDefault(); e.stopPropagation(); store.placeCharInList(cid, g.id, null, 'after'); }
+                if (cid) store.placeCharInList(cid, g.id, null, 'after');
+                else if (gid && gid !== g.id) {
+                  const tIdx = store.charGroups().findIndex((x) => x.id === g.id);
+                  const place = placeOf(e.currentTarget as HTMLElement, e.clientY);
+                  store.moveCharGroup(gid, place === 'before' ? tIdx : tIdx + 1);
+                }
                 markOver(null);
               }}
             >
@@ -1232,7 +1270,8 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                   e.preventDefault();
                   e.stopPropagation();
                   e.dataTransfer.dropEffect = 'move';
-                  if (isGroup && !isChar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget as HTMLElement, e.clientY) });
+                  /* позиция — по половинам контейнера группы (стабильна при раздвижке) */
+                  if (isGroup && !isChar) markOver({ kind: 'ghead', id: g.id, place: placeOf(e.currentTarget.parentElement as HTMLElement, e.clientY) });
                   else markOver({ kind: 'group', id: g.id });
                 }}
                 onDrop={(e) => {
@@ -1243,7 +1282,7 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                   if (cid) store.placeCharInList(cid, g.id, null, 'after');
                   else if (gid && gid !== g.id) {
                     const tIdx = store.charGroups().findIndex((x) => x.id === g.id);
-                    const place = placeOf(e.currentTarget as HTMLElement, e.clientY);
+                    const place = placeOf(e.currentTarget.parentElement as HTMLElement, e.clientY);
                     store.moveCharGroup(gid, place === 'before' ? tIdx : tIdx + 1);
                   }
                   markOver(null);

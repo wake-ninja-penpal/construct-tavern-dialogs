@@ -3,7 +3,7 @@
  * Чистые функции без DOM: используются редактором и проигрывателем.
  */
 
-import type { VetviDoc, VetviEdge, VetviNode, VetviVar } from './types';
+import type { VetviCond, VetviDoc, VetviEdge, VetviNode, VetviOutcome, VetviVar } from './types';
 
 export const VARS_OPS: Record<string, string> = { '=': '=', '+': '+', '-': '−' };
 export const COND_OPS: Record<string, string> = { '==': '=', '!=': '≠', '>': '>', '<': '<', '>=': '≥', '<=': '≤' };
@@ -103,11 +103,71 @@ export function opSym(op: string | null | undefined): string {
   return '=';
 }
 
-export interface Cond { vid: string; op: string; val: number | string | boolean }
+export type Cond = VetviCond;
 
 export function condText(doc: VetviDoc, c: Cond | null | undefined): string {
   if (!c) return '';
   return varName(doc, c.vid) + ' ' + (COND_OPS[c.op] || c.op || '=') + ' ' + varValText(c.val, varById(doc, c.vid));
+}
+
+/* ═══ несколько условий у одного исхода развилки (conds + condJoin) ═══
+   Старые документы хранят одиночное условие в o.cond — читается через
+   outConds; при правке в инспекторе список пишется в o.conds, а o.cond
+   остаётся зеркалом первого условия для старых клиентов. */
+
+function condLooksValid(c: unknown): c is Cond {
+  const o = c as { vid?: unknown; op?: unknown };
+  return !!o && typeof o === 'object' && typeof o.vid === 'string' && typeof o.op === 'string';
+}
+
+/** Условия исхода: массив conds, а для старых документов — одиночное cond.
+ *  Пустой conds при заданном cond (смешанное состояние после внешних правок)
+ *  считается задействованным — работает одиночное условие. */
+export function outConds(o: VetviOutcome | null | undefined): Cond[] {
+  if (!o) return [];
+  const oo = o as { conds?: unknown; cond?: unknown };
+  const legacy = condLooksValid(oo.cond) ? [oo.cond as Cond] : [];
+  if (Array.isArray(oo.conds)) {
+    const cs = oo.conds.filter(condLooksValid) as Cond[];
+    return cs.length ? cs : legacy;
+  }
+  return legacy;
+}
+
+/** Нормализация исхода: conds становится каноническим хранилищем,
+ *  cond — зеркалом первого условия (совместимость со старыми версиями). */
+export function ensureOutConds(o: VetviOutcome): Cond[] {
+  const cs = outConds(o);
+  o.conds = cs;
+  const legacy = (o as unknown as { cond?: unknown });
+  legacy.cond = cs.length ? cs[0] : null;
+  return cs;
+}
+
+/** Как объединяются условия исхода: 'and' — все сразу, 'or' — достаточно любого. */
+export function outJoin(o: VetviOutcome | null | undefined): 'and' | 'or' {
+  return o && o.condJoin === 'or' ? 'or' : 'and';
+}
+
+function condJoinText(join: 'and' | 'or', parts: string[]): string {
+  const sep = join === 'or' ? ' или ' : ' и ';
+  return parts.join(sep);
+}
+
+/** Текст всех условий исхода («A = 1 и B = 2», «A = 1 или B = 2»).
+ *  fn — нода развилки: перебивание входной переменной учитывается. */
+export function outCondText(doc: VetviDoc, o: VetviOutcome | null | undefined, fn?: VetviNode | null): string {
+  const cs = outConds(o).map((c) => condWithOverride(doc, c, fn || null));
+  if (!cs.length) return '';
+  return condJoinText(outJoin(o), cs.map((c) => condText(doc, c)));
+}
+
+/** Проверка всех условий исхода: пусто — истина; 'and' — все, 'or' — любой. */
+export function outCondsMet(doc: VetviDoc, o: VetviOutcome | null | undefined, live?: Record<string, unknown> | null, fn?: VetviNode | null): boolean {
+  const cs = outConds(o).map((c) => condWithOverride(doc, c, fn || null));
+  if (!cs.length) return true;
+  const met = cs.map((c) => condMet(doc, c, live));
+  return outJoin(o) === 'or' ? met.some(Boolean) : met.every(Boolean);
 }
 
 /** Проверка условия (condMet): неизвестная переменная — условие считается выполненным. */
@@ -164,8 +224,9 @@ export function cleanupVarRefs(doc: VetviDoc, vid: string): void {
   for (const n of doc.nodes) {
     if (n.type === 'varnode') n.vid = n.vid === vid ? null : n.vid;
     if (n.type === 'branch' && Array.isArray(n.outcomes)) {
-      for (const o of n.outcomes as unknown as { cond?: Cond | null }[]) {
+      for (const o of n.outcomes as unknown as { cond?: Cond | null; conds?: Cond[] | null }[]) {
         if (o.cond && o.cond.vid === vid) o.cond = null;
+        if (Array.isArray(o.conds)) o.conds = o.conds.filter((c) => c && c.vid !== vid);
       }
     }
   }

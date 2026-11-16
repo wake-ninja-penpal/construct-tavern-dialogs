@@ -32,6 +32,9 @@ export const HK_DEFS: HkDef[] = [
   { id: 'zoomIn', name: 'Приблизить', def: 'Equal', alias: ['Shift+Equal'] },
   { id: 'zoomOut', name: 'Отдалить', def: 'Minus' },
   { id: 'patchnotes', name: 'Что нового (патчноут)', def: 'Mod+KeyH' },
+  /* разметка реплики (работают в активном поле текста реплики) */
+  { id: 'fmtBold', name: 'Реплика: жирный (в поле текста)', def: 'Mod+KeyB' },
+  { id: 'fmtItalic', name: 'Реплика: курсив (в поле текста)', def: 'Mod+KeyI' },
 ];
 
 export function hkDef(id: string): HkDef | null {

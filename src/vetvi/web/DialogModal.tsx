@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { PALETTE_COLORS } from '@/vetvi/core/constants';
+import { hkIs } from '@/vetvi/core/hotkeys';
 import { RTFX_EFFECTS, rtfxWrap } from '@/vetvi/core/rtfx';
 import type { VetviChar, VetviReply } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
@@ -125,7 +126,7 @@ function ReplyFmtBar(props: {
       <button
         type="button"
         className="rt-btn b"
-        title="Жирность (маркер **текст**)
+        title="Жирность (Ctrl+B, маркер **текст**)
 Можно комбинировать с эффектами"
         aria-label="Жирность"
         onClick={() => apply('b', null, null)}
@@ -133,7 +134,7 @@ function ReplyFmtBar(props: {
       <button
         type="button"
         className="rt-btn i"
-        title="Курсив (маркер __текст__)
+        title="Курсив (Ctrl+I, маркер __текст__)
 Можно комбинировать с эффектами"
         aria-label="Курсив"
         onClick={() => apply('i', null, null)}
@@ -449,6 +450,13 @@ export function DialogModal({ store }: { store: VetviStore }) {
             onChange={(e) => {
               store.updateReply(n.id, r.id, { text: e.target.value }, { history: false });
               taGrow(e.currentTarget);
+            }}
+            onKeyDown={(e) => {
+              /* Ctrl+B / Ctrl+I — разметка жирности/курсива прямо в поле (слово
+                 под курсором или выделение); переназначается в настройках хоткеев */
+              const ke = e.nativeEvent;
+              if (hkIs(ke, 'fmtBold')) { e.preventDefault(); applyFmt('b', null, null); return; }
+              if (hkIs(ke, 'fmtItalic')) { e.preventDefault(); applyFmt('i', null, null); }
             }}
             onBlur={(e) => {
               taBlurGrow(e.currentTarget); /* .grow снимается по завершении схлопывания */

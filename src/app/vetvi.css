@@ -390,8 +390,8 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .cgroup-del{opacity:.7}
 .cgroup-del:hover{opacity:1;color:var(--bad);border-color:rgba(207,107,90,.45)}
 .cgroup-body{padding:6px}
-.cgroup:not(.open) .v-fold{transform:rotate(-90deg)}
-.cgroup.open .v-fold{color:var(--acc)}
+.cgroup:not(.open) > .cgroup-head .v-fold{transform:rotate(-90deg)}
+.cgroup.open > .cgroup-head .v-fold{color:var(--acc)}
 #cRows.drop-ok{outline:1.5px dashed var(--acc);outline-offset:-3px;border-radius:10px}
 /* ── выпадающий список групп (с поиском) ── */
 .cgcombo{position:relative}
@@ -413,7 +413,10 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .v-row .v-name{flex:1.2;min-width:0}
 .v-row .v-var{flex:1.2;min-width:0}
 .v-row .v-op{flex:0 0 46px;padding:0 4px}
-.v-row .v-val{flex:.7;min-width:46px}
+/* тип/значение сжимаются в узких местах (внутри группы — на 14px меньше из-за
+   рамки и полей vargroup), иначе строка переполняется и стрелка v-fold
+   обрезается overflow:hidden у группы */
+.v-row .v-val{flex:0 1 58px;min-width:46px}
 .v-del{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .v-del:hover{color:#cf6d4f;border-color:#5a3a33;background:#33272a}
 .v-hint{margin-top:12px;font-size:11.5px;line-height:1.65;color:var(--tx3);background:rgba(255,255,255,.025);border:1px dashed #2e333c;border-radius:10px;padding:10px 12px}
@@ -536,6 +539,14 @@ body.dropping .pout::after{border-color:var(--acc);box-shadow:0 0 9px rgba(226,1
 .out-ed-cond{margin-top:6px}
 .out-ed-cond .seg{margin-bottom:6px}
 .out-ed-cond .v-row{margin-bottom:0}
+/* несколько условий одного исхода: список строк + способ объединения */
+.out-cond-join{font-size:11px}
+.out-cond-join button{height:24px;font-size:11px}
+.out-cond-item{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.out-cond-item .out-cond-row{flex:1;min-width:0}
+.out-cond-del{flex:0 0 26px;height:28px}
+.out-cond-add{margin-top:2px}
+.out-cond-add:hover{color:var(--acc)}
 /* ── вход переменной у развилки ── */
 .br-vin{position:relative;display:flex;align-items:center;gap:6px;background:rgba(183,178,106,.07);border:1px dashed rgba(183,178,106,.38);border-radius:7px;padding:3px 9px 3px 8px;margin-right:2px}
 .br-vin .t{display:flex;align-items:center;gap:4px;font:700 10px var(--body);color:#b9b06d;white-space:nowrap}
@@ -620,8 +631,8 @@ body.connecting .vpinn{cursor:copy}
 #paneVars .v-row.dragging{opacity:.45}
 #paneVars .v-row .v-del{margin-right:2px}
 .v-row .v-grip{flex:0 0 13px;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
-.v-row .v-type{flex:0 0 78px;padding:0 2px;font-size:10.5px}
-#paneVars .v-row .v-val{flex:0 0 58px;min-width:58px}
+.v-row .v-type{flex:0 1 78px;min-width:54px;padding:0 2px;font-size:10.5px}
+#paneVars .v-row .v-val{flex:0 1 58px;min-width:46px}
 .v-add-btn{flex:0 0 26px;height:28px;background:#2a2e36;border:1px solid #363b45;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .v-add-btn:hover{color:#e2a54e;border-color:#54462a;background:#332c20}
 .dlg-children{margin-left:9px;padding-left:14px;position:relative;margin-top:3px}
@@ -1222,8 +1233,8 @@ body{overflow:hidden;background:var(--bg)}
 .vargroup .cgroup-del{opacity:.7}
 .vargroup .cgroup-del:hover{opacity:1;color:var(--bad);border-color:rgba(207,107,90,.45)}
 .vargroup .cgroup-body{padding:6px}
-.vargroup:not(.open) .v-fold{transform:rotate(-90deg)}
-.vargroup.open .v-fold{color:var(--acc)}
+.vargroup:not(.open) > .vargroup-head .v-fold{transform:rotate(-90deg)}
+.vargroup.open > .vargroup-head .v-fold{color:var(--acc)}
 .vargroup,.cgroup{transition:margin .16s ease}
 .vargroup.dnd-gap-above{box-shadow:0 -8px 0 -6px var(--acc)}
 .vargroup.dnd-gap-below{box-shadow:0 8px 0 -6px var(--acc)}
@@ -1261,6 +1272,8 @@ body{overflow:hidden;background:var(--bg)}
 .rtfx-prev-jitter .rt-fx-lbl{animation:rtfxJitter .8s linear infinite}
 .rtfx-prev-wave .rt-fx-lbl{animation:rtfxWave 1.15s ease-in-out infinite}
 .rtfx-prev-flicker .rt-fx-lbl{animation:rtfxFlicker 2.1s ease-in-out infinite}
+.rtfx-prev-pulse .rt-fx-lbl{animation:rtfxPulse 1.05s ease-in-out infinite}
+.rtfx-prev-bounce .rt-fx-lbl{animation:rtfxBounce .72s ease-in-out infinite}
 
 /* ══════════ текстовые эффекты (rtfx) — поле реплики, ноды, проигрыватель ══════════ */
 .rtfx{white-space:pre-wrap}
@@ -1316,6 +1329,23 @@ body{overflow:hidden;background:var(--bg)}
 }
 .rtfx-flicker{animation:rtfxFlicker 2.4s ease-in-out infinite;color:#cfd6de}
 
+/* пульс масштабом — акцент, привлечение внимания */
+@keyframes rtfxPulse{
+  0%,100%{transform:scale(1);opacity:1}
+  50%{transform:scale(1.16);opacity:.78}
+}
+.rtfx-pulse{animation:rtfxPulse 1.05s ease-in-out infinite;color:#e2b184;display:inline-block}
+
+/* отскок — буквы подпрыгивают по очереди (perLetter: фаза через --i) */
+@keyframes rtfxBounce{
+  0%,100%{transform:translateY(0)}
+  28%{transform:translateY(calc(var(--a,0.7)*-4.5px))}
+  45%{transform:translateY(0)}
+  60%{transform:translateY(calc(var(--a,0.7)*-1.8px))}
+  72%{transform:translateY(0)}
+}
+.rtfx-bounce .rtfx-ch{animation:rtfxBounce .72s ease-in-out infinite;animation-delay:calc(var(--i,0)*-.09s);color:#d8cf9a}
+
 /* на нодах холста эффекты видны, но сдержанно (не отвлекают от правки) */
 .node .rtfx-shake{color:inherit}
-.node .rtfx-jitter .rtfx-ch,.node .rtfx-wave .rtfx-ch{color:inherit}
+.node .rtfx-jitter .rtfx-ch,.node .rtfx-wave .rtfx-ch,.node .rtfx-bounce .rtfx-ch{color:inherit}

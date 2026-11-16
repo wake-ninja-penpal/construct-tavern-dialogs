@@ -13,7 +13,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { clamp } from '@/vetvi/core/geometry';
 import { TYPES } from '@/vetvi/core/constants';
 import type { VetviDoc, VetviNode, VetviReply } from '@/vetvi/core/types';
-import { condMet, condText, condWithOverride, opSym, varApplyOp, varById, varName, varType, varValText } from '@/vetvi/core/vars';
+import { condMet, condText, condWithOverride, opSym, outCondText, outConds, outCondsMet, varApplyOp, varById, varName, varType, varValText } from '@/vetvi/core/vars';
 import { linearIds } from '@/vetvi/core/dialog';
 import { hkIs } from '@/vetvi/core/hotkeys';
 import { RtfxView } from './RtfxView';
@@ -62,6 +62,10 @@ interface PlState {
   choices: Choice[] | null;
   end: boolean;
   varFlash: { txt: string; t: number } | null;
+  /* chainVars — переменные, задействованные в проигрываемой цепочке (varnode'ы,
+     условия исходов и условия связей): выводятся в HUD с первой реплики.
+     Закреплённые (pinned) показываются всегда независимо от этого набора. */
+  chainVars: Set<string>;
   /* avCid — персонаж аватара слайда (аналог содержимого #plAv оригинала);
      hintOverride — подсказка «путь закрыт: … · ← назад» после заблокированного шага */
   avCid: string | null;
@@ -69,6 +73,32 @@ interface PlState {
 }
 
 const PL_LIMIT = 120;
+
+/** Переменные, задействованные в проигрываемой цепочке: varnode'ы, условия
+ *  исходов развилок (включая несколько условий с И/ИЛИ) и условия связей.
+ *  Для list — по нодам выделенной цепочки; для graph — весь сюжет.
+ *  Считается один раз при старте плеера — такие переменные видны в HUD
+ *  с первой реплики, не только после прохождения по ним. */
+function plChainVarIds(doc: VetviDoc, mode: 'graph' | 'list', list: string[]): Set<string> {
+  const inv = new Set<string>();
+  const nodeIds = mode === 'list' ? list : doc.nodes.map((n) => n.id);
+  const idSet = new Set(nodeIds);
+  for (const nid of nodeIds) {
+    const nn = doc.nodes.find((x) => x.id === nid);
+    if (!nn) continue;
+    if (nn.type === 'varnode' && nn.vid) inv.add(nn.vid);
+    if (nn.type === 'branch' && Array.isArray(nn.outcomes)) {
+      for (const o of nn.outcomes) {
+        for (const c of outConds(o)) if (c.vid) inv.add(c.vid);
+      }
+    }
+  }
+  for (const e of doc.edges) {
+    const c = (e as unknown as { cond?: { vid?: string } }).cond;
+    if (c && c.vid && (idSet.has(e.from) || idSet.has(e.to))) inv.add(c.vid);
+  }
+  return inv;
+}
 
 export function Player(props: { store: VetviStore }) {
   const { store } = props;
@@ -327,27 +357,37 @@ export function Player(props: { store: VetviStore }) {
     });
   };
 
-  const branchChoices = (n: VetniAlias, nx: VetviDoc['edges']): Choice[] | null => {
+  const branchChoices = (n: VetviNode, nx: VetviDoc['edges']): Choice[] | null => {
     const cur = stRef.current as PlState;
     const outs = n.type === 'branch' && Array.isArray(n.outcomes) ? n.outcomes : [];
     const acts = n.type === 'action' && Array.isArray(n.actions) ? (n.actions as { id: string; label?: string }[]) : [];
-    type PoolCond = { vid: string; op: string; val: number | string } | null | undefined;
-    const pool: { id: string; label?: string; cond?: PoolCond }[] =
+    const pool: { id: string; label?: string; o?: typeof outs[number] }[] =
       outs.length
-        ? outs.map((o) => ({ id: o.id, label: o.label, cond: (o.cond || undefined) as PoolCond }))
-        : acts.map((a) => ({ id: a.id, label: a.label, cond: undefined }));
+        ? outs.map((o) => ({ id: o.id, label: o.label, o }))
+        : acts.map((a) => ({ id: a.id, label: a.label }));
     if (!pool.length) return null;
     const items: Choice[] = [];
-    for (const o of pool) {
-      const ed = nx.find((e) => e.fromOut === o.id);
-      let c = (o.cond || (ed ? (ed as unknown as { cond?: PoolCond }).cond : undefined)) as PoolCond;
-      if (c) c = condWithOverride(doc, c, n) as PoolCond;
-      const ok = !c || condMet(doc, c, cur.vars);
+    for (const p of pool) {
+      const ed = nx.find((e) => e.fromOut === p.id);
+      const oc = p.o ? outConds(p.o) : [];
+      let ok: boolean;
+      let why: string | undefined;
+      if (oc.length) {
+        /* у исхода свои условия (одно или несколько, объединение И/ИЛИ) */
+        ok = outCondsMet(doc, p.o, cur.vars, n);
+        why = !ok ? 'нужно: ' + outCondText(doc, p.o, n) : undefined;
+      } else {
+        /* своих условий нет — проверяем условие стрелки (старое поведение) */
+        const c0 = (ed ? ((ed as unknown as { cond?: { vid: string; op: string; val: number | string } | null }).cond || null) : null) as Parameters<typeof condWithOverride>[1];
+        const cw = c0 ? condWithOverride(doc, c0, n) : null;
+        ok = !cw || condMet(doc, cw, cur.vars);
+        why = (!ok && cw) ? 'нужно: ' + condText(doc, cw) : undefined;
+      }
       const targetNode = ed ? doc.nodes.find((x) => x.id === ed.to) : null;
       items.push({
-        label: o.label || '…',
+        label: p.label || '…',
         ok,
-        why: !ok ? 'нужно: ' + condText(doc, c) : (!ed ? 'исход не подключён стрелкой' : undefined),
+        why: why || (!ed ? 'исход не подключён стрелкой' : undefined),
         targets: ed ? [ed.to] : [],
         fn: () => {
           const c2 = stRef.current;
@@ -357,7 +397,7 @@ export function Player(props: { store: VetviStore }) {
       });
     }
     // авто-переход: единственный выход без условий не показывается кнопкой
-    if (items.length === 1 && items[0].ok && !pool[0].cond) {
+    if (items.length === 1 && items[0].ok && !(pool[0].o && outConds(pool[0].o).length)) {
       const ed = nx.find((e) => e.fromOut === pool[0].id);
       const ec = ed ? (ed as unknown as { cond?: unknown }).cond : undefined;
       if (!ec) return null;
@@ -515,12 +555,17 @@ export function Player(props: { store: VetviStore }) {
     const startId = cur.mode === 'list' ? cur.list[0] : (cur.path[0] || cur.nodeId);
     const n = startId ? doc.nodes.find((x) => x.id === startId) : null;
     if (!n) return;
+    /* «Заново» — переменные с чистого листа: без сброса значения, изменённые
+       в прошлой ветке, «протекали» в новый заход (ветка, где переменная не
+       меняется, показывала чужое значение — баг протечки состояния). */
+    const vars: Record<string, unknown> = {};
+    for (const v of doc.vars || []) vars[v.id] = v.val;
     const s0: PlState = {
       ...cur,
       nodeId: null, replyId: null, intro: false, lastReply: null,
       full: '', shown: '', typing: false,
       hist: [], path: [], idx: cur.mode === 'list' ? 0 : -1,
-      varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
+      vars, varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
       avCid: null, hintOverride: null,
     };
@@ -608,6 +653,7 @@ export function Player(props: { store: VetviStore }) {
       full: '', shown: '', typing: false,
       hist: [], path: [], mode, list, listSet: new Set(list), idx: mode === 'list' ? 0 : -1,
       vars, varChanged: new Set(), visited: new Set<string>(), dead: new Set(),
+      chainVars: plChainVarIds(doc, mode, list),
       seqList: null, seqIdx: -1, choices: null, end: false, varFlash: null,
       avCid: null, hintOverride: null,
     };
@@ -699,40 +745,21 @@ export function Player(props: { store: VetviStore }) {
 
   const pathTail = st ? st.path.slice(-4) : [];
   const hasCnt = !!(st && st.mode === 'list' && st.list.length);
-  /* переменные задействованной цепочки: всё, что уже пройдено (visited+path+текущая
-     нода) — varnode'ы, условия развилок и условий связей; закреплённые (pinned)
-     выводятся всегда, остальные — только если участвуют в цепочке */
+  /* HUD переменных: показываются с первой реплики те, что участвуют в
+     проигрываемой цепочке (chainVars — varnode'ы, условия исходов и связей),
+     плюс закреплённые (pinned) — они видны всегда. Значения — живые, из
+     состояния проигрывания; chg — значение менялось в этом проигрывании. */
   const varsHud = useMemo(() => {
     if (!st) return [];
-    const seen = new Set<string>(st.visited);
-    if (st.nodeId) seen.add(st.nodeId);
-    for (const pid of st.path) seen.add(pid);
-    const inv = new Set<string>();
-    for (const nid of seen) {
-      const nn = doc.nodes.find((x) => x.id === nid);
-      if (!nn) continue;
-      if (nn.type === 'varnode' && nn.vid) inv.add(nn.vid);
-      if (nn.type === 'branch' && Array.isArray(nn.outcomes)) {
-        for (const o of nn.outcomes) {
-          const c = (o as { cond?: { vid?: string } }).cond;
-          if (c && c.vid) inv.add(c.vid);
-        }
-      }
-    }
-    for (const e of doc.edges) {
-      const c = (e as unknown as { cond?: { vid?: string } }).cond;
-      if (c && c.vid && (seen.has(e.from) || seen.has(e.to))) inv.add(c.vid);
-    }
     return (doc.vars || [])
-      .filter((v) => v.pinned || inv.has(v.id))
+      .filter((v) => v.pinned || st.chainVars.has(v.id))
       .map((v) => ({
         v,
         pin: !!v.pinned,
         cur: st.vars[v.id] !== undefined && st.vars[v.id] !== null ? st.vars[v.id] : v.val,
         chg: st.varChanged.has(v.id),
       }));
-
-  }, [st, doc.vars, doc.nodes, doc.edges]);
+  }, [st, doc.vars]);
 
   if (!st) return null;
 
@@ -1076,5 +1103,3 @@ function findReplyDeep(replies: VetviReply[], id: string): VetviReply | null {
   }
   return null;
 }
-
-type VetniAlias = VetviNode;

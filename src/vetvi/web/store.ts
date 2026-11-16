@@ -35,7 +35,7 @@ import { passVerify } from '@/vetvi/core/passlock';
 import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
 import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
 import type { EdgeGeom, NodeSize, VetviChar, VetviCharGroup, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviVarGroup, VetviViewport } from '@/vetvi/core/types';
-import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType } from '@/vetvi/core/vars';
+import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType, type Cond } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import { canvasApi } from './canvasApi';
 import { noteModalOpen } from './NoteModals';
@@ -1619,8 +1619,21 @@ export class VetviStore {
       if (!n || n.type !== 'branch') return;
       if (!Array.isArray(n.outcomes)) n.outcomes = [];
       if (n.outcomes.length >= 24) return;
-      n.outcomes.push({ id: uid(), label: '', cond: null });
+      n.outcomes.push({ id: uid(), label: '', cond: null, conds: [], condJoin: 'and' } as unknown as typeof n.outcomes[number]);
     }, { label: 'Новый исход' });
+  }
+
+  /** Правка списка условий исхода (несколько условий + способ объединения). */
+  setOutcomeConds(nodeId: string, oid: string, conds: Cond[], join: 'and' | 'or', label: string, opts?: { history?: boolean }): void {
+    this.mutate((doc) => {
+      const n = doc.nodes.find((x) => x.id === nodeId);
+      if (!n || !Array.isArray(n.outcomes)) return;
+      const o = n.outcomes.find((x) => x.id === oid);
+      if (!o) return;
+      o.conds = conds;
+      o.condJoin = join;
+      (o as unknown as { cond?: unknown }).cond = conds.length ? conds[0] : null;
+    }, opts ? { ...opts, label } : { label });
   }
 
   updateOutcome(nodeId: string, oid: string, patch: Partial<VetviOutcome>, opts?: { history?: boolean }): void {

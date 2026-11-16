@@ -14,7 +14,7 @@ import { NODE_W, STATUS_RU } from '@/vetvi/core/constants';
 import { ALL_ICONS } from '@/vetvi/core/icons';
 import { getMe } from '@/vetvi/core/identity';
 import { nodeColor, shadeHex, typeInfo } from '@/vetvi/core/geometry';
-import { branchVarOverride, condText, varName, varNodeChipText } from '@/vetvi/core/vars';
+import { branchVarOverride, outCondText, outConds, varName, varNodeChipText } from '@/vetvi/core/vars';
 import type { VetviNode, VetviReply, VetviViewport } from '@/vetvi/core/types';
 import type { VetviStore } from './store';
 import type { MeasureSink } from './measure';
@@ -504,15 +504,17 @@ export function NodeCard(props: {
             </div>
             {outcomes.map((o, i) => {
               const nm = o.label || ('Исход ' + (i + 1));
+              const oc = outConds(o);
+              const ocTxt = oc.length ? outCondText(store.doc, o, n) : '';
               return (
                 <div className="br-out" key={o.id} data-oid={o.id} {...rowDrag(o.id, 'outcome')}>
                   <span className="br-grip" {...rowGrip('Перетащите — изменить порядок исходов')}><Ic d={GRIP_D} size={10} /></span>
                   <span className="lbl">{nm}</span>
                   <span
-                    className={'cnd' + (o.cond ? ' on' : '')}
-                    title={o.cond ? 'Условие: ' + condText(store.doc, o.cond) : 'Без условия — путь всегда открыт'}
+                    className={'cnd' + (oc.length ? ' on' : '')}
+                    title={oc.length ? 'Условия исхода: ' + ocTxt : 'Без условия — путь всегда открыт'}
                   >
-                    {o.cond ? '⟦ ' + condText(store.doc, o.cond) + ' ⟧' : 'без условия'}
+                    {oc.length ? '⟦ ' + ocTxt + ' ⟧' : 'без условия'}
                   </span>
                   <button
                     type="button"

@@ -20,11 +20,23 @@ export interface VetviReply {
   [k: string]: unknown;
 }
 
-/** Исход развилки/действия: подпись + необязательное условие по переменной. */
+/** Условие по переменной (сравнение значения). */
+export interface VetviCond {
+  vid: string;
+  op: string;
+  val: number | string | boolean;
+}
+
+/** Исход развилки/действия: подпись + условия по переменным.
+ *  conds — список условий исхода (несколько поддерживаются, объединяются
+ *  по condJoin: 'and' — все сразу, 'or' — любое одно). Поле cond — одиночное
+ *  условие-зеркало для совместимости со старыми версиями (первое условие). */
 export interface VetviOutcome {
   id: string;
   label: string;
   cond?: { vid: string; op: string; val: number | string } | null;
+  conds?: VetviCond[] | null;
+  condJoin?: 'and' | 'or';
   [k: string]: unknown;
 }
 

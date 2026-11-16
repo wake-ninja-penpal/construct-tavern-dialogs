@@ -22,7 +22,7 @@ import { hkText } from '@/vetvi/core/hotkeys';
 import { getMe } from '@/vetvi/core/identity';
 import type { VetviDoc, VetviGroup, VetviNode, VetviNote, VetviReply } from '@/vetvi/core/types';
 import {
-  branchVarOverride, condOpsFor, isTrueVal, opsForType,
+  branchVarOverride, condOpsFor, isTrueVal, opsForType, outConds, outJoin,
   varById, varName, varType, varsList,
 } from '@/vetvi/core/vars';
 import type { Cond } from '@/vetvi/core/vars';
@@ -428,16 +428,6 @@ function removeDialogPart(store: VetviStore, nodeId: string, pid: string): void 
   }, { label: 'Участники диалога' });
 }
 
-/** Правка условия исхода одной операцией (аналог discrete оригинала). */
-function setOutcomeCond(store: VetviStore, nodeId: string, oid: string, next: Cond | null, label: string): void {
-  store.mutate((doc) => {
-    const nn = doc.nodes.find((x) => x.id === nodeId);
-    if (!nn || !Array.isArray(nn.outcomes)) return;
-    const oo = nn.outcomes.find((x) => x.id === oid);
-    if (oo) (oo as { cond?: unknown }).cond = next;
-  }, { label });
-}
-
 /* ═══ строка условия: condRowHtml + bindCondRow ═══ */
 
 function CondRow({ doc, cond, cls, onChange, onEditPre, onEditEnd }: {
@@ -825,7 +815,9 @@ function OutcomesEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviN
           <div className="v-empty">Добавьте исходы — у каждого появится свой пин на узле (тяните стрелку от строки исхода). Исходу можно привязать переменную: путь откроется только при совпадении значения.</div>
         )}
         {outcomes.map((o, i) => {
-          const cond = (o.cond || null) as Cond | null;
+          const cs = outConds(o);
+          const join = outJoin(o);
+          const hasCond = cs.length > 0;
           return (
             <div
               className="out-ed"
@@ -897,34 +889,77 @@ function OutcomesEditor({ store, n, editPreRef }: { store: VetviStore; n: VetviN
                   <button
                     type="button"
                     data-s="off"
-                    className={o.cond ? '' : 'on'}
-                    onClick={() => setOutcomeCond(store, n.id, o.id, null, 'Сброс условия исхода')}
+                    className={hasCond ? '' : 'on'}
+                    onClick={() => store.setOutcomeConds(n.id, o.id, [], join, 'Сброс условия исхода')}
                   >
                     Без условия
                   </button>
                   <button
                     type="button"
                     data-s="on"
-                    className={o.cond ? 'on' : ''}
-                    onClick={() => setOutcomeCond(store, n.id, o.id, branchCondDefault(doc), 'Условие исхода')}
+                    className={hasCond ? 'on' : ''}
+                    onClick={() => store.setOutcomeConds(n.id, o.id, [branchCondDefault(doc)], join, 'Условие исхода')}
                   >
                     По переменной
                   </button>
                 </div>
-                {cond && vars.length > 0 && (
-                  <CondRow
-                    doc={doc}
-                    cond={cond}
-                    cls="out-cond-row"
-                    onChange={(next, live) => {
-                      if (live) store.updateOutcome(n.id, o.id, { cond: next as typeof o.cond }, { history: false });
-                      else setOutcomeCond(store, n.id, o.id, next, 'Условие исхода');
-                    }}
-                    onEditPre={() => { editPreRef.current = store.beginEdit(); }}
-                    onEditEnd={() => { store.commitEdit(editPreRef.current, 'Условие исхода'); editPreRef.current = null; }}
-                  />
+                {hasCond && vars.length > 0 && (
+                  <>
+                    {cs.length > 1 && (
+                      <div className="seg out-cond-join" title="Как объединяются условия исхода: «все (И)» — путь открыт, когда выполняются все; «любое (ИЛИ)» — достаточно одного">
+                        <button
+                          type="button"
+                          className={join === 'and' ? 'on' : ''}
+                          onClick={() => store.setOutcomeConds(n.id, o.id, cs, 'and', 'Объединение условий исхода')}
+                        >
+                          все (И)
+                        </button>
+                        <button
+                          type="button"
+                          className={join === 'or' ? 'on' : ''}
+                          onClick={() => store.setOutcomeConds(n.id, o.id, cs, 'or', 'Объединение условий исхода')}
+                        >
+                          любое (ИЛИ)
+                        </button>
+                      </div>
+                    )}
+                    {cs.map((c, ci) => (
+                      <div className="out-cond-item" key={ci}>
+                        <CondRow
+                          doc={doc}
+                          cond={c}
+                          cls="out-cond-row"
+                          onChange={(next, live) => {
+                            const arr = cs.map((x, k) => (k === ci ? next : x));
+                            store.setOutcomeConds(n.id, o.id, arr, join, 'Условие исхода', live ? { history: false } : undefined);
+                          }}
+                          onEditPre={() => { editPreRef.current = store.beginEdit(); }}
+                          onEditEnd={() => { store.commitEdit(editPreRef.current, 'Условие исхода'); editPreRef.current = null; }}
+                        />
+                        {cs.length > 1 && (
+                          <button
+                            type="button"
+                            className="v-del out-cond-del"
+                            title="Удалить это условие"
+                            aria-label="Удалить условие"
+                            onClick={() => store.setOutcomeConds(n.id, o.id, cs.filter((_, k) => k !== ci), join, 'Удаление условия исхода')}
+                          >
+                            <Ico name="x" size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="mini-btn out-cond-add"
+                      title="Добавить ещё одно условие (например: var1 = true и var2 = 10)"
+                      onClick={() => store.setOutcomeConds(n.id, o.id, [...cs, branchCondDefault(doc)], join, 'Добавление условия исхода')}
+                    >
+                      <Ico name="plus" size={12} /> условие
+                    </button>
+                  </>
                 )}
-                {cond && !vars.length && <div className="v-empty">Нет переменных — создайте на вкладке «Переменные».</div>}
+                {hasCond && !vars.length && <div className="v-empty">Нет переменных — создайте на вкладке «Переменные».</div>}
               </div>
             </div>
           );
