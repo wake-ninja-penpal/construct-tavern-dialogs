@@ -286,29 +286,56 @@ function ReplyFmtBar(props: {
   );}
 
 /* ═══ перетаскивание реплик — свободное, с автоподстройкой вложенности ═══
-   Реплику можно бросить в любое место дерева: выше/ниже цели (уровень берётся
-   от цели — вложенная становится корневой и наоборот) или ВНУТРЬ цели
-   (последним ответом-веткой). Бросок на пустое место списка — корневой в конец.
+   Механика — кастомный pointer-drag, а НЕ нативный HTML5 DnD. Причина: у
+   браузерного drag-контроллера свои правила отмены броска (последний dragover
+   без preventDefault — «призрак улетает назад», и бросок молча не
+   применяется), а воспроизвести это синтетическими событиями нельзя —
+   автотесты шли мимо drag-контроллера и показывали «всё работает», тогда как
+   в реальной игре кросс-уровневые переносы регулярно отменялись. Теперь вся
+   цепочка наша: pointerdown на grip запоминает реплику; после порога движения
+   5px начинается перенос — призрак-клон следует за курсором; pointermove
+   считает зону тем же резолвером, что рисует индикатор; pointerup применяет
+   перемещение. Браузер в процессе не участвует — «молчаных» отмен нет, и всю
+   цепочку можно проверить настоящими событиями мыши.
 
-   Геометрия (единый резолвер для подсветки И броска — индикатор всегда
-   совпадает с результатом): список разбивается на «полосы» строк. Полоса
-   строки — её собственный контент БЕЗ детей: у родителя это верхняя часть
-   карточки до первого ребёнка, у листа — вся карточка. Раньше зоны считались
-   от полного rect строки, куда входят все дети ветки, — из-за этого у родителя
-   с детьми зона «ниже (корень)» начиналась внутри области детей, индикатор
-   прыгал между уровнями, а drop уходил не туда. Теперь:
+   Зоны (единый резолвер для подсветки И броска — индикатор всегда совпадает
+   с результатом): список разбивается на «полосы» строк. Полоса строки — её
+   собственный контент БЕЗ детей: у родителя это верхняя часть карточки до
+   первого ребёнка, у листа — вся карточка:
    • курсор в полосе строки: лист — 28%/44%/28% → выше/внутрь/ниже;
      родитель — 40%/60% → выше/внутрь (дальше вниз идут полосы детей);
-   • курсор в зазоре между полосами — граница: выше середины зазора —
-     «после верхней» строки (её уровень), ниже — «перед нижней» (её уровень);
-   • ниже всех полос — корневой в конец списка.
-   Мёртвых зон нет: любая точка списка разрешается в конкретное место, и drop
-   разрешается той же функцией, что и подсветка. */
+   • курсор в зазоре между полосами: выше середины зазора — «после верхней»
+     строки (её уровень), ниже — «перед нижней» (её уровень);
+   • ниже всех полос — подъём по цепочке родителей, пока курсор внутри их
+     карточек: бросок «после» самой нижней строки, чей уровень ещё накрыт
+     курсором — так «под низ последней вложенной» ставит соседом той же
+     вложенности (раньше это место считалось «корнем в конец» и реплика
+     уезжала на глобальный уровень). Вышел за карточку корневого предка —
+     «после» последней корневой, то есть в конец списка.
+   Мёртвых зон нет: любая точка списка разрешается в конкретное место, и
+   бросок разрешается той же функцией, что и подсветка. */
 
-let dlgDragRid: string | null = null;
 let dlgIndRow: HTMLElement | null = null;
 
-type DlgDrop = { rid: string | null; place: 'before' | 'after' | 'inside' | 'root' };
+/* активное pointer-перетаскивание (null — переноса нет) */
+type DlgPtrDrag = {
+  store: VetviStore;
+  nodeId: string;
+  rid: string;
+  row: HTMLElement;
+  ghost: HTMLElement | null;
+  sx: number; sy: number; /* точка старта — порог активации переноса */
+  offX: number; offY: number; /* курсор внутри строки — смещение призрака */
+  prevUserSelect: string;
+  active: boolean;
+};
+let dlgPtr: DlgPtrDrag | null = null;
+
+/** Ряд-родитель вложенной строки (children-контейнер лежит внутри карточки родителя). */
+function dlgParentRow(row: HTMLElement): HTMLElement | null {
+  const p = row.parentElement;
+  return p ? (p.closest('.dlg-reply-ed') as HTMLElement | null) : null;
+}
 
 function replyById(arr: VetviReply[], id: string): VetviReply | null {
   for (const r of arr) {
@@ -365,7 +392,19 @@ function dlgResolveDrop(y: number): DlgDrop {
     return y < mid ? { rid: up.r.dataset.rid || null, place: 'after' } : { rid: down.r.dataset.rid || null, place: 'before' };
   }
   if (down) return { rid: down.r.dataset.rid || null, place: 'before' }; /* выше первой полосы */
-  return { rid: null, place: 'root' }; /* ниже всех полос — корневой в конец */
+  /* ниже всех полос: карточка последней строки кончилась, но карточки её
+     предков продолжаются ниже — поднимаемся, пока курсор внутри них. Бросок
+     «после» строки этого уровня = следующим ребёнком этого предка: «под низ
+     последней вложенной» ставит соседом той же вложенности, а не выдёргивает
+     в корень; за карточкой корневого предка — «после» последней корневой,
+     то есть в конец списка (прежний «корневой в конец»). */
+  if (up) {
+    let a = up.r;
+    let anc = dlgParentRow(a);
+    while (anc && y > anc.getBoundingClientRect().bottom) { a = anc; anc = dlgParentRow(a); }
+    return { rid: a.dataset.rid || null, place: 'after' };
+  }
+  return { rid: null, place: 'root' }; /* список пуст */
 }
 
 function dlgClearInd(): void {
@@ -408,13 +447,12 @@ function dlgAutoScrollStep(ts: number): void {
   dlgScrollRaf = requestAnimationFrame(dlgAutoScrollStep);
 }
 
-function dlgAutoScrollUpdate(ev: DragEvent): void {
-  if (!dlgDragRid) { dlgAutoScrollStop(); return; }
+function dlgAutoScrollUpdate(y: number): void {
+  if (!dlgPtr || !dlgPtr.active) { dlgAutoScrollStop(); return; }
   const sc = document.getElementById('dlgModalBody');
   if (!sc) { dlgAutoScrollStop(); return; }
   const r = sc.getBoundingClientRect();
   const Z = 46;
-  const y = ev.clientY;
   const dir = (y < r.top + Z) ? -1 : ((y > r.bottom - Z) ? 1 : 0);
   if (dir !== dlgScrollDir) { dlgScrollDir = dir; dlgScrollLast = 0; }
   if (dlgScrollDir) {
@@ -423,6 +461,131 @@ function dlgAutoScrollUpdate(ev: DragEvent): void {
   } else {
     dlgAutoScrollStop();
   }
+}
+
+/* ── pointer-drag: старт с grip, призрак-клон, зоны, бросок ──
+   Слушатели вешаются на window только на время переноса (снятие — в
+   dlgDragFinish; закрытие модалки/смена узла снимают перенос извне). */
+
+function dlgDragListenersOff(): void {
+  window.removeEventListener('pointermove', dlgDragPointerMove);
+  window.removeEventListener('pointerup', dlgDragPointerUp);
+  window.removeEventListener('pointercancel', dlgDragCancel);
+  window.removeEventListener('keydown', dlgDragKeyDown, true);
+}
+
+/** Призрак — клон строки: value полей cloneNode не копирует, переносим вручную;
+ *  кнопки действий в призраке скрыты (CSS). */
+function dlgGhostMake(row: HTMLElement): HTMLElement {
+  const g = row.cloneNode(true) as HTMLElement;
+  const srcTa = row.querySelectorAll('textarea');
+  const gTa = g.querySelectorAll('textarea');
+  for (let i = 0; i < srcTa.length; i++) (gTa[i] as HTMLTextAreaElement).value = (srcTa[i] as HTMLTextAreaElement).value;
+  const srcSel = row.querySelectorAll('select');
+  const gSel = g.querySelectorAll('select');
+  for (let i = 0; i < srcSel.length; i++) (gSel[i] as HTMLSelectElement).value = (srcSel[i] as HTMLSelectElement).value;
+  g.classList.remove('dragging', 'drop-above', 'drop-below', 'drop-in', 'dlg-flash');
+  g.querySelectorAll('.dlg-reply-ed').forEach((x) => x.classList.remove('dragging', 'drop-above', 'drop-below', 'drop-in', 'dlg-flash'));
+  g.classList.add('dlg-drag-ghost');
+  g.style.width = row.getBoundingClientRect().width + 'px';
+  document.body.appendChild(g);
+  return g;
+}
+
+function dlgGhostMove(x: number, y: number): void {
+  if (!dlgPtr || !dlgPtr.ghost) return;
+  dlgPtr.ghost.style.transform = 'translate(' + Math.round(x - dlgPtr.offX) + 'px,' + Math.round(y - dlgPtr.offY) + 'px)';
+}
+
+/** pointerdown по grip: запоминаем кандидата; сам перенос — после порога 5px
+ *  (клик по grip без движения ничего не делает). */
+function dlgDragBegin(ev: React.PointerEvent, store: VetviStore, nodeId: string, rid: string): void {
+  if (ev.pointerType === 'touch') return; /* тач — прокрутка списка, не перенос */
+  if (ev.button !== 0 || dlgPtr) return;
+  const row = (ev.currentTarget as HTMLElement).closest('.dlg-reply-ed') as HTMLElement | null;
+  if (!row) return;
+  ev.preventDefault(); /* grip — только для переноса: без фокуса и выделения */
+  const rc = row.getBoundingClientRect();
+  dlgPtr = {
+    store, nodeId, rid, row, ghost: null,
+    sx: ev.clientX, sy: ev.clientY,
+    offX: ev.clientX - rc.left, offY: ev.clientY - rc.top,
+    prevUserSelect: document.body.style.userSelect,
+    active: false,
+  };
+  window.addEventListener('pointermove', dlgDragPointerMove);
+  window.addEventListener('pointerup', dlgDragPointerUp);
+  window.addEventListener('pointercancel', dlgDragCancel);
+  window.addEventListener('keydown', dlgDragKeyDown, true);
+}
+
+function dlgDragPointerMove(ev: PointerEvent): void {
+  const st = dlgPtr;
+  if (!st) return;
+  if (!st.active) {
+    if (Math.abs(ev.clientX - st.sx) < 5 && Math.abs(ev.clientY - st.sy) < 5) return;
+    st.active = true;
+    document.body.style.userSelect = 'none'; /* перенос не должен выделять текст под курсором */
+    st.ghost = dlgGhostMake(st.row);
+    st.row.classList.add('dragging');
+  }
+  if (!st.row.isConnected) { dlgDragCancel(); return; } /* строка ушла (модалку закрыли) */
+  if (!st.row.classList.contains('dragging')) st.row.classList.add('dragging'); /* re-render React мог сбросить класс */
+  dlgGhostMove(ev.clientX, ev.clientY);
+  const n = st.store.nodeById(st.nodeId);
+  const dlg = n && n.dialog ? n.dialog : null;
+  const res = dlgResolveDrop(ev.clientY);
+  /* на саму себя и в собственное поддерево бросок не разрешаем — и подсветку
+     снимаем, чтобы старый индикатор не «висел» */
+  if (res.rid && dlg) {
+    if (res.rid === st.rid) { dlgClearInd(); dlgAutoScrollUpdate(ev.clientY); return; }
+    const src = replyById(dlg.replies, st.rid);
+    if (src && replySubtreeHas(src, res.rid)) { dlgClearInd(); dlgAutoScrollUpdate(ev.clientY); return; }
+  }
+  dlgShowInd(res);
+  dlgAutoScrollUpdate(ev.clientY);
+}
+
+/** Завершение переноса (успех/отмена/внешнее снятие) — чистка без последствий. */
+function dlgDragFinish(): DlgPtrDrag | null {
+  const st = dlgPtr;
+  if (!st) return null;
+  dlgPtr = null;
+  dlgDragListenersOff();
+  document.body.style.userSelect = st.prevUserSelect;
+  if (st.ghost) st.ghost.remove();
+  st.row.classList.remove('dragging');
+  dlgClearInd();
+  dlgAutoScrollStop();
+  return st;
+}
+
+function dlgDragPointerUp(ev: PointerEvent): void {
+  const st = dlgDragFinish();
+  if (!st || !st.active) return; /* клик по grip без движения — не перенос */
+  const res = dlgResolveDrop(ev.clientY);
+  const n = st.store.nodeById(st.nodeId);
+  const dlg = n && n.dialog ? n.dialog : null;
+  if (!dlg) return;
+  if (res.rid) {
+    if (res.rid === st.rid) return;
+    const src = replyById(dlg.replies, st.rid);
+    if (src && replySubtreeHas(src, res.rid)) {
+      st.store.toast('Нельзя переложить реплику внутрь её собственной ветки', 'warn');
+      return;
+    }
+  }
+  st.store.moveReplyTo(st.nodeId, st.rid, res.rid, res.rid ? res.place : 'root');
+}
+
+function dlgDragKeyDown(ev: KeyboardEvent): void {
+  if (ev.key !== 'Escape') return;
+  dlgDragFinish(); /* Esc — отмена переноса без изменений */
+}
+
+/** Снятие перетаскивания извне (закрытие модалки, смена узла, размонтирование). */
+function dlgDragCancel(): void {
+  dlgDragFinish();
 }
 
 export function DialogModal({ store }: { store: VetviStore }) {
@@ -497,23 +660,12 @@ export function DialogModal({ store }: { store: VetviStore }) {
     (el as HTMLElement).classList.add('dlg-flash');
   }, [flash]);
 
-  /* автоскролл списка реплик при перетаскивании (слушатели делегированные — модалка не пересоздаётся, 4959–4963 оригинала) */
+  /* перетаскивание реплик — pointer-drag (модульные функции выше): слушатели
+     вешаются на window на время переноса; при закрытии модалки/смене узла
+     незавершённый перенос снимаем, иначе окно останется с нашими слушателями */
   useEffect(() => {
-    if (!store.dialogEdit) return;
-    const body = listRef.current;
-    if (!body) return;
-    const onOver = (ev: DragEvent) => dlgAutoScrollUpdate(ev);
-    const onLeave = (ev: DragEvent) => {
-      const rt = ev.relatedTarget as Node | null;
-      if (!(rt && body.contains(rt))) dlgAutoScrollStop();
-    };
-    body.addEventListener('dragover', onOver);
-    body.addEventListener('dragleave', onLeave);
-    return () => {
-      body.removeEventListener('dragover', onOver);
-      body.removeEventListener('dragleave', onLeave);
-      dlgAutoScrollStop();
-    };
+    if (store.dialogEdit) dlgDragCancel();
+    return () => { dlgDragCancel(); };
   }, [store.dialogEdit]);
 
   const n = node;
@@ -535,40 +687,18 @@ export function DialogModal({ store }: { store: VetviStore }) {
     store.setParticipants(n.id, participants.filter((p) => p !== pid));
   };
 
-  /* локальная ссылка на диалог (сужение типа для замыканий drag-обработчиков) */
-  const dlg = n.dialog;
-
   const renderReply = (r: VetviReply, depth: number): React.ReactNode => {
     const isRoot = depth === 0;
     const isFlash = !!(flash && flash.nodeId === n.id && flash.replyId === r.id);
     const loop = !!(r as unknown as { loop?: boolean }).loop;
-    /* перетаскивание реплик: grip по mousedown делает строку draggable.
-       Подсветка и бросок — делегированные, на теле списка (dlgResolveDrop),
-       поэтому на строке только старт/конец перетаскивания */
-    const onDragStart = (ev: React.DragEvent) => {
-      const row = ev.currentTarget as HTMLElement;
-      if (ev.target !== row) return; /* dragstart от вложенной реплики — не мешаем */
-      if (row.getAttribute('draggable') !== 'true') { ev.preventDefault(); return; }
-      ev.dataTransfer.effectAllowed = 'move';
-      try { ev.dataTransfer.setData('text/plain', r.id); } catch { /* старые браузеры */ }
-      dlgDragRid = r.id;
-      setTimeout(() => row.classList.add('dragging'), 0);
-    };
-    const onDragEnd = (ev: React.DragEvent) => {
-      const row = ev.currentTarget as HTMLElement;
-      row.removeAttribute('draggable');
-      row.classList.remove('dragging');
-      dlgClearInd();
-      dlgDragRid = null;
-      dlgAutoScrollStop();
-    };
+    /* перетаскивание реплик — кастомный pointer-drag: старт по pointerdown на
+       grip (dlgDragBegin), зоны и бросок считает резолвер dlgResolveDrop —
+       индикатор всегда на том месте, куда реплика реально попадёт */
     return (
       <div
         key={r.id}
         className={'dlg-reply-ed' + (isRoot ? ' root' : '') + (isFlash ? ' dlg-flash' : '')}
         data-rid={r.id}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
       >
         {editRid === r.id && <ReplyFmtBar apply={applyFmt} />}
         <div className="dlg-reply-row-ed">
@@ -636,10 +766,7 @@ export function DialogModal({ store }: { store: VetviStore }) {
             className="mini-btn dlg-drag"
             data-act="drag"
             title="Перетащите — изменить порядок или вложенность: выше/ниже цели — на уровень цели, на середину — ответ-веткой внутрь"
-            onMouseDown={(ev) => {
-              const row = (ev.currentTarget as HTMLElement).closest('.dlg-reply-ed');
-              if (row) row.setAttribute('draggable', 'true');
-            }}
+            onPointerDown={(ev) => dlgDragBegin(ev, store, n.id, r.id)}
             onDoubleClick={(ev) => ev.preventDefault()}
           ><Ic name="grip" size={11} /></button>
           <button type="button" className="mini-btn" title="К реплике на холсте" onClick={() => { store.requestFlash(n.id, r.id); }}><Ic name="target" size={11} /></button>
@@ -671,44 +798,6 @@ export function DialogModal({ store }: { store: VetviStore }) {
           className="dlg-modal-body"
           id="dlgModalBody"
           ref={listRef}
-          onDragOver={(ev) => {
-            /* делегированная подсветка: любая точка списка разрешается резолвером —
-               индикатор всегда на том месте, куда реплика реально попадёт */
-            if (!dlgDragRid) return;
-            const res = dlgResolveDrop(ev.clientY);
-            if (res.rid) {
-              /* на саму себя и в собственное поддерево бросок не разрешаем —
-                 и подсветку снимаем, чтобы старый индикатор не «висел» */
-              if (res.rid === dlgDragRid) { dlgClearInd(); return; }
-              const src = replyById(dlg.replies, dlgDragRid);
-              if (replySubtreeHas(src, res.rid)) { dlgClearInd(); return; }
-            }
-            ev.preventDefault();
-            ev.dataTransfer.dropEffect = 'move';
-            dlgShowInd(res);
-          }}
-          onDragLeave={(ev) => {
-            const rt = ev.relatedTarget as Node | null;
-            const el = ev.currentTarget as HTMLElement;
-            if (!rt || !el.contains(rt)) { dlgClearInd(); dlgAutoScrollStop(); }
-          }}
-          onDrop={(ev) => {
-            const res = dlgResolveDrop(ev.clientY);
-            ev.preventDefault();
-            dlgAutoScrollStop();
-            const srcRid = dlgDragRid;
-            dlgDragRid = null;
-            dlgClearInd();
-            if (!srcRid) return;
-            if (!res.rid) { store.moveReplyTo(n.id, srcRid, null, 'root'); return; }
-            if (res.rid === srcRid) return;
-            const src = replyById(dlg.replies, srcRid);
-            if (replySubtreeHas(src, res.rid)) {
-              store.toast('Нельзя переложить реплику внутрь её собственной ветки', 'warn');
-              return;
-            }
-            store.moveReplyTo(n.id, srcRid, res.rid, res.place);
-          }}
         >
           {partChars.length > 0 && (
             <div className="dlg-participants">

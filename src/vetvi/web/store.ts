@@ -1823,13 +1823,19 @@ export class VetviStore {
       if (srcRid === tgtRid) return;
       const t0 = findLoc(replies, tgtRid);
       if (!t0) return;
-      /* бросок внутрь собственного поддерева — цикл, запрещён */
-      const inSubtree = (r: VetviReply): boolean => {
-        if (r.id === srcRid) return true;
-        for (const ch of r.children || []) if (inSubtree(ch)) return true;
+      /* бросок внутрь собственного поддерева запрещён (цикл): цель не должна
+         лежать в поддереве ПЕРЕНОСИМОЙ реплики. Проверка ведётся ИЗ источника.
+         ВАЖНО: обратная ситуация — источник лежит в поддереве цели (цель —
+         предок) — это легальный подъём по цепочке (внук становится прямым
+         ребёнком корневой); прежняя инвертированная проверка молча отклоняла
+         такие броски, и реплика «возвращалась на место» при попытке перетащить
+         её в свою же корневую или просто уровнем выше. */
+      const tgtInsideSrc = (r: VetviReply): boolean => {
+        if (r.id === tgtRid) return true;
+        for (const ch of r.children || []) if (tgtInsideSrc(ch)) return true;
         return false;
       };
-      if (inSubtree(t0.arr[t0.idx])) return;
+      if (tgtInsideSrc(s.arr[s.idx])) return;
       const m = s.arr.splice(s.idx, 1)[0];
       /* после удаления позиция цели могла сдвинуться — ищем заново */
       const t = findLoc(replies, tgtRid);
