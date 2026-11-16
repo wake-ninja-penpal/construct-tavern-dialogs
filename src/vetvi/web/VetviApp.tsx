@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 
 import { hkIs, hkLoad, hkText } from '@/vetvi/core/hotkeys';
 import { fmtWhenLong, fmtWhenShort } from '@/vetvi/core/projects';
+import { storeBoot, storeMode } from '@/vetvi/core/storage';
 import { getStore, type VetviStore } from './store';
 import { useStoreRev } from './rev';
 import { SyncClient } from './sync';
@@ -135,7 +136,30 @@ function EditTipHost({ store }: { store: VetviStore }) {
   );
 }
 
+/**
+ * Boot-обёртка: в режиме IndexedDB данные читаются асинхронно — хранилище прогревается
+ * storeBoot() ДО создания стора (getStore читает слот проекта синхронно из памяти).
+ * Без прогрева в idb-режиме приложение стартовало с пустым проектом, и «локальные
+ * проекты не сохранялись в браузере» — на деле они писались в базу, но никогда не читались.
+ */
 export default function VetviApp() {
+  const [booted, setBooted] = useState(() => storeMode() !== 'idb');
+  useEffect(() => {
+    if (booted) return;
+    let alive = true;
+    void storeBoot().catch(() => { /* нет idb — стартуем с пустой памятью */ }).finally(() => {
+      if (alive) {
+        (window as unknown as { __bootDebug?: string }).__bootDebug = 'booted-at-' + Date.now();
+        setBooted(true);
+      }
+    });
+    return () => { alive = false; };
+  }, [booted]);
+  if (!booted) return <main className="rn-app" aria-label="Ветви — React-редактор" />;
+  return <VetviAppInner />;
+}
+
+function VetviAppInner() {
   const store = useMemo(() => getStore(), []);
   /* Каналы doc+ui: геометрические кадры (жесты холста) не перерисовывают корень —
      их подхватывает сам CanvasBoard своей подпиской, панели/модалки не трогаются. */
@@ -345,11 +369,16 @@ export default function VetviApp() {
       }
     };
     window.addEventListener('keydown', onKey);
+    /* pagehide раньше вешался в page.tsx на getStore() при монтировании — теперь
+       здесь, после прогрева хранилища: сохранение при уходе со страницы/bfcache */
+    const pageHide = () => store.flushSave();
     const beforeUnload = () => store.flushSave();
     window.addEventListener('beforeunload', beforeUnload);
+    window.addEventListener('pagehide', pageHide);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('beforeunload', beforeUnload);
+      window.removeEventListener('pagehide', pageHide);
     };
   }, [store]);
 

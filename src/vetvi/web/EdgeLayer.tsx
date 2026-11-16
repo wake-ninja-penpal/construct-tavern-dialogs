@@ -209,8 +209,8 @@ const EdgeItem = memo(function EdgeItem(props: EdgeItemProps) {
         className="hit"
         d={it.d}
         onMouseDown={bridge
-          ? (ev: React.MouseEvent) => { ev.stopPropagation(); props.onBridgeDown(ev, e.id, bridgePartAt(ev, g)); }
-          : (ev: React.MouseEvent) => { ev.stopPropagation(); props.onEdgeDown(ev, e.id); }}
+          ? (ev: React.MouseEvent) => { if (ev.altKey && ev.button === 0) return; ev.stopPropagation(); props.onBridgeDown(ev, e.id, bridgePartAt(ev, g)); }
+          : (ev: React.MouseEvent) => { if (ev.altKey && ev.button === 0) return; ev.stopPropagation(); props.onEdgeDown(ev, e.id); }}
         onDoubleClick={(ev) => props.onEdgeDbl(ev, e.id)}
       />
       <path className="line" d={it.d} markerEnd="url(#arw)" />
@@ -224,12 +224,12 @@ const EdgeItem = memo(function EdgeItem(props: EdgeItemProps) {
           cx={Math.round(p.x)}
           cy={Math.round(p.y)}
           r={5}
-          onMouseDown={(ev) => { ev.stopPropagation(); props.onWpDown(ev, e.id, i); }}
+          onMouseDown={(ev) => { if (ev.altKey && ev.button === 0) return; ev.stopPropagation(); props.onWpDown(ev, e.id, i); }}
           onDoubleClick={(ev) => { ev.stopPropagation(); props.onWpDbl(ev, e.id, i); }}
         />
       ))}
       {it.labelPt && (
-        <g onMouseDown={(ev) => { ev.stopPropagation(); props.onLabelDown(ev, e.id); }}>
+        <g onMouseDown={(ev) => { if (ev.altKey && ev.button === 0) return; ev.stopPropagation(); props.onLabelDown(ev, e.id); }}>
           <text className="elabel-hit" x={it.labelPt.x} y={it.labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
           <text className="elabel" x={it.labelPt.x} y={it.labelPt.y - 6} style={labelText ? undefined : { display: 'none' }}>{labelText}</text>
           <text className="ecnd" x={it.labelPt.x} y={e.label ? it.labelPt.y + 13 : it.labelPt.y - 6} style={ct ? undefined : { display: 'none' }}>{ct}</text>

@@ -239,3 +239,54 @@ export const SECTION_TITLES: Record<string, string> = {
   gA: 'добавлены группы', gD: 'удалены группы', gC: 'изменены группы',
   vA: 'добавлены переменные', vD: 'удалены переменные', vC: 'изменены переменные',
 };
+
+/* ── нормализация diff записей журнала ──
+   Классическая версия писала diff в другом формате: плоские ключи nA/nD/nC/eA/eD/eC/
+   gA/gD/gC/vA/vD/vC — массивы кортежей [id, name, fieldsStr?, td?] + счётчики nAN/nDN/…
+   + ids/nodes/groups. React-версия хранит sections: LogSection[]. Записи, приехавшие
+   из старых проектов (или от участников классической версии по синку), без нормализации
+   роняли журнал: e.diff.sections.map → TypeError. Здесь старый формат приводится к
+   секционному; новый (sections — массив) проходит как есть. */
+const LEGACY_KEYS = ['nA', 'nD', 'nC', 'eA', 'eD', 'eC', 'gA', 'gD', 'gC', 'vA', 'vD', 'vC'] as const;
+
+function legacyFields(pair: unknown): LogFieldPair[] {
+  /* td оригинала: {items:[{k,a,b,da?,db?}],more} — пары старое/новое; hex для цвета
+     лежал в da/db (LdSide рисует ромбик по hex-строке) */
+  const td = pair as { items?: { k: string; a?: string; b?: string; da?: string | null; db?: string | null }[] } | null;
+  if (!td || !Array.isArray(td.items)) return [];
+  return td.items.slice(0, 6).map((t) => ({
+    k: String(t.k || ''),
+    a: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(String(t.da || '')) ? String(t.da) : String(t.a || ''),
+    b: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(String(t.db || '')) ? String(t.db) : String(t.b || ''),
+  }));
+}
+
+export function normalizeLogDiff(d: unknown): LogDiff | null {
+  if (!d || typeof d !== 'object') return null;
+  const o = d as Record<string, unknown>;
+  if (Array.isArray((o as { sections?: unknown }).sections)) return d as LogDiff;
+  const sections: LogSection[] = [];
+  for (const key of LEGACY_KEYS) {
+    const raw = o[key];
+    if (!Array.isArray(raw) || !raw.length) continue;
+    const items: LogItem[] = [];
+    for (const row of raw) {
+      if (!Array.isArray(row) || !row.length) continue;
+      const id = String(row[0] || '');
+      if (!id) continue;
+      const name = String(row[1] || '');
+      const fieldsStr = typeof row[2] === 'string' ? row[2] : '';
+      const fields = legacyFields(row[3]);
+      if (!fields.length && fieldsStr) fields.push({ k: fieldsStr, a: '', b: '' });
+      items.push({ id, name, fields });
+    }
+    if (items.length) sections.push({ key, items });
+  }
+  if (!sections.length) return null;
+  return {
+    sections,
+    ids: Array.isArray(o.ids) ? (o.ids as string[]) : [],
+    nodes: Array.isArray(o.nodes) ? (o.nodes as string[]) : [],
+    groups: Array.isArray(o.groups) ? (o.groups as string[]) : [],
+  };
+}

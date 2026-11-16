@@ -33,7 +33,7 @@ import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
 import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
-import { stItem, stRemoveItem, stSetItem } from '@/vetvi/core/storage';
+import { stItem, stRemoveItem, stSetItem, storeFlushNow } from '@/vetvi/core/storage';
 import type { EdgeGeom, NodeSize, VetviChar, VetviCharGroup, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviVarGroup, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType, type Cond } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
@@ -581,18 +581,38 @@ export class VetviStore {
   }
   private _manT: ReturnType<typeof setTimeout> | null = null;
 
+  /** Применение снимка истории/журнала (applySnap оригинала, 2127): заменяются только
+   *  nodes/edges/groups/vars/chars/customTypes (плюс прочие структурные поля docFromParsed).
+   *  МЕТА (имя, projectId, журнал действий, editLog) НЕ откатывается — иначе после отката
+   *  проект с уходящей метой писал данные в другой слот и «откат не работал» в проектах,
+   *  где снимки старше появления projectId. */
+  private applyHistorySnap(snap: string): void {
+    const d = docFromParsed(JSON.parse(snap));
+    d.meta = this.doc.meta;
+    this.doc = d;
+    const ids = new Set(this.doc.nodes.map((n) => n.id));
+    const ns = new Set<string>();
+    for (const id of this.sel) if (ids.has(id)) ns.add(id);
+    this.sel = ns;
+    const eids = new Set(this.doc.edges.map((e) => e.id));
+    const es = new Set<string>();
+    for (const id of this.selEdges) if (eids.has(id)) es.add(id);
+    this.selEdges = es;
+    const gids = new Set(this.doc.groups.map((g) => g.id));
+    const gs = new Set<string>();
+    for (const id of this.selGroups) if (gids.has(id)) gs.add(id);
+    this.selGroups = gs;
+    this.noteSelFocus();
+    this.noteEditor();
+  }
+
   undo(): void {
     this.flushPendingLog();
     if (!this.past.length) return;
     const pre = this.serialize();
     this.future.push(pre);
     const snap = this.past.pop();
-    this.doc = docFromParsed(JSON.parse(snap as string));
-    this.sel.clear();
-    this.selEdges.clear();
-    this.selGroups.clear();
-    this.noteSelFocus();
-    this.noteEditor();
+    this.applyHistorySnap(snap as string);
     this.logUndoRedo(pre, 'Отмена');
     this.toast('Отменено', 'warn');
     this.scheduleSave();
@@ -605,12 +625,7 @@ export class VetviStore {
     const pre = this.serialize();
     this.past.push(pre);
     const snap = this.future.pop();
-    this.doc = docFromParsed(JSON.parse(snap as string));
-    this.sel.clear();
-    this.selEdges.clear();
-    this.selGroups.clear();
-    this.noteSelFocus();
-    this.noteEditor();
+    this.applyHistorySnap(snap as string);
     this.logUndoRedo(pre, 'Повтор');
     this.toast('Повторено', 'ok');
     this.scheduleSave();
@@ -622,13 +637,29 @@ export class VetviStore {
 
   logHistoryCount(): number { return this.past.length; }
 
-  /** Откат проекта к моменту записи журнала (logRollbackProject). */
+  /** Откат проекта к моменту записи журнала (logRollbackProject оригинала):
+   *  как applySnap — метаданные проекта не трогаются, откат можно отменить (undo). */
   rollbackToSnapshot(snap: string): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(snap);
+    } catch {
+      this.toast('Снимок повреждён — откат невозможен', 'warn');
+      return;
+    }
+    const cur = this.serialize();
+    if (cur === snap) {
+      this.toast('Проект уже в этом состоянии', 'ok');
+      return;
+    }
     this.pushHistory('Откат проекта по журналу');
-    this.doc = docFromParsed(JSON.parse(snap));
+    const d = docFromParsed(parsed);
+    d.meta = this.doc.meta;
+    this.doc = d;
     this.sel.clear();
     this.selEdges.clear();
     this.selGroups.clear();
+    this.noteSelFocus();
     this.noteEditor();
     this.scheduleSave();
     this.emit();
@@ -645,6 +676,9 @@ export class VetviStore {
     this.persist();
     this.saveState = 'saved';
     this.lastSavedAt = Date.now();
+    /* режим IndexedDB: отложенная запись 350 мс не доживёт до выгрузки страницы —
+       сбрасываем очередь в базу немедленно (закрытие вкладки, F5, смена проекта) */
+    storeFlushNow();
     this.emit();
   }
 
@@ -889,23 +923,29 @@ export class VetviStore {
     if (n && this.sync) this.sync.liveDlg(n);
   }
 
-  /** Входящие перекидываются на исходящие (detachNode «Выдернуть»). */
+  /** «Выдернуть ноду» (detachNode оригинала, 6604): все связи ноды удаляются,
+   *  входящие перекидываются на исходящие (A→N→B превращается в A→B) — цепочка
+   *  сохраняется. САМА НОДА ОСТАЁТСЯ на холсте (в React-версии она ошибочно
+   *  удалялась — через контекстное меню нода и стрелки исчезали). */
   detachNode(id: string): void {
+    let extracted = false;
     this.mutate((doc) => {
       const ins = doc.edges.filter((e) => e.to === id && e.from !== id);
       const outs = doc.edges.filter((e) => e.from === id && e.to !== id);
-      for (const e of doc.edges) {
-        if (ins.includes(e)) {
-          for (const o of outs) {
-            const dup = doc.edges.some((x) => x.from === e.from && x.to === o.to && x.fromReply === e.fromReply);
-            if (!dup && o.to !== e.from) doc.edges.push(newEdge(e.from, o.to, e.fromOut));
-          }
+      if (!ins.length && !outs.length) return;
+      const bypass: VetviEdge[] = [];
+      for (const ei of ins) {
+        for (const eo of outs) {
+          if (ei.from === eo.to) continue;
+          const dup = doc.edges.some((x) => x.from === ei.from && x.to === eo.to && x.fromReply === ei.fromReply)
+            || bypass.some((x) => x.from === ei.from && x.to === eo.to && x.fromReply === ei.fromReply);
+          if (!dup) bypass.push(newEdge(ei.from, eo.to, ei.fromOut));
         }
       }
-      doc.edges = doc.edges.filter((e) => !ins.includes(e));
-      doc.nodes = doc.nodes.filter((n) => n.id !== id);
+      doc.edges = doc.edges.filter((e) => e.from !== id && e.to !== id).concat(bypass);
+      extracted = true;
     }, { label: 'Выдернуть ноду' });
-    this.sel.delete(id);
+    if (extracted) this.toast('Узел выдернут, цепочка сохранена', 'ok');
     this.emit();
   }
 
@@ -1280,27 +1320,34 @@ export class VetviStore {
     this.commitEdit(pre, 'Правка моста');
   }
 
-  /** Нож: удаление связей, пересекаемых линией. */
-  knifeCut(line: { x1: number; y1: number; x2: number; y2: number }, sampleFn: (e: VetviEdge) => { x: number; y: number }[] | null): number {
+  /** Разрез стрелок ножом по траектории (knifeS.path оригинала, 8435–8460):
+   *  пересекаются все связи, чья полилиния пересекает ЛЮБОЙ отрезок пути жеста.
+   *  Раньше резалась только прямая «старт—конец» — короткий надрез поперёк стрелки
+   *  не срабатывал, приходилось вести длинный разрез. */
+  knifeCutPath(path: { x: number; y: number }[], sampleFn: (e: VetviEdge) => { x: number; y: number }[] | null): number {
     const pre = this.serialize();
     const victims: string[] = [];
-    const l1 = { x: line.x1, y: line.y1 };
-    const l2 = { x: line.x2, y: line.y2 };
+    if (path.length < 2) return 0;
     for (const e of this.doc.edges) {
       const pts = sampleFn(e);
       if (!pts) continue;
-      for (let i = 0; i < pts.length - 1; i++) {
+      let hit = false;
+      for (let i = 0; i < pts.length - 1 && !hit; i++) {
         const a = pts[i];
         const b = pts[i + 1];
-        const d1x = l2.x - l1.x;
-        const d1y = l2.y - l1.y;
-        const d2x = b.x - a.x;
-        const d2y = b.y - a.y;
-        const denom = d1x * d2y - d1y * d2x;
-        if (Math.abs(denom) < 1e-9) continue;
-        const t = ((a.x - l1.x) * d2y - (a.y - l1.y) * d2x) / denom;
-        const u = ((a.x - l1.x) * d1y - (a.y - l1.y) * d1x) / denom;
-        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) { victims.push(e.id); break; }
+        for (let j = 0; j < path.length - 1; j++) {
+          const l1 = path[j];
+          const l2 = path[j + 1];
+          const d1x = l2.x - l1.x;
+          const d1y = l2.y - l1.y;
+          const d2x = b.x - a.x;
+          const d2y = b.y - a.y;
+          const denom = d1x * d2y - d1y * d2x;
+          if (Math.abs(denom) < 1e-9) continue;
+          const t = ((a.x - l1.x) * d2y - (a.y - l1.y) * d2x) / denom;
+          const u = ((a.x - l1.x) * d1y - (a.y - l1.y) * d1x) / denom;
+          if (t >= 0 && t <= 1 && u >= 0 && u <= 1) { victims.push(e.id); hit = true; break; }
+        }
       }
     }
     if (victims.length) {
@@ -1732,6 +1779,68 @@ export class VetviStore {
       const m = s.arr.splice(s.idx, 1)[0];
       const insAt = (s.idx < t.idx) ? (t.idx - 1) : t.idx;
       t.arr.splice(below ? insAt + 1 : insAt, 0, m);
+      moved = true;
+    }, { label: 'Порядок реплик' });
+    return moved;
+  }
+
+  /**
+   * Свободное перетаскивание реплики с автоподстройкой вложенности (новое поведение,
+   * запрос 2024-11): реплику можно бросить в любое место дерева —
+   *  place='before'/'after' — соседом цели (вложенная становится корневой рядом с
+   *    корневой и наоборот — уровень берётся от цели);
+   *  place='inside' — последним ответом-веткой внутри цели;
+   *  place='root' — корневой в конец списка (бросок на пустое место списка).
+   * Поддерево реплики переезжает целиком; бросок внутрь собственного поддерева запрещён.
+   */
+  moveReplyTo(nodeId: string, srcRid: string, tgtRid: string | null, place: 'before' | 'after' | 'inside' | 'root'): boolean {
+    let moved = false;
+    this.mutate((doc) => {
+      const n = doc.nodes.find((x) => x.id === nodeId);
+      if (!n || !n.dialog) return;
+      const replies = Array.isArray(n.dialog.replies) ? n.dialog.replies : (n.dialog.replies = []);
+      const findLoc = (arr: VetviReply[], id: string): { arr: VetviReply[]; idx: number } | null => {
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i].id === id) return { arr, idx: i };
+          const ch = arr[i].children;
+          if (ch && ch.length) {
+            const hit = findLoc(ch, id);
+            if (hit) return hit;
+          }
+        }
+        return null;
+      };
+      const s = findLoc(replies, srcRid);
+      if (!s) return;
+      if (!tgtRid || place === 'root') {
+        /* в корень, в конец списка */
+        if (s.arr === replies && s.idx === replies.length - 1) return;
+        const m = s.arr.splice(s.idx, 1)[0];
+        replies.push(m);
+        moved = true;
+        return;
+      }
+      if (srcRid === tgtRid) return;
+      const t0 = findLoc(replies, tgtRid);
+      if (!t0) return;
+      /* бросок внутрь собственного поддерева — цикл, запрещён */
+      const inSubtree = (r: VetviReply): boolean => {
+        if (r.id === srcRid) return true;
+        for (const ch of r.children || []) if (inSubtree(ch)) return true;
+        return false;
+      };
+      if (inSubtree(t0.arr[t0.idx])) return;
+      const m = s.arr.splice(s.idx, 1)[0];
+      /* после удаления позиция цели могла сдвинуться — ищем заново */
+      const t = findLoc(replies, tgtRid);
+      if (!t) { s.arr.splice(s.idx, 0, m); return; }
+      if (place === 'inside') {
+        const tr = t.arr[t.idx];
+        if (!Array.isArray(tr.children)) tr.children = [];
+        tr.children.push(m);
+      } else {
+        t.arr.splice(place === 'before' ? t.idx : t.idx + 1, 0, m);
+      }
       moved = true;
     }, { label: 'Порядок реплик' });
     return moved;

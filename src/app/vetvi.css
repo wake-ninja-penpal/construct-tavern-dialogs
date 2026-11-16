@@ -806,6 +806,9 @@ button.ve-use.clickable:hover{color:var(--acc2)}
 .dlg-reply-ed.dragging{opacity:.45;border-color:var(--acc)!important}
 .dlg-reply-ed.drop-above{box-shadow:inset 0 2px 0 var(--acc)}
 .dlg-reply-ed.drop-below{box-shadow:inset 0 -2px 0 var(--acc)}
+.dlg-reply-ed.drop-in{box-shadow:inset 0 0 0 2px var(--acc);border-color:var(--acc)!important}
+#dlgModalBody.drop-root{box-shadow:inset 0 0 0 2px rgba(226,165,78,.45);border-radius:10px}
+#dlgModalBody.drop-root .dlg-add-root-btn{background:#3a3327;border-color:var(--acc)}
 .dlg-add-root-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;font-size:11.5px;font-weight:600;background:#262b33;color:var(--tx2);border:1px solid var(--line2);cursor:pointer;transition:.15s}
 .dlg-add-root-btn:hover{background:#333a45;color:var(--tx)}
 .dlg-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;margin:3px 6px 3px 0;border-radius:7px;font-size:11px;font-weight:700;letter-spacing:.2px;border:1px solid transparent}

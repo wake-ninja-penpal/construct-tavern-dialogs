@@ -39,13 +39,34 @@ function idbOpen(): Promise<IDBDatabase | null> {
   if (_idbPr) return _idbPr;
   _idbPr = new Promise((resolve) => {
     try {
-      const req = window.indexedDB.open('vetvi-store', 1);
+      /* без версии: берём текущую (БД могла вырасти после ремонта хранилища);
+         новая БД создаётся с версией 1, апгрейд создаёт хранилище kv */
+      const req = window.indexedDB.open('vetvi-store');
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        /* БД может существовать БЕЗ хранилища kv (создана «голым» open раньше) —
+           тогда апгрейд не сработает никогда и все записи будут падать молча.
+           Пересоздаём с версией +1, чтобы onupgradeneeded создал хранилище. */
+        if (!db.objectStoreNames.contains('kv')) {
+          const v = db.version;
+          db.close();
+          const req2 = window.indexedDB.open('vetvi-store', v + 1);
+          req2.onupgradeneeded = () => {
+            const db2 = req2.result;
+            if (!db2.objectStoreNames.contains('kv')) db2.createObjectStore('kv');
+          };
+          req2.onsuccess = () => resolve(req2.result);
+          req2.onerror = () => resolve(null);
+          return;
+        }
+        resolve(db);
+      };
       req.onerror = () => resolve(null);
+      req.onblocked = () => { /* ждём освобождения другой вкладкой */ };
     } catch {
       resolve(null);
     }

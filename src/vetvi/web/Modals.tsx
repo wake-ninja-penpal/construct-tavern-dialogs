@@ -20,7 +20,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { APP_VERSION, PATCHNOTES, PATCH_TAGS } from '@/vetvi/core/patchnotes';
-import { SECTION_TITLES } from '@/vetvi/core/logdiff';
+import { normalizeLogDiff, SECTION_TITLES } from '@/vetvi/core/logdiff';
 import { looksLikeProject, projFmtDate, projList, readJsonFile } from '@/vetvi/core/projects';
 import { LS_LIMITS, storeFmtSize, storeLsUsage, storeMode, storeSwitch, idbReadAll, storeSizeOf, storeCollectData } from '@/vetvi/core/storage';
 import { hkConflict, hkDef, hkHuman, hkLoad, hkResetAll, hkSetUser, hkText, hkUserOverrides, HK_DEFS } from '@/vetvi/core/hotkeys';
@@ -375,6 +375,9 @@ export function LogModal({ store }: { store: VetviStore }) {
               {filtered.map((e) => {
                 const c = (e.by && e.by.color) || '#8b929c';
                 const nm = (e.by && e.by.name) || '—';
+                /* записи классической версии приезжают со старым форматом diff
+                   (nA/nD/nC… кортежи) — нормализуем в секции перед рендером */
+                const diff = normalizeLogDiff(e.diff);
                 return (
                   <div
                     className={'log-row' + (openId === e.id ? ' open' : '')}
@@ -389,10 +392,10 @@ export function LogModal({ store }: { store: VetviStore }) {
                     </div>
                     {openId === e.id && (
                       <div className="log-det">
-                        {!e.diff ? (
+                        {!diff ? (
                           <div className="log-item log-fields">Детали этой записи недоступны</div>
                         ) : (
-                          e.diff.sections.map((sec) => (
+                          diff.sections.map((sec) => (
                             <Fragment key={sec.key}>
                               <div className="log-sec">{SECTION_TITLES[sec.key] || sec.key}</div>
                               {sec.items.slice(0, 8).map((it) => (

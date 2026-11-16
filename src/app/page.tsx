@@ -6,22 +6,16 @@
  * Редактор собран из компонентов src/vetvi/* (ядро без DOM пригодно и для
  * React Native). Классическая версия по-прежнему доступна целиком:
  * /vetvi/index.html — ссылка есть в тулбаре React-версии.
+ *
+ * ВАЖНО: здесь больше нет getStore() — стор создаётся только после прогрева
+ * хранилища (storeBoot в VetviApp). Раньше эффект Home вызывал getStore()
+ * сразу при монтировании — в режиме IndexedDB память была ещё пуста, и
+ * синглтон навсегда «запоминал» пустой проект (локальные проекты терялись).
  */
-
-import { useEffect } from 'react';
 
 import './vetvi.css';
 import VetviApp from '@/vetvi/web/VetviApp';
-import { getStore } from '@/vetvi/web/store';
 
 export default function Home() {
-  // Восстановить последний вид при загрузке (хранится в автосохранении).
-  useEffect(() => {
-    const store = getStore();
-    const save = () => store.flushSave();
-    window.addEventListener('pagehide', save);
-    return () => window.removeEventListener('pagehide', save);
-  }, []);
-
   return <VetviApp />;
 }

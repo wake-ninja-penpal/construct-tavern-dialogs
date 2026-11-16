@@ -1264,6 +1264,7 @@ function CharsPane({ store, active, onFile, onRecrop }: { store: VetviStore; act
                 placeholder="Кто это, какова его роль в истории…"
                 style={{ minHeight: 52 }}
                 aria-label="Описание персонажа"
+                value={String((c as { text?: string }).text || '')}
                 onFocus={descFocus}
                 onChange={(e) => store.updateChar(c.id, { text: e.target.value }, { history: false })}
                 onBlur={descBlur}

@@ -35,7 +35,7 @@ type Gest =
   | { mode: 'pan'; sx: number; sy: number; lx: number; ly: number }
   | { mode: 'marquee'; sx: number; sy: number; add: boolean; preN: Set<string>; preG: Set<string>; markN?: Set<string>; markG?: Set<string> }
   | { mode: 'gcreate'; sx: number; sy: number; cx: number; cy: number }
-  | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number; wx: number; wy: number }
+  | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number; wx: number; wy: number; path: { x: number; y: number }[] }
   | { mode: 'node'; lx: number; ly: number; stackHl: string | null; dropEdge: string | null }
   | { mode: 'group'; gid: string; lx: number; ly: number; base: Map<string, { x: number; y: number }>; adx?: number; ady?: number }
   | { mode: 'gresize'; gid: string; dir: 'r' | 'b' | 'br'; sx: number; sy: number; fw: number; fh: number }
@@ -570,7 +570,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (altDown) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const w0 = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
-      gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, wx: w0.x, wy: w0.y };
+      /* путь ножа (knifeS.path оригинала): накопленные точки жеста — разрез по всей траектории */
+      gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, wx: w0.x, wy: w0.y, path: [{ x: w0.x, y: w0.y }] };
       setCutline({ x1: w0.x, y1: w0.y, x2: w0.x, y2: w0.y });
       e.preventDefault();
       return;
@@ -599,6 +600,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const onNodeDragStart = useCallback((e: React.MouseEvent, id: string) => {
     if (store.carry) return;
     if (store.spaceDown) return; /* Space над нодой: ни пан, ни drag (8158–8159 оригинала) */
+    /* Alt+перенос = «выдернуть» (isExtract оригинала, 8175–8184): связи ноды перекидываются
+       на сквозные, нода остаётся и сразу тащится. Одиночный Alt+клик — тоже выдергивает. */
+    if (e.altKey && e.button === 0 && !store.carry) store.detachNode(id);
     gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY, stackHl: null, dropEdge: null };
     store.dragBegin();
     store.setGestureIds([...store.sel].map((x) => 'n:' + x));
@@ -951,6 +955,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           g.ly = e.clientY;
           const rect = canvasRef.current?.getBoundingClientRect();
           const wk = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
+          g.path.push({ x: wk.x, y: wk.y });
           setCutlineR({ x1: g.wx, y1: g.wy, x2: wk.x, y2: wk.y });
           break;
         }
@@ -1200,8 +1205,6 @@ export function CanvasBoard(props: { store: VetviStore }) {
           setCutline(null);
           const rect = canvasRef.current?.getBoundingClientRect();
           if (!rect) break;
-          const a = screenToWorld(store.vp, g.sx - rect.left, g.sy - rect.top);
-          const b = screenToWorld(store.vp, g.lx - rect.left, g.ly - rect.top);
           const moved = Math.hypot(g.lx - g.sx, g.ly - g.sy) > 6;
           if (!moved) {
             // одиночный клик: разрезать связь под курсором
@@ -1224,7 +1227,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             if (hit) store.knifeSingleEdge(hit.e.id);
             break;
           }
-          store.knifeCut({ x1: a.x, y1: a.y, x2: b.x, y2: b.y }, (ed) => {
+          store.knifeCutPath(g.path, (ed) => {
             const it = items.find((x) => x.e.id === ed.id);
             return it ? it.pts : null;
           });
