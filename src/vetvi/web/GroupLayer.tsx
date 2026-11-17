@@ -211,6 +211,9 @@ export function GroupLayer(props: {
   cardSizes: Map<string, { w: number; h: number }>;
   sink: { setCardSize(id: string, w: number, h: number): void };
   hiddenGids: Set<string>;
+  /** Снимок рамок fold=2 на момент старта перетаскивания ноды: на время жеста
+   *  авторамки «морожены» — не растягиваются и не следуют за нодой. */
+  frameFreeze?: Map<string, { x: number; y: number; w: number; h: number }> | null;
   onGroupDown: (e: React.MouseEvent, gid: string) => void;
   onGroupResize: (e: React.MouseEvent, gid: string, dir: 'r' | 'b' | 'br') => void;
   /** qport.in/qport.out (7870–7921): вход/выход цепочки (isIn=true — вход). */
@@ -519,9 +522,10 @@ export function GroupLayer(props: {
         );
         if (fold === 2) {
           const manual = g.auto === false && typeof g.fw === 'number' && typeof g.fh === 'number';
+          const frozen = props.frameFreeze ? props.frameFreeze.get(g.id) : null;
           const rect = manual
             ? { x: g.x, y: g.y, w: g.fw as number, h: g.fh as number }
-            : groupFrameRect(store.doc, g, sizes, cardSizes);
+            : (frozen || groupFrameRect(store.doc, g, sizes, cardSizes));
           return (
             <div
               key={g.id}

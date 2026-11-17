@@ -13,7 +13,7 @@
 
 import { memo, useMemo } from 'react';
 
-import { edgePathD, bridgeCorners, pathPoint } from '@/vetvi/core/edgepath';
+import { catmullSamples, edgePathD, bridgeCorners, pathPoint, routeOrtho, routeOrtho45 } from '@/vetvi/core/edgepath';
 import { clamp, mainAnchor, nodeHeight, nodeWidth } from '@/vetvi/core/geometry';
 import { getMe } from '@/vetvi/core/identity';
 import type { EdgeGeom, NodeSize, VetviDoc, VetviEdge, VetviNode } from '@/vetvi/core/types';
@@ -122,15 +122,20 @@ export function buildEdgeItems(
     }
 
     const d = edgePathD(g);
-    // полилиния для ножа/вейпоинтов
+    // полилиния для ножа/вейпоинтов/поиска связи — ВИДИМАЯ кривая, не хорды:
+    // клик ножа по дуге изгиба обязан попадать (оригинал сэмплировал edgeSample)
     let pts: { x: number; y: number }[] = [];
     if (g.corners && g.corners.length) pts = [{ x: g.x1, y: g.y1 }, ...g.corners, { x: g.x2, y: g.y2 }];
     else {
       const P = [{ x: g.x1, y: g.y1 }];
       (g.pts || []).forEach((p) => P.push({ x: p.x, y: p.y }));
       P.push({ x: g.x2, y: g.y2 });
-      if (P.length > 2) pts = P;
-      else {
+      if (P.length > 2) {
+        const bend = g.bend || 'smooth';
+        if (bend === 'ortho90') pts = routeOrtho(P);
+        else if (bend === 'ortho45') pts = routeOrtho45(P);
+        else pts = catmullSamples(P, 12);
+      } else {
         // сэмплы кубика
         const dx = g.x2 >= g.x1 ? clamp((g.x2 - g.x1) * 0.55, 46, 190) : clamp((g.x1 - g.x2) * 0.5 + 60, 70, 240);
         const c1 = { x: g.x1 + dx, y: g.y1 };

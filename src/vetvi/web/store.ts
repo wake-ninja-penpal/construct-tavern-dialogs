@@ -1425,6 +1425,31 @@ export class VetviStore {
       n.x = Math.round(p.x - (d0 ? d0.w : NODE_W) / 2);
       n.y = Math.round(p.y - hh / 2);
     }
+    /* место для изгибов (фикс «стрелки подключаются как попало»): обе новые связи
+       (A→n из правого нижнего якоря, n→B в левую грань) обязаны идти «вперёд» с
+       запасом — при тесных краях контрольные точки кубика перекрещиваются и связи
+       дают петли-зацепы. Для преимущественно горизонтальной исходной связи
+       раздвигаем A/B и клампим ноду так, чтобы зазор по обе стороны был ≥ GAP. */
+    if (gm && p && A !== B && Math.abs(gm.x2 - gm.x1) >= Math.abs(gm.y2 - gm.y1)) {
+      const na = doc.nodes.find((x) => x.id === A);
+      const nb = doc.nodes.find((x) => x.id === B);
+      if (na && nb) {
+        const GAP = 72;
+        const wA = this.dimsOf(na.id).w;
+        const wN = d0 ? d0.w : NODE_W;
+        let lo = na.x + wA + GAP;
+        let hi = nb.x - wN - GAP;
+        if (lo > hi) {
+          const deficit = lo - hi;
+          na.x = Math.round(na.x - deficit / 2);
+          nb.x = Math.round(nb.x + deficit / 2);
+          lo = na.x + wA + GAP;
+          hi = nb.x - wN - GAP;
+        }
+        if (n.x < lo) n.x = Math.round(lo);
+        else if (n.x > hi) n.x = Math.round(hi);
+      }
+    }
     doc.edges.push({ id: uid(), from: A, to: n.id, label: '', kind, pts: sp[0] || [], lt: 0.5, lp: 0, fromReply: fromReplyA, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
     doc.edges.push({ id: uid(), from: n.id, to: B, label, kind, pts: sp[1] || [], lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
     if (this.selEdges.has(e.id)) this.selEdges.clear();
@@ -1498,15 +1523,19 @@ export class VetviStore {
    * Глубочайшая группа в мировой точке (deepestGroupAt оригинала, 3064–3076):
    * fold=2 — по рамке, fold<2 — по карточке; размеры — измеренные (sizes/cardSizes
    * из CanvasBoard, в оригинале offsetWidth/offsetHeight элементов).
+   * frameOverride — снимок рамок на момент старта перетаскивания ноды: авторамки
+   * «морожены» на время жеста (не растягиваются и не следуют за нодой), и решение
+   * «остаться в группе / выйти» принимается по той же замороженной рамке.
    */
-  deepestGroupAt(wx: number, wy: number, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>): VetviGroup | null {
+  deepestGroupAt(wx: number, wy: number, sizes: Map<string, NodeSize>, cardSizes: Map<string, { w: number; h: number }>, frameOverride?: Map<string, { x: number; y: number; w: number; h: number }> | null): VetviGroup | null {
     let best: VetviGroup | null = null;
     let bestDepth = -1;
     for (const g of this.doc.groups) {
       if (this.groupInsideCollapsed(g)) continue;
       const fold = g.fold === undefined ? 2 : g.fold;
       let r: { x: number; y: number; w: number; h: number };
-      if (fold === 2) r = groupFrameRect(this.doc, g, sizes, cardSizes);
+      const frozen = frameOverride ? frameOverride.get(g.id) : null;
+      if (fold === 2) r = frozen || groupFrameRect(this.doc, g, sizes, cardSizes);
       else {
         const cr = groupCardRect(this.doc, g, cardSizes);
         r = { x: g.x || 0, y: g.y || 0, w: cr.w, h: cr.h };

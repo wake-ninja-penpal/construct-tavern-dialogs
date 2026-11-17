@@ -171,6 +171,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const [cardSizes] = useState(() => new Map<string, { w: number; h: number }>());
   const [tick, setTick] = useState(0);
   const gestRef = useRef<Gest>(null);
+  /* снимок рамок fold=2 на старте перетаскивания нод: на время жеста авторамки
+     «морожены» — не растягиваются и не следуют за нодой, решение «в группе/вне»
+     на дропе принимается по той же замороженной рамке (вынос ноды из группы) */
+  const [frameFreeze, setFrameFreeze] = useState<Map<string, { x: number; y: number; w: number; h: number }> | null>(null);
   const marqueeRef = useRef<HTMLDivElement>(null);
   /* рамка выделения/группы и подсветки жестов — императивно (без setState в кадре) */
   const [cutline, setCutline] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -552,6 +556,29 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return true;
   }, [store, startPanGesture, showMarquee]);
 
+  /* старт жеста «ножа» (Alt+ЛКМ): путь ножа (knifeS.path оригинала) — накопленные
+     точки жеста, разрез по всей траектории; старт возможен с ЛЮБОЙ точки холста */
+  const startKnifeGesture = useCallback((e: React.MouseEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const w0 = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
+    gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, wx: w0.x, wy: w0.y, path: [{ x: w0.x, y: w0.y }] };
+    setCutline({ x1: w0.x, y1: w0.y, x2: w0.x, y2: w0.y });
+    e.preventDefault();
+  }, [store]);
+
+  /* Alt+ЛКМ — «нож»: ноды, группы и связи ИГНОРИРУЮТСЯ (как ноды при пане через
+     Ctrl) — разрез стрелок работает и внутри групп, и поверх карточек. Фаза
+     захвата на корне холста: перехватываем до обработчиков нод/групп/связей.
+     Исключения — как у Ctrl-пана: пины/порты/грипы/фолды остаются собой. */
+  const onAltKnifeCapture = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0 || !e.altKey) return;
+    if (store.carry || store.spaceDown) return;
+    const t = e.target as HTMLElement;
+    if (t.closest && t.closest('[data-pin], .qport, .dlg-reply-pin, .gb-grip, .gb-fold, .gb-salla, .n-seq, .n-fold, .opin, .vpinn, [data-nodrag]')) return;
+    startKnifeGesture(e);
+    e.stopPropagation();
+  }, [store, startKnifeGesture]);
+
   const onCanvasDown = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     store.closeCtx();
@@ -568,12 +595,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (t.closest('[data-node-id]') || t.closest('[data-pin]') || t.closest('.rn-gframe, .groupbox') || t.closest('.rn-gcard, .gcard, .qcard')) return;
     if (e.button !== 0) return;
     if (altDown) {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const w0 = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
-      /* путь ножа (knifeS.path оригинала): накопленные точки жеста — разрез по всей траектории */
-      gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, wx: w0.x, wy: w0.y, path: [{ x: w0.x, y: w0.y }] };
-      setCutline({ x1: w0.x, y1: w0.y, x2: w0.x, y2: w0.y });
-      e.preventDefault();
+      startKnifeGesture(e);
       return;
     }
     if (e.ctrlKey && e.shiftKey) {
@@ -594,22 +616,42 @@ export function CanvasBoard(props: { store: VetviStore }) {
       showMarquee(e.clientX - rect.left, e.clientY - rect.top, 0, 0);
     }
     e.preventDefault();
-  }, [store, altDown, modGestureInstead, startPanGesture, showMarquee]);
+  }, [store, altDown, modGestureInstead, startPanGesture, showMarquee, startKnifeGesture]);
 
   /* ── ноды ── */
   const onNodeDragStart = useCallback((e: React.MouseEvent, id: string) => {
+    void id;
     if (store.carry) return;
     if (store.spaceDown) return; /* Space над нодой: ни пан, ни drag (8158–8159 оригинала) */
-    /* Alt+перенос = «выдернуть» (isExtract оригинала, 8175–8184): связи ноды перекидываются
-       на сквозные, нода остаётся и сразу тащится. Одиночный Alt+клик — тоже выдергивает. */
-    if (e.altKey && e.button === 0 && !store.carry) store.detachNode(id);
+    /* Alt-жест перехватывается на фазе захвата (onAltKnifeCapture) — сюда не доходит.
+       «Выдернуть» ноду — в контекстном меню ноды (ctxMenus.node). */
+    /* заморозка авторамок: снимок fold=2 до старта жеста — рамки не растягиваются
+       и не следуют за нодой, ноду можно вынести за пределы группы */
+    setFrameFreeze((() => {
+      const m = new Map<string, { x: number; y: number; w: number; h: number }>();
+      for (const g of store.doc.groups) {
+        if ((g.fold === undefined ? 2 : g.fold) !== 2) continue;
+        /* группы внутри свёрнутых не рисуются — рамку не снимаем */
+        let par = g.parent || null;
+        let hidden = false;
+        while (par) {
+          const pg = store.groupById(par);
+          if (!pg) break;
+          if ((pg.fold === undefined ? 2 : pg.fold) < 2) { hidden = true; break; }
+          par = pg.parent || null;
+        }
+        if (hidden) continue;
+        m.set(g.id, groupFrameRect(store.doc, g, sizesMap, cardSizes));
+      }
+      return m;
+    })());
     gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY, stackHl: null, dropEdge: null };
     store.dragBegin();
     store.setGestureIds([...store.sel].map((x) => 'n:' + x));
     /* soft-lock: захват выделенных нод на время жеста */
     if (store.sync && store.sync.enabled) { store.sync.lockTake([...store.sel]); store.setGestureRollback(null); }
     e.preventDefault();
-  }, [store]);
+  }, [store, sizesMap, cardSizes]);
 
   /* ── группы ── */
   const onGroupDown = useCallback((e: React.MouseEvent, gid: string) => {
@@ -1207,10 +1249,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
           if (!rect) break;
           const moved = Math.hypot(g.lx - g.sx, g.ly - g.sy) > 6;
           if (!moved) {
-            // одиночный клик: разрезать связь под курсором
-            const el = document.elementFromPoint(g.lx, g.ly) as HTMLElement | null;
-            const path = el ? el.closest('svg.rn-edges path.hit, svg#edges path.hit') : null;
-            void path;
+            /* одиночный клик: разрезать связь под курсором. Сначала точное попадание
+               по DOM (browser сам хит-тестит видимый path.hit со stroke 16px — как
+               nearestEdgeAt оригинала по истинной кривой), затем геометрический
+               фолбэк по сэмплам кривой (12px). */
+            const el = document.elementFromPoint(g.lx, g.ly) as Element | null;
+            const hitP = el ? el.closest('svg.rn-edges path.hit, svg#edges path.hit') : null;
+            const hitG = hitP ? hitP.closest('g.edge') : null;
+            const eidDom = hitG ? hitG.getAttribute('data-id') : null;
+            if (eidDom) { store.knifeSingleEdge(eidDom); break; }
             const hit = items.find((it) => {
               const pts = it.pts;
               for (let i = 0; i < pts.length - 1; i++) {
@@ -1240,6 +1287,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
             if (shl) shl.classList.remove('drop-hover');
           }
           setDropEdge(null);
+          /* снимок заморозки рамок забираем и гасим сразу — ранние break-и ниже не должны его оставить */
+          const frozenFrames = frameFreeze;
+          setFrameFreeze(null);
           const movedN = store.dragMoved;
           const preN = store.dragStartSnapshot || store.serialize();
           const dragId = store.sel.size === 1 ? [...store.sel][0] : null;
@@ -1264,7 +1314,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
             break;
           }
           /* захват групп/цепочек после переноса (8958–8982): нода над карточкой цепочки
-             — в конец цепочки, иначе — gid глубочайшей группы под центром ноды */
+             — в конец цепочки, иначе — gid глубочайшей группы под центром ноды.
+             Решение по ЗАМОРОЖЕННОЙ рамке (снимок на старте жеста): рамка не следует
+             за нодой, поэтому нода, выброшенная за пределы рамки, покидает группу. */
           if (movedN) {
             const gidSets: { id: string; ngid: string | null }[] = [];
             for (const id of store.sel) {
@@ -1273,11 +1325,11 @@ export function CanvasBoard(props: { store: VetviStore }) {
               const s = sizesMap.get(id);
               const w = s ? s.w : NODE_W;
               const h = s ? s.h : 90;
-              const tg = store.deepestGroupAt(nn.x + w / 2, nn.y + h / 2, sizesMap, cardSizes);
+              const tg = store.deepestGroupAt(nn.x + w / 2, nn.y + h / 2, sizesMap, cardSizes, frozenFrames);
               let appended = false;
               if (tg && tg.stack === true) appended = store.stackAppend(tg, id);
               else if (!tg && wpUp) {
-                const tgS = store.deepestGroupAt(wpUp.x, wpUp.y, sizesMap, cardSizes);
+                const tgS = store.deepestGroupAt(wpUp.x, wpUp.y, sizesMap, cardSizes, frozenFrames);
                 if (tgS && tgS.stack === true) appended = store.stackAppend(tgS, id);
               }
               if (!appended) {
@@ -1445,7 +1497,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       store.syncBusyFlag = false;
       store.gestureRollback = null;
     };
-  }, [store, doc, items, sizesMap, cardSizes]);
+  }, [store, doc, items, sizesMap, cardSizes, frameFreeze]);
 
 
   /* Alt → нож (курсор — через body.knife, как в оригинале) */
@@ -1979,6 +2031,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
         backgroundPosition: vp.x + 'px ' + vp.y + 'px',
       }}
       onMouseDown={onCanvasDown}
+      onMouseDownCapture={onAltKnifeCapture}
       onContextMenu={onCtx}
       onDoubleClick={onDbl}
       onDragOver={onDragOver}
@@ -2007,6 +2060,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             cardSizes={cardSizes}
             sink={sink}
             hiddenGids={new Set<string>()}
+            frameFreeze={frameFreeze}
             onGroupDown={onGroupDown}
             onGroupResize={onGroupResize}
             onQPortDown={onQPortDown}

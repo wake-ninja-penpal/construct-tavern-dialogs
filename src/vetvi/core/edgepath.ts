@@ -158,6 +158,33 @@ export function catmullPath(P: Pt[]): string {
   return d;
 }
 
+/** Выборка видимой кривой (catmullPath) полилинией: те же контрольные точки, что
+ *  в catmullPath. Ножу/поиску связи нужна геометрия ВИДИМОЙ кривой — раньше брали
+ *  хорды между точками изгиба, и клик ножа по видимой дуге не срабатывал. */
+export function catmullSamples(P: Pt[], perSeg = 12): Pt[] {
+  if (P.length < 3) return P.slice();
+  const out: Pt[] = [P[0]];
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[i - 1] || P[i];
+    const p1 = P[i];
+    const p2 = P[i + 1];
+    const p3 = P[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    for (let k = 1; k <= perSeg; k++) {
+      const t = k / perSeg;
+      const m = 1 - t;
+      out.push({
+        x: m * m * m * p1.x + 3 * m * m * t * c1x + 3 * m * t * t * c2x + t * t * t * p2.x,
+        y: m * m * m * p1.y + 3 * m * m * t * c1y + 3 * m * t * t * c2y + t * t * t * p2.y,
+      });
+    }
+  }
+  return out;
+}
+
 function samplePolyline(P: Pt[], t: number): Pt {
   const lens: number[] = [];
   let total = 0;
