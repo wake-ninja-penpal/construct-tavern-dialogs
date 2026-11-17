@@ -15,10 +15,20 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 
+import { authApplyState } from './auth';
+
+export interface AuthStateUser {
+  id: string;
+  login: string;
+  displayName: string;
+  color: string;
+  token?: string | null;
+}
+
 export interface AuthState {
   authEnabled: boolean;
   registrationEnabled: boolean;
-  user: { login: string; displayName: string } | null;
+  user: AuthStateUser | null;
 }
 
 export async function fetchAuthState(): Promise<AuthState> {

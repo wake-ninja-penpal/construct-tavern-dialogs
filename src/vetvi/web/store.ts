@@ -29,7 +29,7 @@ import { isBridge, splitPtsAtHalf } from '@/vetvi/core/insert';
 import { defaultDoc, defaultViewport, ensureDialog, newEdge, newReply, newNode, snapVal, uid } from '@/vetvi/core/factory';
 import { clamp, clampZoom, docBounds, nodeHeight, nodeWidth, screenToWorld } from '@/vetvi/core/geometry';
 import { pathPoint } from '@/vetvi/core/edgepath';
-import { getMe, setMeName, type MeIdentity } from '@/vetvi/core/identity';
+import { getMe, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
 import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
@@ -104,9 +104,7 @@ export function editIdentity(inRoom = false): MeIdentity {
   return { id: 'вы', name: 'вы', color: '#8b929c' };
 }
 
-export function renameMe(name: string): MeIdentity {
-  return setMeName(name);
-}
+/* Смена имени участника удалена: имя приходит из аккаунта (сервер берёт его из БД). */
 
 /** Схлопывание подряд идущих записей об одном редакторе (collapseEditLog оригинала). */
 function collapseEditLog(log: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -195,7 +193,7 @@ export class VetviStore {
   syncStatus: 'off' | 'conn' | 'on' | 'err' | 'lost' | 'copy' = 'off';
   syncMode: 'local' | 'room' | 'copy' = 'local';
   syncRoom: string | null = null;
-  syncUsers: { id: string; name: string; color: string; cur?: string | null }[] = [];
+  syncUsers: { id: string; name: string; color: string; canEdit?: boolean; cur?: string | null }[] = [];
   syncMergeCount = 0;
   syncLocks: Record<string, { id: string; name: string; color: string }> = {};
   syncBusyFlag = false;
@@ -207,6 +205,10 @@ export class VetviStore {
   lockTip: { x: number; y: number; by: { id: string; name: string; color: string } | null } | null = null;
   /** Показан попап участников комнаты. */
   collabPop = false;
+  /** Показан попап аккаунта (аватар в правом краю тулбара). */
+  accPop = false;
+  /** Режим «только чтение»: роль reader/guest в комнате — мутации документа запрещены. */
+  viewOnly = false;
   /** Soft-lock редактируемого объекта (editLockIds оригинала): лок, взятый набором текста. */
   editLockIds: string[] = [];
   /** Расхождение локальной копии и комнаты (см. SyncDiffInfo) — блок в углу холста. */
@@ -543,6 +545,12 @@ export class VetviStore {
 
   commitEdit(pre: string | null, label?: string): void {
     if (!pre) return;
+    /* только чтение: откатываем то, что успел изменить жест/ввод */
+    if (this.viewOnly) {
+      try { this.doc = docFromParsed(JSON.parse(pre)); } catch { /* снимок битый */ }
+      this.denyEdit();
+      return;
+    }
     const cur = this.serialize();
     if (cur === pre) return;
     this.pendingLog = { pre, t: Date.now(), label: label || null };
@@ -593,6 +601,7 @@ export class VetviStore {
 
   /** Мутация с записью в историю. fn меняет this.doc напрямую. */
   mutate(fn: (doc: VetviDoc) => void, opts?: { history?: boolean; label?: string; ch?: 'all' | 'doc' | 'ui' | 'geom' }): void {
+    if (this.denyEdit()) return;
     if (!opts || opts.history !== false) this.pushHistory(opts?.label);
     fn(this.doc);
     this.refreshSigs();
@@ -606,6 +615,7 @@ export class VetviStore {
 
   /** Одноразовое «ручное» действие без diff (переименование проекта и т.п.). */
   mutateManual(fn: (doc: VetviDoc) => void, act: string, debounceMs = 900): void {
+    if (this.denyEdit()) return;
     this.flushPendingLog();
     fn(this.doc);
     this.noteEditor();
@@ -642,6 +652,7 @@ export class VetviStore {
   }
 
   undo(): void {
+    if (this.denyEdit()) return;
     this.flushPendingLog();
     if (!this.past.length) return;
     const pre = this.serialize();
@@ -655,6 +666,7 @@ export class VetviStore {
   }
 
   redo(): void {
+    if (this.denyEdit()) return;
     this.flushPendingLog();
     if (!this.future.length) return;
     const pre = this.serialize();
@@ -675,6 +687,7 @@ export class VetviStore {
   /** Откат проекта к моменту записи журнала (logRollbackProject оригинала):
    *  как applySnap — метаданные проекта не трогаются, откат можно отменить (undo). */
   rollbackToSnapshot(snap: string): void {
+    if (this.denyEdit()) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(snap);
@@ -1078,6 +1091,7 @@ export class VetviStore {
   }
 
   dragMoveBy(dx: number, dy: number): void {
+    if (this.denyEdit()) return;
     if (!dx && !dy) return;
     this.dragMoved = true;
     const nodes = this.doc.nodes;
@@ -1123,6 +1137,7 @@ export class VetviStore {
   }
 
   deleteSelected(): void {
+    if (this.denyEdit()) return;
     if (!this.sel.size && !this.selEdges.size && !this.selGroups.size) return;
     this.pushHistory('Удаление');
     const doc = this.doc;
@@ -3463,6 +3478,57 @@ export class VetviStore {
     this.emit();
   }
 
+  /** Открыть проект, к которому открыли доступ (уведомление / список «Вам открыли доступ»).
+   *  Локального слота может не быть — создаём пустой с projectId комнаты и входим
+   *  в комнату: сервер отдаст авторитетный документ. Роль (reader) — предварительная,
+   *  финальную ставит ack входа (canEdit). */
+  openShared(p: { roomId: string; projectId?: string | null; projectName?: string | null; role?: string | null }): void {
+    const list = projList();
+    const existing = list.find((e) => e.roomId === p.roomId);
+    if (existing) {
+      this.openProject(existing.id, p.roomId);
+      return;
+    }
+    const pid = p.projectId && typeof p.projectId === 'string' && p.projectId ? p.projectId : uid() + uid();
+    const now = Date.now();
+    const n = newNode('scene', 0, 0);
+    const doc: VetviDoc = {
+      meta: { name: p.projectName || 'Проект по доступу', created: now, modified: now, projectId: pid, actionLog: [], editLog: [] },
+      nodes: [n],
+      edges: [],
+      groups: [],
+      vars: [],
+      chars: [],
+      charGroups: [],
+      customTypes: [],
+      palette: [],
+      listHidden: {},
+    };
+    this.flushSave();
+    if (this.sync) this.sync.leaveIfRoom();
+    this.doc = doc;
+    this.vp = defaultViewport();
+    this.bend = 'smooth';
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups.clear();
+    this.past = [];
+    this.future = [];
+    this.selectOnly(n.id);
+    this.viewOnly = p.role === 'reader';
+    /* слот + запись реестра с roomId — сразу (обычный persist roomId ставит только при синхронизации) */
+    projSaveCurrent(doc, this.vp, this.bend, p.roomId);
+    this.toast('Открыт проект: ' + (p.projectName || 'Без названия'), 'ok');
+    if (this.sync) {
+      this.sync.mode = 'room';
+      this.lockAfterUnlock(() => {
+        this.sync!.connect(p.roomId, pid, { own: true, silent: true });
+        this.sync!.setHash(p.roomId, pid);
+      });
+    }
+    this.emit();
+  }
+
   deleteProject(id: string): void {
     /* projSkipSaveId оригинала: удаляемый проект не должен «воскреснуть» через
        flushSave внутри openProject/createProject при переключении на следующий */
@@ -4032,6 +4098,23 @@ export class VetviStore {
     this.emit();
   }
 
+  setAccPop(v: boolean): void {
+    this.accPop = v;
+    this.emit();
+  }
+
+  /** Гейт «только чтение»: true — правка запрещена (с троттлингом тоста). */
+  denyEdit(): boolean {
+    if (!this.viewOnly) return false;
+    const now = Date.now();
+    if (now - this.denyT > 1500) {
+      this.denyT = now;
+      this.toast('Проект открыт в режиме «только чтение»', 'warn');
+    }
+    return true;
+  }
+  private denyT = 0;
+
   finishGestureDrag(): void {
     this.dragStartSnapshot = null;
     this.dragMoved = false;
@@ -4097,7 +4180,7 @@ export class VetviStore {
     /* ввод в модалках синхронизацию не держит: в оригинале #modalWrap не входит
        в syncBusy — иначе (фокус в поле ссылки «Совместного доступа» и т.п.)
        чужие снимки зависают в pendingRemote, пока окно открыто */
-    const inModal = !!t && !!(t.closest('.modal-wrap') || t.closest('#dlgModal') || t.closest('#noteModal'));
+    const inModal = !!t && !!(t.closest('.modal-wrap') || t.closest('#modalWrap') || t.closest('#dlgModal') || t.closest('#noteModal'));
     const typing = !inModal && !!t && t.isConnected && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t as HTMLElement).isContentEditable);
     return typing || this.dialogEdit != null || this.carry != null || this.confirm != null || this.syncBusyFlag || this.busyAnim || noteModalOpen();
   }

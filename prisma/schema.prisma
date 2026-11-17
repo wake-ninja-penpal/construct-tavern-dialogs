@@ -1,3 +1,9 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,16 +16,19 @@ datasource db {
 /* ── заготовка авторизации «Ветви» ──
    Аккаунты (логин+пароль), сессии (cookie-токен), ссылки-инвайты для
    регистрации (одноразовые или на N регистраций), глобальные настройки
-   (вкл/выкл авторизации и регистрации — ключ-значение), доступы к проектам. */
+   (вкл/выкл авторизации и регистрации — ключ-значение), доступы к проектам
+   (комната + роль) и уведомления аккаунта. */
 
 model AuthUser {
-  id           String        @id @default(cuid())
-  login        String        @unique
-  passwordHash String
-  displayName  String?
-  disabled     Boolean       @default(false)
-  createdAt    DateTime      @default(now())
-  sessions     AuthSession[]
+  id            String         @id @default(cuid())
+  login         String         @unique
+  passwordHash  String
+  displayName   String?
+  color         String         @default("#8b929c")
+  disabled      Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  sessions      AuthSession[]
+  notifications Notification[]
 }
 
 model AuthSession {
@@ -46,11 +55,24 @@ model AppSetting {
 }
 
 model ProjectAccess {
-  id        String   @id @default(cuid())
-  projectId String
-  login     String
-  role      String   @default("editor")
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  roomId      String
+  userId      String
+  role        String   @default("editor") // owner | editor | reader
+  projectId   String?
+  projectName String?
+  ownerName   String?
+  createdAt   DateTime @default(now())
 
-  @@unique([projectId, login])
+  @@unique([roomId, userId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  payload   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }

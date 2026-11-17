@@ -20,12 +20,13 @@ import { io, type Socket } from 'socket.io-client';
 
 import { docFromParsed } from '@/vetvi/core/doc';
 import { uid } from '@/vetvi/core/factory';
-import { getMe, setMeName } from '@/vetvi/core/identity';
+import { getMe } from '@/vetvi/core/identity';
 import { mergeDocs, mergeStats, type MergeStats } from '@/vetvi/core/merge';
 import { passRandomSalt, sha256hex } from '@/vetvi/core/passlock';
-import { projReadSlot } from '@/vetvi/core/projects';
+import { projList, projReadSlot } from '@/vetvi/core/projects';
 import { stItem, stSetItem } from '@/vetvi/core/storage';
 import type { VetviChar, VetviCharGroup, VetviEdge, VetviGroup, VetviNode } from '@/vetvi/core/types';
+import { accessInit, getAccountToken } from './auth';
 import { canvasApi } from './canvasApi';
 import type { VetviStore } from './store';
 
@@ -172,6 +173,8 @@ export class SyncClient {
   mode: 'local' | 'room' | 'copy' = 'local';
   activeCopy: string | null = null;
   mergeCount = 0;
+  /* роль в комнате из ack (owner/editor/reader/guest) — читает ShareModal */
+  role: string | null = null;
   rlocks: Record<string, LockInfo> | null = null;
   myLocks: Record<string, number> = {};
   lockHB: ReturnType<typeof setInterval> | null = null;
@@ -264,11 +267,15 @@ export class SyncClient {
 
     sock.on('connect', () => {
       const jpay: Record<string, unknown> = { roomId, user: { id: me.id, name: me.name, color: me.color } };
+      /* сессия аккаунта: сервер vetvi-sync проверяет её по общей БД и берёт
+         имя/цвет из записи AuthUser — имена в комнате менять нельзя */
+      const tok = getAccountToken();
+      if (tok) { jpay.token = tok; jpay.userId = me.id; }
       const jpw = (typeof opts.password === 'string' && opts.password) ? opts.password : (this.store.syncProjPass || this.joinPass || null);
       if (jpw) jpay.password = jpw;
       const meta = this.store.doc.meta as unknown as { passHash?: string; passSalt?: string };
       if (meta && meta.passHash) jpay.pass = { salt: String(meta.passSalt || ''), hash: String(meta.passHash) };
-      sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc } | null) => {
+      sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc; role?: string; canEdit?: boolean; legacy?: boolean } | null) => {
         if (!res || !res.ok) {
           if (res && res.needPassword) {
             if (jpw) opts._pwWrong = true;
@@ -281,6 +288,13 @@ export class SyncClient {
         }
         opts._pwWrong = false;
         this.setStatus('on');
+        /* роль и право на правку: reader/guest — только чтение (сервер и отклоняет правки) */
+        this.role = typeof res.role === 'string' ? res.role : null;
+        const canEdit = res.canEdit !== false;
+        this.store.viewOnly = !canEdit && this.mode === 'room';
+        if (!canEdit && !opts.silent) {
+          this.store.toast('У вас доступ только на чтение — правки недоступны', 'warn');
+        }
         this.store.syncUsers = res.users || [];
         this.lockApplyServerList(res.locks);
         this.focusApply(res.focus);
@@ -335,15 +349,37 @@ export class SyncClient {
           }
         }
         if (this.mergeCount > 0) this.store.toast('Merge-запросов в очереди: ' + this.mergeCount, 'warn');
+
+        /* legacy-комната (до введения доступов): владелец заявляет владение и
+           перезаходит — сервер пересчитает роль и право редактирования */
+        if (res.legacy && this.mode === 'room') {
+          void (async () => {
+            const entry = projList().find((e) => e.roomId === roomId);
+            const isOwn = opts.own === true || !!entry;
+            if (!isOwn) return;
+            const r = await accessInit(roomId, pid, (this.store.doc.meta.name as string) || null);
+            if (!r.ok || !r.role) return;
+            try { this.sock?.emit('vetvi:join', jpay, () => { /* re-ack: сервер вернёт новую роль */ }); } catch { /* соединение умерло */ }
+          })();
+        }
       });
     });
     sock.on('disconnect', () => { if (this.enabled) this.setStatus('lost'); });
     sock.io.on('reconnect', () => this.setStatus('conn'));
     sock.on('connect_error', () => this.setStatus('err'));
-    sock.on('vetvi:users', (m: { roomId?: string; users?: { id: string; name: string; color: string }[] }) => {
+    sock.on('vetvi:users', (m: { roomId?: string; users?: { id: string; name: string; color: string; canEdit?: boolean }[] }) => {
       if (!m || m.roomId !== this.room) return;
       this.store.syncUsers = m.users || [];
       this.store.emit();
+    });
+    /* уведомление о входе участника: кто перешёл по ссылке / вошёл по доступу */
+    sock.on('vetvi:notice', (m: { roomId?: string; kind?: string; user?: { id: string; name: string; color: string }; role?: string; canEdit?: boolean }) => {
+      if (!m || m.roomId !== this.room || m.kind !== 'join') return;
+      if (m.user && m.user.id === getMe().id) return;
+      const nm = (m.user && m.user.name) || 'Кто-то';
+      if (m.role === 'guest') this.store.toast(nm + ' — гость по ссылке (только чтение)', 'warn');
+      else if (m.role === 'reader') this.store.toast(nm + ' — только чтение', 'warn');
+      else this.store.toast(nm + ' — в комнате');
     });
     sock.on('vetvi:locks', (m: { roomId?: string; locks?: LockInfo[] }) => {
       if (!m || m.roomId !== this.room) return;
@@ -437,7 +473,9 @@ export class SyncClient {
     this.sock = null;
     this.enabled = false;
     this.room = null;
+    this.role = null;
     this.store.syncUsers = [];
+    this.store.viewOnly = false;
     this.mergeCount = 0;
     this.pendingRemote = null;
     this.pendingRemoteAt = 0;
@@ -526,6 +564,7 @@ export class SyncClient {
    *  у соавторов изменения НЕ применяются сразу — показывается сравнение. */
   publishReplace(doc: SyncDoc): void {
     if (!this.enabled || !this.sock || !this.sock.connected) return;
+    if (this.store.viewOnly) { this.store.toast('Только чтение: публикация недоступна', 'warn'); return; }
     const me = getMe();
     try { this.sock.emit('vetvi:replace', { roomId: this.room, doc, by: { name: me.name, color: me.color } }); } catch { /* соединение умерло */ }
     try { this.lastSent = JSON.stringify(doc); } catch { /* нет сериализации */ }
@@ -626,6 +665,7 @@ export class SyncClient {
 
   flushState(force = false): void {
     if (!this.enabled || !this.sock || !this.sock.connected) return;
+    if (this.store.viewOnly) return; // только чтение: снапшоты не публикуем (сервер и так отклонит)
     if (this.applyingRemote && !force) return;
     const doc = this.store.syncDocObj();
     /* flushSave больше не публикует, поэтому сюда попадают ТОЛЬКО реальные правки
@@ -657,6 +697,7 @@ export class SyncClient {
 
   liveDrag(src: { ids?: Set<string>; cards?: Set<string> }): void {
     if (!this.enabled || !this.sock || !this.sock.connected || this.applyingRemote) return;
+    if (this.store.viewOnly) return;
     const now = Date.now();
     if (now - this.liveT < 55) return;
     this.liveT = now;
@@ -763,6 +804,7 @@ export class SyncClient {
 
   lockTake(ids: string[] | Set<string>): void {
     if (!this.enabled || !this.sock || !this.sock.connected) return;
+    if (this.store.viewOnly) return; // только чтение: локи не берём
     const arr = Array.isArray(ids) ? ids : [...ids];
     const clean: string[] = [];
     for (const id of arr) {
@@ -892,6 +934,9 @@ export class SyncClient {
     this.store.scheduleSave();
     this.setHash(roomId, String(this.store.doc.meta.projectId));
     this.connect(roomId, String(this.store.doc.meta.projectId), { pushLocal: true });
+    /* владелец комнаты: запись доступа — получатель гранта увидит проект в своём списке
+       (идемпотентно: повторный вызов не меняет уже существующую роль) */
+    void accessInit(roomId, String(this.store.doc.meta.projectId), (this.store.doc.meta.name as string) || null).catch(() => { /* сервер недоступен */ });
     this.store.openModal('share');
   }
 
@@ -920,16 +965,7 @@ export class SyncClient {
     }
   }
 
-  renameMe(name: string): void {
-    const v = (name || '').trim();
-    if (!v) return;
-    const m = setMeName(v);
-    if (this.sock && this.sock.connected) {
-      try { this.sock.emit('vetvi:join', { roomId: this.room, user: { id: m.id, name: m.name, color: m.color } }, () => { /* ack */ }); } catch { /* соединение умерло */ }
-    }
-    this.store.toast('Имя обновлено: ' + v);
-    this.store.emit();
-  }
+  /* Смена имени удалена: имя в комнате — имя аккаунта (берётся сервером из БД). */
 
   /* ═══ пароль проекта: синхронизация в комнату ═══ */
 

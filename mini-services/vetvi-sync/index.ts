@@ -45,11 +45,21 @@ interface UserMeta {
   id: string
   name: string
   color: string
+  /* право на редактирование (аккаунт с доступом owner/editor) */
+  canEdit?: boolean
 }
 
 interface RoomMember {
   socketId: string
   user: UserMeta
+  canEdit: boolean
+}
+
+interface AccInfo {
+  id: string
+  name: string
+  color: string
+  login: string
 }
 
 interface MergeRequest {
@@ -81,6 +91,94 @@ interface StoredRoom {
 const DATA_DIR = new URL('./data/', import.meta.url).pathname
 const DATA_FILE = DATA_DIR + 'store.json' // legacy-хранилище (только для миграции)
 const DB_FILE = DATA_DIR + 'store.db'
+
+/* ─── главная БД (аккаунты, сессии, доступы) ───
+   Та же SQLite-база, куда пишет Next.js через Prisma. Открываем вторым
+   соединением только на чтение: сессии проверяются при join, доступы
+   (ProjectAccess) определяют роль и право редактирования в комнате. */
+const MAIN_DB_FILE =
+  process.env.VETVI_MAIN_DB || new URL('../../db/custom.db', import.meta.url).pathname
+let mainDb: Database | null = null
+try {
+  mainDb = new Database(MAIN_DB_FILE)
+  try { mainDb.exec('PRAGMA journal_mode = WAL;') } catch { /* режим уже установлен */ }
+  mainDb.exec('PRAGMA busy_timeout = 5000;')
+} catch (e) {
+  console.error('[vetvi-sync] главная БД недоступна:', MAIN_DB_FILE, e)
+}
+
+const qSessionRow = mainDb?.prepare(
+  `SELECT s.userId AS userId, s.expiresAt AS expiresAt,
+          a.login AS login, a.displayName AS displayName, a.color AS color
+     FROM AuthSession s JOIN AuthUser a ON a.id = s.userId WHERE s.token = ?`,
+)
+const qAccessRole = mainDb?.prepare(
+  'SELECT role FROM ProjectAccess WHERE roomId = ? AND userId = ?',
+)
+const qAccessCount = mainDb?.prepare(
+  'SELECT COUNT(*) AS c FROM ProjectAccess WHERE roomId = ?',
+)
+
+/* сессия действительна? имя/цвет аккаунта всегда берём из БД —
+   их больше нельзя менять произвольно. При SQLITE_BUSY — короткий ретрай. */
+function verifySession(token: unknown, userId: unknown): AccInfo | null {
+  if (!mainDb || typeof token !== 'string' || !token) return null
+  const t = token.slice(0, 128)
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const row = qSessionRow.get(t) as
+        | { userId: string; expiresAt: string | number; login: string; displayName: string | null; color: string }
+        | null
+      if (!row) return null
+      const exp = typeof row.expiresAt === 'number' ? row.expiresAt : Date.parse(String(row.expiresAt))
+      if (!Number.isFinite(exp) || exp <= Date.now()) return null
+      if (typeof userId === 'string' && userId && userId !== row.userId) return null
+      return {
+        id: row.userId,
+        name: String(row.displayName || row.login || 'Гость').slice(0, 40),
+        color: String(row.color || '#8b929c').slice(0, 20),
+        login: String(row.login || ''),
+      }
+    } catch (e) {
+      lastErr = e
+      const spin = Date.now() + 60
+      while (Date.now() < spin) { /* busy spin */ }
+    }
+  }
+  console.error('[vetvi-sync] session check error', lastErr)
+  return null
+}
+
+function accessRole(roomId: string, userId: string): 'owner' | 'editor' | 'reader' | null {
+  if (!mainDb) return null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const row = qAccessRole.get(roomId, userId) as { role: string } | null
+      if (row && (row.role === 'owner' || row.role === 'editor' || row.role === 'reader')) return row.role
+      return null
+    } catch (e) {
+      if (attempt === 2) console.error('[vetvi-sync] access role error', e)
+      const spin = Date.now() + 60
+      while (Date.now() < spin) { /* busy spin */ }
+    }
+  }
+  return null
+}
+
+function accessCount(roomId: string): number {
+  if (!mainDb) return 0
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return (qAccessCount.get(roomId) as { c: number }).c
+    } catch (e) {
+      if (attempt === 2) console.error('[vetvi-sync] access count error', e)
+      const spin = Date.now() + 60
+      while (Date.now() < spin) { /* busy spin */ }
+    }
+  }
+  return 0
+}
 
 mkdirSync(DATA_DIR, { recursive: true })
 const db = new Database(DB_FILE)
@@ -416,7 +514,7 @@ function userList(room: RoomState) {
   for (const m of room.members.values()) {
     if (seen.has(m.user.id)) continue
     seen.add(m.user.id)
-    out.push(m.user)
+    out.push({ ...m.user, canEdit: m.canEdit })
   }
   return out
 }
@@ -536,6 +634,8 @@ const isSafeRoom = (room: unknown): room is string =>
 
 io.on('connection', (socket: Socket) => {
   let joinedRoom: string | null = null
+  /* право этого сокета на изменение состояния (роль из join) */
+  let canEditSock = false
 
   /* ── вход в комнату ── */
   socket.on(
@@ -548,6 +648,9 @@ io.on('connection', (socket: Socket) => {
         password?: string
         /* salt+hash защищённого проекта: закрепляется за комнатой первым вошедшим */
         pass?: { salt?: string; hash?: string }
+        /* сессия аккаунта: токен + id — имя/цвет берутся из БД */
+        token?: string
+        userId?: string
       },
       ack?: (r: unknown) => void,
     ) => {
@@ -557,11 +660,23 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, error: 'bad room' })
           return
         }
-        const user: UserMeta = {
-          id: String(payload?.user?.id || socket.id),
-          name: String(payload?.user?.name || 'Гость').slice(0, 40),
-          color: String(payload?.user?.color || '#8b929c').slice(0, 20),
+
+        /* аккаунт и роль: сессия проверяется по главной БД, доступ — по ProjectAccess.
+           Без сессии/доступа — «гость по ссылке»: имя из payload, только чтение. */
+        const acc = verifySession(payload?.token, payload?.userId)
+        const role = acc ? accessRole(roomName, acc.id) : null
+        const canEdit = role === 'owner' || role === 'editor'
+        if (process.env.VETVI_DEBUG) {
+          console.log(`[vetvi-sync][debug] join "${roomName}" tok=${typeof payload?.token === 'string' ? payload.token.slice(0, 8) : JSON.stringify(payload?.token)} userId=${JSON.stringify(payload?.userId)} acc=${acc ? acc.id : null} role=${role}`)
         }
+
+        const user: UserMeta = acc
+          ? { id: acc.id, name: acc.name, color: acc.color }
+          : {
+              id: String(payload?.user?.id || socket.id),
+              name: String(payload?.user?.name || 'Гость').slice(0, 40),
+              color: String(payload?.user?.color || '#8b929c').slice(0, 20),
+            }
 
         const room = getRoom(roomName)
 
@@ -598,8 +713,9 @@ io.on('connection', (socket: Socket) => {
           }
         }
 
-        /* проверка пароля: участник комнаты (rejoin/rename) проходит без повторного ввода */
-        if (room.pass && !isMember) {
+        /* проверка пароля: участник комнаты (rejoin) и пользователи с доступом
+           (owner/editor/reader) проходят без повторного ввода */
+        if (room.pass && !isMember && !role) {
           const given = typeof payload.password === 'string' ? payload.password : ''
           if (sha256hex(room.pass.salt + ':' + given) !== room.pass.hash) {
             ack?.({ ok: false, error: 'password', needPassword: true })
@@ -608,8 +724,9 @@ io.on('connection', (socket: Socket) => {
         }
 
         joinedRoom = roomName
+        canEditSock = canEdit
         socket.join(roomName)
-        room.members.set(socket.id, { socketId: socket.id, user })
+        room.members.set(socket.id, { socketId: socket.id, user, canEdit })
 
         // удаляем призраков перед расчётом списка — счётчик онлайн всегда актуальный
         if (sweepStaleMembers(io, room)) broadcastUsers(io, room)
@@ -623,11 +740,26 @@ io.on('connection', (socket: Socket) => {
           pendingMerges: pendingCount(roomName),
           locks: lockList(room),
           focus: focusList(room),
+          /* роль вошедшего и право на редактирование */
+          role: role || 'guest',
+          canEdit,
+          /* legacy: в комнате ещё нет ни одной записи доступа — клиент может
+             заявить владение (первый перешедший с обновления) */
+          legacy: !role && accessCount(roomName) === 0,
         })
 
         broadcastUsers(io, room)
+        /* уведомление остальным: кто вошёл (имя аккаунта + роль) — так в комнате
+           сразу видят, кто перешёл по ссылке без доступа */
+        socket.to(roomName).emit('vetvi:notice', {
+          roomId: roomName,
+          kind: 'join',
+          user: { id: user.id, name: user.name, color: user.color },
+          role: role || 'guest',
+          canEdit,
+        })
         console.log(
-          `[vetvi-sync] join "${roomName}" (${user.name}), peers: ${userList(room).length}`,
+          `[vetvi-sync] join "${roomName}" (${user.name}${role ? ', ' + role : ''}), peers: ${userList(room).length}`,
         )
       } catch (error) {
         console.error('[vetvi-sync] join error', error)
@@ -640,6 +772,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:state', (msg: { roomId?: string; doc?: unknown }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      if (!canEditSock) return // только чтение: снапшоты не принимаются
       const doc = msg.doc as { nodes?: unknown[] } | undefined
       if (!doc || !Array.isArray(doc.nodes)) return
       const json = JSON.stringify(doc)
@@ -660,6 +793,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:replace', (msg: { roomId?: string; doc?: unknown; by?: { name?: string; color?: string } | null }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      if (!canEditSock) return // только чтение
       const doc = msg.doc as { nodes?: unknown[] } | undefined
       if (!doc || !Array.isArray(doc.nodes)) return
       const json = JSON.stringify(doc)
@@ -692,6 +826,7 @@ io.on('connection', (socket: Socket) => {
     }) => {
       try {
         if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+        if (!canEditSock) return // только чтение: live-события не ретранслируются
         socket.to(msg.roomId).emit('vetvi:live', {
           roomId: msg.roomId,
           nodes: msg.nodes,
@@ -860,6 +995,10 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, denied: [] })
           return
         }
+        if (!me.canEdit) {
+          ack?.({ ok: true, denied: [] }) // только чтение: локи не выдаются
+          return
+        }
         const ids = (Array.isArray(payload.ids) ? payload.ids : [])
           .map(String)
           .filter(Boolean)
@@ -957,6 +1096,10 @@ io.on('connection', (socket: Socket) => {
         const room = rooms.get(payload.roomId)
         if (!room) {
           ack?.({ ok: false, error: 'no room' })
+          return
+        }
+        if (!canEditSock) {
+          ack?.({ ok: false, error: 'read only' }) // пароль комнаты меняют только редакторы
           return
         }
         if (room.pass) {

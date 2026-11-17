@@ -1514,3 +1514,70 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .acc-row{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.02);border:1px solid var(--line2);border-radius:10px;padding:8px 12px}
 .acc-login{flex:1;min-width:0;font:600 13px var(--body);color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acc-you{font:500 11.5px var(--body);font-style:normal;color:var(--tx3)}
+
+/* ═══════════ аккаунт: аватар, попап, уведомления (система доступов) ═══════════ */
+
+#collabPop,.acc-pop,.ntf-pop{position:fixed;z-index:95;display:none;min-width:236px;background:#1b1e24;border:1px solid #303540;border-radius:12px;padding:8px;box-shadow:var(--sh)}
+#collabPop.show,.acc-pop.show,.ntf-pop.show{display:block;animation:ctxIn .16s cubic-bezier(.2,.9,.3,1.2)}
+
+.avatar-btn{padding:0;overflow:visible}
+.avatar-circle{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#1c1002;font:700 13px/1 var(--body);user-select:none;box-shadow:0 0 0 2px rgba(0,0,0,.25),inset 0 0 6px rgba(0,0,0,.18)}
+.avatar-circle.big{width:44px;height:44px;font-size:20px}
+.bell-badge{position:absolute;top:-6px;right:-7px;min-width:16px;height:16px;border-radius:8px;background:#cf6b5a;color:#fff;font:700 10px/16px var(--mono);text-align:center;padding:0 4px}
+
+/* бейдж «только чтение» в тулбаре */
+.ro-badge{font:600 10.5px var(--mono);letter-spacing:.5px;color:#d8c96f;border:1px solid rgba(216,201,111,.45);background:rgba(216,201,111,.08);border-radius:7px;padding:4px 9px;flex:none;user-select:none}
+
+/* попап аккаунта */
+.acc-pop{min-width:230px}
+.acc-head{display:flex;align-items:center;gap:11px;padding:11px 11px 9px}
+.acc-head-txt{display:flex;flex-direction:column;min-width:0}
+.acc-head-txt b{font-size:13.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-head-txt i{font-style:normal;font-size:11px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-logout:hover{color:#f0a791!important;background:rgba(207,107,90,.13)!important}
+
+/* попап уведомлений */
+.ntf-pop{min-width:300px;max-width:340px}
+.ntf-empty{font-size:12px;color:var(--tx3);padding:8px 11px 4px;line-height:1.5}
+.ntf-list{display:flex;flex-direction:column;gap:2px;padding:4px 6px 2px;max-height:320px;overflow-y:auto}
+.ntf-item{display:flex;align-items:center;gap:9px;padding:8px 7px;border-radius:8px;font-size:12.5px;transition:.12s}
+.ntf-item:hover{background:#262b33}
+.ntf-item.unread{background:rgba(226,165,78,.07)}
+.ntf-item.unread:hover{background:rgba(226,165,78,.12)}
+.ntf-ico{display:flex;align-items:center;justify-content:center;width:26px;height:26px;flex:none;border-radius:7px;background:#262b33;color:var(--acc)}
+.ntf-ico.rev{color:#e0937f}
+.ntf-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ntf-txt b{font-weight:600;color:var(--tx);font-size:12px;line-height:1.35}
+.ntf-txt i{font-style:normal;font-size:10.5px;color:var(--tx3)}
+
+/* «только чтение» в попапе участников */
+.cp-ro{font-size:11.5px;color:#d8c96f;padding:2px 9px 6px}
+.cp-ro-tag{font:600 9.5px var(--mono);font-style:normal;color:#d8c96f;border:1px solid rgba(216,201,111,.4);border-radius:4px;padding:0 4px;margin-left:6px;text-transform:uppercase}
+
+/* ═══════════ доступы в окне «Совместный доступ» ═══════════ */
+
+.share-acc{margin-top:14px;border-top:1px solid var(--line);padding-top:11px}
+.sa-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.sa-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:9px;background:#191c21;border:1px solid #262a31}
+.sa-who{flex:1;min-width:0;display:flex;flex-direction:column}
+.sa-who b{font-size:12.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sa-who i{font-style:normal;font-size:10.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sa-role{font:600 10px var(--mono);border-radius:5px;padding:1px 7px;flex:none}
+.sa-role.r-owner{color:#e2a54e;border:1px solid rgba(226,165,78,.45);background:rgba(226,165,78,.1)}
+.sa-role.r-editor{color:#8fbf7f;border:1px solid rgba(143,191,127,.4);background:rgba(143,191,127,.08)}
+.sa-role.r-reader{color:#d8c96f;border:1px solid rgba(216,201,111,.4);background:rgba(216,201,111,.08)}
+.sa-acts{display:flex;gap:5px;flex:none}
+.sa-acts .btn{height:26px;padding:0 9px;font-size:11.5px}
+.sa-acts .btn.danger{width:26px;padding:0;justify-content:center;font-size:14px}
+.sa-form{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.sa-form .inp{flex:1;min-width:150px;height:32px;background:#14161a;border:1px solid #2b2f37;border-radius:8px;color:var(--tx);font:12.5px var(--body);padding:0 10px}
+.sa-form .inp:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+.sa-ro{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx2);user-select:none;cursor:pointer}
+.sa-ro input{accent-color:var(--acc);width:14px;height:14px;cursor:pointer}
+.sa-empty{font-size:12px;color:var(--tx3);padding:6px 0}
+
+/* ═══════════ «Вам открыли доступ» в списке проектов ═══════════ */
+
+.pj-shared{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
+.pj-sh-cap{font:600 9.5px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);padding:2px 2px 7px}
+.pj-row.shared{background:rgba(226,165,78,.04)}

@@ -31,7 +31,8 @@ import type { LogEntry, VetviStore } from './store';
 import { TypeEditorModal } from './TypeEditorModal';
 import { TextsImportModal } from './TextsImportModal';
 import { TypeIcon } from './NodeCard';
-import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RenameMeModal, RoomPassModal, ShareModal, SyncDiffModal } from './SyncModals';
+import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RoomPassModal, ShareModal, SyncDiffModal } from './SyncModals';
+import { accessMine, type AccessMineItem } from './auth';
 
 /* ═══════════ иконки оригинала (ic(name,size): viewBox 24, stroke 1.7) ═══════════ */
 
@@ -559,10 +560,18 @@ export function ProjectsModal({ store }: { store: VetviStore }) {
   const cur = String(store.doc.meta.projectId || '');
   const impRef = useRef<HTMLInputElement>(null);
   const [ren, setRen] = useState<{ id: string; val: string } | null>(null);
+  const [shared, setShared] = useState<AccessMineItem[]>([]);
 
   const list = projList();
   const refresh = () => tick((t) => t + 1);
   const curFlag = (id: string) => id === cur && store.syncMode !== 'copy';
+
+  /* проекты, к которым открыли доступ (уведомление/грант) — приходят с сервера */
+  useEffect(() => {
+    let alive = true;
+    void accessMine().then((items) => { if (alive) setShared(items.filter((x) => x.role !== 'owner')); });
+    return () => { alive = false; };
+  }, []);
 
   return (
     <ModalShell title="Мои проекты" onClose={() => store.closeModal()}>
@@ -637,6 +646,26 @@ export function ProjectsModal({ store }: { store: VetviStore }) {
         ))}
         {!list.length && <div className="pj-empty">Пока нет проектов — создайте первый</div>}
       </div>
+      {shared.length > 0 && (
+        <div className="pj-shared">
+          <div className="pj-sh-cap">Вам открыли доступ</div>
+          {shared.map((s) => (
+            <div
+              key={s.roomId}
+              className="pj-row shared"
+              title="Открыть проект, к которому вам открыли доступ"
+              onClick={() => { store.openShared({ roomId: s.roomId, projectId: s.projectId, projectName: s.projectName, role: s.role }); store.closeModal(); }}
+            >
+              <div className="pj-main">
+                <div className="pj-name">{s.projectName || 'Проект по ссылке'}</div>
+                <div className="pj-meta">открыл: {s.ownerName || 'владелец'}</div>
+              </div>
+              <span className={'sa-role r-' + s.role}>{s.role === 'reader' ? 'чтение' : 'редактор'}</span>
+              <span className="pj-badge">комната</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="pj-foot">
         <button type="button" className="btn" onClick={() => { store.createProject(); store.closeModal(); }}>+ Новый проект</button>
         <button type="button" className="btn" onClick={() => impRef.current?.click()}>Импорт из файла…</button>
@@ -731,11 +760,10 @@ export function GroupCreateModal({ store }: { store: VetviStore }) {
 
 /* ═══════════ настройки: хаб + горячие клавиши + хранилище (.dlg-modal > .set-card) ═══════════ */
 
-export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' | 'ui' | 'access' }) {
+export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' | 'ui' }) {
   if (section === 'hk') return <HkModal store={store} />;
   if (section === 'store') return <StoreModal store={store} />;
   if (section === 'ui') return <UiModal store={store} />;
-  if (section === 'access') return <AccessModal store={store} />;
   return (
     <div className="dlg-modal show" role="dialog" aria-label="Настройки проекта">
       <div className="dlg-modal-card set-card">
@@ -783,20 +811,6 @@ export function SettingsModal({ store, section }: { store: VetviStore; section: 
             <span className="set-item-info">
               <span className="set-item-name">Настройки интерфейса</span>
               <span className="set-item-desc">Пределы масштаба холста: отдаление и приближение</span>
-            </span>
-            <span className="set-item-go">→</span>
-          </button>
-          <button type="button" className="set-item" onClick={() => store.openModal('settingsAccess')}>
-            <span className="set-item-ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" width="20" height="20" aria-hidden="true">
-                <rect x="4" y="10.5" width="16" height="9.5" rx="2" />
-                <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
-                <circle cx="12" cy="15.5" r="1.6" />
-              </svg>
-            </span>
-            <span className="set-item-info">
-              <span className="set-item-name">Доступ к проекту</span>
-              <span className="set-item-desc">Кто может работать в проекте: просмотр или редактирование</span>
             </span>
             <span className="set-item-go">→</span>
           </button>
@@ -1029,161 +1043,6 @@ function UiModal({ store }: { store: VetviStore }) {
   );
 }
 
-/* ── настройки доступа к проекту: кто может работать в проекте ── */
-
-interface AccEntry {
-  id: string;
-  projectId: string;
-  login: string;
-  role: string;
-}
-
-interface UserLite {
-  login: string;
-  displayName: string | null;
-}
-
-function AccessModal({ store }: { store: VetviStore }) {
-  const projectId = typeof store.doc.meta.projectId === 'string' ? store.doc.meta.projectId : '';
-  const [entries, setEntries] = useState<AccEntry[]>([]);
-  const [authOn, setAuthOn] = useState(true);
-  const [me, setMe] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserLite[]>([]);
-  const [newLogin, setNewLogin] = useState('');
-  const [newRole, setNewRole] = useState<'editor' | 'viewer'>('editor');
-  const [msg, setMsg] = useState('');
-
-  const reload = useCallback(() => {
-    if (!projectId) return;
-    void fetch('/api/project-access?projectId=' + encodeURIComponent(projectId), { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((j: { list: AccEntry[]; authEnabled: boolean; me: string | null }) => {
-        setEntries(j.list || []);
-        setAuthOn(j.authEnabled);
-        setMe(j.me);
-      })
-      .catch(() => undefined);
-    void fetch('/api/users', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : { list: [] }))
-      .then((j: { list: UserLite[] }) => setUsers(j.list || []))
-      .catch(() => undefined);
-  }, [projectId]);
-
-  useEffect(() => { reload(); }, [reload]);
-
-  const grant = async () => {
-    if (!newLogin) return;
-    const r = await fetch('/api/project-access', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, login: newLogin, role: newRole }),
-    });
-    if (r.ok) {
-      setNewLogin('');
-      reload();
-      setMsg('Доступ выдан: ' + newLogin);
-    } else {
-      setMsg('Не удалось выдать доступ');
-    }
-    setTimeout(() => setMsg(''), 2400);
-  };
-
-  const setRole = async (e: AccEntry, role: string) => {
-    await fetch('/api/project-access', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, login: e.login, role }),
-    });
-    reload();
-  };
-
-  const revoke = async (e: AccEntry) => {
-    await fetch('/api/project-access?projectId=' + encodeURIComponent(projectId) + '&login=' + encodeURIComponent(e.login), { method: 'DELETE' });
-    reload();
-  };
-
-  const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    window.location.reload();
-  };
-
-  return (
-    <div className="dlg-modal sub show" role="dialog" aria-label="Настройки — Доступ к проекту">
-      <div className="dlg-modal-card set-card">
-        <div className="dlg-modal-head">
-          <span className="dlg-modal-title">Настройки — Доступ к проекту</span>
-          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
-        </div>
-        <div className="dlg-modal-body">
-          {!authOn && (
-            <div className="acc-warn">
-              Авторизация сейчас выключена в панели администратора — доступы ни на что не влияют,
-              приложение открыто всем. Включите авторизацию, чтобы ограничить вход.
-            </div>
-          )}
-          {!projectId && <div className="acc-warn">Проект ещё не сохранён — доступы появятся после первого сохранения.</div>}
-
-          <div className="set-hint">Пользователи проекта (аккаунты создаются по ссылкам-приглашениям администратора).</div>
-
-          <div className="acc-add">
-            <select
-              className="acc-select"
-              value={newLogin}
-              aria-label="Пользователь"
-              onChange={(e) => setNewLogin(e.target.value)}
-            >
-              <option value="">— выбрать пользователя —</option>
-              {users.map((u) => (
-                <option key={u.login} value={u.login}>
-                  {u.displayName ? u.displayName + ' (@' + u.login + ')' : '@' + u.login}
-                </option>
-              ))}
-            </select>
-            <select
-              className="acc-select acc-select-role"
-              value={newRole}
-              aria-label="Роль"
-              onChange={(e) => setNewRole(e.target.value === 'viewer' ? 'viewer' : 'editor')}
-            >
-              <option value="editor">редактор</option>
-              <option value="viewer">просмотр</option>
-            </select>
-            <button type="button" className="btn" disabled={!newLogin} onClick={grant}>Выдать доступ</button>
-          </div>
-          {users.length === 0 && <div className="acc-empty">Зарегистрированных пользователей пока нет</div>}
-
-          <div className="acc-list">
-            {entries.length === 0 && <div className="acc-empty">Доступы ещё не выдавались</div>}
-            {entries.map((e) => (
-              <div className="acc-row" key={e.id}>
-                <span className="acc-login">@{e.login}{me === e.login ? <i className="acc-you"> — это вы</i> : null}</span>
-                <select
-                  className="acc-select acc-select-role"
-                  value={e.role === 'viewer' ? 'viewer' : 'editor'}
-                  aria-label="Роль пользователя"
-                  onChange={(ev) => setRole(e, ev.target.value)}
-                >
-                  <option value="editor">редактор</option>
-                  <option value="viewer">просмотр</option>
-                </select>
-                <button type="button" className="btn btn-xs" title="Забрать доступ" onClick={() => revoke(e)}>×</button>
-              </div>
-            ))}
-          </div>
-
-          <div className="set-foot-row">
-            <button type="button" className="btn btn-xs" onClick={logout} title="Завершить сеанс этого браузера">Выйти из аккаунта</button>
-            {msg && <span className="set-store-msg ok">{msg}</span>}
-          </div>
-        </div>
-        <div className="dlg-modal-foot">
-          <button type="button" className="btn" onClick={() => store.openModal('settings')}>← Назад</button>
-          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function comboOf(e: KeyboardEvent): string {
   const p: string[] = [];
@@ -1291,7 +1150,6 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'settingsHk': return <SettingsModal store={store} section="hk" />;
     case 'settingsStore': return <SettingsModal store={store} section="store" />;
     case 'settingsUi': return <SettingsModal store={store} section="ui" />;
-    case 'settingsAccess': return <SettingsModal store={store} section="access" />;
     case 'share': return <ShareModal store={store} />;
     case 'passSet': return <PassSetModal store={store} />;
     case 'passRemove': return <PassRemoveModal store={store} />;
@@ -1300,7 +1158,6 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'copyBar': return <CopyBarModal store={store} />;
     case 'merge': return <MergeModal store={store} />;
     case 'syncDiff': return <SyncDiffModal store={store} />;
-    case 'renameMe': return <RenameMeModal store={store} />;
     case 'typeEditor': return <TypeEditorModal store={store} id={store.modalArg} />;
     case 'textsImport': return <TextsImportModal store={store} />;
     default: return null;

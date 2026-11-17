@@ -29,7 +29,9 @@ log_step_end() {
 }
 
 start_mini_services() {
-	local mini_services_dir="$PROJECT_DIR/mini-services"
+	# каталог mini-services = каталог dev-сервера (RUN_DIR: worktree или основной проект)
+	# — синхронизация mini-services и Next.js всегда из одного дерева
+	local mini_services_dir="${RUN_DIR:-$PROJECT_DIR}/mini-services"
 	local started_count=0
 
 	log_step_start "Starting mini-services"

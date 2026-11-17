@@ -9,23 +9,31 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { hkText } from '@/vetvi/core/hotkeys';
+import { getMe } from '@/vetvi/core/identity';
 import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
+import { avatarInitial } from './auth';
+import { AccountPopover, NotificationsPopover, useNotifications } from './AccountMenu';
 
 export function TopBar(props: { store: VetviStore }) {
   const { store } = props;
   const [saveOpen, setSaveOpen] = useState(false);
   const saveRef = useRef<HTMLDivElement>(null);
+  const me = getMe();
+  const ntf = useNotifications(store);
   void store.revision;
 
+  /* закрытие попапов аккаунта/уведомлений кликом мимо (capture, как bindSyncUI) */
   useEffect(() => {
-    if (!saveOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (saveOpen && saveRef.current && !saveRef.current.contains(e.target as Node)) setSaveOpen(false);
+    const onDoc = (e: Event) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (store.accPop && !t.closest('.acc-pop') && !t.closest('#accBtn')) store.setAccPop(false);
+      if (ntf.open && !t.closest('.ntf-pop') && !t.closest('#bellBtn')) ntf.setOpen(false);
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [saveOpen]);
+    document.addEventListener('pointerdown', onDoc, true);
+    return () => document.removeEventListener('pointerdown', onDoc, true);
+  }, [store, store.accPop, ntf.open, ntf.setOpen]);
 
   const zoomStep = (factor: number) => {
     const r = canvasApi.current?.getRect();
@@ -84,6 +92,7 @@ export function TopBar(props: { store: VetviStore }) {
   })();
 
   return (
+    <>
     <header id="topbar" role="banner">
       <div className="brand">
         <svg viewBox="0 0 24 24" fill="none">
@@ -226,6 +235,10 @@ export function TopBar(props: { store: VetviStore }) {
 
       {statusChip}
 
+      {store.syncStatus === 'on' && store.viewOnly && (
+        <span className="ro-badge" title="У вас доступ только на чтение — правки недоступны">только чтение</span>
+      )}
+
       {(sc && sc.enabled && store.syncMode !== 'copy') && (
         <button type="button" className="btn" id="bMerge" title="Merge-запросы копий" onClick={() => store.openModal('merge')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
@@ -263,12 +276,47 @@ export function TopBar(props: { store: VetviStore }) {
 
       <div className="spacer" />
 
-      <button type="button" className="btn ibtn" id="bSettings" title="Настройки проекта" onClick={() => store.openModal('settings')}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+      <button
+        type="button"
+        className="btn ibtn"
+        id="bellBtn"
+        title="Уведомления"
+        aria-label="Уведомления"
+        onClick={() => { ntf.toggle(); store.setAccPop(false); }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9.5a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
+        {ntf.state.unread > 0 && (
+          <span className="m-badge bell-badge" aria-label={ntf.state.unread + ' непрочитанных уведомлений'}>
+            {ntf.state.unread > 9 ? '9+' : ntf.state.unread}
+          </span>
+        )}
       </button>
+
+      {/* аватар аккаунта вместо старой кнопки настроек: инфо о аккаунте, настройки, выход */}
+      <button
+        type="button"
+        className="btn ibtn avatar-btn"
+        id="accBtn"
+        title={me.name + ' — аккаунт'}
+        aria-label="Аккаунт"
+        onClick={() => { store.setAccPop(!store.accPop); ntf.setOpen(false); }}
+      >
+        <span className="avatar-circle" style={{ background: me.color }}>{avatarInitial(me.name)}</span>
+      </button>
+
       <button type="button" className="btn ibtn" id="bHelp" title="Горячие клавиши" onClick={() => store.openModal('settingsHk')}>
         ?
       </button>
     </header>
+
+    <AccountPopover store={store} onClose={() => store.setAccPop(false)} />
+    {ntf.open && (
+      <NotificationsPopover
+        items={ntf.state.items}
+        onOpenItem={(n) => void ntf.openItem(n)}
+        onClose={() => ntf.setOpen(false)}
+      />
+    )}
+    </>
   );
 }

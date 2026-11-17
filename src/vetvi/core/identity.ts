@@ -1,9 +1,10 @@
 /**
  * Ветви — личность участника (syncMe оригинала).
  *
- * Одна на браузер (localStorage vetvi-me-v1): случайное имя из лесного
- * списка + случайный цвет палитры. Используется и журналом действий
- * (автор записей), и совместным редактированием (presence, локи, merge).
+ * Теперь личность берётся из аккаунта (серверная запись AuthUser): имя и цвет
+ * нельзя менять произвольно — они приходят из /api/auth/state при старте и
+ * подставляются в presence/журналы/merge. Случайная «лесная» личность
+ * осталась только как fallback до входа (или когда авторизация выключена).
  */
 
 import { PALETTE_COLORS } from './constants';
@@ -17,8 +18,18 @@ function uidLite(): string {
   return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
 }
 
-/** Текущая личность (создаётся при первом обращении, хранится в localStorage). */
+/** Личность из аккаунта (устанавливается после /api/auth/state при старте). */
+let accountMe: MeIdentity | null = null;
+
+/** Подставить личность аккаунта (вызывается авторизационным гейтом при старте). */
+export function setAccountIdentity(a: { id: string; name: string; color: string }): void {
+  accountMe = { id: a.id, name: a.name, color: a.color };
+  try { window.localStorage.setItem(LS_ME, JSON.stringify(accountMe)); } catch { /* нет доступа */ }
+}
+
+/** Текущая личность: аккаунт приоритетнее; до входа — legacy-генерация. */
 export function getMe(): MeIdentity {
+  if (accountMe) return accountMe;
   try {
     const raw = window.localStorage.getItem(LS_ME) || 'null';
     const m = JSON.parse(raw) as MeIdentity | null;
@@ -33,10 +44,5 @@ export function getMe(): MeIdentity {
   return m;
 }
 
-/** Смена имени участника (окно «Сменить имя» в списке участников). */
-export function setMeName(name: string): MeIdentity {
-  const m = getMe();
-  m.name = name;
-  try { window.localStorage.setItem(LS_ME, JSON.stringify(m)); } catch { /* нет доступа */ }
-  return m;
-}
+/* Смена имени участника удалена: имя приходит из аккаунта и на сервере
+   берётся из БД (клиентское переименование больше не поддерживается). */

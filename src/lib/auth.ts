@@ -19,6 +19,29 @@ export const ADMIN_COOKIE = 'vv_root';
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 export const ADMIN_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов
 
+/* палитра цвета участника: цвет выдаётся при регистрации и больше не меняется
+   произвольно — имя и цвет аккаунта использует вся коллаборация */
+export const USER_PALETTE = [
+  '#e5484d', '#e5763c', '#f0b429', '#7cb342', '#2f9e77', '#12a594',
+  '#00a2c7', '#646bd0', '#8661c9', '#c951a2', '#d04a7a',
+];
+
+export function pickUserColor(): string {
+  return USER_PALETTE[Math.floor(Math.random() * USER_PALETTE.length)];
+}
+
+/** Публичные данные аккаунта (то, что видит клиент и sync-сервер). */
+export interface PublicUser {
+  id: string;
+  login: string;
+  displayName: string;
+  color: string;
+}
+
+export function publicUser(u: AuthUser): PublicUser {
+  return { id: u.id, login: u.login, displayName: u.displayName || u.login, color: u.color };
+}
+
 /* ── пароли ── */
 
 export function hashPassword(password: string): string {

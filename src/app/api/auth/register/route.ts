@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { USER_COOKIE, authEnabled, checkInvite, createSession, hashPassword, registrationEnabled } from '@/lib/auth';
+import { USER_COOKIE, authEnabled, checkInvite, createSession, hashPassword, pickUserColor, registrationEnabled } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 /** POST /api/auth/register {code, login, password, displayName} — регистрация
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   if (exists) return NextResponse.json({ error: 'Такой логин уже занят' }, { status: 409 });
 
   const user = await db.authUser.create({
-    data: { login, passwordHash: hashPassword(password), displayName: displayName || null },
+    data: { login, passwordHash: hashPassword(password), displayName: displayName || null, color: pickUserColor() },
   });
   await db.inviteLink.update({ where: { code }, data: { uses: { increment: 1 } } });
 

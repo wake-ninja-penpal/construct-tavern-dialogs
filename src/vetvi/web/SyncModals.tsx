@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { getMe } from '@/vetvi/core/identity';
 import { mergeStats } from '@/vetvi/core/merge';
+import { accessGrant, accessList, accessRevoke, type AccessListItem } from './auth';
 import { copiesAll, syncFmtDate, type MergeRequest } from './sync';
 import type { VetviStore } from './store';
 
@@ -52,6 +53,129 @@ function SyncShell(props: { title: string; onClose: () => void; children: React.
 
 /* ═══════════ «Совместный доступ» (shareProject → showShareModal) ═══════════ */
 
+const ROLE_BADGE: Record<string, string> = {
+  owner: 'владелец',
+  editor: 'редактор',
+  reader: 'чтение',
+};
+
+interface UserLite { login: string; displayName: string | null }
+
+/** Секция «Доступы»: пользователи с доступом к комнате + выдача по логину.
+ *  Грант шлёт получателю уведомление — проект появится в его списке. */
+function ShareAccess({ store }: { store: VetviStore }) {
+  const sc = store.sync;
+  const roomId = sc ? sc.room : null;
+  const [items, setItems] = useState<AccessListItem[]>([]);
+  const [meRole, setMeRole] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [login, setLogin] = useState('');
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const [reader, setReader] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const reload = () => {
+    if (!roomId) return;
+    void accessList(roomId).then((r) => {
+      if (r.ok) {
+        setItems(r.items);
+        setMeRole(r.meRole ?? null);
+      }
+      setLoaded(true);
+    });
+  };
+  useEffect(() => { reload(); }, [roomId]);
+  useEffect(() => {
+    void fetch('/api/users', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { list: [] }))
+      .then((j: { list: UserLite[] }) => setUsers(j.list || []))
+      .catch(() => undefined);
+  }, []);
+  const isOwner = meRole === 'owner';
+  const grant = async () => {
+    if (!sc || !roomId || busy) return;
+    const lg = login.trim().toLowerCase();
+    if (!lg) { store.toast('Выберите пользователя', 'warn'); return; }
+    setBusy(true);
+    const r = await accessGrant(roomId, lg, reader ? 'reader' : 'editor', sc.projectId, (store.doc.meta.name as string) || null);
+    setBusy(false);
+    if (!r.ok) { store.toast(r.error || 'Не удалось открыть доступ', 'err'); return; }
+    setLogin('');
+    setReader(false);
+    store.toast('Доступ открыт — пользователю отправлено уведомление', 'ok');
+    reload();
+  };
+  const revoke = async (lg: string) => {
+    if (!roomId) return;
+    const r = await accessRevoke(roomId, lg);
+    if (!r.ok) { store.toast(r.error || 'Не удалось отозвать доступ', 'err'); return; }
+    store.toast('Доступ отозван', 'ok');
+    reload();
+  };
+  const toggleRole = async (it: AccessListItem) => {
+    if (!roomId) return;
+    const next = it.role === 'reader' ? 'editor' : 'reader';
+    const r = await accessGrant(roomId, it.login, next, null, null);
+    if (!r.ok) { store.toast(r.error || 'Не удалось изменить роль', 'err'); return; }
+    reload();
+  };
+  return (
+    <div className="share-acc">
+      <div className="sp-cap">Доступы</div>
+      {!loaded && <div className="sa-empty">Загрузка доступов…</div>}
+      {loaded && !items.length && <div className="sa-empty">Пока никого — откройте доступ по логину или отправьте ссылку</div>}
+      <div className="sa-list">
+        {items.map((it) => (
+          <div key={it.userId} className="sa-item">
+            <span className="avatar-circle" style={{ background: it.color || '#8b929c' }}>{(it.displayName || it.login || '?')[0].toUpperCase()}</span>
+            <div className="sa-who">
+              <b>{it.displayName}</b>
+              <i>@{it.login}</i>
+            </div>
+            <span className={'sa-role r-' + it.role}>{ROLE_BADGE[it.role] || it.role}</span>
+            {isOwner && it.role !== 'owner' && (
+              <div className="sa-acts">
+                <button type="button" className="btn" title={it.role === 'reader' ? 'Разрешить редактирование' : 'Сделать только чтение'} onClick={() => void toggleRole(it)}>
+                  {it.role === 'reader' ? 'Разрешить правку' : 'Только чтение'}
+                </button>
+                <button type="button" className="btn danger" title="Отозвать доступ" onClick={() => void revoke(it.login)}>×</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {isOwner && (
+        <div className="sa-form">
+          <select
+            className="inp"
+            value={login}
+            aria-label="Пользователь"
+            onChange={(e) => setLogin(e.target.value)}
+          >
+            <option value="">— выбрать пользователя —</option>
+            {users.map((usr) => (
+              <option key={usr.login} value={usr.login} disabled={items.some((it) => it.login === usr.login)}>
+                {usr.displayName ? usr.displayName + ' (@' + usr.login + ')' : '@' + usr.login}
+              </option>
+            ))}
+          </select>
+          <label className="sa-ro">
+            <input type="checkbox" checked={reader} onChange={(e) => setReader(e.target.checked)} />
+            только чтение
+          </label>
+          <button type="button" className="btn primary" disabled={busy || !login} onClick={() => void grant()}>
+            {busy ? 'Открываю…' : 'Открыть доступ'}
+          </button>
+        </div>
+      )}
+      {isOwner && users.length === 0 && <div className="sa-empty">Зарегистрированных пользователей пока нет — аккаунты создаются по ссылкам-приглашениям</div>}
+      <p style={{ fontSize: '11px', color: 'var(--tx3)', margin: '8px 0 0' }}>
+        Пользователь с доступом получит уведомление и увидит проект в своём списке.
+        Переход по ссылке без доступа — только чтение (в комнате увидят уведомление).
+      </p>
+    </div>
+  );
+}
+
 export function ShareModal({ store }: { store: VetviStore }) {
   const inpRef = useRef<HTMLInputElement>(null);
   void store.revision;
@@ -67,7 +191,7 @@ export function ShareModal({ store }: { store: VetviStore }) {
   }, []);
   return (
     <SyncShell title="Совместный доступ" onClose={() => store.closeModal()} foot={<button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>}>
-      <p>Отправьте эту ссылку соавторам — они смогут редактировать проект вместе с вами в реальном времени.</p>
+      <p>Отправьте эту ссылку соавторам — пользователи с доступом смогут редактировать проект вместе с вами в реальном времени, остальные увидят проект в режиме «только чтение».</p>
       <div className="share-link">
         <input ref={inpRef} readOnly value={u} onClick={(e) => (e.currentTarget as HTMLInputElement).select()} aria-label="Ссылка комнаты" />
         <button type="button" className="btn primary" title="Скопировать ссылку" onClick={() => sc && sc.copyShareLink()}><Ic name="copy" size={14} /></button>
@@ -85,13 +209,14 @@ export function ShareModal({ store }: { store: VetviStore }) {
           </>
         ) : (
           <>
-            <div className="sp-st">Не установлен — редактировать сможет любой, у кого есть ссылка.</div>
+            <div className="sp-st">Не установлен — по ссылке войдут все, но правка доступна только пользователям с доступом (остальным — только чтение).</div>
             <div className="sp-acts">
               <button type="button" className="btn" onClick={() => sc && sc.passSetModal(false)}>Задать пароль…</button>
             </div>
           </>
         )}
       </div>
+      {sc && sc.room && <ShareAccess store={store} />}
     </SyncShell>
   );
 }
@@ -482,34 +607,8 @@ export function MergeModal({ store }: { store: VetviStore }) {
   );
 }
 
-/* ═══════════ смена имени участника (syncRenameModal) ═══════════ */
-
-export function RenameMeModal({ store }: { store: VetviStore }) {
-  const [v, setV] = useState(() => getMe().name);
-  const submit = () => {
-    const val = v.trim();
-    if (!val) return;
-    if (store.sync) store.sync.renameMe(val);
-    store.closeModal();
-  };
-  return (
-    <SyncShell
-      title="Ваше имя в комнате"
-      onClose={() => store.closeModal()}
-      foot={
-        <>
-          <button type="button" className="btn" onClick={() => store.closeModal()}>Отмена</button>
-          <button type="button" className="btn primary" onClick={submit}>Сохранить</button>
-        </>
-      }
-    >
-      <label className="i-lab">Имя участника</label>
-      <input className="inp" value={v} maxLength={40} autoFocus onFocus={(e) => e.currentTarget.select()} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
-    </SyncShell>
-  );
-}
-
-/* ═══════════ попап участников (#collabPop / syncRenderPop) ═══════════ */
+/* ═══════════ попап участников (#collabPop / syncRenderPop) ═══════════
+   Имена — из аккаунтов (сервер берёт их из БД), смена имени удалена. */
 
 export function CollabPopover({ store }: { store: VetviStore }) {
   void store.revision;
@@ -529,6 +628,9 @@ export function CollabPopover({ store }: { store: VetviStore }) {
   return (
     <div id="collabPop" className="collab-pop show" style={popStyle} role="dialog" aria-label="Участники комнаты">
       <div className="cp-cap">Участники комнаты</div>
+      {store.viewOnly && (
+        <div className="cp-ro">У вас доступ только на чтение</div>
+      )}
       {!users.length && <div className="cp-row"><span className="cp-name">Пока только вы</span></div>}
       {users.map((u) => {
         const nid = store.syncFocus ? store.syncFocus[u.id] : null;
@@ -536,7 +638,7 @@ export function CollabPopover({ store }: { store: VetviStore }) {
         return (
           <div key={u.id} className={'cp-row' + (u.id === me.id ? ' me' : '')} title={fnNode ? 'Сейчас у «' + u.name + '»: нода «' + (fnNode.title || '…') + '»' : undefined}>
             <span className="cp-dot" style={{ background: u.color || '#8b929c' }} />
-            <span className="cp-name">{u.name}{u.id === me.id ? ' (вы)' : ''}</span>
+            <span className="cp-name">{u.name}{u.id === me.id ? ' (вы)' : ''}{u.canEdit === false ? <i className="cp-ro-tag">чтение</i> : null}</span>
             {fnNode && (
               <>
                 <span className="cp-node">{fnNode.title || '…'}</span>
@@ -550,10 +652,10 @@ export function CollabPopover({ store }: { store: VetviStore }) {
         {sc.status !== 'on' && (
           <button type="button" className="cp-act" onClick={() => { store.setCollabPop(false); sc.reconnect(); }}><Ic name="rback" size={13} />Переподключиться</button>
         )}
-        <button type="button" className="cp-act" onClick={() => { store.setCollabPop(false); store.openModal('renameMe'); }}><Ic name="pencil" size={13} />Сменить имя</button>
         {sc.room && (
           <button type="button" className="cp-act" onClick={() => { store.setCollabPop(false); sc.copyShareLink(); }}><Ic name="copy" size={13} />Скопировать ссылку</button>
         )}
+        <button type="button" className="cp-act" onClick={() => { store.setCollabPop(false); store.openModal('share'); }}><Ic name="pencil" size={13} />Доступы и ссылка</button>
         <button type="button" className="cp-act" onClick={() => {
           store.setCollabPop(false);
           if (sc.mode === 'copy') sc.exitCopyPanel();

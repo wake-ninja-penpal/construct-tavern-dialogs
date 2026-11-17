@@ -29,6 +29,7 @@ import { CollabPopover, LockScreen, LockTipHost } from './SyncModals';
 import { canvasApi } from './canvasApi';
 import { AuthGate, fetchAuthState } from './AuthGate';
 import { AdminPanel, isAdminHash } from './AdminPanel';
+import { authApplyState } from './auth';
 
 /* Рендер после монтирования: документ читается из localStorage при создании стора. */
 const emptySubscribe = () => () => {};
@@ -163,12 +164,15 @@ export default function VetviApp() {
     return () => window.removeEventListener('hashchange', check);
   }, []);
 
-  /* кто я: если авторизация включена и не залогинен — гейт входа/регистрации */
+  /* кто я: если авторизация включена и не залогинен — гейт входа/регистрации.
+     При успехе личность аккаунта становится личностью редактора (имя/цвет
+     в комнате больше не меняются произвольно). */
   useEffect(() => {
     let alive = true;
     void fetchAuthState()
       .then((st) => {
         if (!alive) return;
+        authApplyState(st);
         setAuthPhase(st.authEnabled && !st.user ? 'gate' : 'ok');
       })
       .catch(() => {
@@ -253,6 +257,13 @@ function VetviAppInner() {
       if (!isEditable(e.target)) return;
       const el = e.target as HTMLElement;
       if (!inEditorArea(el)) return;
+      /* только чтение: поля правки ПРОЕКТА (инспектор, диалог, заметки) не получают
+         фокус; модалки (#modalWrap — пароль комнаты, ссылка, поиск) остаются доступны */
+      if (store.viewOnly && (el.closest('#insp') || el.closest('#dlgModal') || el.closest('#noteModal') || el.closest('.v-edit'))) {
+        el.blur();
+        store.denyEdit();
+        return;
+      }
       store.editSoftLock();
     };
     const onFocusOut = (e: FocusEvent) => {

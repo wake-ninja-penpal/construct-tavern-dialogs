@@ -356,6 +356,9 @@ function replySubtreeHas(root: VetviReply | null, id: string): boolean {
   return false;
 }
 
+/** Цель броска в диалоге: rid строки (null — корень) и место относительно неё. */
+type DlgDrop = { rid: string | null; place: 'before' | 'after' | 'inside' | 'root' };
+
 /** Нижняя граница «полосы» строки — верх первого ребёнка (у родителя)
  *  или низ самой строки (у листа). */
 function dlgBandOf(row: HTMLElement): { top: number; bot: number; leaf: boolean } {
