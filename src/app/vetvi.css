@@ -25,7 +25,7 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
 #projName:focus{outline:none;border-color:var(--acc);background:#131519;box-shadow:0 0 0 3px var(--accd)}
 .vsep{width:1px;height:24px;background:var(--line);flex:none}
 .spacer{flex:1}
-.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--tx2);font:500 13px var(--body);cursor:pointer;transition:all .18s;position:relative;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--tx2);font:500 13px var(--body);cursor:pointer;transition:all .18s;position:relative;white-space:nowrap;justify-content: center;}
 .btn:hover{background:#262b33;color:var(--tx);transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.35);border-color:#3d434f}
 .btn:active{transform:translateY(0) scale(.97)}
 .btn svg{width:15px;height:15px;flex:none}
