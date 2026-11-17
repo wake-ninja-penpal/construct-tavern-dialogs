@@ -27,6 +27,7 @@ import {
 } from '@/vetvi/core/vars';
 import type { Cond } from '@/vetvi/core/vars';
 import { allDescNodes } from './ggroups';
+import { PanelTab } from './PanelTab';
 import type { VetviStore } from './store';
 import { TypeIcon } from './NodeCard';
 import { NOTE_MAX, noteBus } from './NoteModals';
@@ -1678,56 +1679,41 @@ export function Inspector(props: { store: VetviStore; onClose: () => void }) {
     box.insertBefore(d, box.firstChild);
   });
 
-  /* панель скрыта → узкая рейка у правого края с кнопкой разворачивания.
-     Важно: ранний return ПОСЛЕ всех хуков (порядок хуков стабилен). */
-  if (inspHidden) {
-    return (
-      <aside id="right" className="rcollapsed" aria-label="Инспектор свёрнут">
-        <button
-          type="button"
-          className="mini-btn"
-          title="Развернуть инспектор"
-          aria-label="Развернуть инспектор"
-          onClick={() => store.setRightCollapsed(false)}
-        >
-          <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="m15 6-6 6 6 6" />
-          </svg>
-        </button>
-      </aside>
-    );
-  }
-
+  /* ── единый aside (всегда смонтирован — ширина/прозрачность анимируются CSS).
+     Свёрнутый режим (inspHidden): панель «задвинута» — полоски на всю высоту
+     НЕТ, снаружи блока остаётся только хлястик со стрелкой. Контент обёрнут
+     в .r-body с overflow:hidden — панель выезжает/заезжает плавно. ── */
   return (
-    <aside id="right" aria-label="Инспектор">
-      <div className="i-cap">
-        Инспектор элемента
-        {/* свернуть панель: откроется снова при выделении объекта (или кнопкой на рейке) */}
-        <button
-          type="button"
-          className="mini-btn"
-          title="Свернуть панель — откроется при выделении объекта"
-          aria-label="Свернуть инспектор"
-          style={{ float: 'right', width: 20, height: 20, marginTop: -2 }}
-          onClick={() => store.setRightCollapsed(true)}
-        >
-          <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="m9 6 6 6-6 6" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className="mini-btn"
-          title="Снять выделение"
-          style={{ float: 'right', width: 20, height: 20, marginTop: -2, marginRight: 4 }}
-          onClick={props.onClose}
-        >
-          ×
-        </button>
+    <aside id="right" className={inspHidden ? 'rcollapsed' : undefined} aria-label="Инспектор">
+      <div className="r-body">
+        <div className="i-cap">
+          Инспектор элемента
+          <button
+            type="button"
+            className="mini-btn"
+            title="Снять выделение"
+            style={{ float: 'right', width: 20, height: 20, marginTop: -2, marginRight: 4 }}
+            onClick={props.onClose}
+          >
+            ×
+          </button>
+        </div>
+        <div id="insp" ref={inspRef}>
+          {body}
+        </div>
       </div>
-      <div id="insp" ref={inspRef}>
-        {body}
-      </div>
+      {/* хлястик: снаружи блока, сверху; клик — свернуть/развернуть, потянуть вправо —
+          свернуть (откроется снова при выделении объекта), влево из «задвинутого» — развернуть */}
+      <PanelTab
+        side="r"
+        open={!inspHidden}
+        title={inspHidden ? 'Развернуть инспектор — нажать или потянуть влево' : 'Свернуть панель — откроется при выделении объекта (или потянуть вправо)'}
+        onToggle={() => store.setRightCollapsed(!store.rightCollapsed)}
+        onPull={(dir) => {
+          if (!inspHidden && dir === 1) store.setRightCollapsed(true);
+          else if (inspHidden && dir === -1) store.setRightCollapsed(false);
+        }}
+      />
     </aside>
   );
 }

@@ -142,6 +142,10 @@ export class VetviStore {
   /** Свёрнутая левая панель: мини-рейка с иконками разделов (клик по иконке —
    *  развернуть панель и открыть соответствующий раздел). */
   leftCollapsed = false;
+  /** Панель открыта кликом по ИКОНКЕ раздела в мини-рейке — «подглядывание»:
+   *  такой режим закрывается обратно кликом мимо панели (холст, ноды, что угодно
+   *  вне блока левой панели). Открытие хлястиком/кнопкой — постоянное. */
+  leftPeek = false;
   /** Свёрнутая правая панель (инспектор): открывается только когда мы что-то
    *  выделяем — чтобы показывать подробности и функционал выделенного объекта. */
   rightCollapsed = false;
@@ -899,7 +903,18 @@ export class VetviStore {
    *  разделов, клик по иконке разворачивает панель и открывает раздел. */
   setLeftCollapsed(v: boolean): void {
     this.leftCollapsed = v;
+    this.leftPeek = false;
     try { window.localStorage.setItem('vetvi-left-col', v ? '1' : '0'); } catch { /* нет доступа */ }
+    this.emit();
+  }
+
+  /** Клик по иконке раздела в мини-рейке: панель разворачивается на этом разделе,
+   *  но в режиме «подглядывания» (leftPeek) — клик мимо панели сворачивает её
+   *  обратно. localStorage не трогаем: после перезагрузки панель снова свёрнута. */
+  openLeftSection(t: 'pal' | 'list' | 'vars' | 'chars'): void {
+    this.leftTab = t;
+    this.leftCollapsed = false;
+    this.leftPeek = true;
     this.emit();
   }
 
@@ -1490,45 +1505,90 @@ export class VetviStore {
        «выход») обязаны идти «вперёд» с запасом — при тесных краях контрольные
        точки кубика перекрещиваются и связи дают петли-зацепы, а стрелки
        визуально входят/выходят не на входе/выходе вставленной ноды.
-       Для преимущественно горизонтальной СВЯЗИ «ВПЕРЁД» (B правее A) раздвигаем
-       A/B и клампим ноду так, чтобы зазор по обе стороны был ≥ GAP. Для обратной
-       связи (B левее A) раздвижка НЕ применяется: раздвижка «обратно» меняла
-       ноды местами вокруг вставленной ноды и уводила их далеко — там S-кривые
-       edgePathD (формула x2<x1) дают аккуратные встречные дуги без петель. */
+       Раздвижка ведётся по ВЗАИМНОМУ РАСПОЛОЖЕНИЮ СОСЕДОВ (центр B относительно
+       центра A), а не по якорям связи: связь из нижнего якоря A в левую грань B
+       часто «вертикальна» даже у горизонтальных соседей — старое условие по
+       доминанте якорей отключало раздвижку ровно на изогнутых связях тесных нод
+       (скрин: нода наезжает на соседей, стрелки не входят в разъёмы).
+       Горизонтальные соседи: раздвигаем A/B по X (A влево, B вправо — порядок
+       сохраняется), n зажимаем между ними с зазором GAP. Обратные связи (B левее
+       A) — без раздвижки: S-кривые edgePathD (формула x2<x1) дают аккуратные
+       встречные дуги. Вертикальные соседи (A над B или под B): n встраивается
+       «лесенкой» — правее правого края A (стрелка входит в левую грань-разъём),
+       вертикально между A и B; если по высоте места мало — раздвижка по Y: A
+       уходит от n вверх, B — вниз (или наоборот при B выше), тоже с сохранением
+       порядка. */
     let spread = false;
-    if (gm && p && A !== B && Math.abs(gm.x2 - gm.x1) >= Math.abs(gm.y2 - gm.y1)) {
+    let nx0 = nx;
+    let ny0 = ny;
+    if (gm && p && A !== B) {
       const na = doc.nodes.find((x) => x.id === A);
       const nb = doc.nodes.find((x) => x.id === B);
       if (na && nb) {
         const GAP = 72;
-        const wA = this.dimsOf(na.id).w;
+        const GAPV = 56;
+        const dA = this.dimsOf(na.id);
+        const dB = this.dimsOf(nb.id);
         const wN = d0 ? d0.w : NODE_W;
-        /* «вперёд» — по фактическому направлению нарисованной кривой (выход A правее входа B) */
-        const forward = gm.x2 >= gm.x1;
-        if (forward) {
-          let lo = na.x + wA + GAP;
-          let hi = nb.x - wN - GAP;
+        const hN = hh;
+        const dcx = (nb.x + dB.w / 2) - (na.x + dA.w / 2);
+        const dcy = (nb.y + dB.h / 2) - (na.y + dA.h / 2);
+        if (Math.abs(dcx) >= Math.abs(dcy)) {
+          /* «вперёд» — по фактическому расположению нод (центр B правее центра A) */
+          if (dcx >= 0) {
+            let lo = na.x + dA.w + GAP;
+            let hi = nb.x - wN - GAP;
+            if (lo > hi) {
+              const deficit = lo - hi;
+              putNode(na.id, na.x - deficit / 2, na.y);
+              putNode(nb.id, nb.x + deficit / 2, nb.y);
+              const na2 = doc.nodes.find((x) => x.id === A);
+              const nb2 = doc.nodes.find((x) => x.id === B);
+              lo = (na2 ? na2.x : na.x) + dA.w + GAP;
+              hi = (nb2 ? nb2.x : nb.x) - wN - GAP;
+              spread = deficit > 0;
+            }
+            if (nx < lo) nx = lo;
+            else if (nx > hi) nx = hi;
+          }
+        } else {
+          /* вертикальные соседи: слот для n — по вертикали между A и B */
+          const below = dcy >= 0; /* B ниже A */
+          let lo = below ? na.y + dA.h + GAPV : nb.y + dB.h + GAPV;
+          let hi = below ? nb.y - hN - GAPV : na.y - hN - GAPV;
           if (lo > hi) {
             const deficit = lo - hi;
-            putNode(na.id, na.x - deficit / 2, na.y);
-            putNode(nb.id, nb.x + deficit / 2, nb.y);
+            if (below) {
+              putNode(na.id, na.x, na.y - deficit / 2);
+              putNode(nb.id, nb.x, nb.y + deficit / 2);
+            } else {
+              putNode(na.id, na.x, na.y + deficit / 2);
+              putNode(nb.id, nb.x, nb.y - deficit / 2);
+            }
             const na2 = doc.nodes.find((x) => x.id === A);
             const nb2 = doc.nodes.find((x) => x.id === B);
-            lo = (na2 ? na2.x : na.x) + wA + GAP;
-            hi = (nb2 ? nb2.x : nb.x) - wN - GAP;
+            lo = below ? (na2 ? na2.y : na.y) + dA.h + GAPV : (nb2 ? nb2.y : nb.y) + dB.h + GAPV;
+            hi = below ? (nb2 ? nb2.y : nb.y) - hN - GAPV : (na2 ? na2.y : na.y) - hN - GAPV;
             spread = deficit > 0;
           }
-          if (nx < lo) nx = lo;
-          else if (nx > hi) nx = hi;
+          if (ny < lo) ny = lo;
+          else if (ny > hi) ny = hi;
+          /* «лесенка»: вход вставленной ноды — её левая грань, поэтому n правее
+             правого края A (стрелка A→n заходит в разъём входа «вперёд», без
+             обратной петли); наезд на B гасит resolveOverlaps (n фиксирована) */
+          const na3 = doc.nodes.find((x) => x.id === A);
+          if (na3 && nx < na3.x + dA.w + 24) nx = na3.x + dA.w + 24;
         }
       }
     }
     putNode(n.id, nx, ny);
-    /* при раздвижке A/B старые waypoints исходной связи (абсолютные точки бывшей
-       кривой) больше не совпадают с новой геометрией: связь A→n могла петлиться
-       НАЗАД к входу вставленной ноды — сбрасываем, гладкий кубик честнее */
-    const ptsA = spread ? [] : (sp[0] || []);
-    const ptsB = spread ? [] : (sp[1] || []);
+    /* при раздвижке/сдвиге старые waypoints исходной связи (абсолютные точки
+       бывшей кривой) больше не совпадают с новой геометрией: связь A→n могла
+       петляться НАЗАД к входу вставленной ноды — сбрасываем, гладкий кубик
+       честнее. Если нода легла ровно в точку дропа — изгибы сохраняются. */
+    const nMoved = spread || Math.abs(nx - nx0) > 2 || Math.abs(ny - ny0) > 2;
+    const ptsA = nMoved ? [] : (sp[0] || []);
+    const ptsB = nMoved ? [] : (sp[1] || []);
     doc.edges.push({ id: uid(), from: A, to: n.id, label: '', kind, pts: ptsA, lt: 0.5, lp: 0, fromReply: fromReplyA, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
     doc.edges.push({ id: uid(), from: n.id, to: B, label, kind, pts: ptsB, lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
     if (this.selEdges.has(e.id)) this.selEdges.clear();

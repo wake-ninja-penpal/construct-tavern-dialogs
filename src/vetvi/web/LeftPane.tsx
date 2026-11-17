@@ -18,6 +18,7 @@ import { opsForType, VAR_TYPES, varCastVal, varType, isTrueVal } from '@/vetvi/c
 import type { VetviChar, VetviCharGroup, VetviDoc, VetviGroup, VetviNode, VetviVar } from '@/vetvi/core/types';
 import { condOpsFor, outConds, varById } from '@/vetvi/core/vars';
 import type { VetviStore } from './store';
+import { PanelTab } from './PanelTab';
 import { TypeIcon } from './NodeCard';
 import { CropModal, type CropReq } from './CropModal';
 
@@ -27,8 +28,6 @@ const P_LIST = '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.
 const P_VAR = '<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>';
 const P_CHAR = '<circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c1.1-3.4 3.9-5.2 7.2-5.2s6.1 1.8 7.2 5.2"/>';
 const P_CHEV = '<path d="m6 9 6 6 6-6"/>';
-const P_CHEV_L = '<path d="m15 6-6 6 6 6"/>';
-const P_CHEV_R = '<path d="m9 6 6 6-6 6"/>';
 const P_X = '<path d="M6 6l12 12M18 6 6 18"/>';
 const P_GRIP = '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>';
 const P_EYE = '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
@@ -176,81 +175,92 @@ export function LeftPane(props: { store: VetviStore }) {
     });
   };
 
-  /* ── мини-режим: панель свернута в узкую рейку с иконками разделов.
-     Клик по иконке — развернуть панель и открыть соответствующий раздел. ── */
-  if (store.leftCollapsed) {
-    return (
-      <aside id="left" className="mini" aria-label="Панель проекта (мини-режим)">
-        <nav className="ltabs" role="tablist">
-          {tabs.map(([t, title]) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              data-t={t}
-              title={title + ' — развернуть панель'}
-              className={'ltab' + (tab === t ? ' active' : '')}
-              onClick={() => { store.setLeftCollapsed(false); store.setLeftTab(t); }}
-            >
-              <span className="lt-ic">
-                <Ic d={t === 'pal' ? P_FOLDER : t === 'list' ? P_LIST : t === 'vars' ? P_VAR : P_CHAR} size={17} />
-              </span>
-            </button>
-          ))}
-          <button
-            type="button"
-            className="ltab mini-x"
-            title="Развернуть панель"
-            aria-label="Развернуть панель проекта"
-            onClick={() => store.setLeftCollapsed(false)}
-          >
-            <span className="lt-ic">
-              <Ic d={P_CHEV_R} size={15} />
-            </span>
-          </button>
-        </nav>
-        {crop && <CropModal store={store} req={crop} onClose={closeCrop} />}
-      </aside>
-    );
-  }
+  /* ── «подглядывание»: панель, развёрнутая кликом по ИКОНКЕ раздела в мини-рейке,
+     сворачивается обратно по клику мимо блока левой панели (холст, ноды, модалки —
+     что угодно вне #left). Открытие хлястиком — постоянное. ── */
+  useEffect(() => {
+    if (store.leftCollapsed || !store.leftPeek) return;
+    const onDoc = (e: Event) => {
+      const t = e.target as Element | null;
+      if (t && typeof t.closest === 'function' && t.closest('#left')) return;
+      store.setLeftCollapsed(true);
+    };
+    document.addEventListener('pointerdown', onDoc, true);
+    return () => document.removeEventListener('pointerdown', onDoc, true);
+  }, [store, store.leftCollapsed, store.leftPeek]);
+
+  /* ── единый aside (не размонтируется между режимами — ширина анимируется CSS):
+     mini — узкая рейка с иконками разделов; полный режим — вкладки + разделы.
+     Контент обёрнут в .l-body (overflow:hidden — панель «задвигается» плавно),
+     хлястик .ptab живёт СНАРУЖИ блока и от перерисовки контента не страдает. ── */
+  const mini = store.leftCollapsed;
 
   return (
-    <aside id="left" style={{ width: store.leftWidth }} aria-label="Панель проекта">
-      <nav className="ltabs" role="tablist">
-        {tabs.map(([t, title]) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            data-t={t}
-            title={title}
-            className={'ltab' + (tab === t ? ' active' : '')}
-            onClick={() => store.setLeftTab(t)}
-          >
-            <span className="lt-ic">
-              <Ic d={t === 'pal' ? P_FOLDER : t === 'list' ? P_LIST : t === 'vars' ? P_VAR : P_CHAR} size={16} />
-            </span>
-          </button>
-        ))}
-        {/* свернуть панель в мини-режим: вертикальная рейка с иконками разделов */}
-        <button
-          type="button"
-          className="ltab lfold"
-          title="Свернуть панель (мини-режим с иконками)"
-          aria-label="Свернуть панель проекта"
-          onClick={() => store.setLeftCollapsed(true)}
-        >
-          <span className="lt-ic">
-            <Ic d={P_CHEV_L} size={14} />
-          </span>
-        </button>
-      </nav>
-      <PalettePane store={store} active={tab === 'pal'} onEditType={(id) => store.openModal('typeEditor', id)} onNewType={() => store.openModal('typeEditor', null)} />
-      <ListPane store={store} active={tab === 'list'} />
-      <VarsPane store={store} active={tab === 'vars'} />
-      <CharsPane store={store} active={tab === 'chars'} onFile={onFile} onRecrop={onRecrop} />
+    <aside
+      id="left"
+      className={mini ? 'mini' : undefined}
+      style={mini ? undefined : { width: store.leftWidth }}
+      aria-label="Панель проекта"
+    >
+      <div className="l-body">
+        {mini ? (
+          <nav className="ltabs" role="tablist">
+            {tabs.map(([t, title]) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                data-t={t}
+                title={title + ' — открыть раздел (свернётся по клику мимо)'}
+                className={'ltab' + (tab === t ? ' active' : '')}
+                onClick={() => store.openLeftSection(t)}
+              >
+                <span className="lt-ic">
+                  <Ic d={t === 'pal' ? P_FOLDER : t === 'list' ? P_LIST : t === 'vars' ? P_VAR : P_CHAR} size={17} />
+                </span>
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <>
+            <nav className="ltabs" role="tablist">
+              {tabs.map(([t, title]) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  data-t={t}
+                  title={title}
+                  className={'ltab' + (tab === t ? ' active' : '')}
+                  onClick={() => store.setLeftTab(t)}
+                >
+                  <span className="lt-ic">
+                    <Ic d={t === 'pal' ? P_FOLDER : t === 'list' ? P_LIST : t === 'vars' ? P_VAR : P_CHAR} size={16} />
+                  </span>
+                </button>
+              ))}
+            </nav>
+            <PalettePane store={store} active={tab === 'pal'} onEditType={(id) => store.openModal('typeEditor', id)} onNewType={() => store.openModal('typeEditor', null)} />
+            <ListPane store={store} active={tab === 'list'} />
+            <VarsPane store={store} active={tab === 'vars'} />
+            <CharsPane store={store} active={tab === 'chars'} onFile={onFile} onRecrop={onRecrop} />
+          </>
+        )}
+      </div>
+      {/* хлястик: снаружи блока, сверху; клик — свернуть/развернуть, потянуть влево —
+          свернуть, потянуть вправо из мини-режима — развернуть */}
+      <PanelTab
+        side="l"
+        open={!mini}
+        title={mini ? 'Развернуть панель — нажать или потянуть вправо' : 'Свернуть панель — нажать или потянуть влево'}
+        onToggle={() => store.setLeftCollapsed(!store.leftCollapsed)}
+        onPull={(dir) => {
+          if (!store.leftCollapsed && dir === -1) store.setLeftCollapsed(true);
+          else if (store.leftCollapsed && dir === 1) store.setLeftCollapsed(false);
+        }}
+      />
       {crop && <CropModal store={store} req={crop} onClose={closeCrop} />}
     </aside>
   );
