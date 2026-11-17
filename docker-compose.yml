@@ -17,6 +17,11 @@
 #                  gateway подключён к ней, поэтому nginx достаёт шлюз
 #                  по имени контейнера:  http://vetvi-gateway:80
 #
+# Volumes:
+#   sync-data — SQLite realtime-синхронизации (проекты)
+#   web-data  — SQLite авторизации (/app/db/custom.db: аккаунты, сессии,
+#               ссылки-инвайты, доступы к проектам)
+#
 # Схема повторяет Caddy-шлюз песочницы:
 #   браузер → gateway(:80) ─┬─ /  (всё остальное)        → vetvi-web:3000   (Next.js, /vetvi/index.html)
 #                           └─ /?XTransformPort=3003     → vetvi-sync:3003  (socket.io realtime)
@@ -37,6 +42,11 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       NEXT_TELEMETRY_DISABLED: 1
+      # База авторизации: абсолютный путь внутрь volume (см. volumes ниже) —
+      # иначе Prisma решает file:-путь относительно схемы в node_modules.
+      DATABASE_URL: "file:/app/db/custom.db"
+    volumes:
+      - web-data:/app/db
     expose:
       - "3000"
     networks:
@@ -98,3 +108,4 @@ networks:
 
 volumes:
   sync-data:
+  web-data:

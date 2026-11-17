@@ -65,3 +65,6 @@ dev.log
 
 # vetvi-sync: состояние комнат (никогда не коммитится)
 mini-services/vetvi-sync/data/
+
+# генерируется в Docker-сборке (prisma migrate diff), в репозиторий не нужен
+prisma/schema.sql
