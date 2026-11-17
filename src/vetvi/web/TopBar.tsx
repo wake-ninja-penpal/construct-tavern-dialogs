@@ -8,28 +8,24 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { TYPES } from '@/vetvi/core/constants';
 import { hkText } from '@/vetvi/core/hotkeys';
 import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
 
 export function TopBar(props: { store: VetviStore }) {
   const { store } = props;
-  const [menuOpen, setMenuOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
-  const addRef = useRef<HTMLDivElement>(null);
   const saveRef = useRef<HTMLDivElement>(null);
   void store.revision;
 
   useEffect(() => {
-    if (!menuOpen && !saveOpen) return;
+    if (!saveOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (menuOpen && addRef.current && !addRef.current.contains(e.target as Node)) setMenuOpen(false);
       if (saveOpen && saveRef.current && !saveRef.current.contains(e.target as Node)) setSaveOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, [menuOpen, saveOpen]);
+  }, [saveOpen]);
 
   const zoomStep = (factor: number) => {
     const r = canvasApi.current?.getRect();
@@ -113,40 +109,6 @@ export function TopBar(props: { store: VetviStore }) {
       />
 
       <div className="vsep" />
-
-      {/* React-экстры оригинала нет: меню добавления ноды — как .save-wrap/.save-menu */}
-      <div className="save-wrap" style={{ position: 'relative' }} ref={addRef}>
-        <button
-          type="button"
-          className="btn"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          title="Добавить ноду в центр холста"
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          ＋ Элемент
-        </button>
-        <div className={'save-menu' + (menuOpen ? ' show' : '')} role="menu" aria-label="Тип новой ноды">
-          {Object.entries(TYPES).map(([key, info]) => (
-            <div
-              key={key}
-              role="menuitem"
-              className="sm-i"
-              onClick={() => {
-                setMenuOpen(false);
-                const el = document.querySelector('.rn-canvas');
-                const r = el ? el.getBoundingClientRect() : { width: 800, height: 600, left: 0, top: 0 };
-                const wx = (r.width / 2 - store.vp.x) / store.vp.z - 108;
-                const wy = (r.height / 2 - store.vp.y) / store.vp.z - 40;
-                store.addNodeAt(key, wx, wy);
-              }}
-            >
-              <span className="dot" style={{ background: info.color, width: 8, height: 8, borderRadius: '50%' }} />
-              {info.name}
-            </div>
-          ))}
-        </div>
-      </div>
 
       <button type="button" className="btn" id="bNew" title={'Новый проект (' + hkText('newProject') + ')'} onClick={() => store.createProject()}>
         + Новый

@@ -11,8 +11,10 @@ export function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v;
 }
 
-export function clampZoom(z: number): number {
-  return clamp(z, ZOOM_MIN, ZOOM_MAX);
+/** Пределы масштаба: по умолчанию константы ядра, но редактор задаёт
+ *  пользовательские границы (настройки интерфейса). */
+export function clampZoom(z: number, min: number = ZOOM_MIN, max: number = ZOOM_MAX): number {
+  return clamp(z, Math.min(min, max), Math.max(min, max));
 }
 
 /**

@@ -157,6 +157,11 @@ export class VetviStore {
   selVer = 0;
   /** Мини-карта включена — кнопка #bMap тулбара (mmOn оригинала, 9371). */
   mmOn = true;
+  /** Пределы масштаба холста (настройки интерфейса): минимум — как далеко
+   *  можно отдалить, максимум — как близко приблизить. По умолчанию минимум
+   *  шире константного ZOOM_MIN=0.25 — отдаляем до 10%. */
+  uiZoomMin = 0.1;
+  uiZoomMax = 3;
   modal: string | null = null;
   modalArg: string | null = null;
   dialogEdit: string | null = null; // nodeId открытого редактора диалога
@@ -289,6 +294,14 @@ export class VetviStore {
     this.leftCollapsed = isClient && window.localStorage.getItem('vetvi-left-col') === '1';
     this.rightCollapsed = isClient && window.localStorage.getItem('vetvi-right-col') === '1';
     this.mmOn = isClient ? window.localStorage.getItem('vetvi-mm-on') !== '0' : true;
+    /* пределы масштаба (настройки интерфейса) */
+    if (isClient) {
+      const zmin = Number(window.localStorage.getItem('vetvi-zoom-min'));
+      const zmax = Number(window.localStorage.getItem('vetvi-zoom-max'));
+      if (Number.isFinite(zmin) && zmin > 0) this.uiZoomMin = zmin;
+      if (Number.isFinite(zmax) && zmax > 0) this.uiZoomMax = zmax;
+      this.vp.z = clampZoom(this.vp.z, this.uiZoomMin, this.uiZoomMax);
+    }
   }
 
   /* ── подписка ── */
@@ -933,6 +946,24 @@ export class VetviStore {
   toggleMm(): void {
     this.mmOn = !this.mmOn;
     try { window.localStorage.setItem('vetvi-mm-on', this.mmOn ? '1' : '0'); } catch { /* нет доступа */ }
+    this.emit();
+  }
+
+  /** Пределы масштаба холста (настройки интерфейса): минимум — до скольки можно
+   *  отдалить, максимум — до скольки приблизить. Значения валидируются (0.01…10,
+   *  min < max), текущий вид переприжимается к новым границам. Личная настройка. */
+  setZoomLimits(min: number, max: number): void {
+    const lo = Math.min(10, Math.max(0.01, Number(min) || 0.1));
+    const hi = Math.min(10, Math.max(0.01, Number(max) || 3));
+    this.uiZoomMin = Math.min(lo, hi);
+    this.uiZoomMax = Math.max(lo, hi);
+    try {
+      window.localStorage.setItem('vetvi-zoom-min', String(this.uiZoomMin));
+      window.localStorage.setItem('vetvi-zoom-max', String(this.uiZoomMax));
+    } catch { /* нет доступа */ }
+    /* текущий зум может выйти за новые границы — прижать и применить вид */
+    const z = clampZoom(this.vp.z, this.uiZoomMin, this.uiZoomMax);
+    if (z !== this.vp.z) this.setViewport({ z });
     this.emit();
   }
 
@@ -3283,7 +3314,7 @@ export class VetviStore {
   setViewport(vp: Partial<VetviViewport>): void {
     if (typeof vp.x === 'number') this.vp.x = vp.x;
     if (typeof vp.y === 'number') this.vp.y = vp.y;
-    if (typeof vp.z === 'number') this.vp.z = clampZoom(vp.z);
+    if (typeof vp.z === 'number') this.vp.z = clampZoom(vp.z, this.uiZoomMin, this.uiZoomMax);
     canvasApi.current?.applyVp(this.vp);
     this.scheduleSave();
     this.emit('geom');
@@ -3291,7 +3322,7 @@ export class VetviStore {
 
   zoomAt(screenX: number, screenY: number, factor: number): void {
     const z0 = this.vp.z;
-    const z1 = clampZoom(z0 * factor);
+    const z1 = clampZoom(z0 * factor, this.uiZoomMin, this.uiZoomMax);
     if (z1 === z0) return;
     const w = screenToWorld(this.vp, screenX, screenY);
     this.vp.z = z1;
@@ -3323,7 +3354,7 @@ export class VetviStore {
       return;
     }
     const pad = 70;
-    const z = clampZoom(Math.min((vw - pad * 2) / Math.max(b.w, 1), (vh - pad * 2) / Math.max(b.h, 1)));
+    const z = clampZoom(Math.min((vw - pad * 2) / Math.max(b.w, 1), (vh - pad * 2) / Math.max(b.h, 1)), this.uiZoomMin, this.uiZoomMax);
     this.vp.z = z;
     this.vp.x = vw / 2 - (b.x + b.w / 2) * z;
     this.vp.y = vh / 2 - (b.y + b.h / 2) * z;

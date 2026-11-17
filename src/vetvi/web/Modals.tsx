@@ -731,9 +731,10 @@ export function GroupCreateModal({ store }: { store: VetviStore }) {
 
 /* ═══════════ настройки: хаб + горячие клавиши + хранилище (.dlg-modal > .set-card) ═══════════ */
 
-export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' }) {
+export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' | 'ui' }) {
   if (section === 'hk') return <HkModal store={store} />;
   if (section === 'store') return <StoreModal store={store} />;
+  if (section === 'ui') return <UiModal store={store} />;
   return (
     <div className="dlg-modal show" role="dialog" aria-label="Настройки проекта">
       <div className="dlg-modal-card set-card">
@@ -767,6 +768,20 @@ export function SettingsModal({ store, section }: { store: VetviStore; section: 
             <span className="set-item-info">
               <span className="set-item-name">Горячие клавиши</span>
               <span className="set-item-desc">Список действий и переназначение сочетаний</span>
+            </span>
+            <span className="set-item-go">→</span>
+          </button>
+          <button type="button" className="set-item" onClick={() => store.openModal('settingsUi')}>
+            <span className="set-item-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" width="20" height="20" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="13" rx="2" />
+                <path d="M8 21h8M12 17v4" />
+                <path d="M7 9h4M7 12h7" />
+              </svg>
+            </span>
+            <span className="set-item-info">
+              <span className="set-item-name">Настройки интерфейса</span>
+              <span className="set-item-desc">Пределы масштаба холста: отдаление и приближение</span>
             </span>
             <span className="set-item-go">→</span>
           </button>
@@ -894,6 +909,111 @@ function hkText2(id: string): string {
   return hkText(id);
 }
 
+/* ── настройки интерфейса: пределы масштаба холста ── */
+
+function UiModal({ store }: { store: VetviStore }) {
+  const [zmin, setZmin] = useState(String(store.uiZoomMin));
+  const [zmax, setZmax] = useState(String(store.uiZoomMax));
+  const [msg, setMsg] = useState<{ t: string; cls: string } | null>(null);
+
+  const parse = (v: string): number | null => {
+    const n = Number(v.replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  const apply = (min: number, max: number, quiet?: boolean) => {
+    if (min >= max) {
+      setMsg({ t: 'Минимум должен быть меньше максимума', cls: 'err' });
+      return false;
+    }
+    store.setZoomLimits(min, max);
+    setZmin(String(store.uiZoomMin));
+    setZmax(String(store.uiZoomMax));
+    if (!quiet) setMsg({ t: 'Пределы масштаба сохранены: ' + Math.round(store.uiZoomMin * 100) + '% … ' + Math.round(store.uiZoomMax * 100) + '%', cls: 'ok' });
+    return true;
+  };
+
+  const invalid = (() => {
+    const lo = parse(zmin);
+    const hi = parse(zmax);
+    if (lo === null || hi === null) return 'Введите положительные числа (например 0.1 и 3)';
+    if (lo >= hi) return 'Минимум должен быть меньше максимума';
+    return null;
+  })();
+
+  return (
+    <div className="dlg-modal sub show" role="dialog" aria-label="Настройки — Интерфейс">
+      <div className="dlg-modal-card set-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Настройки — Интерфейс</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="dlg-modal-body">
+          <div className="set-hint">Пределы масштаба холста: как далеко можно отдалить и как близко приблизить. Колесо мыши и кнопки «±» работают в этих границах.</div>
+          <div className="ui-zoom-row">
+            <label className="ui-zoom-field">
+              <span className="ui-zoom-name">Минимальный масштаб</span>
+              <span className="ui-zoom-desc">Насколько далеко можно отдалить холст</span>
+              <span className="ui-zoom-input">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={zmin}
+                  aria-label="Минимальный масштаб холста"
+                  onChange={(e) => setZmin(e.target.value)}
+                />
+                <span className="ui-zoom-pct">= {Math.round((parse(zmin) || 0) * 100)}%</span>
+              </span>
+            </label>
+            <label className="ui-zoom-field">
+              <span className="ui-zoom-name">Максимальный масштаб</span>
+              <span className="ui-zoom-desc">Насколько близко можно приблизить холст</span>
+              <span className="ui-zoom-input">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={zmax}
+                  aria-label="Максимальный масштаб холста"
+                  onChange={(e) => setZmax(e.target.value)}
+                />
+                <span className="ui-zoom-pct">= {Math.round((parse(zmax) || 0) * 100)}%</span>
+              </span>
+            </label>
+          </div>
+          <div className="set-foot-row">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!!invalid}
+              title={invalid || 'Применить пределы масштаба'}
+              onClick={() => {
+                const lo = parse(zmin);
+                const hi = parse(zmax);
+                if (lo !== null && hi !== null) apply(lo, hi);
+              }}
+            >
+              Применить
+            </button>
+            <button
+              type="button"
+              className="btn"
+              title="Вернуть значения по умолчанию (10% … 300%)"
+              onClick={() => apply(0.1, 3)}
+            >
+              Сбросить
+            </button>
+            {msg && <span className={'set-store-msg' + (msg.cls ? ' ' + msg.cls : '')}>{msg.t}</span>}
+          </div>
+        </div>
+        <div className="dlg-modal-foot">
+          <button type="button" className="btn" onClick={() => store.openModal('settings')}>← Назад</button>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function comboOf(e: KeyboardEvent): string {
   const p: string[] = [];
   if (e.ctrlKey || e.metaKey) p.push('Mod');
@@ -999,6 +1119,7 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'settings': return <SettingsModal store={store} section="hub" />;
     case 'settingsHk': return <SettingsModal store={store} section="hk" />;
     case 'settingsStore': return <SettingsModal store={store} section="store" />;
+    case 'settingsUi': return <SettingsModal store={store} section="ui" />;
     case 'share': return <ShareModal store={store} />;
     case 'passSet': return <PassSetModal store={store} />;
     case 'passRemove': return <PassRemoveModal store={store} />;
