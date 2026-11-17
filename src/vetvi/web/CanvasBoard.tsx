@@ -36,7 +36,7 @@ type Gest =
   | { mode: 'marquee'; sx: number; sy: number; add: boolean; preN: Set<string>; preG: Set<string>; markN?: Set<string>; markG?: Set<string> }
   | { mode: 'gcreate'; sx: number; sy: number; cx: number; cy: number }
   | { mode: 'knife'; sx: number; sy: number; lx: number; ly: number; wx: number; wy: number; path: { x: number; y: number }[] }
-  | { mode: 'node'; lx: number; ly: number; stackHl: string | null; dropEdge: string | null }
+  | { mode: 'node'; lx: number; ly: number; stackHl: string | null; dropEdge: string | null; extract?: boolean }
   | { mode: 'group'; gid: string; lx: number; ly: number; base: Map<string, { x: number; y: number }>; adx?: number; ady?: number }
   | { mode: 'gresize'; gid: string; dir: 'r' | 'b' | 'br'; sx: number; sy: number; fw: number; fh: number }
   | { mode: 'link'; from: string; out: string | null; reply: string | null; wx: number; wy: number; sx: number; sy: number; target: string | null; varin: boolean }
@@ -49,15 +49,31 @@ type Gest =
   | null;
 
 /** rAF-троттлинг setState: высокочастотные жесты (рисование связи/ножа, hover)
- *  пишут в React не чаще кадра. Отложенное значение — всегда последнее. */
-function rafSet<T>(setter: (v: T) => void): (v: T) => void {
+ *  пишут в React не чаще кадра. Отложенное значение — всегда последнее.
+ *  cancel() — гарантированная отмена запланированного кадра: без неё кадр,
+ *  запланированный ПОСЛЕДНИМ движением мыши, срабатывает уже после mouseup и
+ *  воскрешает стёртую линию ножа/связи (зависшая «полоса» разреза до следующего
+ *  жеста). Вызывается при завершении/старте жеста перед setState(null). */
+function rafSet<T>(setter: (v: T) => void): { set: (v: T) => void; cancel: () => void } {
   let f = false;
   let v: T | undefined;
-  return (nv: T) => {
-    v = nv;
-    if (f) return;
-    f = true;
-    requestAnimationFrame(() => { f = false; setter(v as T); });
+  let h: number | null = null;
+  const flush = () => {
+    h = null;
+    f = false;
+    setter(v as T);
+  };
+  return {
+    set(nv: T) {
+      v = nv;
+      if (f) return;
+      f = true;
+      h = requestAnimationFrame(flush);
+    },
+    cancel() {
+      if (h !== null) { cancelAnimationFrame(h); h = null; }
+      f = false;
+    },
   };
 }
 
@@ -180,9 +196,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
   const [cutline, setCutline] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ from: string; out: string | null; reply: string | null; x: number; y: number; startX: number; startY: number } | null>(null);
   const [hoverTarget, setHoverTarget] = useState<string | null>(null);
-  const setCutlineR = useMemo(() => rafSet(setCutline), [setCutline]);
-  const setPendingLinkR = useMemo(() => rafSet(setPendingLink), [setPendingLink]);
-  const setHoverTargetR = useMemo(() => rafSet(setHoverTarget), [setHoverTarget]);
+  const cutlineR = useMemo(() => rafSet(setCutline), []);
+  const pendingLinkR = useMemo(() => rafSet(setPendingLink), []);
+  const hoverTargetR = useMemo(() => rafSet(setHoverTarget), []);
   const [altDown, setAltDown] = useState(false);
   /* dropready — перетаскивание из палитры над холстом; panning — активный пан; animv — анимация вида */
   const [dropReady, setDropReady] = useState(false);
@@ -556,28 +572,83 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return true;
   }, [store, startPanGesture, showMarquee]);
 
-  /* старт жеста «ножа» (Alt+ЛКМ): путь ножа (knifeS.path оригинала) — накопленные
-     точки жеста, разрез по всей траектории; старт возможен с ЛЮБОЙ точки холста */
+  /* старт жеста «ножа» (Alt+ЛКМ по холсту/группе/стрелке): путь ножа (knifeS.path оригинала) —
+     накопленные точки жеста, разрез по всей траектории; старт возможен с ЛЮБОЙ точки холста */
   const startKnifeGesture = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const w0 = screenToWorld(store.vp, e.clientX - rect.left, e.clientY - rect.top);
+    cutlineR.cancel(); /* хвост предыдущего жеста не должен дорисовать свою линию */
     gestRef.current = { mode: 'knife', sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, wx: w0.x, wy: w0.y, path: [{ x: w0.x, y: w0.y }] };
     setCutline({ x1: w0.x, y1: w0.y, x2: w0.x, y2: w0.y });
     e.preventDefault();
-  }, [store]);
+  }, [store, cutlineR]);
 
-  /* Alt+ЛКМ — «нож»: ноды, группы и связи ИГНОРИРУЮТСЯ (как ноды при пане через
-     Ctrl) — разрез стрелок работает и внутри групп, и поверх карточек. Фаза
-     захвата на корне холста: перехватываем до обработчиков нод/групп/связей.
+  /* снимок рамок fold=2 для «заморозки» на время жеста (см. onNodeDragStart).
+     Замораживаются ТОЛЬКО ручные рамки (auto=false): у авторазмерных (auto)
+     рамка обязана тянуться за нодой — как refreshGroupFrames оригинала, иначе
+     ноду можно вынести из группы с включённым авторазмером (регрессия). */
+  const snapshotManualFrames = useCallback(() => {
+    const m = new Map<string, { x: number; y: number; w: number; h: number }>();
+    for (const g of store.doc.groups) {
+      if ((g.fold === undefined ? 2 : g.fold) !== 2) continue;
+      /* морозятся ТОЛЬКО ручные рамки (auto выкл + fw/fh) — тот же предикат, что в
+         groupFrameRect; авторазмерные (auto) рамки живут — тянутся за нодой */
+      if (g.auto) continue;
+      if (typeof g.fw !== 'number' || typeof g.fh !== 'number') continue;
+      /* группы внутри свёрнутых не рисуются — рамку не снимаем */
+      let par = g.parent || null;
+      let hidden = false;
+      while (par) {
+        const pg = store.groupById(par);
+        if (!pg) break;
+        if ((pg.fold === undefined ? 2 : pg.fold) < 2) { hidden = true; break; }
+        par = pg.parent || null;
+      }
+      if (hidden) continue;
+      m.set(g.id, groupFrameRect(store.doc, g, sizesMap, cardSizes));
+    }
+    return m;
+  }, [store, sizesMap, cardSizes]);
+
+  /* старт жеста «выдергивания» ноды (Alt+ЛКМ по ноде — extract-ветка dragS оригинала 8175–8184):
+     выделить только её, разомкнуть связи с шитьём соседей (detachNode, 6604), тянуть свободно;
+     на move/drop отключены stack-сборка и встраивание в связь (8602/8946/8952) */
+  const startExtractGesture = useCallback((e: React.MouseEvent, id: string) => {
+    const n = store.nodeById(id);
+    if (!n) return;
+    const lk = store.lockBlockedBy([id]);
+    if (lk) { store.showLockTip(e.clientX, e.clientY, lk); return; }
+    store.selectOnly(id);
+    /* снимок ДО detach: undo вернёт и связи, и позицию одним шагом (как pre оригинала) */
+    store.dragBegin();
+    store.detachNode(id, { history: false });
+    setFrameFreeze(snapshotManualFrames());
+    gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY, stackHl: null, dropEdge: null, extract: true };
+    store.setGestureIds(['n:' + id]);
+    if (store.sync && store.sync.enabled) { store.sync.lockTake([id]); store.setGestureRollback(null); }
+    e.preventDefault();
+  }, [store, snapshotManualFrames]);
+
+  /* Alt+ЛКМ — целевая семантика модификатора (8175/8231/8303 оригинала):
+     • нода — «выдергивание» (extract: связи размыкаются, соседи сшиваются, нода тянется свободно);
+     • холст/группа/стрелка — «нож» (разрез стрелок), ноды/группы игнорируются
+       (как ноды при Ctrl-пане) — разрез работает и внутри групп, и поверх карточек.
+     Фаза захвата на корне холста: перехватываем до обработчиков нод/групп/связей.
      Исключения — как у Ctrl-пана: пины/порты/грипы/фолды остаются собой. */
-  const onAltKnifeCapture = useCallback((e: React.MouseEvent) => {
+  const onAltDownCapture = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0 || !e.altKey) return;
     if (store.carry || store.spaceDown) return;
     const t = e.target as HTMLElement;
     if (t.closest && t.closest('[data-pin], .qport, .dlg-reply-pin, .gb-grip, .gb-fold, .gb-salla, .n-seq, .n-fold, .opin, .vpinn, [data-nodrag]')) return;
+    const nodeEl = t.closest('[data-node-id]') as HTMLElement | null;
+    if (nodeEl) {
+      const nid = nodeEl.getAttribute('data-node-id') || '';
+      if (nid) { startExtractGesture(e, nid); e.stopPropagation(); }
+      return;
+    }
     startKnifeGesture(e);
     e.stopPropagation();
-  }, [store, startKnifeGesture]);
+  }, [store, startKnifeGesture, startExtractGesture]);
 
   const onCanvasDown = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
@@ -623,35 +694,19 @@ export function CanvasBoard(props: { store: VetviStore }) {
     void id;
     if (store.carry) return;
     if (store.spaceDown) return; /* Space над нодой: ни пан, ни drag (8158–8159 оригинала) */
-    /* Alt-жест перехватывается на фазе захвата (onAltKnifeCapture) — сюда не доходит.
-       «Выдернуть» ноду — в контекстном меню ноды (ctxMenus.node). */
-    /* заморозка авторамок: снимок fold=2 до старта жеста — рамки не растягиваются
-       и не следуют за нодой, ноду можно вынести за пределы группы */
-    setFrameFreeze((() => {
-      const m = new Map<string, { x: number; y: number; w: number; h: number }>();
-      for (const g of store.doc.groups) {
-        if ((g.fold === undefined ? 2 : g.fold) !== 2) continue;
-        /* группы внутри свёрнутых не рисуются — рамку не снимаем */
-        let par = g.parent || null;
-        let hidden = false;
-        while (par) {
-          const pg = store.groupById(par);
-          if (!pg) break;
-          if ((pg.fold === undefined ? 2 : pg.fold) < 2) { hidden = true; break; }
-          par = pg.parent || null;
-        }
-        if (hidden) continue;
-        m.set(g.id, groupFrameRect(store.doc, g, sizesMap, cardSizes));
-      }
-      return m;
-    })());
+    /* Alt-жест перехватывается на фазе захвата (onAltDownCapture): по ноде —
+       «выдергивание» (startExtractGesture), по холсту/группе — «нож». */
+    /* «морозка» рамок: снимок ТОЛЬКО ручных (auto=false) рамок до старта жеста —
+       рамка не следует за нодой, ноду можно вынести из группы с ручным размером;
+       авторазмерные (auto) рамки живут — тянутся за нодой (refreshGroupFrames оригинала) */
+    setFrameFreeze(snapshotManualFrames());
     gestRef.current = { mode: 'node', lx: e.clientX, ly: e.clientY, stackHl: null, dropEdge: null };
     store.dragBegin();
     store.setGestureIds([...store.sel].map((x) => 'n:' + x));
     /* soft-lock: захват выделенных нод на время жеста */
     if (store.sync && store.sync.enabled) { store.sync.lockTake([...store.sel]); store.setGestureRollback(null); }
     e.preventDefault();
-  }, [store, sizesMap, cardSizes]);
+  }, [store, snapshotManualFrames]);
 
   /* ── группы ── */
   const onGroupDown = useCallback((e: React.MouseEvent, gid: string) => {
@@ -712,14 +767,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const rect = canvasRef.current?.getBoundingClientRect();
     const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
     gestRef.current = { mode: 'link', from: id, out, reply, wx: w.x, wy: w.y, sx: w.x, sy: w.y, target: null, varin: false };
+    pendingLinkR.cancel();
     setPendingLink({ from: id, out, reply, x: w.x, y: w.y, startX: w.x, startY: w.y });
     store.setGestureIds(['n:' + id]);
     if (store.sync && store.sync.enabled) {
       store.sync.lockTake([id]);
-      store.setGestureRollback(() => { setPendingLink(null); setHoverTarget(null); });
+      store.setGestureRollback(() => { pendingLinkR.cancel(); setPendingLink(null); hoverTargetR.cancel(); setHoverTarget(null); });
     }
     e.preventDefault();
-  }, [store]);
+  }, [store, pendingLinkR, hoverTargetR]);
 
   const onPinReattach = useCallback((e: React.MouseEvent, id: string) => {
     gestRef.current = { mode: 'reattachOut', from: id, lx: e.clientX, ly: e.clientY, target: null };
@@ -771,8 +827,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const ax = (g.x || 0) + (cr.w || QCARD_W); /* qCardPortAnchor, 7842–7845 */
     const ay = (g.y || 0) + 17;
     gestRef.current = { mode: 'link', from: nid2, out: null, reply: null, wx: ax, wy: ay, sx: ax, sy: ay, target: null, varin: false };
+    pendingLinkR.cancel();
     setPendingLink({ from: nid2, out: null, reply: null, x: ax, y: ay, startX: ax, startY: ay });
-  }, [store, cardSizes]);
+  }, [store, cardSizes, pendingLinkR]);
 
   /* ── выход строки цепочки (startRowConnect, 7924–7944) ── */
   const onRowPinDown = useCallback((ev: React.MouseEvent, nid: string) => {
@@ -797,8 +854,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
     const y1 = (g.y || 0) + row.offsetTop + row.offsetHeight / 2;
     store.selectOnly(nid);
     gestRef.current = { mode: 'link', from: nid, out: null, reply: null, wx: x1, wy: y1, sx: x1, sy: y1, target: null, varin: false };
+    pendingLinkR.cancel();
     setPendingLink({ from: nid, out: null, reply: null, x: x1, y: y1, startX: x1, startY: y1 });
-  }, [store]);
+  }, [store, pendingLinkR]);
 
   const onResizeDown = useCallback((e: React.MouseEvent, id: string) => {
     const n = store.nodeById(id);
@@ -998,7 +1056,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const rect = canvasRef.current?.getBoundingClientRect();
           const wk = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
           g.path.push({ x: wk.x, y: wk.y });
-          setCutlineR({ x1: g.wx, y1: g.wy, x2: wk.x, y2: wk.y });
+          cutlineR.set({ x1: g.wx, y1: g.wy, x2: wk.x, y2: wk.y });
           break;
         }
         case 'node': {
@@ -1007,6 +1065,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
           g.lx = e.clientX;
           g.ly = e.clientY;
           if (!store.dragMoved) break;
+          /* «выдергивание» (extract): подсветки целей сброса отключены (8602 оригинала:
+             if(!dragS.extract){...}) — нода тянется свободно */
+          if (g.extract) break;
           /* цели сброса перетаскиваемой ноды (8602–8632): цепочка → нода-цель,
              иначе связь (встраивание существующей ноды) */
           const rect = canvasRef.current?.getBoundingClientRect();
@@ -1026,7 +1087,20 @@ export function CanvasBoard(props: { store: VetviStore }) {
             setDropEdge(null);
             g.dropEdge = null;
           } else if (store.sel.size === 1) {
-            let deId = nearestEdgeIn(items, wp.x, wp.y, 16 / (store.vp.z || 1), store.sel);
+            /* зона вставки на связь (nearestEdgeAt оригинала, 8628): 16px по курсору —
+               расширено: 22px по курсору + проверка ЦЕНТРА тянемой карточки (28px) —
+               курсор при переносе карточки обычно на её теле, и зону вставки было
+               тяжело «нащупать»: линия под карточкой не срабатывала, пока курсор
+               сам не попадал в 16px. Мосты не подсвечиваются (как в оригинале). */
+            const vz = store.vp.z || 1;
+            const dragN = store.nodeById([...store.sel][0]);
+            let deId = nearestEdgeIn(items, wp.x, wp.y, 22 / vz, store.sel);
+            if (!deId && dragN) {
+              const ds = sizesMap.get(dragN.id);
+              const ncx = dragN.x + (ds ? ds.w : NODE_W) / 2;
+              const ncy = dragN.y + (ds ? ds.h : 90) / 2;
+              deId = nearestEdgeIn(items, ncx, ncy, 28 / vz, store.sel);
+            }
             if (deId) {
               const de = store.edgeById(deId);
               if (de && isBridge(de)) deId = null;
@@ -1087,7 +1161,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const w = screenToWorld(store.vp, e.clientX - (rect?.left || 0), e.clientY - (rect?.top || 0));
           g.wx = w.x;
           g.wy = w.y;
-          setPendingLinkR({ from: g.from, out: g.out, reply: g.reply, x: w.x, y: w.y, startX: g.sx, startY: g.sy });
+          pendingLinkR.set({ from: g.from, out: g.out, reply: g.reply, x: w.x, y: w.y, startX: g.sx, startY: g.sy });
           const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
           const node = el ? el.closest('[data-node-id]') : null;
           let target = node ? node.getAttribute('data-node-id') : null;
@@ -1106,7 +1180,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
           }
           g.target = target && target !== g.from ? target : (target === g.from && g.reply ? target : null);
           g.varin = varin && !!g.target;
-          setHoverTargetR(g.target);
+          hoverTargetR.set(g.target);
           setQCardHl(qHl);
           break;
         }
@@ -1127,7 +1201,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             }
           }
           g.target = target && target !== g.from ? target : null;
-          setHoverTargetR(g.target);
+          hoverTargetR.set(g.target);
           setQCardHl(qHl);
           break;
         }
@@ -1148,7 +1222,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             }
           }
           g.target = target && target !== g.to ? target : null;
-          setHoverTarget(g.target);
+          hoverTargetR.set(g.target);
           setQCardHl(qHl);
           break;
         }
@@ -1244,6 +1318,10 @@ export function CanvasBoard(props: { store: VetviStore }) {
           break;
         }
         case 'knife': {
+          /* гасим линию ножа: сначала отменяем отложенный rAF-кадр (иначе он
+             воскресит стёртую линию — «полоса оставалась до следующего разреза»),
+             затем чистим состояние */
+          cutlineR.cancel();
           setCutline(null);
           const rect = canvasRef.current?.getBoundingClientRect();
           if (!rect) break;
@@ -1295,8 +1373,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
           const dragId = store.sel.size === 1 ? [...store.sel][0] : null;
           const rectN = canvasRef.current?.getBoundingClientRect();
           const wpUp = rectN ? screenToWorld(store.vp, e.clientX - rectN.left, e.clientY - rectN.top) : null;
-          /* нода брошена на stackable-ноду → сборка/пополнение цепочки (8946–8951) */
-          if (movedN && dragId && wpUp) {
+          /* нода брошена на stackable-ноду → сборка/пополнение цепочки (8946–8951);
+             «выдергивание» не собирает цепочки (8946: !dragS.extract) */
+          if (movedN && !g.extract && dragId && wpUp) {
             const stT = stackDropTargetAt(store, dragId, wpUp, sizesMap);
             if (stT) {
               store.stackDropCreate(dragId, stT.id, preN);
@@ -1304,8 +1383,9 @@ export function CanvasBoard(props: { store: VetviStore }) {
               break;
             }
           }
-          /* нода брошена на связь → встраивание существующей ноды (8952–8956) */
-          if (movedN && dragId && g.dropEdge) {
+          /* нода брошена на связь → встраивание существующей ноды (8952–8956);
+             «выдергивание» не встраивается (8952: !dragS.extract) */
+          if (movedN && !g.extract && dragId && g.dropEdge) {
             const nIns = store.nodeById(dragId);
             const edIns = store.edgeById(g.dropEdge);
             if (nIns && edIns && !isBridge(edIns)) store.performInsert(nIns, edIns.id, preN, false);
@@ -1424,6 +1504,8 @@ export function CanvasBoard(props: { store: VetviStore }) {
             const menus = ctxMenus(store);
             store.openCtx(lastMouse.x, lastMouse.y, menus.connectFrom(g.from, g.out, g.reply, lastMouse.x, lastMouse.y));
           }
+          pendingLinkR.cancel();
+          hoverTargetR.cancel();
           setPendingLink(null);
           setHoverTarget(null);
           break;
@@ -1442,6 +1524,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             store.commitEdit(pre, 'Перенос исходящих стрелок');
             store.toast(applied > 1 ? 'Переподключено выходов: ' + applied : 'Исходящая стрелка переподключена');
           }
+          hoverTargetR.cancel();
           setHoverTarget(null);
           break;
         }
@@ -1458,6 +1541,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             store.commitEdit(pre, 'Перенос входящих стрелок');
             store.toast(applied > 1 ? 'Переподключено входов: ' + applied : 'Входящая стрелка переподключена');
           }
+          hoverTargetR.cancel();
           setHoverTarget(null);
           break;
         }
@@ -2031,7 +2115,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
         backgroundPosition: vp.x + 'px ' + vp.y + 'px',
       }}
       onMouseDown={onCanvasDown}
-      onMouseDownCapture={onAltKnifeCapture}
+      onMouseDownCapture={onAltDownCapture}
       onContextMenu={onCtx}
       onDoubleClick={onDbl}
       onDragOver={onDragOver}

@@ -521,7 +521,10 @@ export function GroupLayer(props: {
           </div>
         );
         if (fold === 2) {
-          const manual = g.auto === false && typeof g.fw === 'number' && typeof g.fh === 'number';
+          /* «ручная» рамка — тот же предикат, что в groupFrameRect (!g.auto + заданные fw/fh):
+             расхождение предикатов разъединяло рендер и дроп-логику (drop решал по одной
+             рамке, а рисовалась другая) */
+          const manual = !g.auto && typeof g.fw === 'number' && typeof g.fh === 'number' && g.fw > 0 && g.fh > 0;
           const frozen = props.frameFreeze ? props.frameFreeze.get(g.id) : null;
           const rect = manual
             ? { x: g.x, y: g.y, w: g.fw as number, h: g.fh as number }

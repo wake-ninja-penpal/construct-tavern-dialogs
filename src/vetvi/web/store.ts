@@ -926,8 +926,10 @@ export class VetviStore {
   /** «Выдернуть ноду» (detachNode оригинала, 6604): все связи ноды удаляются,
    *  входящие перекидываются на исходящие (A→N→B превращается в A→B) — цепочка
    *  сохраняется. САМА НОДА ОСТАЁТСЯ на холсте (в React-версии она ошибочно
-   *  удалялась — через контекстное меню нода и стрелки исчезали). */
-  detachNode(id: string): void {
+   *  удалялась — через контекстное меню нода и стрелки исчезали).
+   *  opts.history:false — жест «выдергивания» (Alt+ЛКМ по ноде): запись истории
+   *  сделает dragEnd одним шагом «до жеста → после» (как pre оригинала 8177). */
+  detachNode(id: string, opts?: { history?: boolean }): void {
     let extracted = false;
     this.mutate((doc) => {
       const ins = doc.edges.filter((e) => e.to === id && e.from !== id);
@@ -944,8 +946,8 @@ export class VetviStore {
       }
       doc.edges = doc.edges.filter((e) => e.from !== id && e.to !== id).concat(bypass);
       extracted = true;
-    }, { label: 'Выдернуть ноду' });
-    if (extracted) this.toast('Узел выдернут, цепочка сохранена', 'ok');
+    }, { label: 'Выдернуть ноду', history: opts?.history !== false });
+    if (extracted && opts?.history !== false) this.toast('Узел выдернут, цепочка сохранена', 'ok');
     this.emit();
   }
 
@@ -1421,15 +1423,32 @@ export class VetviStore {
     if (isNew) doc.nodes.push(n);
     const d0 = isNew ? null : this.dimsOf(n.id);
     const hh = d0 ? d0.h : 96;
+    /* позиции пишутся через putNode (замена объекта в doc.nodes): карточка ноды —
+       memo по ССЫЛКЕ объекта (a.node === b.node), мутация x/y на месте не
+       перерисовывает карточку — стрелки тогда рисуются к «новому» месту, а сама
+       нода визуально остаётся на старом (главная причина «стрелки входа и
+       выхода рисуются не на входе и выходе вставленной ноды») */
+    const putNode = (id: string, x: number, y: number) => {
+      const i = doc.nodes.findIndex((q) => q.id === id);
+      if (i >= 0) doc.nodes[i] = { ...doc.nodes[i], x: Math.round(x), y: Math.round(y) };
+    };
+    let nx = n.x;
+    let ny = n.y;
     if (p) {
-      n.x = Math.round(p.x - (d0 ? d0.w : NODE_W) / 2);
-      n.y = Math.round(p.y - hh / 2);
+      nx = p.x - (d0 ? d0.w : NODE_W) / 2;
+      ny = p.y - hh / 2;
     }
     /* место для изгибов (фикс «стрелки подключаются как попало»): обе новые связи
-       (A→n из правого нижнего якоря, n→B в левую грань) обязаны идти «вперёд» с
-       запасом — при тесных краях контрольные точки кубика перекрещиваются и связи
-       дают петли-зацепы. Для преимущественно горизонтальной исходной связи
-       раздвигаем A/B и клампим ноду так, чтобы зазор по обе стороны был ≥ GAP. */
+       (A→n в ЛЕВУЮ грань ноды — её «вход», n→B из правого нижнего якоря — её
+       «выход») обязаны идти «вперёд» с запасом — при тесных краях контрольные
+       точки кубика перекрещиваются и связи дают петли-зацепы, а стрелки
+       визуально входят/выходят не на входе/выходе вставленной ноды.
+       Для преимущественно горизонтальной СВЯЗИ «ВПЕРЁД» (B правее A) раздвигаем
+       A/B и клампим ноду так, чтобы зазор по обе стороны был ≥ GAP. Для обратной
+       связи (B левее A) раздвижка НЕ применяется: раздвижка «обратно» меняла
+       ноды местами вокруг вставленной ноды и уводила их далеко — там S-кривые
+       edgePathD (формула x2<x1) дают аккуратные встречные дуги без петель. */
+    let spread = false;
     if (gm && p && A !== B && Math.abs(gm.x2 - gm.x1) >= Math.abs(gm.y2 - gm.y1)) {
       const na = doc.nodes.find((x) => x.id === A);
       const nb = doc.nodes.find((x) => x.id === B);
@@ -1437,21 +1456,34 @@ export class VetviStore {
         const GAP = 72;
         const wA = this.dimsOf(na.id).w;
         const wN = d0 ? d0.w : NODE_W;
-        let lo = na.x + wA + GAP;
-        let hi = nb.x - wN - GAP;
-        if (lo > hi) {
-          const deficit = lo - hi;
-          na.x = Math.round(na.x - deficit / 2);
-          nb.x = Math.round(nb.x + deficit / 2);
-          lo = na.x + wA + GAP;
-          hi = nb.x - wN - GAP;
+        /* «вперёд» — по фактическому направлению нарисованной кривой (выход A правее входа B) */
+        const forward = gm.x2 >= gm.x1;
+        if (forward) {
+          let lo = na.x + wA + GAP;
+          let hi = nb.x - wN - GAP;
+          if (lo > hi) {
+            const deficit = lo - hi;
+            putNode(na.id, na.x - deficit / 2, na.y);
+            putNode(nb.id, nb.x + deficit / 2, nb.y);
+            const na2 = doc.nodes.find((x) => x.id === A);
+            const nb2 = doc.nodes.find((x) => x.id === B);
+            lo = (na2 ? na2.x : na.x) + wA + GAP;
+            hi = (nb2 ? nb2.x : nb.x) - wN - GAP;
+            spread = deficit > 0;
+          }
+          if (nx < lo) nx = lo;
+          else if (nx > hi) nx = hi;
         }
-        if (n.x < lo) n.x = Math.round(lo);
-        else if (n.x > hi) n.x = Math.round(hi);
       }
     }
-    doc.edges.push({ id: uid(), from: A, to: n.id, label: '', kind, pts: sp[0] || [], lt: 0.5, lp: 0, fromReply: fromReplyA, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
-    doc.edges.push({ id: uid(), from: n.id, to: B, label, kind, pts: sp[1] || [], lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    putNode(n.id, nx, ny);
+    /* при раздвижке A/B старые waypoints исходной связи (абсолютные точки бывшей
+       кривой) больше не совпадают с новой геометрией: связь A→n могла петлиться
+       НАЗАД к входу вставленной ноды — сбрасываем, гладкий кубик честнее */
+    const ptsA = spread ? [] : (sp[0] || []);
+    const ptsB = spread ? [] : (sp[1] || []);
+    doc.edges.push({ id: uid(), from: A, to: n.id, label: '', kind, pts: ptsA, lt: 0.5, lp: 0, fromReply: fromReplyA, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
+    doc.edges.push({ id: uid(), from: n.id, to: B, label, kind, pts: ptsB, lt: 0.5, lp: 0, fromReply: null, fromOut: null, bd: { dl: 0, dy: 0, dr: 0 } });
     if (this.selEdges.has(e.id)) this.selEdges.clear();
     this.emit();
     this.resolveOverlaps(new Set([n.id]));

@@ -1346,11 +1346,28 @@ function GroupBody({ store, gid, editPreRef }: { store: VetviStore; gid: string;
           checked={!!g.auto}
           onChange={(ev) => {
             const on = ev.target.checked;
+            /* toggleAuto оригинала (4548–4559): ВКЛ — очистить ручную рамку (следует за
+               содержимым), ВЫКЛ — «морозить» текущий расчётный размер в fw/fh (иначе
+               после выключения рамка продолжала бы тянуться и ноду не вынести) */
+            const box = document.querySelector('.groupbox[data-gid="' + gid + '"]') as HTMLElement | null;
             store.mutate((d) => {
               const gg = d.groups.find((x) => x.id === gid);
               if (!gg) return;
-              (gg as { auto?: unknown }).auto = on;
-              if (on) { delete gg.fx; delete gg.fy; delete gg.fw; delete gg.fh; }
+              if (on) {
+                gg.auto = true;
+                delete gg.fx;
+                delete gg.fy;
+                delete gg.fw;
+                delete gg.fh;
+              } else {
+                gg.auto = false;
+                if (box) {
+                  gg.x = box.offsetLeft;
+                  gg.y = box.offsetTop;
+                  gg.fw = box.offsetWidth;
+                  gg.fh = box.offsetHeight;
+                }
+              }
             }, { label: 'Авторазмер группы' });
           }}
         />
