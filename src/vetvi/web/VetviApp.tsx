@@ -27,6 +27,8 @@ import { CtxMenuHost, ToastHost } from './CtxMenu';
 import { DstWin } from './DstWin';
 import { CollabPopover, LockScreen, LockTipHost } from './SyncModals';
 import { canvasApi } from './canvasApi';
+import { AuthGate, fetchAuthState } from './AuthGate';
+import { AdminPanel, isAdminHash } from './AdminPanel';
 
 /* Рендер после монтирования: документ читается из localStorage при создании стора. */
 const emptySubscribe = () => () => {};
@@ -141,9 +143,41 @@ function EditTipHost({ store }: { store: VetviStore }) {
  * storeBoot() ДО создания стора (getStore читает слот проекта синхронно из памяти).
  * Без прогрева в idb-режиме приложение стартовало с пустым проектом, и «локальные
  * проекты не сохранялись в браузере» — на деле они писались в базу, но никогда не читались.
+ *
+ * Заготовка авторизации: секретный хеш в адресе открывает скрытую панель админа;
+ * при включённой авторизации без залогина показывается гейт входа/регистрации.
+ * Если сервер авторизации недоступен — работаем как раньше (fail-open для разработки).
  */
 export default function VetviApp() {
+  /* скрытая админка: только по секретному хешу в адресе, ссылок в приложении нет.
+     Проверяем ПОСЛЕ монтирования (и на hashchange) — иначе рассинхрон SSR/клиент
+     даёт ошибку гидратации. */
+  const [adminHash, setAdminHash] = useState(false);
+  const [authPhase, setAuthPhase] = useState<'loading' | 'ok' | 'gate'>('loading');
   const [booted, setBooted] = useState(() => storeMode() !== 'idb');
+
+  useEffect(() => {
+    const check = () => setAdminHash(isAdminHash());
+    check();
+    window.addEventListener('hashchange', check);
+    return () => window.removeEventListener('hashchange', check);
+  }, []);
+
+  /* кто я: если авторизация включена и не залогинен — гейт входа/регистрации */
+  useEffect(() => {
+    let alive = true;
+    void fetchAuthState()
+      .then((st) => {
+        if (!alive) return;
+        setAuthPhase(st.authEnabled && !st.user ? 'gate' : 'ok');
+      })
+      .catch(() => {
+        if (alive) setAuthPhase('ok'); /* сервер недоступен — как раньше */
+      });
+    return () => { alive = false; };
+  }, []);
+
+  /* прогрев хранилища (idb) */
   useEffect(() => {
     if (booted) return;
     let alive = true;
@@ -155,6 +189,9 @@ export default function VetviApp() {
     });
     return () => { alive = false; };
   }, [booted]);
+
+  if (adminHash) return <AdminPanel />;
+  if (authPhase === 'gate') return <AuthGate onPass={() => setAuthPhase('ok')} />;
   if (!booted) return <main className="rn-app" aria-label="Ветви — React-редактор" />;
   return <VetviAppInner />;
 }

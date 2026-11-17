@@ -1439,3 +1439,78 @@ body{overflow:hidden;background:var(--bg)}
 body.ptab-drag{cursor:ew-resize;user-select:none}
 body.ptab-drag .ptab{transition:none;cursor:grabbing}
 body.ptab-drag #left,body.ptab-drag #right{transition:none}
+
+/* ═══════════ заготовка авторизации: гейт входа/регистрации (.au-*) ═══════════ */
+.au-wrap{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:radial-gradient(1100px 700px at 30% 20%, #1a1e25, #121418 70%);overflow-y:auto;padding:24px}
+.au-card{width:360px;max-width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:16px;padding:26px 26px 22px;display:flex;flex-direction:column;gap:12px;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+.au-brand{display:flex;align-items:center;gap:10px;margin-bottom:2px}
+.au-lg{font:800 17px var(--body);letter-spacing:2.4px;color:var(--tx)}
+.au-title{margin:0;font:700 17px var(--body);color:var(--tx)}
+.au-hint{margin:-6px 0 4px;font:400 12.5px var(--body);line-height:1.5;color:var(--tx3)}
+.au-field{display:flex;flex-direction:column;gap:5px}
+.au-field>span{font:600 12px var(--body);color:var(--tx2)}
+.au-input{width:100%;box-sizing:border-box;background:#191c21;border:1px solid var(--line2);border-radius:9px;color:var(--tx);font:500 13.5px var(--body);padding:10px 12px;outline:none;transition:border-color .15s}
+.au-input:focus{border-color:var(--acc)}
+.au-err{background:rgba(207,109,79,.12);border:1px solid rgba(207,109,79,.45);color:#e8a08d;border-radius:9px;padding:9px 11px;font:500 12.5px var(--body)}
+.au-btn{margin-top:4px;height:40px;border:none;border-radius:10px;background:var(--acc);color:#1c1503;font:700 13.5px var(--body);cursor:pointer;transition:filter .15s}
+.au-btn:hover{filter:brightness(1.08)}
+.au-btn:disabled{opacity:.55;cursor:default}
+.au-btn:active{transform:translateY(1px)}
+.au-alt{background:none;border:none;color:var(--tx3);font:500 12.5px var(--body);cursor:pointer;padding:6px 0;text-decoration:underline;text-underline-offset:3px}
+.au-alt:hover{color:var(--tx2)}
+
+/* ═══════════ скрытая панель администратора (.adm-*) ═══════════ */
+.adm-wrap{align-items:flex-start;padding-top:6vh}
+.adm-card{width:820px;max-width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:16px;padding:0;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+.adm-head{display:flex;align-items:center;gap:14px;padding:18px 22px 14px;border-bottom:1px solid var(--line)}
+.adm-title{font:700 16px var(--body);color:var(--tx)}
+.adm-tag{margin-left:4px;font:600 10.5px var(--body);letter-spacing:.6px;color:var(--acc);background:rgba(226,165,78,.1);border:1px solid rgba(226,165,78,.35);border-radius:99px;padding:3px 9px}
+.adm-toast{margin-left:auto;font:600 12px var(--body);color:#9cb878}
+.adm-tabs{display:flex;gap:4px;padding:10px 14px 0;border-bottom:1px solid var(--line)}
+.adm-tab{flex:none;height:34px;padding:0 14px;background:none;border:none;border-bottom:2px solid transparent;color:var(--tx3);font:600 12.5px var(--body);cursor:pointer;border-radius:8px 8px 0 0;transition:.15s}
+.adm-tab:hover{color:var(--tx2);background:rgba(255,255,255,.03)}
+.adm-tab.active{color:var(--tx);border-bottom-color:var(--acc)}
+.adm-body{padding:18px 22px 22px;display:flex;flex-direction:column;gap:12px}
+.adm-switch{display:flex;align-items:center;gap:13px;background:rgba(255,255,255,.02);border:1px solid var(--line2);border-radius:12px;padding:13px 15px;cursor:pointer}
+.adm-switch input{width:17px;height:17px;accent-color:var(--acc);cursor:pointer;flex:none}
+.adm-sw-txt{flex:1;display:flex;flex-direction:column;gap:3px}
+.adm-sw-txt b{font:600 13.5px var(--body);color:var(--tx)}
+.adm-sw-txt i{font:400 12px var(--body);font-style:normal;color:var(--tx3);line-height:1.45}
+.adm-badge{flex:none;font:700 10.5px var(--body);letter-spacing:.5px;border-radius:99px;padding:4px 10px}
+.adm-badge.on{color:#9cb878;background:rgba(156,184,120,.12);border:1px solid rgba(156,184,120,.4)}
+.adm-badge.off{color:#e08a75;background:rgba(207,109,79,.1);border:1px solid rgba(207,109,79,.4)}
+.adm-badge.done{color:var(--tx3);background:rgba(255,255,255,.04);border:1px solid var(--line2)}
+.adm-note{margin:2px 0 0;font:400 12px var(--body);color:var(--tx3);line-height:1.55}
+.adm-create{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:rgba(255,255,255,.02);border:1px solid var(--line2);border-radius:12px;padding:13px 15px}
+.adm-field{display:flex;flex-direction:column;gap:5px}
+.adm-field>span{font:600 12px var(--body);color:var(--tx2)}
+.adm-field .au-input{width:150px}
+.adm-field-grow{flex:1;min-width:160px}
+.adm-field-grow .au-input{width:100%}
+.adm-field-note{font:400 11px var(--body);font-style:normal;color:var(--tx3)}
+.adm-list{display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto;padding-right:2px}
+.adm-empty,.acc-empty{font:400 12.5px var(--body);color:var(--tx3);padding:14px;text-align:center;border:1px dashed var(--line2);border-radius:10px}
+.adm-row{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.02);border:1px solid var(--line2);border-radius:11px;padding:11px 13px}
+.adm-row-main{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0}
+.adm-code{font:600 13px ui-monospace,monospace;color:var(--tx);background:#191c21;border:1px solid var(--line2);border-radius:7px;padding:3px 8px;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.adm-note-chip{font:500 11.5px var(--body);color:var(--tx2);background:rgba(255,255,255,.05);border-radius:99px;padding:2px 9px}
+.adm-login{font:600 13.5px var(--body);color:var(--tx)}
+.adm-login-sub{font:500 12px var(--body);color:var(--tx3)}
+.adm-row-sub{margin-top:-2px}
+.adm-uses{font:400 11.5px var(--body);color:var(--tx3)}
+.adm-acts{display:flex;gap:7px}
+.adm-ib{background:#191c21;border:1px solid var(--line2);border-radius:8px;color:var(--tx2);font:600 11.5px var(--body);padding:5px 10px;cursor:pointer;transition:.13s}
+.adm-ib:hover{border-color:#3d4450;color:var(--tx)}
+.adm-ib.danger{color:#e08a75}
+.adm-ib.danger:hover{border-color:rgba(207,109,79,.55);background:rgba(207,109,79,.08)}
+
+/* ═══════════ настройки доступа к проекту (.acc-*) ═══════════ */
+.acc-warn{background:rgba(226,165,78,.08);border:1px solid rgba(226,165,78,.4);color:#f4d9b8;border-radius:10px;padding:10px 12px;font:500 12.5px var(--body);line-height:1.5;margin-bottom:10px}
+.acc-add{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.acc-select{flex:1;min-width:180px;background:#191c21;border:1px solid var(--line2);border-radius:8px;color:var(--tx);font:500 12.5px var(--body);padding:8px 10px;outline:none}
+.acc-select:focus{border-color:var(--acc)}
+.acc-select-role{flex:none;min-width:0;width:120px}
+.acc-list{display:flex;flex-direction:column;gap:7px;max-height:34vh;overflow-y:auto}
+.acc-row{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.02);border:1px solid var(--line2);border-radius:10px;padding:8px 12px}
+.acc-login{flex:1;min-width:0;font:600 13px var(--body);color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-you{font:500 11.5px var(--body);font-style:normal;color:var(--tx3)}

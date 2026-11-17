@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,20 +7,50 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+/* ── заготовка авторизации «Ветви» ──
+   Аккаунты (логин+пароль), сессии (cookie-токен), ссылки-инвайты для
+   регистрации (одноразовые или на N регистраций), глобальные настройки
+   (вкл/выкл авторизации и регистрации — ключ-значение), доступы к проектам. */
+
+model AuthUser {
+  id           String        @id @default(cuid())
+  login        String        @unique
+  passwordHash String
+  displayName  String?
+  disabled     Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  sessions     AuthSession[]
 }
 
-model Post {
+model AuthSession {
+  token     String    @id
+  userId    String
+  user      AuthUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+}
+
+model InviteLink {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  code      String   @unique
+  maxUses   Int      @default(1)
+  uses      Int      @default(0)
+  disabled  Boolean  @default(false)
+  note      String?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+}
+
+model AppSetting {
+  key   String @id
+  value String
+}
+
+model ProjectAccess {
+  id        String   @id @default(cuid())
+  projectId String
+  login     String
+  role      String   @default("editor")
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, login])
 }
