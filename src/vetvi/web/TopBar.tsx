@@ -242,6 +242,11 @@ export function TopBar(props: { store: VetviStore }) {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 18h6l8-8h2" /></svg>
       </button>
       <div className="vsep" style={{ margin: '0 8px' }} />
+      {/* Мини-карта (#bMap оригинала, 1115/9371): показывает/скрывает #miniMap */}
+      <button type="button" className={'btn ibtn' + (store.mmOn ? ' on' : '')} id="bMap" title="Мини-карта" onClick={() => store.toggleMm()}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><rect x="7" y="8" width="7" height="6" rx="1" fill="currentColor" fillOpacity=".3" /></svg>
+      </button>
+      <div className="vsep" />
 
       <button
         type="button"

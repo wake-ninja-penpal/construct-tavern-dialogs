@@ -1396,3 +1396,19 @@ body{overflow:hidden;background:var(--bg)}
 /* на нодах холста эффекты видны, но сдержанно (не отвлекают от правки) */
 .node .rtfx-shake{color:inherit}
 .node .rtfx-jitter .rtfx-ch,.node .rtfx-wave .rtfx-ch,.node .rtfx-bounce .rtfx-ch{color:inherit}
+
+/* ═══════════ свёрнутые панели: левая — мини-рейка с иконками разделов,
+   правая (инспектор) — узкая рейка; открывается при выделении объекта ═══════════ */
+#left{transition:width .2s cubic-bezier(.2,.8,.3,1)}
+#left.mini{width:48px}
+#left.mini .ltabs{flex:1;flex-direction:column;gap:6px;padding:8px 7px 10px;border-bottom:none;overflow:visible;scrollbar-width:none}
+#left.mini .ltabs::-webkit-scrollbar{display:none}
+#left.mini .ltab{flex:none;width:34px;height:34px;min-width:0;padding:0;border-radius:9px;border-bottom:2px solid transparent}
+#left.mini .ltab.active{border-bottom-color:transparent;background:var(--accd);color:var(--acc)}
+#left.mini .ltab.mini-x{color:var(--tx3);background:#262b33}
+#left.mini .ltab.mini-x:hover{color:var(--tx);background:#333a45}
+/* кнопка сворачивания в шапке развёрнутой панели */
+.ltab.lfold{flex:none;width:26px;height:26px;min-width:0;padding:0;margin:0 0 4px 4px;align-self:center;border-radius:7px;border-bottom:none;background:#262b33;color:var(--tx3)}
+.ltab.lfold:hover{color:var(--tx);background:#333a45}
+/* правая панель свёрнута: узкая рейка с кнопкой разворачивания */
+#right.rcollapsed{width:26px;padding:10px 0;overflow:visible;align-items:center}

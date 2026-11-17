@@ -322,6 +322,13 @@ export function CanvasBoard(props: { store: VetviStore }) {
      сам рассматривает карту — mmManualFollow оригинала не было, это доработка по фидбеку */
   const mmManualTRef = useRef(0);
   useEffect(() => { mmDimRef.current = mmDim; }, [mmDim]);
+  /* повторное включение карты (bMap оригинала, 9371): mmReady=false → карта
+     перецентрируется по контенту заново; выключенная карта не синхронизируется */
+  const mmOnPrevRef = useRef(true);
+  useEffect(() => {
+    if (!store.mmOn && mmOnPrevRef.current) mmReadyRef.current = false;
+    mmOnPrevRef.current = store.mmOn;
+  });
 
   const applyMmView = useCallback(() => {
     const mv = mmViewRef.current;
@@ -350,7 +357,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
      попадать в «захваты» хуков — правило react-hooks/immutability запрещает их
      менять после этого. Все данные читаются из рефов/стора — замыкание всегда свежее. */
   const followMm = () => {
-    if (!mmReadyRef.current) return;
+    if (!mmReadyRef.current || !store.mmOn) return;
     if (mmFrameDragRef.current || mmPanRef.current || mmResizeRef.current) return;
     if (Date.now() - mmManualTRef.current < 2500) return;
     const el = canvasRef.current;
@@ -1087,20 +1094,13 @@ export function CanvasBoard(props: { store: VetviStore }) {
             setDropEdge(null);
             g.dropEdge = null;
           } else if (store.sel.size === 1) {
-            /* зона вставки на связь (nearestEdgeAt оригинала, 8628): 16px по курсору —
-               расширено: 22px по курсору + проверка ЦЕНТРА тянемой карточки (28px) —
-               курсор при переносе карточки обычно на её теле, и зону вставки было
-               тяжело «нащупать»: линия под карточкой не срабатывала, пока курсор
-               сам не попадал в 16px. Мосты не подсвечиваются (как в оригинале). */
+            /* зона вставки на связь (nearestEdgeAt оригинала, 8628): 16px ПО КУРСОРУ —
+               вставка срабатывает, только если тянемую ноду навели ИМЕННО на линию
+               связи (цель подсвечивается классом drop-target). Никаких расширенных
+               зон «по центру карточки»: нода, брошенная просто между нодами мимо
+               линии, связь не разрывает. Мосты не подсвечиваются (как в оригинале). */
             const vz = store.vp.z || 1;
-            const dragN = store.nodeById([...store.sel][0]);
-            let deId = nearestEdgeIn(items, wp.x, wp.y, 22 / vz, store.sel);
-            if (!deId && dragN) {
-              const ds = sizesMap.get(dragN.id);
-              const ncx = dragN.x + (ds ? ds.w : NODE_W) / 2;
-              const ncy = dragN.y + (ds ? ds.h : 90) / 2;
-              deId = nearestEdgeIn(items, ncx, ncy, 28 / vz, store.sel);
-            }
+            let deId = nearestEdgeIn(items, wp.x, wp.y, 16 / vz, store.sel);
             if (deId) {
               const de = store.edgeById(deId);
               if (de && isBridge(de)) deId = null;
@@ -1862,7 +1862,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
 
   /* mmFit оригинала — один раз, когда ноды измерены: bbox контента ∪ вид холста, pad 16, z 0.02..4 */
   useEffect(() => {
-    if (mmReadyRef.current) return;
+    if (mmReadyRef.current || !store.mmOn) return;
     const el = canvasRef.current;
     if (!el || !el.clientWidth) return;
     if (visibleNodes.length > 0 && sizesMap.size < visibleNodes.length) return;
@@ -2238,6 +2238,11 @@ export function CanvasBoard(props: { store: VetviStore }) {
       {/* блок расхождения локальной копии и комнаты — в углу холста (новая система комнат) */}
       <SyncDiffBadge store={store} />
     </div>
+    {/* Мини-карта (mmOn оригинала, кнопка #bMap тулбара): при выключении снимается с
+        дерева ЦЕЛИКОМ — как в оригинале мини-карта перестаёт синхронизироваться. Свежий
+        DOM при повторном включении гарантирует чистое состояние отрисовки SVG (после
+        display:none→'' Chromium мог не перекрасить императивно обновлённый #mmView). */}
+    {store.mmOn && (
     <div id="miniMap" ref={mmRef} onPointerDown={onMmDown} onContextMenu={onMmCtx} style={mmDim ? { width: mmDim.w + 'px', height: mmDim.h + 'px' } : undefined}>
       <svg id="mmSvg" viewBox={'0 0 ' + mmW + ' ' + mmH} preserveAspectRatio="none">
         <g id="mmContent">
@@ -2249,6 +2254,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
       </svg>
       <i className="mm-resize" id="mmResize" title="Потяни за угол, чтобы изменить размер карты" onPointerDown={onMmResizeDown} />
     </div>
+    )}
     </>
   );
 }

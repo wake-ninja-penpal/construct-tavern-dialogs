@@ -139,6 +139,20 @@ export class VetviStore {
   /* ── UI-состояние ── */
   leftTab: 'pal' | 'list' | 'vars' | 'chars' = 'pal';
   leftWidth = 300;
+  /** Свёрнутая левая панель: мини-рейка с иконками разделов (клик по иконке —
+   *  развернуть панель и открыть соответствующий раздел). */
+  leftCollapsed = false;
+  /** Свёрнутая правая панель (инспектор): открывается только когда мы что-то
+   *  выделяем — чтобы показывать подробности и функционал выделенного объекта. */
+  rightCollapsed = false;
+  /** Версия выделения на момент сворачивания правой панели: свернули при активном
+   *  выделении — пока выделение не сменится, панель не переоткрывается. */
+  rightCollapseVer = -1;
+  /** Счётчик изменений выделения (инкрементируется в noteSelFocus — его вызывают
+   *  все селекторы стора); для режима «правая панель открывается при выделении». */
+  selVer = 0;
+  /** Мини-карта включена — кнопка #bMap тулбара (mmOn оригинала, 9371). */
+  mmOn = true;
   modal: string | null = null;
   modalArg: string | null = null;
   dialogEdit: string | null = null; // nodeId открытого редактора диалога
@@ -267,6 +281,10 @@ export class VetviStore {
     this.leftWidth = isClient
       ? Math.min(560, Math.max(240, Number(window.localStorage.getItem('vetvi-left-w')) || 300))
       : 300;
+    /* свёрнутые панели и мини-карта — личные UI-настройки (не синхронизируются) */
+    this.leftCollapsed = isClient && window.localStorage.getItem('vetvi-left-col') === '1';
+    this.rightCollapsed = isClient && window.localStorage.getItem('vetvi-right-col') === '1';
+    this.mmOn = isClient ? window.localStorage.getItem('vetvi-mm-on') !== '0' : true;
   }
 
   /* ── подписка ── */
@@ -689,6 +707,9 @@ export class VetviStore {
    *  снятие галочки, рамка) — метка снимается (focusTrack(null) → сервер удаляет
    *  фокус участника, плашка на чужой стороне исчезает). */
   private noteSelFocus(): void {
+    /* любое изменение выделения (все селекторы вызывают этот метод) — новый «кадр»
+       выделения: правая панель в свёрнутом режиме открывается именно по нему */
+    this.selVer++;
     if (!this.sync) return;
     const first = this.sel.size ? (this.sel.values().next().value as string) : null;
     this.sync.focusTrack(first || null);
@@ -871,6 +892,32 @@ export class VetviStore {
   setLeftWidth(w: number): void {
     this.leftWidth = clamp(w, 240, 560);
     try { window.localStorage.setItem('vetvi-left-w', String(this.leftWidth)); } catch { /* нет доступа */ }
+    this.emit();
+  }
+
+  /** Сворачивание/разворачивание левой панели: свёрнутая — мини-рейка с иконками
+   *  разделов, клик по иконке разворачивает панель и открывает раздел. */
+  setLeftCollapsed(v: boolean): void {
+    this.leftCollapsed = v;
+    try { window.localStorage.setItem('vetvi-left-col', v ? '1' : '0'); } catch { /* нет доступа */ }
+    this.emit();
+  }
+
+  /** Сворачивание правой панели: после сворачивания она открывается только при
+   *  выделении объекта. Запоминаем версию выделения на момент сворачивания —
+   *  пока выделение не сменилось, панель не переоткрывается. */
+  setRightCollapsed(v: boolean): void {
+    this.rightCollapsed = v;
+    if (v) this.rightCollapseVer = this.selVer;
+    try { window.localStorage.setItem('vetvi-right-col', v ? '1' : '0'); } catch { /* нет доступа */ }
+    this.emit();
+  }
+
+  /** Кнопка «Мини-карта» тулбара (#bMap оригинала, строка 9371): переключает
+   *  видимость #miniMap (класс mm-hidden), состояние — личная настройка. */
+  toggleMm(): void {
+    this.mmOn = !this.mmOn;
+    try { window.localStorage.setItem('vetvi-mm-on', this.mmOn ? '1' : '0'); } catch { /* нет доступа */ }
     this.emit();
   }
 

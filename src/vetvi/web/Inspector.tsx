@@ -1614,6 +1614,13 @@ export function Inspector(props: { store: VetviStore; onClose: () => void }) {
   const editPreRef = useRef<string | null>(null);
   const inspRef = useRef<HTMLDivElement | null>(null);
 
+  /* ── сворачивание правой панели: свернули — открывается только при ВЫДЕЛЕНИИ ──
+     Панель скрыта, пока нет выделения ИЛИ выделение то же, что было активным в
+     момент сворачивания (selVer растёт при любом изменении выделения — noteSelFocus).
+     Выделили объект — панель открылась с подробностями и функционалом выделенного. */
+  const hasSel = store.sel.size > 0 || store.selEdges.size > 0 || store.selGroups.size > 0;
+  const inspHidden = store.rightCollapsed && (!hasSel || store.selVer === store.rightCollapseVer);
+
   /* выбор режима — как в renderInspector оригинала; свой .i-cap у каждого режима внутри #insp */
   let body: ReactNode = null;
   let lockIds: string[] = [];
@@ -1671,15 +1678,48 @@ export function Inspector(props: { store: VetviStore; onClose: () => void }) {
     box.insertBefore(d, box.firstChild);
   });
 
+  /* панель скрыта → узкая рейка у правого края с кнопкой разворачивания.
+     Важно: ранний return ПОСЛЕ всех хуков (порядок хуков стабилен). */
+  if (inspHidden) {
+    return (
+      <aside id="right" className="rcollapsed" aria-label="Инспектор свёрнут">
+        <button
+          type="button"
+          className="mini-btn"
+          title="Развернуть инспектор"
+          aria-label="Развернуть инспектор"
+          onClick={() => store.setRightCollapsed(false)}
+        >
+          <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m15 6-6 6 6 6" />
+          </svg>
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside id="right" aria-label="Инспектор">
       <div className="i-cap">
         Инспектор элемента
+        {/* свернуть панель: откроется снова при выделении объекта (или кнопкой на рейке) */}
+        <button
+          type="button"
+          className="mini-btn"
+          title="Свернуть панель — откроется при выделении объекта"
+          aria-label="Свернуть инспектор"
+          style={{ float: 'right', width: 20, height: 20, marginTop: -2 }}
+          onClick={() => store.setRightCollapsed(true)}
+        >
+          <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+        </button>
         <button
           type="button"
           className="mini-btn"
           title="Снять выделение"
-          style={{ float: 'right', width: 20, height: 20, marginTop: -2 }}
+          style={{ float: 'right', width: 20, height: 20, marginTop: -2, marginRight: 4 }}
           onClick={props.onClose}
         >
           ×

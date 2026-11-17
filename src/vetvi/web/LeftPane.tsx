@@ -27,6 +27,8 @@ const P_LIST = '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.7" cy="6" r="1.
 const P_VAR = '<path d="M5 8c2.6-5 5.4 5 8 0 1.4-2.6 3.4-3 6-1.5"/><path d="M5 12.5h14"/><path d="M5 17c2.6 5 5.4-5 8 0 1.4 2.6 3.4 3 6 1.5"/>';
 const P_CHAR = '<circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c1.1-3.4 3.9-5.2 7.2-5.2s6.1 1.8 7.2 5.2"/>';
 const P_CHEV = '<path d="m6 9 6 6 6-6"/>';
+const P_CHEV_L = '<path d="m15 6-6 6 6 6"/>';
+const P_CHEV_R = '<path d="m9 6 6 6-6 6"/>';
 const P_X = '<path d="M6 6l12 12M18 6 6 18"/>';
 const P_GRIP = '<path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01"/>';
 const P_EYE = '<path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
@@ -174,6 +176,45 @@ export function LeftPane(props: { store: VetviStore }) {
     });
   };
 
+  /* ── мини-режим: панель свернута в узкую рейку с иконками разделов.
+     Клик по иконке — развернуть панель и открыть соответствующий раздел. ── */
+  if (store.leftCollapsed) {
+    return (
+      <aside id="left" className="mini" aria-label="Панель проекта (мини-режим)">
+        <nav className="ltabs" role="tablist">
+          {tabs.map(([t, title]) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              data-t={t}
+              title={title + ' — развернуть панель'}
+              className={'ltab' + (tab === t ? ' active' : '')}
+              onClick={() => { store.setLeftCollapsed(false); store.setLeftTab(t); }}
+            >
+              <span className="lt-ic">
+                <Ic d={t === 'pal' ? P_FOLDER : t === 'list' ? P_LIST : t === 'vars' ? P_VAR : P_CHAR} size={17} />
+              </span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className="ltab mini-x"
+            title="Развернуть панель"
+            aria-label="Развернуть панель проекта"
+            onClick={() => store.setLeftCollapsed(false)}
+          >
+            <span className="lt-ic">
+              <Ic d={P_CHEV_R} size={15} />
+            </span>
+          </button>
+        </nav>
+        {crop && <CropModal store={store} req={crop} onClose={closeCrop} />}
+      </aside>
+    );
+  }
+
   return (
     <aside id="left" style={{ width: store.leftWidth }} aria-label="Панель проекта">
       <nav className="ltabs" role="tablist">
@@ -193,6 +234,18 @@ export function LeftPane(props: { store: VetviStore }) {
             </span>
           </button>
         ))}
+        {/* свернуть панель в мини-режим: вертикальная рейка с иконками разделов */}
+        <button
+          type="button"
+          className="ltab lfold"
+          title="Свернуть панель (мини-режим с иконками)"
+          aria-label="Свернуть панель проекта"
+          onClick={() => store.setLeftCollapsed(true)}
+        >
+          <span className="lt-ic">
+            <Ic d={P_CHEV_L} size={14} />
+          </span>
+        </button>
       </nav>
       <PalettePane store={store} active={tab === 'pal'} onEditType={(id) => store.openModal('typeEditor', id)} onNewType={() => store.openModal('typeEditor', null)} />
       <ListPane store={store} active={tab === 'list'} />
