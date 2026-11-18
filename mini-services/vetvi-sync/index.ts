@@ -103,36 +103,65 @@ const DATA_FILE = DATA_DIR + 'store.json' // legacy-хранилище (толь
 const DB_FILE = DATA_DIR + 'store.db'
 
 /* ─── главная БД (аккаунты, сессии, доступы) ───
-   Та же SQLite-база, куда пишет Next.js через Prisma. Открываем вторым
-   соединением только на чтение: сессии проверяются при join, доступы
-   (ProjectAccess) определяют роль и право редактирования в комнате. */
+   Та же SQLite-база, куда пишет Next.js через Prisma (volume web-data,
+   в контейнере монтируется в /db — см. docker-compose.yml). Читаем сессии
+   при join и доступы (ProjectAccess) для роли/права редактирования.
+
+   Открытие ЛЕНИВОЕ: база лежит в томе web-контейнера и может появиться
+   позже первого старта sync (или таблицы в ней создаются init-db'ом уже
+   после нас) — если при старте её нет, раньше mainDb навсегда оставался
+   null и вся коллаборация считалась «гостями только для чтения». Теперь
+   пробуем открыть при каждом обращении, пока не получится; после ошибки
+   схемы («no such table») соединение сбрасывается и переоткрывается. */
 const MAIN_DB_FILE =
   process.env.VETVI_MAIN_DB || new URL('../../db/custom.db', import.meta.url).pathname
 let mainDb: Database | null = null
-try {
-  mainDb = new Database(MAIN_DB_FILE)
-  try { mainDb.exec('PRAGMA journal_mode = WAL;') } catch { /* режим уже установлен */ }
-  mainDb.exec('PRAGMA busy_timeout = 5000;')
-} catch (e) {
-  console.error('[vetvi-sync] главная БД недоступна:', MAIN_DB_FILE, e)
+let qSessionRow: ReturnType<Database['prepare']> | null = null
+let qAccessRole: ReturnType<Database['prepare']> | null = null
+let qAccessCount: ReturnType<Database['prepare']> | null = null
+
+function openMainDb(): void {
+  if (mainDb) return
+  /* файла ещё нет — не создаём пустую базу вместо Prisma, попробуем позже */
+  if (!existsSync(MAIN_DB_FILE)) return
+  try {
+    const d = new Database(MAIN_DB_FILE)
+    try { d.exec('PRAGMA journal_mode = WAL;') } catch { /* режим уже установлен */ }
+    d.exec('PRAGMA busy_timeout = 5000;')
+    qSessionRow = d.prepare(
+      `SELECT s.userId AS userId, s.expiresAt AS expiresAt,
+              a.login AS login, a.displayName AS displayName, a.color AS color
+         FROM AuthSession s JOIN AuthUser a ON a.id = s.userId WHERE s.token = ?`,
+    )
+    qAccessRole = d.prepare('SELECT role FROM ProjectAccess WHERE roomId = ? AND userId = ?')
+    qAccessCount = d.prepare('SELECT COUNT(*) AS c FROM ProjectAccess WHERE roomId = ?')
+    mainDb = d
+    console.log('[vetvi-sync] главная БД открыта:', MAIN_DB_FILE)
+  } catch (e) {
+    console.error('[vetvi-sync] главная БД недоступна:', MAIN_DB_FILE, e)
+  }
 }
 
-const qSessionRow = mainDb?.prepare(
-  `SELECT s.userId AS userId, s.expiresAt AS expiresAt,
-          a.login AS login, a.displayName AS displayName, a.color AS color
-     FROM AuthSession s JOIN AuthUser a ON a.id = s.userId WHERE s.token = ?`,
-)
-const qAccessRole = mainDb?.prepare(
-  'SELECT role FROM ProjectAccess WHERE roomId = ? AND userId = ?',
-)
-const qAccessCount = mainDb?.prepare(
-  'SELECT COUNT(*) AS c FROM ProjectAccess WHERE roomId = ?',
-)
+function dropMainDb(): void {
+  try { mainDb?.close() } catch { /* уже закрыта */ }
+  mainDb = null
+  qSessionRow = null
+  qAccessRole = null
+  qAccessCount = null
+}
+
+/* после «no such table» (база создана, но init-db ещё не отработал)
+   соединение бессмысленно — сбрасываем, следующий вызов переоткроет */
+function isSchemaError(e: unknown): boolean {
+  const msg = String((e as Error)?.message || e)
+  return msg.includes('no such table') || msg.includes('no such column')
+}
 
 /* сессия действительна? имя/цвет аккаунта всегда берём из БД —
    их больше нельзя менять произвольно. При SQLITE_BUSY — короткий ретрай. */
 function verifySession(token: unknown, userId: unknown): AccInfo | null {
-  if (!mainDb || typeof token !== 'string' || !token) return null
+  openMainDb()
+  if (!mainDb || !qSessionRow || typeof token !== 'string' || !token) return null
   const t = token.slice(0, 128)
   let lastErr: unknown = null
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -151,6 +180,10 @@ function verifySession(token: unknown, userId: unknown): AccInfo | null {
         login: String(row.login || ''),
       }
     } catch (e) {
+      if (isSchemaError(e)) {
+        dropMainDb()
+        return null // переоткроем (и переподготовим запросы) на следующем вызове
+      }
       lastErr = e
       const spin = Date.now() + 60
       while (Date.now() < spin) { /* busy spin */ }
@@ -161,13 +194,18 @@ function verifySession(token: unknown, userId: unknown): AccInfo | null {
 }
 
 function accessRole(roomId: string, userId: string): 'owner' | 'editor' | 'reader' | null {
-  if (!mainDb) return null
+  openMainDb()
+  if (!mainDb || !qAccessRole) return null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const row = qAccessRole.get(roomId, userId) as { role: string } | null
       if (row && (row.role === 'owner' || row.role === 'editor' || row.role === 'reader')) return row.role
       return null
     } catch (e) {
+      if (isSchemaError(e)) {
+        dropMainDb()
+        return null
+      }
       if (attempt === 2) console.error('[vetvi-sync] access role error', e)
       const spin = Date.now() + 60
       while (Date.now() < spin) { /* busy spin */ }
@@ -177,11 +215,16 @@ function accessRole(roomId: string, userId: string): 'owner' | 'editor' | 'reade
 }
 
 function accessCount(roomId: string): number {
-  if (!mainDb) return 0
+  openMainDb()
+  if (!mainDb || !qAccessCount) return 0
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return (qAccessCount.get(roomId) as { c: number }).c
     } catch (e) {
+      if (isSchemaError(e)) {
+        dropMainDb()
+        return 0
+      }
       if (attempt === 2) console.error('[vetvi-sync] access count error', e)
       const spin = Date.now() + 60
       while (Date.now() < spin) { /* busy spin */ }

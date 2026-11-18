@@ -68,3 +68,7 @@ mini-services/vetvi-sync/data/
 
 # генерируется в Docker-сборке (prisma migrate diff), в репозиторий не нужен
 prisma/schema.sql
+
+# SQLite журнал/разделяемая память — временные файлы, данные уже в custom.db
+db/*.db-wal
+db/*.db-shm
