@@ -57,9 +57,12 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
 .ibtn.on{color:var(--acc);background:var(--accd);border-color:rgba(226,165,78,.4);box-shadow:inset 0 0 12px rgba(226,165,78,.08)}
 #zPct{font:600 11px var(--mono);color:var(--tx3);width:46px;text-align:center;user-select:none}
 .save-wrap{position:relative;display:inline-flex}
-.save-wrap .btn.primary:first-child{border-radius:9px 0 0 9px}
-.save-wrap .caret{width:24px;padding:4px;border-radius:0 9px 9px 0;margin-left:0px}
-.save-wrap .caret svg{width:12px;height:12px;transition:transform .2s}
+.save-wrap .btn.primary:first-child{border-radius:9px;z-index:1;}
+.save-wrap .caret{
+   /* width:24px; */
+   padding:4px;border-radius:0 9px 9px 0;margin-left:0px;background: #2e333c;border: 1px solid #4a5160;margin-left: -10px;
+    padding-right: 5px !important;}
+.save-wrap .caret svg{width:12px;height:12px;transition:transform .2s; stroke: #a6acb7;}
 .save-wrap.open .caret svg{transform:rotate(180deg)}
 .save-menu{position:absolute;top:calc(100% + 7px);left:0;min-width:250px;background:#1b1e24;border:1px solid #303540;border-radius:11px;padding:6px;box-shadow:var(--sh);display:none;z-index:60;transform-origin:top left;animation:ctxIn .15s cubic-bezier(.2,.9,.3,1.2)}
 .save-menu.show{display:block}
@@ -1080,7 +1083,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .share-split .sg-main{padding:0 11px;position:relative;z-index:1}
 /* справа — статус совместной работы: серая с рамкой, ВЫХОДИТ ИЗ-ПОД левой кнопки
    (заходит под неё левым краем), все углы скруглены как у отдельной кнопки */
-.share-split .sg-status{position:relative;z-index:0;margin-left:-7px;background:#2e333c;border:1px solid #4a5160;color:var(--tx2);gap:6px;min-width:40px;padding:0 10px}
+.share-split .sg-status{position:relative;z-index:0;margin-left:-15px;background:#2e333c;border:1px solid #4a5160;color:var(--tx2);gap:2px;min-width:40px;padding:0 10px; padding-right: 5px !important;}
 .share-split .sg-count{font:700 12px var(--mono);color:var(--tx)}
 .share-split .sg-status:hover{background:#383f4b;border-color:#5a6373;color:var(--tx)}
 .share-split .sg-status:hover,.share-split .sg-main:hover{transform:none}
