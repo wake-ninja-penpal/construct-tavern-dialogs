@@ -1618,6 +1618,10 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .share-acc{margin-top:14px;border-top:1px solid var(--line);padding-top:11px}
 .sa-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
 .sa-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:9px;background:#191c21;border:1px solid #262a31}
+/* сетевой режим выключен: участник «серый» — доступ приостановлен (владелец видит это сразу) */
+.sa-item.off{opacity:.45;filter:grayscale(.85)}
+.sa-item.off .sa-who b{color:var(--tx2)}
+.sa-item.off .avatar-circle{filter:grayscale(1)}
 .sa-who{flex:1;min-width:0;display:flex;flex-direction:column}
 .sa-who b{font-size:12.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sa-who i{font-style:normal;font-size:10.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -320,6 +320,10 @@ export class SyncClient {
       if (jpw) jpay.password = jpw;
       const meta = this.store.doc.meta as unknown as { passHash?: string; passSalt?: string };
       if (meta && meta.passHash) jpay.pass = { salt: String(meta.passSalt || ''), hash: String(meta.passHash) };
+      /* own: вошедший публикует локальный проект (переключатель «Общедоступный»
+         или переподключение своей комнаты) — сервер разрешает ему открыть
+         комнату, которой ещё/уже нет на диске (см. join → room_closed) */
+      if (opts.own) jpay.own = true;
       sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc; role?: string; canEdit?: boolean; legacy?: boolean; linkMode?: string; error?: string } | null) => {
         if (!res || !res.ok) {
           if (res && res.needPassword) {
@@ -336,6 +340,11 @@ export class SyncClient {
           if (res && res.error === 'members_only') {
             this.disconnect(true);
             this.store.toast('По ссылке могут войти только участники, добавленные владельцем', 'warn');
+            return;
+          }
+          if (res && res.error === 'room_closed') {
+            this.disconnect(true);
+            this.store.toast('Проект сейчас не на сервере — владелец отключил сетевой доступ', 'warn');
             return;
           }
           this.setStatus('err');
@@ -494,12 +503,15 @@ export class SyncClient {
       this.linkMode = next;
       this.store.emit();
     });
-    /* владельца закрыл ссылку, пока мы были в комнате: гостей вежливо выгоняет */
+    /* владелец закрыл ссылку/выключил сетевой режим, пока мы были в комнате:
+       гостей и участников вежливо выгоняет */
     sock.on('vetvi:kicked', (m: { roomId?: string; reason?: string }) => {
       if (!m || m.roomId !== this.room) return;
       const why = m.reason === 'members'
         ? 'По ссылке могут войти только участники, добавленные владельцем'
-        : 'Владелец закрыл доступ по ссылке';
+        : m.reason === 'closed'
+          ? 'Владелец отключил сетевой доступ — комната закрыта'
+          : 'Владелец закрыл доступ по ссылке';
       this.disconnect(true);
       this.store.toast(why, 'warn');
     });
@@ -1065,13 +1077,35 @@ export class SyncClient {
     })();
   }
 
-  /** Выключить сетевой режим: выходим из комнаты, ссылка перестаёт работать
-   *  (hash очищается), проект остаётся локальным — доступы участников сохраняются. */
+  /** Выключить сетевой режим: удалить комнату с сервера (владелец — документ,
+   *  пароль и merge-заявки стираются, все участники выгоняются), выйти из
+   *  комнаты, очистить ссылку из хеша. Проект остаётся локальным; доступы
+   *  участников сохраняются — в окне «Поделиться» они показываются серыми,
+   *  при повторной публикации снова получают доступ. */
   unpublishProject(): void {
     if (this.mode === 'copy') return;
     if (!this.enabled) return;
-    this.disconnect(true);
-    this.store.toast('Проект снова локальный — сетевой доступ выключен', 'warn');
+    const roomId = this.room;
+    const sock = this.sock;
+    if (roomId && sock && sock.connected) {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        this.disconnect(true);
+        this.store.toast('Сетевой доступ выключен — комната удалена с сервера, участники отключены', 'warn');
+      };
+      try {
+        sock.emit('vetvi:room-delete', { roomId }, () => finish());
+      } catch {
+        finish();
+      }
+      /* страховка: сеть могла умереть в момент выключения — выходим сами */
+      window.setTimeout(finish, 2000);
+    } else {
+      this.disconnect(true);
+      this.store.toast('Сетевой доступ выключен', 'warn');
+    }
   }
 
   /** Сменить режим доступа по ссылке (off/members/open) — сервер проверяет роль

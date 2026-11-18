@@ -68,6 +68,7 @@ interface UserLite { login: string; displayName: string | null }
  *  участники заведены до публикации. Грант шлёт получателю уведомление —
  *  проект появится в его списке. */
 function ShareAccess({ store }: { store: VetviStore }) {
+  void store.revision;
   const sc = store.sync;
   const [items, setItems] = useState<AccessListItem[]>([]);
   const [meRole, setMeRole] = useState<string | null>(null);
@@ -77,6 +78,9 @@ function ShareAccess({ store }: { store: VetviStore }) {
   const [focused, setFocused] = useState(false);
   const [role, setRole] = useState<'editor' | 'reader'>('editor');
   const [busy, setBusy] = useState(false);
+  /* проект сейчас на сервере? серость участников и автопубликация
+     привязаны к этому состоянию (обновляется emit'ом стора) */
+  const isPub = !!(sc && sc.enabled && sc.mode === 'room');
   const reload = (attempt = 0) => {
     if (!sc) return;
     void accessList(sc.shareRoomId()).then((r) => {
@@ -133,6 +137,9 @@ function ShareAccess({ store }: { store: VetviStore }) {
     const lg = resolveLogin(raw !== undefined ? raw : login);
     if (!lg) { store.toast('Введите имя или логин пользователя', 'warn'); return; }
     setBusy(true);
+    /* первый сторонний участник: проект ещё локальный — после выдачи доступа
+       он САМ переходит в сетевой режим (иначе новому участнику некуда входить) */
+    const noExternalYet = !items.some((it) => it.role !== 'owner');
     const r = await accessGrant(
       sc.shareRoomId(),
       lg,
@@ -144,7 +151,12 @@ function ShareAccess({ store }: { store: VetviStore }) {
     if (!r.ok) { store.toast(r.error || 'Не удалось открыть доступ', 'err'); return; }
     setLogin('');
     setRole('editor');
-    store.toast('Доступ открыт — пользователю отправлено уведомление', 'ok');
+    if (noExternalYet && !(sc.enabled && sc.mode === 'room')) {
+      store.toast('Первый участник добавлен — проект переведён в сетевой режим', 'ok');
+      sc.publishProject();
+    } else {
+      store.toast('Доступ открыт — пользователю отправлено уведомление', 'ok');
+    }
     reload();
   };
   const revoke = async (lg: string) => {
@@ -178,9 +190,16 @@ function ShareAccess({ store }: { store: VetviStore }) {
       <div className="sp-cap">Участники проекта</div>
       {!loaded && <div className="sa-empty">Загрузка участников…</div>}
       {loaded && !items.length && <div className="sa-empty">Пока никого — найдите пользователя по имени или нику ниже</div>}
+      {!isPub && items.some((it) => it.role !== 'owner') && (
+        <div className="sa-empty">Сетевой режим выключен — участники серые и открыть проект не могут. Включите «Общедоступный (на сервере)» ниже, чтобы вернуть им доступ.</div>
+      )}
       <div className="sa-list">
         {items.map((it) => (
-          <div key={it.userId} className="sa-item">
+          <div
+            key={it.userId}
+            className={'sa-item' + (!isPub && it.role !== 'owner' ? ' off' : '')}
+            title={!isPub && it.role !== 'owner' ? 'Сетевой режим выключен — доступ приостановлен' : undefined}
+          >
             <span className="avatar-circle" style={{ background: it.color || '#8b929c' }}>{(it.displayName || it.login || '?')[0].toUpperCase()}</span>
             <div className="sa-who">
               <b>{it.displayName}</b>
@@ -255,7 +274,7 @@ function ShareAccess({ store }: { store: VetviStore }) {
       )}
       {isOwner && users.length === 0 && loaded && <div className="sa-empty">Зарегистрированных пользователей пока нет — аккаунты создаются по ссылкам-приглашениям</div>}
       <p style={{ fontSize: '11px', color: 'var(--tx3)', margin: '8px 0 0' }}>
-        Участник получит уведомление и увидит проект в своём списке — даже если проект ещё не на сервере.
+        Участник получит уведомление и увидит проект в своём списке. Открыть его можно, когда проект на сервере: первый добавленный участник сам включает сетевой режим.
       </p>
     </div>
   );
@@ -292,11 +311,16 @@ export function ShareModal({ store }: { store: VetviStore }) {
         </div>
       )}
 
-      {/* сетевой режим: включается ТОЛЬКО явным переключателем */}
+      {/* сетевой режим: включается ТОЛЬКО явным переключателем владельца.
+          Не-владельцу (участник/гость чужой комнаты) переключатель не
+          показывается — выключение удаляет комнату с сервера, это
+          исключительно решение владельца. */}
       <div className="share-pub">
         <div className="sp-cap">Сетевой проект</div>
         {isCopy ? (
           <div className="sp-st">Копия не публикуется: откройте оригинал и включите сетевой режим там.</div>
+        ) : !isOwner ? (
+          <div className="sp-st">Сетевой режим управляет владелец проекта — вы {sc?.role === 'editor' ? 'редактор' : sc?.role === 'reader' ? 'читатель' : 'гость'} этой комнаты.</div>
         ) : (
           <label className="pub-row">
             <input
@@ -327,6 +351,7 @@ export function ShareModal({ store }: { store: VetviStore }) {
       {isPublic && !isCopy && (
         <div className="share-linksec">
           <div className="sp-cap">Ссылка на проект</div>
+          {isOwner && (
           <label className="pub-row pub-row-sm">
             <input
               type="checkbox"
@@ -349,6 +374,7 @@ export function ShareModal({ store }: { store: VetviStore }) {
               </span>
             </span>
           </label>
+          )}
           {linkMode !== 'off' && (
             <>
               <div className="share-link">

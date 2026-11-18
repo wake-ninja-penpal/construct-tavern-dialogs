@@ -336,6 +336,10 @@ const qRoomUpsertPass = db.prepare(
 )
 const qRoomClearPass = db.prepare('UPDATE rooms SET pass_salt = NULL, pass_hash = NULL WHERE id = ?')
 const qRoomSetLinkMode = db.prepare('UPDATE rooms SET link_mode = ? WHERE id = ?')
+/* удаление комнаты с сервера (владелец выключил сетевой режим): вместе с
+   комнатой стираются её merge-заявки — в очереди не остаётся мусора */
+const qRoomDelete = db.prepare('DELETE FROM rooms WHERE id = ?')
+const qMergeDelRoom = db.prepare('DELETE FROM merges WHERE room_id = ?')
 const qRoomTrim = db.prepare(
   `DELETE FROM rooms WHERE id NOT IN (
      SELECT id FROM rooms ORDER BY updated_at DESC LIMIT ?
@@ -634,6 +638,11 @@ function sweepStaleMembers(io: Server, room: RoomState): boolean {
   return changed
 }
 
+/* есть ли живые участники в комнате (до создания RoomState) */
+function room_members_count(roomName: string): number {
+  return rooms.get(roomName)?.members.size || 0
+}
+
 function broadcastUsers(io: Server, room: RoomState) {
   io.to(room.name).emit('vetvi:users', { roomId: room.name, users: userList(room) })
 }
@@ -777,6 +786,9 @@ io.on('connection', (socket: Socket) => {
         userId?: string
         /* тихий rejoin (обновление роли): без «X — в комнате» остальным */
         quiet?: boolean
+        /* вошедший публикует локальный проект (переключатель «Общедоступный»):
+           может открыть комнату, которой ещё/уже нет на сервере */
+        own?: boolean
       },
       ack?: (r: unknown) => void,
     ) => {
@@ -796,6 +808,20 @@ io.on('connection', (socket: Socket) => {
           console.log(`[vetvi-sync][debug] join "${roomName}" tok=${typeof payload?.token === 'string' ? payload.token.slice(0, 8) : JSON.stringify(payload?.token)} userId=${JSON.stringify(payload?.userId)} acc=${acc ? acc.id : null} role=${role}`)
         }
 
+        /* комната на сервере — это сохранённый документ. Если его НЕТ (комната
+           никогда не публиковалась или удалена владельцем при выключении
+           сетевого режима), открыть комнату может только тот, кто публикует
+           локальный проект (own — переключатель «Общедоступный»). Все остальные
+           — гости по ссылке и УЧАСТНИКИ С РОЛЬЮ (они «серые» после выключения)
+           получают room_closed: комната удалена — никто не подключается,
+           вместо тихого создания пустой комнаты. */
+        const storedRoomEarly = getStoredRoom(roomName)
+        const ownClaim = payload?.own === true
+        if (!storedRoomEarly && room_members_count(roomName) === 0 && !ownClaim) {
+          ack?.({ ok: false, error: 'room_closed' })
+          return
+        }
+
         const user: UserMeta = acc
           ? { id: acc.id, name: acc.name, color: acc.color }
           : {
@@ -807,7 +833,7 @@ io.on('connection', (socket: Socket) => {
         const room = getRoom(roomName)
 
         /* пароль комнаты: восстановить из SQLite */
-        const storedRoom = getStoredRoom(roomName)
+        const storedRoom = storedRoomEarly
         if (!room.pass && storedRoom?.pass?.salt && storedRoom?.pass?.hash) {
           room.pass = { salt: String(storedRoom.pass.salt), hash: String(storedRoom.pass.hash) }
         }
@@ -963,6 +989,60 @@ io.on('connection', (socket: Socket) => {
       } catch (error) {
         console.error('[vetvi-sync] room-settings error', error)
         ack?.({ ok: false, error: 'settings failed' })
+      }
+    },
+  )
+
+  /* ── удаление комнаты с сервера — только владелец ──
+     Выключение «Общедоступный» в окне «Поделиться»: документ комнаты и её
+     настройки (пароль, режим ссылки) стираются из БД, merge-заявки комнаты
+     тоже, все участники выгоняются (в т.ч. по ссылке и из списка проектов).
+     Записи ProjectAccess НЕ удаляются: список участников сохраняется — в
+     окне владельца они показываются серыми, а при повторной публикации
+     снова получают доступ. */
+  socket.on(
+    'vetvi:room-delete',
+    (msg: { roomId?: string }, ack?: (r: unknown) => void) => {
+      try {
+        const roomName = msg?.roomId
+        if (!isSafeRoom(roomName) || roomName !== joinedRoom) {
+          ack?.({ ok: false, error: 'bad room' })
+          return
+        }
+        const me = room_members_get(roomName, socket.id)
+        const myRole = me && me.accId ? accessRole(roomName, me.accId) : null
+        if (myRole !== 'owner') {
+          ack?.({ ok: false, error: 'Только владелец может удалить комнату' })
+          return
+        }
+        const room = rooms.get(roomName)
+        if (room) {
+          /* выгоняем всех, кроме запросившего удаление (он сам закрывает
+             соединение сразу после ack — без двойного уведомления) */
+          for (const [sid, m] of room.members) {
+            if (sid === socket.id) continue
+            const sock = io.of('/').sockets.get(sid)
+            if (sock) sock.emit('vetvi:kicked', { roomId: roomName, reason: 'closed' })
+            releaseSocketLocks(io, room, sid)
+            releaseSocketFocus(io, room, sid)
+          }
+          if (room.gcTimer) {
+            clearTimeout(room.gcTimer)
+            room.gcTimer = null
+          }
+          rooms.delete(roomName)
+        }
+        try {
+          qRoomDelete.run(roomName)
+          qMergeDelRoom.run(roomName)
+        } catch (e) {
+          console.error('[vetvi-sync] room delete db error', e)
+        }
+        ack?.({ ok: true })
+        console.log(`[vetvi-sync] room "${roomName}" удалена владельцем`)
+      } catch (error) {
+        console.error('[vetvi-sync] room-delete error', error)
+        ack?.({ ok: false, error: 'delete failed' })
       }
     },
   )
