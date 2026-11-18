@@ -23,7 +23,7 @@ import { uid } from '@/vetvi/core/factory';
 import { getMe } from '@/vetvi/core/identity';
 import { mergeDocs, mergeStats, type MergeStats } from '@/vetvi/core/merge';
 import { passRandomSalt, sha256hex } from '@/vetvi/core/passlock';
-import { projList, projReadSlot } from '@/vetvi/core/projects';
+import { projList, projReadSlot, projRename } from '@/vetvi/core/projects';
 import { stItem, stSetItem } from '@/vetvi/core/storage';
 import type { VetviChar, VetviCharGroup, VetviEdge, VetviGroup, VetviNode } from '@/vetvi/core/types';
 import { accessInit, getAccountToken } from './auth';
@@ -324,7 +324,7 @@ export class SyncClient {
          или переподключение своей комнаты) — сервер разрешает ему открыть
          комнату, которой ещё/уже нет на диске (см. join → room_closed) */
       if (opts.own) jpay.own = true;
-      sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc; role?: string; canEdit?: boolean; legacy?: boolean; linkMode?: string; error?: string } | null) => {
+      sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc; role?: string; canEdit?: boolean; legacy?: boolean; linkMode?: string; name?: string; error?: string } | null) => {
         if (!res || !res.ok) {
           if (res && res.needPassword) {
             if (jpw) opts._pwWrong = true;
@@ -356,6 +356,10 @@ export class SyncClient {
         /* режим ссылки и роль: reader/guest — только чтение (сервер и отклоняет правки) */
         this.linkMode = res.linkMode === 'off' || res.linkMode === 'members' ? res.linkMode : 'open';
         this.applyRole(res, opts.silent);
+        /* актуальное имя проекта комнаты: сервер хранит meta.name документа —
+           если соавтор переименовал проект, пока у нас он закрыт, запись реестра
+           обновится сразу при входе в комнату (и по vetvi:room-meta вживую) */
+        if (typeof res.name === 'string' && res.name) this.applyRoomName(roomId, res.name);
         this.store.syncUsers = res.users || [];
         this.lockApplyServerList(res.locks);
         this.focusApply(res.focus);
@@ -503,6 +507,12 @@ export class SyncClient {
       this.linkMode = next;
       this.store.emit();
     });
+    /* кто-то переименовал проект комнаты: сервер обновил ProjectAccess.projectName —
+       свежее имя в наш список проектов (в реальном времени, без перезагрузки) */
+    sock.on('vetvi:room-meta', (m: { roomId?: string; name?: string }) => {
+      if (!m || typeof m.name !== 'string' || !m.name) return;
+      this.applyRoomName(m.roomId || this.room || '', m.name);
+    });
     /* владелец закрыл ссылку/выключил сетевой режим, пока мы были в комнате:
        гостей и участников вежливо выгоняет. reason=revoked — у нас отозвали
        доступ (окно «Поделиться» → «Отозвать доступ»): выгоняет и участника. */
@@ -561,6 +571,31 @@ export class SyncClient {
     this.pwPending = null;
     this.disconnect(true);
     this.store.toast('Вход в комнату отменён', 'warn');
+  }
+
+  /** Свежее имя проекта комнаты → запись реестра проектов (список «Мои проекты»).
+   *  Вызывается при входе в комнату и по vetvi:room-meta (кто-то переименовал):
+   *  имя обновляется вживую и сохраняется в localStorage — остаётся и после
+   *  перезагрузки страницы. */
+  applyRoomName(roomId: string, name: string): void {
+    if (!roomId || !name) return;
+    try {
+      const entry = projList().find((e) => e.roomId === roomId);
+      if (!entry) return;
+      if (entry.name === name) return;
+      projRename(entry.id, name);
+      /* текущий проект этой комнаты: заголовок в шапке тоже показывает имя из
+         документа — документ придёт снимком/публикацией; реестр уже свежий */
+      this.store.emit();
+    } catch { /* реестр необязателен */ }
+  }
+
+  /** Мгновенное оповещение о переименовании проекта в комнате (без ожидания
+   *  публикации состояния): сервер обновит ProjectAccess.projectName и раздаст
+   *  vetvi:room-meta остальным участникам. */
+  sendRename(name: string): void {
+    if (!this.enabled || !this.sock || !this.room) return;
+    try { this.sock.emit('vetvi:rename', { roomId: this.room, name }); } catch { /* соединение умерло */ }
   }
 
   /** Ручное переподключение (клик по чипу со статусом разрыва). */

@@ -170,6 +170,14 @@ export async function accessMine(): Promise<AccessMineItem[]> {
   return (data.items as AccessMineItem[]) || [];
 }
 
+/** Актуальные названия проектов по комнатам (список «Мои проекты»): пока проект
+ *  закрыт, соавтор мог переименовать его — сервер хранит свежее имя в ProjectAccess. */
+export async function roomsNames(roomIds: string[]): Promise<Record<string, string>> {
+  const { status, data } = await postJson('/api/rooms/names', { roomIds });
+  if (status !== 200) return {};
+  return (data.names as Record<string, string>) || {};
+}
+
 /** Уведомления аккаунта. */
 export async function notificationsFetch(): Promise<{ items: NotificationItem[]; unread: number }> {
   const { status, data } = await getJson('/api/notifications');

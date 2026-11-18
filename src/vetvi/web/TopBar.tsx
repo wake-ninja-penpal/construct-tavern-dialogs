@@ -12,12 +12,13 @@
  * если кнопки скрыты скроллом — на краю панели появляется стрелка «там есть ещё».
  *
  * Блок кнопок холста — отсоединяемый: тянем за «грип» — блок отстёгивается от
- * шапки и превращается в плавающую панель, которую можно поставить у ЛЮБОГО края
- * холста: сверху/снизу — горизонтально, слева/справа — ВЕРТИКАЛЬНО. Панель сама
- * выравнивается (ничего не вылезает за экран — в том числе при быстром отпускании
- * сразу после отсоединения), не налезает на боковые панели (двигается вместе с их
- * открытием/закрытием) и сдвигает мини-карту/плашки в углах холста. Перетаскивание
- * обратно на шапку возвращает блок на место. Положение хранится в localStorage.
+ * шапки и ТЯНЕТСЯ ЗА КУРСОРОМ: панель следует за курсором в любую точку холста;
+ * рядом с местами крепления (края холста и шапка) панель МАГНИТИТСЯ к ним,
+ * а когда её оттягивают прочь — снова следует за курсором. У края панель
+ * ориентируется по нему (сверху/снизу — горизонтально, слева/справа — ВЕРТИКАЛЬНО),
+ * сама выравнивается (ничего не вылезает за экран), не налезает на боковые панели
+ * (двигается вместе с их открытием/закрытием) и сдвигает мини-карту/плашки в углах
+ * холста. Отпускание над шапкой возвращает блок на место. Положение — localStorage.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -31,21 +32,29 @@ import { AccountPopover, NotificationsPopover, useNotifications } from './Accoun
 
 /* ── отсоединяемый блок кнопок холста ── */
 
-const TOOLBLOCK_LS = 'vetvi-toolblock-v2';
+const TOOLBLOCK_LS = 'vetvi-toolblock-v3';
 const GAP = 12; // отступ плавающей панели от краёв экрана/панелей
 const TOPBAR_H_FALLBACK = 56;
+const MAGNET = 56; // радиус магнита: ближе этого расстояния до места крепления панель «прилипает»
 
 type ToolEdge = 'top' | 'bottom' | 'left' | 'right';
 
-interface ToolDock { float: boolean; edge: ToolEdge; along: number }
+/* edge+along — панель у края холста; free — панель в произвольной точке холста
+   (тянется за курсором, магнитится к краям и шапке) */
+interface ToolDock {
+  float: boolean; edge: ToolEdge; along: number;
+  free?: boolean; x?: number; y?: number;
+}
 
 function loadToolDock(): ToolDock {
   const def: ToolDock = { float: false, edge: 'top', along: GAP };
   try {
-    /* миграция v1 ({float,x,y}) → v2 (edge+along): ближайший край */
+    /* миграция v1 ({float,x,y}) и v2 (edge+along) → v3 (edge+along | free+x+y) */
     const old = localStorage.getItem('vetvi-toolblock-v1');
     if (old) localStorage.removeItem('vetvi-toolblock-v1');
-    const raw = localStorage.getItem(TOOLBLOCK_LS) || (old && (() => {
+    const old2 = localStorage.getItem('vetvi-toolblock-v2');
+    if (old2) localStorage.removeItem('vetvi-toolblock-v2');
+    const raw = localStorage.getItem(TOOLBLOCK_LS) || old2 || (old && (() => {
       try {
         const o = JSON.parse(old) as { float?: boolean; x?: number; y?: number };
         if (!o || !o.float) return null;
@@ -61,6 +70,10 @@ function loadToolDock(): ToolDock {
     const d = JSON.parse(raw as string) as Partial<ToolDock>;
     if (!d || typeof d !== 'object') return def;
     const edge: ToolEdge = d.edge === 'bottom' || d.edge === 'left' || d.edge === 'right' ? d.edge : 'top';
+    /* свободная позиция (v3): панель в произвольной точке холста */
+    if (d.float && d.free && Number.isFinite(Number(d.x)) && Number.isFinite(Number(d.y))) {
+      return { float: true, edge, along: Number(d.along) || def.along, free: true, x: Number(d.x), y: Number(d.y) };
+    }
     return { float: !!d.float, edge, along: Number(d.along) || def.along };
   } catch { return def; }
 }
@@ -152,48 +165,65 @@ export function TopBar(props: { store: VetviStore }) {
   /* ── отсоединяемый блок инструментов ── */
   const [toolDock, setToolDock] = useState<ToolDock>(loadToolDock);
   const [toolDragging, setToolDragging] = useState(false);
-  /* перетаскивание: держим блок за ту точку, за которую взялись (grabFrac —
-     доля вдоль длинной оси). Размеры перемеряются вживую: шапка даёт блок
-     «растянутым», плавающая панель — по содержимому, ориентация меняет оси. */
+  /* перетаскивание: панель тянется за курсором (точка хвата сохраняется — grabAlong
+     вдоль оси, grabCross поперёк), а рядом с местами крепления (края холста, шапка)
+     магнитится к ним. Размеры перемеряются вживую: шапка даёт блок «растянутым»,
+     плавающая панель — по содержимому, ориентация меняет оси. */
   const dragRef = useRef<{
-    moved: boolean; floatStart: boolean;
-    grabFrac: number; grabAlong: number; horiz: boolean; len: number; cross: number;
+    moved: boolean;
+    grabFrac: number; grabAlong: number; grabCross: number;
+    horiz: boolean; len: number; cross: number;
     pos: { x: number; y: number };
+    snap: ToolEdge | 'header' | null; // активный магнит в этот кадр
   } | null>(null);
   const floatRef = useRef<HTMLDivElement>(null);
   const toolDockRef = useRef(toolDock);
   const toolDraggingRef = useRef(false);
+  /* подсветка магнита: у какого края панель «прилипла» во время перетаскивания */
+  const [toolMagnet, setToolMagnet] = useState<ToolEdge | null>(null);
   /* refs синхронизируются в useLayoutEffect (не useEffect): fitDock и подгонка
      при перетаскивании читают их ДО отрисовки кадра — иначе на смене ориентации
      fitDock видит старый edge и возвращает панель по старой оси */
   useLayoutEffect(() => { toolDockRef.current = toolDock; }, [toolDock]);
   useLayoutEffect(() => { toolDraggingRef.current = toolDragging; }, [toolDragging]);
 
-  /* ── стрелки скролла блока кнопок в шапке ── */
+  /* ── стрелки скролла блоков шапки (блок меню и блок кнопок холста):
+     если кнопки скрыты скроллом — на краю блока появляется стрелка «там есть ещё» ── */
   const scrollRef = useRef<HTMLDivElement>(null);
+  const menuScrollRef = useRef<HTMLDivElement>(null);
   const [arrows, setArrows] = useState({ l: false, r: false });
+  const [menuArrows, setMenuArrows] = useState({ l: false, r: false });
 
   const measureArrows = () => {
     const el = scrollRef.current;
-    if (!el) return;
-    const has = el.scrollWidth > el.clientWidth + 2;
-    const l = has && el.scrollLeft > 2;
-    const r = has && el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
-    setArrows((p) => (p.l === l && p.r === r ? p : { l, r }));
+    if (el) {
+      const has = el.scrollWidth > el.clientWidth + 2;
+      const l = has && el.scrollLeft > 2;
+      const r = has && el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+      setArrows((p) => (p.l === l && p.r === r ? p : { l, r }));
+    }
+    const mf = menuScrollRef.current;
+    if (mf) {
+      const has = mf.scrollWidth > mf.clientWidth + 2;
+      const l = has && mf.scrollLeft > 2;
+      const r = has && mf.scrollLeft + mf.clientWidth < mf.scrollWidth - 2;
+      setMenuArrows((p) => (p.l === l && p.r === r ? p : { l, r }));
+    }
   };
 
   useEffect(() => {
     const t0 = setTimeout(measureArrows, 0); // первичный замер — вне тела эффекта
-    const el = scrollRef.current;
-    if (!el) return () => clearTimeout(t0);
     const ro = new ResizeObserver(() => measureArrows());
-    ro.observe(el);
+    const el = scrollRef.current;
+    const mf = menuScrollRef.current;
+    if (el) ro.observe(el);
+    if (mf) ro.observe(mf);
     const t = setInterval(measureArrows, 1200); // шрифты/контент могли догрузиться
     return () => { clearTimeout(t0); ro.disconnect(); clearInterval(t); };
-  }, [toolDock.float, toolDock.edge]);
+  }, [toolDock.float, toolDock.edge, saveOpen]);
 
-  const scrollTool = (dir: 1 | -1) => {
-    const el = scrollRef.current;
+  const scrollTool = (dir: 1 | -1, which: 'tools' | 'menu' = 'tools') => {
+    const el = which === 'tools' ? scrollRef.current : menuScrollRef.current;
     if (!el) return;
     el.scrollBy({ left: dir * Math.max(160, el.clientWidth * 0.6), behavior: 'smooth' });
   };
@@ -212,7 +242,7 @@ export function TopBar(props: { store: VetviStore }) {
   /* сдвиг угловых элементов (мини-карта, «только чтение», плашка расхождения),
      чтобы плавающая панель не налезала на них: карта уезжает вниз/влево,
      плашки — вверх, освобождая полосу панели */
-  const pushOverlays = (edge: ToolEdge, rect: Rect) => {
+  const pushOverlays = (edge: ToolEdge | 'free', rect: Rect) => {
     const mmEl = document.getElementById('miniMap');
     if (mmEl && store.mmOn) {
       const base = rectOf(mmEl);
@@ -220,6 +250,13 @@ export function TopBar(props: { store: VetviStore }) {
       if (overlap(rect, mm)) {
         if (edge === 'top') shiftVars.mmY = rect.bottom - mm.top + 10;
         else if (edge === 'right') shiftVars.mmX = -(mm.right - rect.left) - 10;
+        else if (edge === 'free') {
+          /* свободная позиция: освобождаем сторону с меньшим перекрытием */
+          const pushDown = rect.bottom - mm.top;
+          const pushLeft = mm.right - rect.left;
+          if (pushDown <= pushLeft) shiftVars.mmY = pushDown + 10;
+          else shiftVars.mmX = -(pushLeft + 10);
+        }
         else { shiftVars.mmX = 0; shiftVars.mmY = 0; }
       } else { shiftVars.mmX = 0; shiftVars.mmY = 0; }
     }
@@ -253,6 +290,17 @@ export function TopBar(props: { store: VetviStore }) {
     if (!el) return;
     const d = toolDockRef.current;
     const r = rectOf(el);
+    /* свободная позиция: клэмп внутрь холста (шапка/статусбар/боковые панели учтены) */
+    if (d.free) {
+      const x = clamp(Number(d.x) || GAP, st.left + GAP, Math.max(st.left + GAP, window.innerWidth - st.right - GAP - r.width));
+      const y = clamp(Number(d.y) || GAP, st.top + GAP, Math.max(st.top + GAP, window.innerHeight - st.bottom - GAP - r.height));
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.style.right = '';
+      el.style.bottom = '';
+      pushOverlays('free', { left: x, top: y, right: x + r.width, bottom: y + r.height, width: r.width, height: r.height });
+      return;
+    }
     const vert = d.edge === 'left' || d.edge === 'right';
     const len = vert ? r.height : r.width;
     const min = (vert ? st.top : st.left) + GAP;
@@ -263,8 +311,8 @@ export function TopBar(props: { store: VetviStore }) {
     /* позицию панель принимает ДО отрисовки кадра (правим DOM напрямую) —
        панель никогда не стоит за пределами экрана и не мигает; чужая ось
        очищается, чтобы не осталось позиции от прошлой ориентации */
-    if (vert) { el.style.top = along + 'px'; el.style.left = ''; }
-    else { el.style.left = along + 'px'; el.style.top = ''; }
+    if (vert) { el.style.top = along + 'px'; el.style.left = ''; el.style.right = ''; el.style.bottom = ''; }
+    else { el.style.left = along + 'px'; el.style.top = ''; el.style.right = ''; el.style.bottom = ''; }
     pushOverlays(d.edge, dockRect(d.edge, along, vert ? r.width : len, vert ? len : r.height));
   };
 
@@ -310,6 +358,18 @@ export function TopBar(props: { store: VetviStore }) {
     d.len = len;
     d.cross = cross;
     d.grabAlong = d.grabFrac * len;
+    /* свободный режим: точка хвата остаётся под курсором при смене размера */
+    if (toolDockRef.current.free && Number.isFinite(d.pos.x)) {
+      const st = reservedStrips();
+      const x = clamp(d.pos.x - d.grabAlong, st.left + GAP, Math.max(st.left + GAP, window.innerWidth - st.right - GAP - r.width));
+      const y = clamp(d.pos.y - d.grabCross, st.top + GAP, Math.max(st.top + GAP, window.innerHeight - st.bottom - GAP - r.height));
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.style.right = '';
+      el.style.bottom = '';
+      pushOverlays('free', { left: x, top: y, right: x + r.width, bottom: y + r.height, width: r.width, height: r.height });
+      return;
+    }
     const st = reservedStrips();
     const min = horiz ? st.left + GAP : st.top + GAP;
     const max = horiz
@@ -317,10 +377,10 @@ export function TopBar(props: { store: VetviStore }) {
       : Math.max(min, window.innerHeight - st.bottom - GAP - len);
     const along = clamp((horiz ? d.pos.x : d.pos.y) - d.grabAlong, min, max);
     /* правим позицию до отрисовки кадра — без прыжка; чужая ось очищается */
-    if (horiz) { el.style.left = along + 'px'; el.style.top = ''; }
-    else { el.style.top = along + 'px'; el.style.left = ''; }
+    if (horiz) { el.style.left = along + 'px'; el.style.top = ''; el.style.right = ''; el.style.bottom = ''; }
+    else { el.style.top = along + 'px'; el.style.left = ''; el.style.right = ''; el.style.bottom = ''; }
     pushOverlays(toolDock.edge, dockRect(toolDock.edge, along, horiz ? len : cross, horiz ? cross : len));
-  }, [toolDock.float, toolDock.edge, toolDragging]);
+  }, [toolDock.float, toolDock.edge, toolDock.free, toolDragging]);
 
   const onGripMove = (e: PointerEvent) => {
     const d = dragRef.current;
@@ -330,8 +390,6 @@ export function TopBar(props: { store: VetviStore }) {
       setToolDragging(true);
     }
     d.pos = { x: e.clientX, y: e.clientY };
-    /* ближайший край холста — панель ориентируется по нему (сверху/снизу —
-       горизонтально, слева/справа — вертикально) */
     const st = reservedStrips();
     const ih = window.innerHeight;
     const iw = window.innerWidth;
@@ -339,27 +397,61 @@ export function TopBar(props: { store: VetviStore }) {
     const cBottom = ih - st.bottom - GAP;
     const cLeft = st.left + GAP;
     const cRight = iw - st.right - GAP;
-    const dist = [
-      { e: 'top' as ToolEdge, v: Math.abs(e.clientY - cTop) },
-      { e: 'bottom' as ToolEdge, v: Math.abs(e.clientY - cBottom) },
-      { e: 'left' as ToolEdge, v: Math.abs(e.clientX - cLeft) },
-      { e: 'right' as ToolEdge, v: Math.abs(e.clientX - cRight) },
-    ].sort((a, b) => a.v - b.v)[0].e;
-    const horiz = dist === 'top' || dist === 'bottom';
-    /* блок держится за взятую точку (никакого прыжка центром к курсору);
-       при смене ориентации точка хвата переносится пропорционально */
-    if (horiz !== d.horiz) {
-      d.horiz = horiz;
-      d.grabAlong = d.grabFrac * d.len;
+    const topbarH = document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
+
+    /* ── магнит: места крепления — шапка и четыре края холста ──
+       в радиусе MAGNET от линии крепления панель «прилипает» к ней,
+       дальше от всех мест крепления — свободно следует за курсором */
+    const dHeader = e.clientY - topbarH; /* ≤0 — курсор над шапкой */
+    const edges: Array<{ e: ToolEdge; v: number }> = [
+      { e: 'top', v: Math.abs(e.clientY - cTop) },
+      { e: 'bottom', v: Math.abs(e.clientY - cBottom) },
+      { e: 'left', v: Math.abs(e.clientX - cLeft) },
+      { e: 'right', v: Math.abs(e.clientX - cRight) },
+    ];
+    edges.sort((a, b) => a.v - b.v);
+    const nearEdge = edges[0];
+    const headerHit = dHeader <= 0 || (dHeader < MAGNET && dHeader < nearEdge.v);
+    const edgeHit = !headerHit && nearEdge.v <= MAGNET;
+
+    /* магнит шапки: блок возвращается на своё место прямо во время drag'а,
+       оттягиваем прочь — снова тянется за курсором */
+    if (headerHit) {
+      d.snap = 'header';
+      setToolMagnet(null);
+      setToolDock((v) => (v.float ? { float: false, edge: 'top', along: 0 } : v));
+      return;
     }
-    /* клэмп при перетаскивании по живому размеру: панель не выходит за края */
-    const pointerAlong = horiz ? e.clientX : e.clientY;
-    const min = horiz ? cLeft : cTop;
-    const max = horiz ? Math.max(min, cRight - d.len) : Math.max(min, cBottom - d.len);
-    const along = clamp(pointerAlong - d.grabAlong, min, max);
-    setToolDock((v) => ({ ...v, float: true, edge: dist, along }));
-    /* мини-карта/плашки уступают место СРАЗУ, пока панель тянут над ними */
-    pushOverlays(dist, dockRect(dist, along, horiz ? d.len : d.cross, horiz ? d.cross : d.len));
+
+    /* магнит края: панель встаёт на край (сверху/снизу — горизонтально,
+       слева/справа — вертикально), точка хвата переносится пропорционально */
+    if (edgeHit) {
+      const dist = nearEdge.e;
+      d.snap = dist;
+      setToolMagnet(dist);
+      const horiz = dist === 'top' || dist === 'bottom';
+      if (horiz !== d.horiz) {
+        d.horiz = horiz;
+        d.grabAlong = d.grabFrac * d.len;
+      }
+      const pointerAlong = horiz ? e.clientX : e.clientY;
+      const min = horiz ? cLeft : cTop;
+      const max = horiz ? Math.max(min, cRight - d.len) : Math.max(min, cBottom - d.len);
+      const along = clamp(pointerAlong - d.grabAlong, min, max);
+      setToolDock((v) => ({ ...v, float: true, free: false, x: undefined, y: undefined, edge: dist, along }));
+      /* мини-карта/плашки уступают место СРАЗУ, пока панель тянут над ними */
+      pushOverlays(dist, dockRect(dist, along, horiz ? d.len : d.cross, horiz ? d.cross : d.len));
+      return;
+    }
+
+    /* ── свободный режим: панель тянется за курсором в любой точке холста ── */
+    d.snap = null;
+    setToolMagnet(null);
+    d.horiz = true;
+    const x = clamp(e.clientX - d.grabAlong, cLeft, Math.max(cLeft, cRight - d.len));
+    const y = clamp(e.clientY - d.grabCross, cTop, Math.max(cTop, cBottom - d.cross));
+    setToolDock((v) => ({ ...v, float: true, free: true, x, y }));
+    pushOverlays('free', { left: x, top: y, right: x + d.len, bottom: y + d.cross, width: d.len, height: d.cross });
   };
 
   const onGripUp = () => {
@@ -371,41 +463,51 @@ export function TopBar(props: { store: VetviStore }) {
        пропускалась (ref догонял позже) — блок оставался заэкранным до клика */
     toolDraggingRef.current = false;
     setToolDragging(false);
+    setToolMagnet(null);
     if (!d || !d.moved) return;
     const topbarH = document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
-    /* плавающую панель отпустили над шапкой — блок встаёт на своё место */
-    if (d.floatStart && d.pos.y <= topbarH) {
+    /* отпустили над шапкой (или магнит держал за шапку) — блок встаёт на своё место */
+    if (d.snap === 'header' || d.pos.y <= topbarH) {
       const next: ToolDock = { float: false, edge: 'top', along: 0 };
       setToolDock(next);
       saveToolDock(next);
       return;
     }
-    /* финальный клэмп по фактическому размеру прямо при отпускании: панель
-       немедленно встаёт целиком на экран — «нажать на холст» не требуется */
     const st = reservedStrips();
-    const el = floatRef.current;
-    const r = el ? rectOf(el) : null;
-    const len = r ? (d.horiz ? r.width : r.height) : d.len;
     const ih = window.innerHeight;
     const iw = window.innerWidth;
-    /* край пересчитываем по точке отпускания — ref мог отстать на быстром флипе */
-    const dist: ToolEdge = [
-      { e: 'top' as ToolEdge, v: Math.abs(d.pos.y - (st.top + GAP)) },
-      { e: 'bottom' as ToolEdge, v: Math.abs(d.pos.y - (ih - st.bottom - GAP)) },
-      { e: 'left' as ToolEdge, v: Math.abs(d.pos.x - (st.left + GAP)) },
-      { e: 'right' as ToolEdge, v: Math.abs(d.pos.x - (iw - st.right - GAP)) },
-    ].sort((a, b) => a.v - b.v)[0].e;
-    const horiz = dist === 'top' || dist === 'bottom';
-    if (horiz !== d.horiz) {
-      d.horiz = horiz;
-      d.grabAlong = d.grabFrac * len;
+    /* магнит края при отпускании: панель закрепляется у этого края (финальный
+       клэмп по фактическому размеру — панель немедленно стоит целиком на экране);
+       шапка исключена выше (первая проверка) — здесь остаётся только край */
+    if (d.snap) {
+      const dist: ToolEdge = d.snap;
+      const el = floatRef.current;
+      const r = el ? rectOf(el) : null;
+      const len = r ? (dist === 'top' || dist === 'bottom' ? r.width : r.height) : d.len;
+      const horiz = dist === 'top' || dist === 'bottom';
+      if (horiz !== d.horiz) {
+        d.horiz = horiz;
+        d.grabAlong = d.grabFrac * len;
+      }
+      const min = horiz ? st.left + GAP : st.top + GAP;
+      const max = horiz
+        ? Math.max(min, iw - st.right - GAP - len)
+        : Math.max(min, ih - st.bottom - GAP - len);
+      const along = clamp((horiz ? d.pos.x : d.pos.y) - d.grabAlong, min, max);
+      const next: ToolDock = { float: true, edge: dist, along, free: false };
+      setToolDock(next);
+      saveToolDock(next);
+      return;
     }
-    const min = horiz ? st.left + GAP : st.top + GAP;
-    const max = horiz
-      ? Math.max(min, iw - st.right - GAP - len)
-      : Math.max(min, ih - st.bottom - GAP - len);
-    const along = clamp((horiz ? d.pos.x : d.pos.y) - d.grabAlong, min, max);
-    const next: ToolDock = { float: true, edge: dist, along };
+    /* свободная позиция: клэмп по фактическому размеру и сохранение */
+    const el = floatRef.current;
+    const r = el ? rectOf(el) : null;
+    const w = r ? r.width : d.len;
+    const h = r ? r.height : d.cross;
+    const prev = toolDockRef.current;
+    const x = clamp(Number(prev.x) || GAP, st.left + GAP, Math.max(st.left + GAP, iw - st.right - GAP - w));
+    const y = clamp(Number(prev.y) || GAP, st.top + GAP, Math.max(st.top + GAP, ih - st.bottom - GAP - h));
+    const next: ToolDock = { float: true, free: true, edge: prev.edge || 'top', along: prev.along || GAP, x, y };
     setToolDock(next);
     saveToolDock(next);
   };
@@ -415,18 +517,24 @@ export function TopBar(props: { store: VetviStore }) {
     const el = (e.currentTarget as HTMLElement).closest('.tool-block, .tool-float') as HTMLElement | null;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    const floatStart = el.classList.contains('tool-float');
     const horizStart = !el.classList.contains('vert');
     const len = horizStart ? r.width : r.height;
+    const cross = horizStart ? r.height : r.width;
     const along0 = horizStart ? e.clientX - r.left : e.clientY - r.top;
     dragRef.current = {
       moved: false,
-      floatStart: el.classList.contains('tool-float'),
+      /* точка хвата: вдоль оси — пропорция (переживает смену ориентации/размера),
+         поперёк — пиксели (панель держится за взятую высоту); при отрыве от шапки
+         панель встаёт центром под курсор */
       grabFrac: len > 0 ? clamp(along0 / len, 0, 1) : 0.5,
       grabAlong: along0,
+      grabCross: floatStart ? e.clientY - r.top : cross / 2,
       horiz: horizStart,
       len,
-      cross: horizStart ? r.height : r.width,
+      cross,
       pos: { x: e.clientX, y: e.clientY },
+      snap: null,
     };
     e.preventDefault();
     window.addEventListener('pointermove', onGripMove);
@@ -464,9 +572,11 @@ export function TopBar(props: { store: VetviStore }) {
   };
 
   const sc = store.sync;
-  const statusChip = (() => {
+  /* статус синхронизации: цвет точки и число участников онлайн (для правой
+     половины составной кнопки «Поделиться») */
+  const statusInfo = (() => {
     const map: Record<string, [string, string]> = {
-      off: ['#6d7480', 'офлайн'],
+      off: ['#cf6b5a', 'офлайн'],
       conn: ['#d8c96f', 'подключение…'],
       on: ['#8fbf7f', 'онлайн'],
       err: ['#cf6b5a', 'ошибка связи'],
@@ -476,36 +586,13 @@ export function TopBar(props: { store: VetviStore }) {
     const isCopy = store.syncMode === 'copy';
     const [baseColor, baseText] = map[store.syncStatus] || map.off;
     const color = isCopy ? '#e2a54e' : baseColor;
-    const label = isCopy
-      ? 'копия'
-      : store.syncStatus === 'on'
-        ? (store.syncUsers.length || 1) + ' онлайн'
-        : baseText;
+    const count = store.syncStatus === 'on' ? (store.syncUsers.length || 1) : 0;
     const title = isCopy
-      ? 'Режим копии: ' + ((sc && sc.activeCopyObj()?.name) || '')
-      : 'Совместный доступ: статус и участники';
-    return (
-      <button
-        type="button"
-        id="bCollab"
-        className={'btn collab-chip' + (isCopy ? ' copy-mode' : '')}
-        title={title}
-        onClick={() => {
-          if (!sc) return;
-          if (!sc.enabled) {
-            if (store.syncMode === 'copy') store.openModal('copyBar');
-            else sc.shareProject();
-            return;
-          }
-          /* разрыв связи: клик по чипу — немедленное переподключение */
-          if (sc.status !== 'on') { sc.reconnect(); return; }
-          store.setCollabPop(!store.collabPop);
-        }}
-      >
-        <span className={'cc-dot' + (store.syncStatus === 'conn' ? ' pulse' : '')} style={{ background: color }} />
-        <span>{label}</span>
-      </button>
-    );
+      ? 'Режим копии: ' + ((sc && sc.activeCopyObj()?.name) || '') + ' — статус и участники'
+      : store.syncStatus === 'on'
+        ? 'В проекте сейчас работают: ' + count + ' — статус и участники'
+        : baseText + ' — совместный доступ';
+    return { color, count, title, isCopy };
   })();
 
   /* содержимое отсоединяемого блока (одинаково в шапке и в плавающей панели) */
@@ -587,38 +674,45 @@ export function TopBar(props: { store: VetviStore }) {
 
       <div className="vsep" />
 
-      {/* фиксированные кнопки слева (в совсем узких окнах тихо скроллятся без полосы) */}
+      {/* блок кнопок меню: та же ширина, что у блока кнопок холста, со скроллом
+          и стрелками — в узких окнах ни один из блоков не пропадает */}
       <div className="tb-fixed">
-        <button type="button" className="btn" id="bNew" title={'Новый проект (' + hkText('newProject') + ')'} onClick={() => store.createProject()}>
-          + Новый
-        </button>
-        <button type="button" className="btn" id="bOpen" title={'Открыть (' + hkText('projects') + ')'} onClick={() => store.openModal('projects')}>
-          Открыть
-        </button>
+        {menuArrows.l && (
+          <button type="button" className="tb-arrow l" title="Здесь есть ещё кнопки" aria-label="Прокрутить меню влево" onMouseDown={(e) => e.preventDefault()} onClick={() => scrollTool(-1, 'menu')}>
+            <ArrowIcon dir="l" />
+          </button>
+        )}
+        <div className="tb-fixed-scroll" ref={menuScrollRef} onScroll={measureArrows}>
+          <button type="button" className="btn ibtn" id="bNew" title={'Новый проект (' + hkText('newProject') + ')'} aria-label="Новый проект" onClick={() => store.createProject()}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+          <button type="button" className="btn ibtn" id="bOpen" title={'Открыть (' + hkText('projects') + ')'} aria-label="Открыть проект" onClick={() => store.openModal('projects')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+          </button>
 
-        <div className={'save-wrap' + (saveOpen ? ' open' : '')} ref={saveRef}>
-          <button type="button" className="btn primary" id="bSave" title={'Сохранить (' + hkText('save') + ')'} onClick={() => store.saveAs()}>
-            Сохранить
-          </button>
-          <button
-            type="button"
-            className="btn primary caret"
-            id="bSaveMenu"
-            title="Варианты сохранения"
-            aria-haspopup="menu"
-            aria-expanded={saveOpen}
-            onClick={() => {
-              /* меню позиционируется fixed: не зависит от прокруток шапки */
-              const el = saveRef.current;
-              if (el) {
-                const r = el.getBoundingClientRect();
-                setSavePos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 266)), top: r.bottom + 7 });
-              }
-              setSaveOpen((v) => !v);
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-          </button>
+          <div className={'save-wrap' + (saveOpen ? ' open' : '')} ref={saveRef}>
+            <button type="button" className="btn primary ibtn" id="bSave" title={'Сохранить (' + hkText('save') + ')'} aria-label="Сохранить" onClick={() => store.saveAs()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
+            </button>
+            <button
+              type="button"
+              className="btn primary caret"
+              id="bSaveMenu"
+              title="Варианты сохранения"
+              aria-haspopup="menu"
+              aria-expanded={saveOpen}
+              onClick={() => {
+                /* меню позиционируется fixed: не зависит от прокруток шапки */
+                const el = saveRef.current;
+                if (el) {
+                  const r = el.getBoundingClientRect();
+                  setSavePos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 266)), top: r.bottom + 7 });
+                }
+                setSaveOpen((v) => !v);
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
           <div
             className={'save-menu' + (saveOpen ? ' show' : '')}
             role="menu"
@@ -657,42 +751,68 @@ export function TopBar(props: { store: VetviStore }) {
 
         <div className="vsep" />
 
-        <button type="button" className="btn" id="bPlay" title={'Режим новеллы (' + hkText('play') + ') — выделенные блоки по порядку или весь сюжет'} onClick={() => {
+        <button type="button" className="btn ibtn" id="bPlay" title={'Режим новеллы (' + hkText('play') + ') — выделенные блоки по порядку или весь сюжет'} aria-label="Играть" onClick={() => {
           store.setPlayerStart(null, false);
           store.openModal('player');
         }}>
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 5.5v13l10.5-6.5z" /></svg>
-          <span className="t">Играть</span>
         </button>
 
-        {statusChip}
-
         {(sc && sc.enabled && store.syncMode !== 'copy') && (
-          <button type="button" className="btn" id="bMerge" title="Merge-запросы копий" onClick={() => store.openModal('merge')}>
+          <button type="button" className="btn ibtn" id="bMerge" title="Merge-запросы копий" aria-label="Merge-запросы" onClick={() => store.openModal('merge')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
-            <span className="t">Merge</span>
             {store.syncMergeCount > 0 && <span className="m-badge">{store.syncMergeCount}</span>}
           </button>
         )}
 
-        <button type="button" className="btn" id="bCopies" title="Локальные копии проекта" onClick={() => store.openModal('copies')}>
+        <button type="button" className="btn ibtn" id="bCopies" title="Локальные копии проекта" aria-label="Копии" onClick={() => store.openModal('copies')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-          <span className="t">Копии</span>
         </button>
 
-        <button type="button" className="btn" id="bLog" title="Журнал действий: кто и что менял в проекте" onClick={() => { store.setLogFilters(null, null); store.openModal('log'); }}>
+        <button type="button" className="btn ibtn" id="bLog" title="Журнал действий: кто и что менял в проекте" aria-label="Журнал действий" onClick={() => { store.setLogFilters(null, null); store.openModal('log'); }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8.6" /><path d="M12 7.4V12l3.2 2" /></svg>
-          <span className="t">Журнал</span>
         </button>
 
-        <button type="button" className="btn primary" id="bShare" title="Поделиться ссылкой на проект" onClick={() => {
-          if (!sc) return;
-          if (store.syncMode === 'copy') store.openModal('copyBar');
-          else sc.shareProject();
-        }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" /></svg>
-          <span className="t">Поделиться</span>
-        </button>
+        {/* составная кнопка «Поделиться + онлайн»: слева — иконка поделиться
+            (окно «Поделиться»), справа — статус: красная точка офлайн или зелёная
+            с числом участников в проекте сейчас */}
+        <div className="share-split" role="group" aria-label="Поделиться и статус совместной работы">
+          <button type="button" className="btn primary sg-main" id="bShare" title="Поделиться ссылкой на проект" aria-label="Поделиться" onClick={() => {
+            if (!sc) return;
+            if (store.syncMode === 'copy') store.openModal('copyBar');
+            else sc.shareProject();
+          }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" /></svg>
+          </button>
+          <button
+            type="button"
+            className="btn primary sg-status"
+            id="bCollab"
+            title={statusInfo.title}
+            aria-label="Статус совместной работы"
+            onClick={() => {
+              if (!sc) return;
+              if (!sc.enabled) {
+                if (store.syncMode === 'copy') store.openModal('copyBar');
+                else sc.shareProject();
+                return;
+              }
+              /* разрыв связи: клик по статусу — немедленное переподключение */
+              if (sc.status !== 'on') { sc.reconnect(); return; }
+              store.setCollabPop(!store.collabPop);
+            }}
+          >
+            <span className={'cc-dot' + (store.syncStatus === 'conn' ? ' pulse' : '')} style={{ background: statusInfo.color }} />
+            {statusInfo.count > 0 && <span className="sg-count">{statusInfo.count}</span>}
+          </button>
+        </div>
+
+        {menuArrows.r && (
+          <button type="button" className="tb-arrow r" title="Здесь есть ещё кнопки" aria-label="Прокрутить меню вправо" onMouseDown={(e) => e.preventDefault()} onClick={() => scrollTool(1, 'menu')}>
+            <ArrowIcon dir="r" />
+          </button>
+        )}
+        </div>
       </div>
 
       {/* отсоединяемый блок кнопок холста: в шапке — со внутренним скроллом и
@@ -764,25 +884,30 @@ export function TopBar(props: { store: VetviStore }) {
     </header>
 
     {/* плавающая панель инструментов: у любого края холста — горизонтальная
-        (сверху/снизу) или вертикальная (слева/справа). Перпендикулярная координата
-        — в CSS по data-edge (от полос шапки/панелей), координата вдоль края — here. */}
+        (сверху/снизу) или вертикальная (слева/справа), либо в свободной позиции —
+        тянется за курсором и магнитится к местам крепления. Перпендикулярная
+        координата у края — в CSS по data-edge, вдоль края / свободная — here. */}
     {toolDock.float && (
       <div
-        className={'tool-float' + (vertFloat ? ' vert' : '') + (toolDragging ? ' dragging' : '')}
+        className={'tool-float' + (toolDock.free ? ' free' : '') + (vertFloat ? ' vert' : '') + (toolDragging ? ' dragging' : '') + (!toolDock.free && toolMagnet && toolDragging ? ' magnet' : '')}
         ref={floatRef}
-        style={vertFloat ? { top: toolDock.along } : { left: toolDock.along }}
-        data-edge={toolDock.edge}
+        style={toolDock.free
+          ? { left: toolDock.x, top: toolDock.y, right: '', bottom: '' }
+          : vertFloat
+            ? { top: toolDock.along, left: '', right: '', bottom: '' }
+            : { left: toolDock.along, top: '', right: '', bottom: '' }}
+        data-edge={toolDock.free ? 'free' : toolDock.edge}
         role="toolbar"
         aria-label="Панель инструментов холста"
       >
         <button
           type="button"
           className="tool-grip"
-          title="Перетащите — вернёте на шапку или переставите"
+          title="Перетащите — панель следует за курсором; у края холста или шапки примагнитится"
           aria-label="Переместить панель инструментов"
           onPointerDown={onGripDown}
         >
-          <GripIcon vert={vertFloat} />
+          <GripIcon vert={vertFloat && !toolDock.free} />
         </button>
         <div className="float-scroll">
           {toolContent}

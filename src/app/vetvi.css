@@ -25,8 +25,10 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
 /* фиксированные кнопки слева; при острой нехватке места (узкие окна) тихо
    сжимаются со скрытым скроллом — правый блок (поиск/уведомления/аккаунт)
    прижат к краю и ВИДЕН всегда; основной скролл с стрелками — у блока кнопок холста */
-#topbar > .tb-fixed{display:inline-flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
-.tb-fixed::-webkit-scrollbar{display:none}
+#topbar > .tb-fixed{position:relative;display:inline-flex;align-items:center;gap:0;flex:1 1 0;min-width:0;border-radius:10px;transition:background .15s}
+.tb-fixed:hover{background:rgba(255,255,255,.035)}
+.tb-fixed .tb-fixed-scroll{display:inline-flex;align-items:center;gap:10px;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding:4px 2px}
+.tb-fixed-scroll::-webkit-scrollbar{display:none}
 /* правый прижатый блок: поиск, уведомления, аккаунт — всегда у края шапки,
    никогда не сдвигаются и не уезжают за экран */
 #topbar > .tb-right{display:inline-flex;align-items:center;gap:10px;flex:none;margin-left:auto}
@@ -942,6 +944,11 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .log-rb:hover{background:#332c1d;color:#efce9e}
 .log-rb.dis{opacity:.45;cursor:not-allowed}
 .log-rb.dis:hover{background:#292417;color:#d9b98a}
+/* причина под кнопкой отката: для «недоступных» точек — почему, для
+   «ближайшего снимка» — что именно произойдёт; видна всегда (подсказка
+   у выключенной кнопки не показывается) */
+.log-rb-why{margin-top:4px;align-self:flex-start;max-width:520px;font:11px/1.5 var(--body);color:var(--tx3);opacity:.85}
+.log-rb-why.dis{color:#c9927e}
 .log-empty{color:var(--tx3);text-align:center;padding:26px 0;font:12.5px var(--body)}
 .log-foot-info{margin-right:auto;font:10.5px var(--mono);color:var(--tx3);align-self:center}
 .log-flash{animation:logFlash 1.6s ease-out 1}
@@ -1066,6 +1073,14 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .cc-dot{width:9px;height:9px;border-radius:50%;background:#6d7480;flex:none;transition:background .2s}
 .cc-dot.pulse{animation:ccPulse 1.1s infinite}
 @keyframes ccPulse{50%{opacity:.3}}
+/* составная кнопка «Поделиться + онлайн»: левая половина — иконка поделиться,
+   правая — статус (красная точка офлайн / зелёная + число участников) */
+.share-split{display:inline-flex;flex:none}
+.share-split .sg-main{border-top-right-radius:0;border-bottom-right-radius:0;padding:0 10px}
+.share-split .sg-status{border-top-left-radius:0;border-bottom-left-radius:0;border-left:1px solid rgba(34,22,4,.28);gap:6px;min-width:38px;padding:0 9px}
+.share-split .sg-count{font:700 12px var(--mono);color:#221604}
+.share-split .sg-status:hover,.share-split .sg-main:hover{transform:none}
+.share-split .sg-status:active,.share-split .sg-main:active{transform:scale(.97)}
 .collab-chip.copy-mode{border-color:rgba(226,165,78,.55);color:var(--acc2);background:var(--accd)}
 #collabPop{position:fixed;z-index:95;display:none;min-width:236px;background:#1b1e24;border:1px solid #303540;border-radius:12px;padding:8px;box-shadow:var(--sh)}
 #collabPop.show{display:block;animation:ctxIn .16s cubic-bezier(.2,.9,.3,1.2)}
@@ -1538,8 +1553,8 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 #collabPop,.acc-pop,.ntf-pop{position:fixed;z-index:95;display:none;min-width:236px;background:#1b1e24;border:1px solid #303540;border-radius:12px;padding:8px;box-shadow:var(--sh)}
 #collabPop.show,.acc-pop.show,.ntf-pop.show{display:block;animation:ctxIn .16s cubic-bezier(.2,.9,.3,1.2)}
 
-.avatar-btn{padding:0;overflow:visible}
-.avatar-circle{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#1c1002;font:700 13px/1 var(--body);user-select:none;box-shadow:0 0 0 2px rgba(0,0,0,.25),inset 0 0 6px rgba(0,0,0,.18)}
+.avatar-btn{padding:0;overflow:visible;flex:none;width:34px}
+.avatar-circle{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#1c1002;font:700 13px/1 var(--body);user-select:none;box-shadow:0 0 0 2px rgba(0,0,0,.25),inset 0 0 6px rgba(0,0,0,.18);flex:none}
 .avatar-circle.big{width:44px;height:44px;font-size:20px}
 
 /* ── отсоединяемый блок кнопок холста (тулбар) ──
@@ -1570,6 +1585,9 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tool-float[data-edge="bottom"]{bottom:calc(var(--flt-strip-bottom,0px) + 12px)}
 .tool-float[data-edge="left"]{left:calc(var(--flt-strip-left,0px) + 12px)}
 .tool-float[data-edge="right"]{right:calc(var(--flt-strip-right,0px) + 12px)}
+/* свободная позиция: координаты задаются инлайн (панель тянется за курсором,
+   магнитится к местам крепления); CSS-привязку к полосам отключаем */
+.tool-float[data-edge="free"]{top:auto;right:auto;bottom:auto;left:auto}
 /* вертикальная ориентация у левого/правого края */
 .tool-float.vert{flex-direction:column;align-items:center;padding:6px 6px 12px}
 .tool-float.vert .float-scroll{flex-direction:column;max-width:none;max-height:calc(100vh - 140px);overflow-x:hidden;overflow-y:auto}
@@ -1580,6 +1598,9 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tool-float .vsep{height:22px}
 .tool-float.dragging{z-index:80;cursor:grabbing;box-shadow:0 16px 44px rgba(0,0,0,.65);opacity:.96}
 .tool-float.dragging .btn{pointer-events:none}
+/* магнит: панель у места крепления — подсветка границ */
+.tool-float.magnet{border-color:rgba(226,165,78,.75);box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 0 2px rgba(226,165,78,.35),0 0 18px rgba(226,165,78,.25)}
+.tool-float.magnet.dragging{box-shadow:0 16px 44px rgba(0,0,0,.65),0 0 0 2px rgba(226,165,78,.4),0 0 22px rgba(226,165,78,.3)}
 
 /* угловые элементы холста уступают место плавающей панели через --flt-* переменные
    (их выставляет TopBar, когда панель поставлена на их полосе) */
@@ -1678,3 +1699,8 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .pj-shared{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
 .pj-sh-cap{font:600 9.5px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);padding:2px 2px 7px}
 .pj-row.shared{background:rgba(226,165,78,.04)}
+
+/* кнопки внутри скролл-блоков шапки не сжимаются — прокрутка вместо сплющивания */
+.tb-fixed .tb-fixed-scroll > *,.tb-fixed .tb-fixed-scroll .save-wrap,
+.tool-block .tool-scroll > *,.tool-block .tool-scroll .save-wrap,
+.tool-float .float-scroll > *{flex:none}

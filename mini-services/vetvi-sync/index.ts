@@ -120,6 +120,7 @@ let mainDbWarnAt = 0
 let qSessionRow: ReturnType<Database['prepare']> | null = null
 let qAccessRole: ReturnType<Database['prepare']> | null = null
 let qAccessCount: ReturnType<Database['prepare']> | null = null
+let qAccessRename: ReturnType<Database['prepare']> | null = null
 
 /* предупреждение о недоступной главной БД — не чаще раза в 30 секунд,
    чтобы не заспамить лог, но причина «все гости только для чтения»
@@ -154,6 +155,7 @@ function openMainDb(): void {
     )
     qAccessRole = d.prepare('SELECT role FROM ProjectAccess WHERE roomId = ? AND userId = ?')
     qAccessCount = d.prepare('SELECT COUNT(*) AS c FROM ProjectAccess WHERE roomId = ?')
+    qAccessRename = d.prepare('UPDATE ProjectAccess SET projectName = ? WHERE roomId = ?')
     mainDb = d
     mainDbWarnAt = 0
     console.log('[vetvi-sync] главная БД открыта:', MAIN_DB_FILE)
@@ -168,6 +170,7 @@ function dropMainDb(): void {
   qSessionRow = null
   qAccessRole = null
   qAccessCount = null
+  qAccessRename = null
 }
 
 /* после «no such table» (база создана, но init-db ещё не отработал)
@@ -552,6 +555,11 @@ interface RoomState {
   pass: { salt: string; hash: string } | null
   /* доступ по ссылке (см. StoredRoom.linkMode) — меняет владелец из окна */
   linkMode: 'off' | 'members' | 'open'
+  /* актуальное название проекта комнаты: обновляется при публикации документа
+     (meta.name) — синхронизируется в ProjectAccess.projectName (списки проектов
+     участников показывают свежее имя даже пока проект закрыт) и раздаётся
+     подписчикам события vetvi:room-meta */
+  pname: string | null
   gcTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -590,7 +598,7 @@ function room_members_get(roomName: string, sid: string): RoomMember | null {
 function getRoom(name: string): RoomState {
   let room = rooms.get(name)
   if (!room) {
-    room = { name, members: new Map(), locks: new Map(), focus: new Map(), pass: null, linkMode: 'open', gcTimer: null }
+    room = { name, members: new Map(), locks: new Map(), focus: new Map(), pass: null, linkMode: 'open', pname: null, gcTimer: null }
     rooms.set(name, room)
   }
   if (room.gcTimer) {
@@ -598,6 +606,37 @@ function getRoom(name: string): RoomState {
     room.gcTimer = null
   }
   return room
+}
+
+/* имя проекта из документа комнаты (meta.name), безопасно */
+function docProjectName(doc: unknown): string | null {
+  if (!doc || typeof doc !== 'object') return null
+  const meta = (doc as { meta?: unknown }).meta
+  if (!meta || typeof meta !== 'object') return null
+  const nm = (meta as { name?: unknown }).name
+  if (typeof nm !== 'string') return null
+  const t = nm.trim().slice(0, 120)
+  return t || null
+}
+
+/* переименование проекта комнаты: название хранится в ProjectAccess (списки
+   «Мои проекты»/«Вам открыли доступ» у участников обновляются даже пока проект
+   у них закрыт — в реальном времени по vetvi:room-meta и после перезагрузки
+   страницы через /api/rooms/names). Ошибки БД не роняют комнату. */
+function applyRoomRename(roomId: string, name: string): void {
+  const room = getRoom(roomId)
+  if (room.pname === name) return
+  room.pname = name
+  try {
+    openMainDb()
+    if (mainDb && qAccessRename) {
+      qAccessRename.run(name, roomId)
+    }
+  } catch (e) {
+    if (isSchemaError(e)) dropMainDb()
+    else warnMainDb('обновление projectName', e)
+  }
+  io.to(roomId).emit('vetvi:room-meta', { roomId, name })
 }
 
 /* sha256 в hex — тот же формат, что и на клиенте (utf-8) */
@@ -973,6 +1012,13 @@ io.on('connection', (socket: Socket) => {
         // удаляем призраков перед расчётом списка — счётчик онлайн всегда актуальный
         if (sweepStaleMembers(io, room)) broadcastUsers(io, room)
 
+        /* актуальное имя проекта комнаты: из хранящегося документа (или БД при
+           первом взгляде) — клиент обновляет свой список проектов при входе */
+        const roomName0 = docProjectName(storedRoom ? storedRoom.doc : null)
+        if (roomName0 && !room.pname) {
+          room.pname = roomName0
+        }
+
         ack?.({
           ok: true,
           count: userList(room).length,
@@ -987,6 +1033,8 @@ io.on('connection', (socket: Socket) => {
           canEdit,
           /* режим доступа по ссылке — его показывает окно «Поделиться» */
           linkMode: room.linkMode,
+          /* название проекта комнаты (meta.name хранящегося документа) */
+          name: room.pname || roomName0 || undefined,
           /* legacy: в комнате ещё нет ни одной записи доступа — клиент может
              заявить владение (первый перешедший с обновления) */
           legacy: !role && accessCount(roomName) === 0,
@@ -1139,8 +1187,25 @@ io.on('connection', (socket: Socket) => {
       saveRoomDoc(msg.roomId, doc, new Date().toISOString()) // только строка этой комнаты
       scheduleTrim()
       socket.to(msg.roomId).emit('vetvi:state', { roomId: msg.roomId, doc })
+      /* название проекта могло измениться — в БД (списки участников) и в комнату */
+      const nm = docProjectName(doc)
+      if (nm) applyRoomRename(msg.roomId, nm)
     } catch (error) {
       console.error('[vetvi-sync] state error', error)
+    }
+  })
+
+  /* ── переименование проекта в комнате (мгновенное, без ожидания публикации):
+       обновляет ProjectAccess.projectName и раздаёт vetvi:room-meta участникам ── */
+  socket.on('vetvi:rename', (msg: { roomId?: string; name?: string }) => {
+    try {
+      if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      if (!sockCanEditNow(socket, joinedRoom)) return // только чтение
+      const nm = typeof msg?.name === 'string' ? msg.name.trim().slice(0, 120) : ''
+      if (!nm) return
+      applyRoomRename(msg.roomId, nm)
+    } catch {
+      // ignore
     }
   })
 
@@ -1164,6 +1229,8 @@ io.on('connection', (socket: Socket) => {
         doc,
         by: msg.by && typeof msg.by === 'object' ? { name: String(msg.by.name || '').slice(0, 40), color: String(msg.by.color || '').slice(0, 20) } : null,
       })
+      const nmR = docProjectName(doc)
+      if (nmR) applyRoomRename(msg.roomId, nmR)
       console.log(`[vetvi-sync] replace in "${msg.roomId}" by ${msg.by?.name || '?'}`)
     } catch (error) {
       console.error('[vetvi-sync] replace error', error)

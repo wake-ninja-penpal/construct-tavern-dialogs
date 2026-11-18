@@ -17,7 +17,7 @@
  *    .log-foot-info, подвалы настроек — .set-foot-row + .set-store-msg.
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { APP_VERSION, PATCHNOTES, PATCH_TAGS } from '@/vetvi/core/patchnotes';
 import { normalizeLogDiff, SECTION_TITLES } from '@/vetvi/core/logdiff';
@@ -291,22 +291,38 @@ function fragOf(text: string, q: string): string {
 const LOG_PREFIX: Record<string, string> = { nA: '+', nD: '−', eA: '+', eD: '−', gA: '+', gD: '−' };
 const LOG_RB_NO_SNAP = 'Снимок состояния для этой записи недоступен: запись старая, от другого участника, или снимок вытеснен более новыми — откат невозможен.';
 const LOG_RB_APPROX = 'Точный снимок этой записи недоступен — откат к ближайшему доступному снимку (состояние проекта сразу ПОСЛЕ этой правки). Правки между ними тоже будут откачены. Сам откат можно отменить (';
+const LOG_RB_APPROX_SHORT = 'Точного снимка этой записи нет — откат к ближайшему: состояние сразу после этой правки, промежуточные правки тоже откатятся.';
 
-/* Для каждой записи журнала — снимок, к которому можно откатить.
+/* Причина, по которой у записи нет собственного снимка (и нет более нового):
+   запись создана «вручную» (переименование, сохранение, экспорт, импорт) —
+   без деталей и снимка состояния. */
+function logRbNoSnapReason(e: LogEntry): string {
+  const tail = 'а более новых снимков в журнале нет — откатывать не к чему.';
+  if (!e.diff) {
+    return 'У записи нет снимка состояния: она создана вручную или служебная (переименование, сохранение, экспорт, импорт), ' + tail;
+  }
+  return 'Снимок состояния не сохранился: правка слишком большая для снимка (журнал хранит снимки до ~0,8 МБ), ' + tail;
+}
+
+/* Для каждой записи журнала — что доступно для отката.
    Свой снимок записи (состояние ДО правки) — точный откат. Если его нет
    (старая запись классической версии, снимок вытеснен, запись чужой копии),
    используем ближайший снимок НОВЕЕ записи: это состояние сразу после
    правки — «откат к моменту записи» с оговоркой (снимки едут в журнале
    только для записей, сделанных в React-версии, поэтому старые записи
-   без fallback были вообще недоступны для отката). */
-function buildRollbackMap(entries: LogEntry[]): Map<string, { snap: string; approx: boolean }> {
-  const map = new Map<string, { snap: string; approx: boolean }>();
+   без fallback были вообще недоступны для отката). Если снимков нет ни
+   у записи, ни у всех более новых — откат невозможен, причина видна рядом. */
+function buildRollbackMap(entries: LogEntry[]): Map<string, { snap: string; approx: boolean; undone?: number } | { snap: null; reason: string }> {
+  const map = new Map<string, { snap: string; approx: boolean; undone?: number } | { snap: null; reason: string }>();
   let nearestNewer: string | null = null; // ближайший снимок новее (вверх списка)
+  let newerCount = 0; // сколько записей между этой и снимком (их тоже откатит)
   for (const e of entries) {
     const own = typeof e.snap === 'string' && e.snap ? (e.snap as string) : null;
     if (own) map.set(e.id, { snap: own, approx: false });
-    else if (nearestNewer) map.set(e.id, { snap: nearestNewer, approx: true });
-    if (own) nearestNewer = own;
+    else if (nearestNewer) map.set(e.id, { snap: nearestNewer, approx: true, undone: newerCount });
+    else map.set(e.id, { snap: null, reason: logRbNoSnapReason(e) });
+    if (own) { nearestNewer = own; newerCount = 0; }
+    else newerCount++;
   }
   return map;
 }
@@ -444,25 +460,35 @@ export function LogModal({ store }: { store: VetviStore }) {
                         {(() => {
                           const rb = rbMap.get(e.id);
                           return (
-                            <button
-                              type="button"
-                              className={'log-rb log-rb-proj' + (rb ? '' : ' dis')}
-                              title={rb
-                                ? (rb.approx
-                                  ? LOG_RB_APPROX + hkText('undo') + ').'
-                                  : 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').')
-                                : LOG_RB_NO_SNAP}
-                              disabled={!rb}
-                              onClick={(ev) => {
-                                ev.stopPropagation();
-                                if (!rb) return;
-                                store.rollbackToSnapshot(rb.snap);
-                                store.toast(rb.approx ? 'Проект откачен к ближайшему доступному снимку' : 'Проект откачен к моменту записи', rb.approx ? 'warn' : 'ok');
-                                store.closeModal();
-                              }}
-                            >
-                              {IC_RBACK} {rb && rb.approx ? 'Откатить к ближайшему снимку' : 'Откатить проект к этому моменту'}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className={'log-rb log-rb-proj' + (rb && rb.snap ? '' : ' dis')}
+                                title={rb && rb.snap !== null
+                                  ? (rb.approx
+                                    ? LOG_RB_APPROX + hkText('undo') + ').'
+                                    : 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').')
+                                  : (rb && rb.snap === null ? rb.reason : LOG_RB_NO_SNAP)}
+                                disabled={!rb || !rb.snap}
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  if (!rb || !rb.snap) return;
+                                  store.rollbackToSnapshot(rb.snap);
+                                  store.toast(rb.approx ? 'Проект откачен к ближайшему доступному снимку' : 'Проект откачен к моменту записи', rb.approx ? 'warn' : 'ok');
+                                  store.closeModal();
+                                }}
+                              >
+                                {IC_RBACK} {rb && rb.snap && rb.approx ? 'Откатить к ближайшему снимку' : 'Откатить проект к этому моменту'}
+                              </button>
+                              {/* причина видна РЯДОМ с кнопкой: подсказка у выключенной
+                                  кнопки не показывается — без строки причину не увидеть */}
+                              {rb && rb.snap !== null && rb.approx && (
+                                <div className="log-rb-why">{LOG_RB_APPROX_SHORT}</div>
+                              )}
+                              {rb && rb.snap === null && (
+                                <div className="log-rb-why dis">Откат недоступен: {rb.reason}</div>
+                              )}
+                            </>
                           );
                         })()}
                         <button
@@ -590,16 +616,23 @@ export function ProjectsModal({ store }: { store: VetviStore }) {
   const [ren, setRen] = useState<{ id: string; val: string } | null>(null);
   const [shared, setShared] = useState<AccessMineItem[]>([]);
 
+  /* реестр читается при каждом рендере: модалка перерисовывается при изменениях
+     стора (в т.ч. vetvi:room-meta — кто-то переименовал проект в комнате) */
+  useSyncExternalStore(store.subscribe, () => store.revision, () => store.revision);
+
   const list = projList();
   const refresh = () => tick((t) => t + 1);
   const curFlag = (id: string) => id === cur && store.syncMode !== 'copy';
 
-  /* проекты, к которым открыли доступ (уведомление/грант) — приходят с сервера */
+  /* проекты, к которым открыли доступ (уведомление/грант) — приходят с сервера;
+     названия закрытых проектов в реестре — из /api/rooms/names (кто-то мог
+     переименовать их в комнате, пока у нас они закрыты) */
   useEffect(() => {
     let alive = true;
+    store.refreshRoomNames();
     void accessMine().then((items) => { if (alive) setShared(items.filter((x) => x.role !== 'owner')); });
     return () => { alive = false; };
-  }, []);
+  }, [store]);
 
   return (
     <ModalShell title="Мои проекты" onClose={() => store.closeModal()}>

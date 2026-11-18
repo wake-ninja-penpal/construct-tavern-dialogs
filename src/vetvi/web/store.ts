@@ -3391,6 +3391,10 @@ export class VetviStore {
 
   setProjectName(name: string): void {
     this.mutateManual((doc) => { doc.meta.name = name; }, 'Переименование проекта');
+    /* мгновенное оповещение комнаты: соавторы увидят свежее имя в своих списках
+       проектов сразу (vetvi:rename → сервер обновит ProjectAccess.projectName
+       и раздаст vetvi:room-meta) — имя живёт и после перезагрузки страницы */
+    if (this.sync && this.syncMode === 'room') this.sync.sendRename(name);
   }
 
   openProject(id: string, roomHint?: string | null): void {
@@ -3550,6 +3554,47 @@ export class VetviStore {
     import('@/vetvi/core/projects').then((m) => {
       m.projRename(id, name);
       this.emit();
+    });
+  }
+
+  /* ── свежие имена проектов в комнатах (список «Мои проекты») ──
+     Записи реестра хранятся в localStorage и устаревают, пока проект закрыт:
+     соавтор мог переименовать его в комнате. Сервер синхронизирует имя в
+     ProjectAccess.projectName при каждой публикации — /api/rooms/names отдаёт
+     актуальные имена, реестр обновляется (вживую — по vetvi:room-meta). */
+  refreshRoomNames(): void {
+    const roomIds: string[] = [];
+    const seen = new Set<string>();
+    for (const e of projList()) {
+      if (!e.roomId || seen.has(e.roomId)) continue;
+      seen.add(e.roomId);
+      roomIds.push(e.roomId);
+    }
+    if (!roomIds.length) return;
+    void import('./auth').then(async (m) => {
+      let names: Record<string, string> = {};
+      try {
+        names = await m.roomsNames(roomIds);
+      } catch { /* сервер недоступен — имена останутся как были */ return; }
+      let changed = false;
+      for (const [roomId, nm] of Object.entries(names)) {
+        const e = projList().find((x) => x.roomId === roomId);
+        if (!e || !nm || nm === e.name) continue;
+        /* текущий проект этой комнаты: имя ведёт документ (шапка) и persist —
+           реестр не трогаем, чтобы не разойтись с doc.meta.name */
+        if (e.id === String(this.doc.meta.projectId || '') && this.syncRoom === roomId) continue;
+        e.name = nm;
+        changed = true;
+      }
+      if (changed) {
+        import('@/vetvi/core/projects').then((p) => {
+          for (const e of projList()) {
+            const nm = e.roomId ? names[e.roomId] : undefined;
+            if (nm && nm !== e.name) p.projRename(e.id, nm);
+          }
+        });
+        this.emit();
+      }
     });
   }
 
