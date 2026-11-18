@@ -697,17 +697,25 @@ const ROLE_CHECK_MS = 2500
 function applyAccessRole(room: RoomState, sid: string, role: string | null, sock: Socket): 'kept' | 'updated' | 'kicked' {
   const m = room.members.get(sid)
   if (!m) return 'kicked'
-  /* роль не найдена (запись доступа удалена — отзыв) и в комнате есть записи
-     доступов: участник больше не может быть здесь — выгоняем немедленно */
+  /* записи доступа больше нет (отзыв) — выгоняем ТОЛЬКО того, у кого доступ
+     был (owner/editor/reader). Гость по открытой ссылке (role='guest', даже
+     с сессией аккаунта) остаётся в комнате: его нахождение регулирует
+     linkMode (vetvi:room-settings), а не записи ProjectAccess. */
   if (!role) {
-    try { sock.emit('vetvi:kicked', { roomId: room.name, reason: 'revoked' }) } catch { /* сокет умер */ }
-    room.members.delete(sid)
-    releaseSocketLocks(io, room, sid)
-    releaseSocketFocus(io, room, sid)
+    if (m.role && m.role !== 'guest') {
+      try { sock.emit('vetvi:kicked', { roomId: room.name, reason: 'revoked' }) } catch { /* сокет умер */ }
+      room.members.delete(sid)
+      releaseSocketLocks(io, room, sid)
+      releaseSocketFocus(io, room, sid)
+      sockCanEditMap.set(sid, false)
+      sock.leave(room.name)
+      console.log(`[vetvi-sync] access revoked → kicked "${m.user.name}" from "${room.name}"`)
+      return 'kicked'
+    }
+    /* гость без записи: право правки не выдаётся (страховка) */
     sockCanEditMap.set(sid, false)
-    sock.leave(room.name)
-    console.log(`[vetvi-sync] access revoked → kicked "${m.user.name}" from "${room.name}"`)
-    return 'kicked'
+    m.canEdit = false
+    return 'kept'
   }
   const canEdit = role === 'owner' || role === 'editor'
   const was = sockCanEditMap.get(sid) === true
