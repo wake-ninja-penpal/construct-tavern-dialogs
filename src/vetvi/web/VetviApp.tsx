@@ -246,7 +246,10 @@ function VetviAppInner() {
       const t = e.target as Element | null;
       if (!t) return;
       if (t.closest('.collab-pop')) return;
-      if (t.closest('.collab-chip')) return;
+      /* составная кнопка «Поделиться+онлайн»: клик по статусу (правая половина)
+         переключает попап сам — закрывать его здесь нельзя, иначе повторный
+         клик по кнопке снова откроет попап (toggle всегда true) */
+      if (t.closest('.share-split')) return;
       store.setCollabPop(false);
     };
     document.addEventListener('pointerdown', onDoc, true);

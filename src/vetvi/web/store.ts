@@ -33,7 +33,7 @@ import { getMe, type MeIdentity } from '@/vetvi/core/identity';
 import { logDiff, logDiffSummary, type LogDiff } from '@/vetvi/core/logdiff';
 import { passVerify } from '@/vetvi/core/passlock';
 import { downloadFile, projDelete, projList, projMigrateLegacy, projReadSlot, projSaveCurrent, projSetCur, projSkipSaveId, projSlotKey } from '@/vetvi/core/projects';
-import { stItem, stRemoveItem, stSetItem, storeFlushNow } from '@/vetvi/core/storage';
+import { stItem, stRemoveItem, stSetItem, storeFlushNow, storeMode } from '@/vetvi/core/storage';
 import type { EdgeGeom, NodeSize, VetviChar, VetviCharGroup, VetviDoc, VetviEdge, VetviGroup, VetviMeta, VetviNode, VetviOutcome, VetviReply, VetviVar, VetviVarGroup, VetviViewport } from '@/vetvi/core/types';
 import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType, type Cond } from '@/vetvi/core/vars';
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
@@ -70,6 +70,9 @@ export interface LogEntry {
   act: string;
   diff: LogDiff | null;
   snap?: string | null;
+  /** Снимок не сохранён, потому что правка больше LOG_SNAP_ONE (иначе
+   *  отсутствие снимка у записи с diff означает «вытеснен бюджетом»). */
+  snapTooBig?: boolean;
 }
 
 /**
@@ -119,9 +122,19 @@ function collapseEditLog(log: Record<string, unknown>[]): Record<string, unknown
   return out;
 }
 
-const LOG_LIMIT = 60;
-const LOG_SNAP_ONE = 800000;
-const LOG_SNAP_TOTAL = 1200000;
+/* Бюджеты журнала. Режим хранилища задаёт масштаб: IndexedDB вмещает на порядок
+ * больше LocalStorage (~5 МБ на ВСЕ проекты). Снимок теперь «худой» (без журнала,
+ * см. serializeDoc(journalSnap)), поэтому ~30 снимков типичного проекта свободно
+ * помещаются — пользовательский запрос: «хранить все снимки, хотя бы последние 20–30». */
+const SNAPSHOT_STORE_IDB = typeof window !== 'undefined' && storeMode() === 'idb';
+const LOG_LIMIT = 100;
+const LOG_SNAP_ONE = SNAPSHOT_STORE_IDB ? 4000000 : 500000;
+const LOG_SNAP_TOTAL = SNAPSHOT_STORE_IDB ? 8000000 : 2000000;
+/* Гарантированный «хвост»: у последних LOG_SNAP_KEEP записей снимок НЕ вытесняется,
+ * пока суммарный бюджет не переполнен самим хвостом; тогда защищаем только
+ * последние LOG_SNAP_KEEP_MIN (журнал не должен переполнять хранилище). */
+export const LOG_SNAP_KEEP = 30;
+const LOG_SNAP_KEEP_MIN = SNAPSHOT_STORE_IDB ? 10 : 3;
 
 export class VetviStore {
   doc: VetviDoc;
@@ -289,6 +302,10 @@ export class VetviStore {
     this.doc = loaded.doc;
     this.vp = loaded.vp;
     this.bend = (loaded.bend || 'smooth') as BendMode;
+    /* разовая ревизия журнала после загрузки: проекты прошлых версий тащат
+       «разбухшие» снимки (журнал вложен в снимок) — вытесняем по новому бюджету,
+       иначе хранилище переполняется ещё до первой правки */
+    if (isClient) this.logTrimSnaps();
     this.leftWidth = isClient
       ? Math.min(560, Math.max(240, Number(window.localStorage.getItem('vetvi-left-w')) || 300))
       : 300;
@@ -458,13 +475,15 @@ export class VetviStore {
     const cur = this.serialize();
     if (pre === cur) return;
     const diff = logDiff(pre, cur);
+    const tooBig = pre.length > LOG_SNAP_ONE;
     this.logActionEntry({
       id: uid() + uid(),
       t: Date.now(),
       by: this.identity(),
       act: label || logDiffSummary(diff),
       diff,
-      snap: pre.length <= LOG_SNAP_ONE ? pre : null,
+      snap: tooBig ? null : pre,
+      snapTooBig: tooBig || undefined,
     });
   }
 
@@ -482,14 +501,20 @@ export class VetviStore {
   private logTrimSnaps(): void {
     const arr = (this.doc.meta.actionLog || []) as LogEntry[];
     let total = 0;
-    for (const e of arr) total += e.snap ? e.snap.length : 0;
+    for (const e of arr) if (e.snap) total += e.snap.length;
     if (total <= LOG_SNAP_TOTAL) return;
+    /* Вытесняем снимки с САМЫХ СТАРЫХ записей. Хвост из LOG_SNAP_KEEP последних
+     * записей защищён (пользовательский запрос: снимки последних 20–30 правок
+     * доступны всегда); если защищённый хвост сам переполняет бюджет
+     * (гигантские снимки в LS-режиме), продолжаем вытеснение, но минимум
+     * LOG_SNAP_KEEP_MIN последних снимков всё равно остаётся. */
     for (let i = arr.length - 1; i >= 0 && total > LOG_SNAP_TOTAL; i--) {
       const sn = arr[i]?.snap;
-      if (sn) {
-        total -= sn.length;
-        arr[i].snap = null;
-      }
+      if (!sn) continue;
+      if (i < LOG_SNAP_KEEP && i >= LOG_SNAP_KEEP_MIN) break;
+      total -= sn.length;
+      arr[i].snap = null;
+      if (arr[i].snapTooBig) arr[i].snapTooBig = false;
     }
   }
 
@@ -502,19 +527,33 @@ export class VetviStore {
     const cur = this.serialize();
     if (pre === cur) return;
     const diff = logDiff(pre, cur);
+    const tooBig = pre.length > LOG_SNAP_ONE;
     this.logActionEntry({
       id: uid() + uid(),
       t: Date.now(),
       by: this.identity(),
       act: word + (diff ? ' — ' + logDiffSummary(diff) : ''),
       diff,
-      snap: pre.length <= LOG_SNAP_ONE ? pre : null,
+      snap: tooBig ? null : pre,
+      snapTooBig: tooBig || undefined,
     });
   }
 
-  /* ── история и сохранение ── */
+  /* ── история и сохранение ──
 
+   * serialize() — «худая» сериализация (мета без actionLog/editLog): она идёт
+   * в снимки журнала, стек undo/redo и сравнения pre/cur. Журнал внутри снимка
+   * давал экспоненциальный рост (снимок содержал журнал с предыдущими снимками,
+   * каждый из которых содержал свой журнал...) — через 3–5 правок снимок
+   * «перерастал» лимит и откат становился невозможен. Мету при откате всё равно
+   * подменяем текущей (applyHistorySnap/rollbackToSnapshot), так что журнал
+   * в снимке не нужен. Полная версия — serializeFull() (экспорт в файл). */
   serialize(): string {
+    return serializeDoc(this.doc, this.vp, this.bend, true);
+  }
+
+  /** Полная сериализация с журналом — экспорт проекта в файл. */
+  serializeFull(): string {
     return serializeDoc(this.doc, this.vp, this.bend);
   }
 
@@ -545,9 +584,14 @@ export class VetviStore {
 
   commitEdit(pre: string | null, label?: string): void {
     if (!pre) return;
-    /* только чтение: откатываем то, что успел изменить жест/ввод */
+    /* только чтение: откатываем то, что успел изменить жест/ввод.
+       Мета (и журнал в ней) остаётся текущей — снимок «худой», без журнала */
     if (this.viewOnly) {
-      try { this.doc = docFromParsed(JSON.parse(pre)); } catch { /* снимок битый */ }
+      try {
+        const d = docFromParsed(JSON.parse(pre));
+        d.meta = this.doc.meta;
+        this.doc = d;
+      } catch { /* снимок битый */ }
       this.denyEdit();
       return;
     }
@@ -3601,7 +3645,7 @@ export class VetviStore {
   saveAs(): void {
     const name = (this.doc.meta.name || 'проект').replace(/[^\w\u0400-\u04ff]+/g, '_').slice(0, 60) || 'проект';
     import('@/vetvi/core/projects').then((m) => {
-      m.downloadJson(name + '.vetvi.json', JSON.parse(this.serialize()));
+      m.downloadJson(name + '.vetvi.json', JSON.parse(this.serializeFull()));
       this.logManual('Сохранение проекта в JSON');
     });
   }

@@ -27,7 +27,7 @@ import { hkConflict, hkDef, hkHuman, hkLoad, hkResetAll, hkSetUser, hkText, hkUs
 import { condText } from '@/vetvi/core/vars';
 import { STATUS_RU, TYPES } from '@/vetvi/core/constants';
 import type { VetviNode } from '@/vetvi/core/types';
-import type { LogEntry, VetviStore } from './store';
+import { LOG_SNAP_KEEP, type LogEntry, type VetviStore } from './store';
 import { TypeEditorModal } from './TypeEditorModal';
 import { TextsImportModal } from './TextsImportModal';
 import { TypeIcon } from './NodeCard';
@@ -288,20 +288,26 @@ function fragOf(text: string, q: string): string {
 /* ═══════════ журнал действий (.dlg-modal > .log-card) ═══════════ */
 
 /* префиксы пунктов деталей: добавленное — «+», удалённое — «−» (logDetSec оригинала) */
-const LOG_PREFIX: Record<string, string> = { nA: '+', nD: '−', eA: '+', eD: '−', gA: '+', gD: '−' };
+const LOG_PREFIX: Record<string, string> = { nA: '+', nD: '−', eA: '+', eD: '−', gA: '+', gD: '−', vA: '+', vD: '−', cA: '+', cD: '−', cgA: '+', cgD: '−', vgA: '+', vgD: '−' };
 const LOG_RB_NO_SNAP = 'Снимок состояния для этой записи недоступен: запись старая, от другого участника, или снимок вытеснен более новыми — откат невозможен.';
 const LOG_RB_APPROX = 'Точный снимок этой записи недоступен — откат к ближайшему доступному снимку (состояние проекта сразу ПОСЛЕ этой правки). Правки между ними тоже будут откачены. Сам откат можно отменить (';
 const LOG_RB_APPROX_SHORT = 'Точного снимка этой записи нет — откат к ближайшему: состояние сразу после этой правки, промежуточные правки тоже откатятся.';
 
 /* Причина, по которой у записи нет собственного снимка (и нет более нового):
-   запись создана «вручную» (переименование, сохранение, экспорт, импорт) —
-   без деталей и снимка состояния. */
+   — запись без изменений содержимого (переименование, сохранение, экспорт,
+     импорт) — diff пуст;
+   — правка больше лимита одного снимка (snapTooBig);
+   — снимок вытеснен бюджетом журнала (журнал хранит снимки последних ~30
+     записей, в LS-режиме меньше — см. LOG_SNAP_KEEP/logTrimSnaps). */
 function logRbNoSnapReason(e: LogEntry): string {
   const tail = 'а более новых снимков в журнале нет — откатывать не к чему.';
   if (!e.diff) {
     return 'У записи нет снимка состояния: она создана вручную или служебная (переименование, сохранение, экспорт, импорт), ' + tail;
   }
-  return 'Снимок состояния не сохранился: правка слишком большая для снимка (журнал хранит снимки до ~0,8 МБ), ' + tail;
+  if (e.snapTooBig) {
+    return 'Снимок не сохранился: правка слишком большая для снимка (превышен лимит размера одного снимка), ' + tail;
+  }
+  return 'Снимок вытеснен более новыми правками: журнал хранит снимки у последних ~' + LOG_SNAP_KEEP + ' записей (в LocalStorage-режиме меньше), ' + tail;
 }
 
 /* Для каждой записи журнала — что доступно для отката.

@@ -826,10 +826,12 @@ export function CollabPopover({ store }: { store: VetviStore }) {
   if (!sc || !store.collabPop || !sc.enabled) return null;
   const me = getMe();
   const users = store.syncUsers || [];
-  /* позиция — под чипом синхронизации (bindSyncUI оригинала) */
+  /* позиция — ПОД кнопкой статуса (правая серая половина составной кнопки
+     «Поделиться+онлайн», id=bCollab); раньше якорем был чип .collab-chip,
+     который исчез после объединения кнопок — попап уезжал в правый край экрана */
   let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8 };
   if (typeof document !== 'undefined') {
-    const anchor = document.querySelector('.collab-chip');
+    const anchor = document.getElementById('bCollab') || document.querySelector('.collab-chip');
     if (anchor) {
       const r = anchor.getBoundingClientRect();
       popStyle = { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };

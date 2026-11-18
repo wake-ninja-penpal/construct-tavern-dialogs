@@ -173,13 +173,31 @@ export function loadAutosave(): { doc: VetviDoc; vp: VetviViewport; bend: string
   return { doc: defaultDoc(), vp: defaultViewport(), bend: 'smooth' };
 }
 
-/** Сериализация документа (совместима с serialize() оригинала, версия 18). */
-export function serializeDoc(doc: VetviDoc, vp: VetviViewport, bend: string): string {
+/** Мета без «летучих» полей для снимков журнала/истории. Журнал (actionLog)
+ *  внутри снимка нельзя хранить: снимок записи N содержит журнал со снимками
+ *  записей 0..N-1, каждый из которых содержит свой журнал со своими снимками —
+ *  размер сериализации растёт ЭКСПОНЕНЦИАЛЬНО, и через 3–5 правок снимок
+ *  «не помещается» в лимит (ошибка «правка слишком большая»). Мету при откате
+ *  всё равно подменяют текущей (applyHistorySnap/rollbackToSnapshot), поэтому
+ *  журнал в снимке не нужен вовсе. */
+function metaWithoutLog<T extends Record<string, unknown>>(meta: T): T {
+  if (!meta || typeof meta !== 'object') return meta;
+  const { actionLog: _a, editLog: _e, lastEditBy: _l, ...rest } = meta;
+  void _a; void _e; void _l;
+  return rest as T;
+}
+
+/** Сериализация документа (совместима с serialize() оригинала, версия 18).
+ *  journalSnap=true — снимок для журнала/истории: мета без actionLog/editLog
+ *  (иначе экспоненциальный рост снимков, см. metaWithoutLog). Сохранение слота,
+ *  экспорт и синхронизация пишут ПОЛНУЮ мету (журнал должен переживать
+ *  перезагрузку и доезжать до соавторов). */
+export function serializeDoc(doc: VetviDoc, vp: VetviViewport, bend: string, journalSnap = false): string {
   return JSON.stringify({
     app: 'vetvi',
     version: 18,
     bend,
-    meta: doc.meta,
+    meta: journalSnap ? metaWithoutLog(doc.meta as unknown as Record<string, unknown>) : doc.meta,
     viewport: vp,
     nodes: doc.nodes,
     edges: doc.edges,
@@ -211,7 +229,11 @@ export function saveAutosave(doc: VetviDoc, vp: VetviViewport, bend: string): vo
   const raw = JSON.stringify({ project: doc, vp, bend });
   try {
     stSetItem(slotKey(pid), raw);
-    stSetItem(LS_KEY, raw);
+    /* legacy-зеркало дублирует проект во втором ключе: для больших проектов
+       (журнал со снимками вырос) это второй такой же кусок в хранилище —
+       зеркалим только небольшие проекты (зеркало нужно лишь как fallback
+       при чтении, слот пишется первым и остаётся главным источником) */
+    if (raw.length <= 1200000) stSetItem(LS_KEY, raw);
     stSetItem(LS_CURPROJ, pid);
   } catch {
     return;

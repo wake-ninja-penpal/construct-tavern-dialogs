@@ -29,10 +29,21 @@ export const LOG_F_G: Record<string, string> = {
   name: 'название', color: 'цвет', tint: 'яркость', fold: 'вид', stack: 'тип', parent: 'вложенность',
   alpha: 'прозрачность', badge: 'ярлык', auto: 'авторазмер', fx: 'рамка', fy: 'рамка', fw: 'рамка', fh: 'рамка', order: 'порядок',
 };
+export const LOG_F_C: Record<string, string> = {
+  name: 'имя', color: 'цвет', text: 'описание', role: 'роль', groupId: 'группа',
+  av: 'аватар', avShape: 'форма аватара',
+};
+export const LOG_F_CG: Record<string, string> = {
+  name: 'название', collapsed: 'сворачивание',
+};
+export const LOG_F_VG: Record<string, string> = {
+  name: 'название', collapsed: 'сворачивание',
+};
 
 const SKIP_N = new Set(['id', 'type']);
 const SKIP_E = new Set(['id', 'from', 'to']);
 const SKIP_G = new Set(['id']);
+const SKIP_C = new Set(['id']);
 
 /** Стабильная сериализация значения (сортировка ключей — logStable оригинала). */
 function stableKeyOf(v: unknown): string {
@@ -107,6 +118,12 @@ export function logDiff(preStr: string, curStr: string): LogDiff | null {
   const gb = byIdList(B.groups);
   const va = byIdList(A.vars);
   const vb = byIdList(B.vars);
+  const ca = byIdList(A.chars);
+  const cb = byIdList(B.chars);
+  const cga = byIdList(A.charGroups);
+  const cgb = byIdList(B.charGroups);
+  const vga = byIdList(A.varGroups);
+  const vgb = byIdList(B.varGroups);
 
   const push = (key: string, items: LogItem[]) => {
     if (items.length) sections.push({ key, items });
@@ -178,6 +195,57 @@ export function logDiff(preStr: string, curStr: string): LogDiff | null {
   }
   push('vC', vChanged);
 
+  /* персонажи и их группы: без этих секций правки персонажей выглядели в журнале
+     как «запись без содержимого» (создана вручную) — деталей нет, снимок часто
+     отсутствовал (журнал не считал их изменением содержимого) */
+  const cAdded: LogItem[] = [];
+  for (const id of cb.order) if (!ca.map.has(id)) cAdded.push({ id, name: String((cb.map.get(id) as { name?: string }).name || '?'), fields: [] });
+  push('cA', cAdded);
+  const cRemoved: LogItem[] = [];
+  for (const id of ca.order) if (!cb.map.has(id)) cRemoved.push({ id, name: String((ca.map.get(id) as { name?: string }).name || '?'), fields: [] });
+  push('cD', cRemoved);
+  const cChanged: LogItem[] = [];
+  for (const id of cb.order) {
+    const a = ca.map.get(id);
+    const b = cb.map.get(id);
+    if (!a || !b) continue;
+    const pairs = fieldPairs(a, b, SKIP_C, LOG_F_C);
+    if (pairs.length) cChanged.push({ id, name: String((b as { name?: string }).name || '?'), fields: pairs.slice(0, 5) });
+  }
+  push('cC', cChanged);
+
+  const cgAdded: LogItem[] = [];
+  for (const id of cgb.order) if (!cga.map.has(id)) cgAdded.push({ id, name: String((cgb.map.get(id) as { name?: string }).name || 'Группа'), fields: [] });
+  push('cgA', cgAdded);
+  const cgRemoved: LogItem[] = [];
+  for (const id of cga.order) if (!cgb.map.has(id)) cgRemoved.push({ id, name: String((cga.map.get(id) as { name?: string }).name || 'Группа'), fields: [] });
+  push('cgD', cgRemoved);
+  const cgChanged: LogItem[] = [];
+  for (const id of cgb.order) {
+    const a = cga.map.get(id);
+    const b = cgb.map.get(id);
+    if (!a || !b) continue;
+    const pairs = fieldPairs(a, b, SKIP_C, LOG_F_CG);
+    if (pairs.length) cgChanged.push({ id, name: String((b as { name?: string }).name || 'Группа'), fields: pairs.slice(0, 5) });
+  }
+  push('cgC', cgChanged);
+
+  const vgAdded: LogItem[] = [];
+  for (const id of vgb.order) if (!vga.map.has(id)) vgAdded.push({ id, name: String((vgb.map.get(id) as { name?: string }).name || 'Группа'), fields: [] });
+  push('vgA', vgAdded);
+  const vgRemoved: LogItem[] = [];
+  for (const id of vga.order) if (!vgb.map.has(id)) vgRemoved.push({ id, name: String((vga.map.get(id) as { name?: string }).name || 'Группа'), fields: [] });
+  push('vgD', vgRemoved);
+  const vgChanged: LogItem[] = [];
+  for (const id of vgb.order) {
+    const a = vga.map.get(id);
+    const b = vgb.map.get(id);
+    if (!a || !b) continue;
+    const pairs = fieldPairs(a, b, SKIP_C, LOG_F_VG);
+    if (pairs.length) vgChanged.push({ id, name: String((b as { name?: string }).name || 'Группа'), fields: pairs.slice(0, 5) });
+  }
+  push('vgC', vgChanged);
+
   for (const s of sections) {
     for (const it of s.items) {
       if (ids.length < 12) ids.push(it.id);
@@ -230,6 +298,18 @@ export function logDiffSummary(d: LogDiff | null): string {
   if (vA) parts.push('+' + vA + ' переменных');
   if (vD) parts.push('−' + vD + ' переменных');
   if (vC) parts.push('правка переменных: ' + vC);
+  const cA = cnt('cA'); const cD = cnt('cD'); const cC = cnt('cC');
+  if (cA) parts.push('+' + cA + ' персонажей');
+  if (cD) parts.push('−' + cD + ' персонажей');
+  if (cC) parts.push('правка персонажей: ' + cC);
+  const cgA = cnt('cgA'); const cgD = cnt('cgD'); const cgC = cnt('cgC');
+  if (cgA) parts.push('+' + cgA + ' групп персонажей');
+  if (cgD) parts.push('−' + cgD + ' групп персонажей');
+  if (cgC) parts.push('правка групп персонажей: ' + cgC);
+  const vgA = cnt('vgA'); const vgD = cnt('vgD'); const vgC = cnt('vgC');
+  if (vgA) parts.push('+' + vgA + ' групп переменных');
+  if (vgD) parts.push('−' + vgD + ' групп переменных');
+  if (vgC) parts.push('правка групп переменных: ' + vgC);
   return parts.join(', ') || 'Изменение проекта';
 }
 
@@ -238,6 +318,9 @@ export const SECTION_TITLES: Record<string, string> = {
   eA: 'добавлены связи', eD: 'удалены связи', eC: 'изменены связи',
   gA: 'добавлены группы', gD: 'удалены группы', gC: 'изменены группы',
   vA: 'добавлены переменные', vD: 'удалены переменные', vC: 'изменены переменные',
+  cA: 'добавлены персонажи', cD: 'удалены персонажи', cC: 'изменены персонажи',
+  cgA: 'добавлены группы персонажей', cgD: 'удалены группы персонажей', cgC: 'изменены группы персонажей',
+  vgA: 'добавлены группы переменных', vgD: 'удалены группы переменных', vgC: 'изменены группы переменных',
 };
 
 /* ── нормализация diff записей журнала ──
