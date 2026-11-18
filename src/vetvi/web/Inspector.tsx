@@ -503,6 +503,46 @@ function GripCell({ title }: { title: string }) {
 
 /* ═══ нода: инспектор (renderInspNode) ═══ */
 
+/* ── ввод тегов ноды (iTags): сырой черновик в локальном состоянии ──
+   Классический контролируемый input с value={tags.join(', ')} съедал запятую:
+   «акт 1,» → split+filter(Boolean) → tags без пустого хвоста → value
+   перерисовывался как «акт 1» и запятую было не ввести — второй тег создать
+   было нельзя. Черновик живёт до blur, в стор уходит разобранный список. */
+function TagInput({ store, n, commit, editPreRef }: {
+  store: VetviStore;
+  n: VetviNode;
+  commit: (patch: Partial<VetviNode>, opts?: { history?: boolean; label?: string }) => void;
+  editPreRef: React.MutableRefObject<string | null>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const joined = Array.isArray(n.tags) ? (n.tags as string[]).join(', ') : '';
+  return (
+    <input
+      className="inp"
+      id="iTags"
+      value={draft !== null ? draft : joined}
+      placeholder="акт 1, хаб…"
+      onFocus={() => {
+        editPreRef.current = store.beginEdit();
+        setDraft(joined);
+      }}
+      onChange={(ev) => {
+        const raw = ev.target.value;
+        setDraft(raw);
+        commit(
+          { tags: raw.split(',').map((s) => s.trim()).filter(Boolean) },
+          { history: false },
+        );
+      }}
+      onBlur={() => {
+        store.commitEdit(editPreRef.current, 'Метки ноды');
+        editPreRef.current = null;
+        setDraft(null);
+      }}
+    />
+  );
+}
+
 function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; editPreRef: React.MutableRefObject<string | null> }) {
   const doc = store.doc;
   const isDialog = n.type === 'dialog';
@@ -766,15 +806,7 @@ function NodeBody({ store, n, editPreRef }: { store: VetviStore; n: VetviNode; e
         onBlur={() => { store.commitEdit(editPreRef.current, 'Текст ноды'); editPreRef.current = null; }}
       />
       <label className="i-lab">Теги, через запятую</label>
-      <input
-        className="inp"
-        id="iTags"
-        value={Array.isArray(n.tags) ? (n.tags as string[]).join(', ') : ''}
-        placeholder="акт 1, хаб…"
-        onFocus={() => { editPreRef.current = store.beginEdit(); }}
-        onChange={(ev) => commit({ tags: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) }, { history: false })}
-        onBlur={() => { store.commitEdit(editPreRef.current, 'Метки ноды'); editPreRef.current = null; }}
-      />
+      <TagInput key={n.id} store={store} n={n} commit={commit} editPreRef={editPreRef} />
       {isBranch && <OutcomesEditor store={store} n={n} editPreRef={editPreRef} />}
       {isAction && <ActionsEditor store={store} n={n} editPreRef={editPreRef} />}
       {isVar && <VarNodeEditor store={store} n={n} editPreRef={editPreRef} />}

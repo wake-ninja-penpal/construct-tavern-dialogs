@@ -361,7 +361,9 @@ function NodeCardImpl(props: {
     top: n.y,
     width,
     ['--c']: cc || info.color,
-    ...(cc ? { background: 'linear-gradient(' + shadeHex(cc, 10) + ',' + shadeHex(cc, -8) + ')', borderColor: shadeHex(cc, -30) } : null),
+    /* цвет персонажа — ОБВОДКА карточки, а не заливка: фон ноды остаётся базовым,
+       цвет идёт в рамку (цвет + внутреннее кольцо тем же тоном) */
+    ...(cc ? { borderColor: cc, boxShadow: '0 6px 18px rgba(0,0,0,.38), inset 0 0 0 1px ' + shadeHex(cc, -14) } : null),
     ...(paint ? { background: 'linear-gradient(' + shadeHex(paint, 10) + ',' + shadeHex(paint, -8) + ')', borderColor: shadeHex(paint, -30) } : null),
     ...(lk ? { ['--lkc']: lk.color } : null),
     ...(focusBy ? { ['--fc']: focusBy.color } : null),

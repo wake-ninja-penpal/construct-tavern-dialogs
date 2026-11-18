@@ -988,6 +988,32 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (el) el.classList.add('drop-hover');
   }, []);
 
+  /* ── компенсация вида при сдвиге холста посреди жеста (сворачивание
+     «подсматривающей» левой панели по клику мимо, открытие/закрытие панелей,
+     ресайз окна): ширина панелей анимируется (#left width .26s), rect холста
+     «уезжает» — и дельтовые жесты (перенос нод/групп) теряли курсор: нода
+     уходила влево от него. Теперь на каждое изменение rect холста во время
+     жеста вид доезжает ровно на ту же величину (panBy) — содержимое остаётся
+     под курсором до конца жеста; вне жеста вид ведёт себя как раньше. ── */
+  const canvasRectRef = useRef<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      const prev = canvasRectRef.current;
+      canvasRectRef.current = { left: r.left, top: r.top };
+      if ((!gestRef.current && !store.carry) || !prev) return;
+      const dx = r.left - prev.left;
+      const dy = r.top - prev.top;
+      /* экранная позиция мира = rect.left + vp.x + n.x·z — чтобы содержимое
+         осталось на месте при сдвиге края холста, vp доезжает на −dx (и по y) */
+      if (dx || dy) store.panBy(-dx, -dy);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [store]);
+
   /* ── глобальные обработчики жеста ── */
   useEffect(() => {
     const move = (e: MouseEvent) => {

@@ -572,27 +572,41 @@ export function TopBar(props: { store: VetviStore }) {
   };
 
   const sc = store.sync;
-  /* статус синхронизации: цвет точки и число участников онлайн (для правой
-     половины составной кнопки «Поделиться») */
+  /* статус синхронизации: цвет точки и всплывающая подпись для правой половины
+     составной кнопки «Поделиться». В покое видна ТОЛЬКО точка-индикатор; при
+     наведении правая половина выдвигается и показывает текст:
+     «N онлайн» / «локально» / «переподключиться» / «подключение…» / «офлайн». */
   const statusInfo = (() => {
     const map: Record<string, [string, string]> = {
       off: ['#cf6b5a', 'офлайн'],
       conn: ['#d8c96f', 'подключение…'],
       on: ['#8fbf7f', 'онлайн'],
-      err: ['#cf6b5a', 'ошибка связи'],
-      lost: ['#cf6b5a', 'связь потеряна'],
-      copy: ['#e2a54e', 'копия'],
+      err: ['#cf6b5a', 'переподключиться'],
+      lost: ['#cf6b5a', 'переподключиться'],
+      copy: ['#e2a54e', 'локально'],
     };
     const isCopy = store.syncMode === 'copy';
+    const localOnly = isCopy || !sc || !sc.enabled;
     const [baseColor, baseText] = map[store.syncStatus] || map.off;
     const color = isCopy ? '#e2a54e' : baseColor;
     const count = store.syncStatus === 'on' ? (store.syncUsers.length || 1) : 0;
+    const label = localOnly
+      ? 'локально'
+      : store.syncStatus === 'on'
+        ? count + ' онлайн'
+        : store.syncStatus === 'conn'
+          ? 'подключение…'
+          : baseText;
     const title = isCopy
       ? 'Режим копии: ' + ((sc && sc.activeCopyObj()?.name) || '') + ' — статус и участники'
-      : store.syncStatus === 'on'
-        ? 'В проекте сейчас работают: ' + count + ' — статус и участники'
-        : baseText + ' — совместный доступ';
-    return { color, count, title, isCopy };
+      : !sc || !sc.enabled
+        ? 'Локальный проект — поделиться, чтобы работать вместе'
+        : store.syncStatus === 'on'
+          ? 'В проекте сейчас работают: ' + count + ' — статус и участники'
+          : store.syncStatus === 'lost' || store.syncStatus === 'err'
+            ? 'Связь потеряна — клик, чтобы переподключиться'
+            : baseText + ' — совместный доступ';
+    return { color, count, title, isCopy, label };
   })();
 
   /* содержимое отсоединяемого блока (одинаково в шапке и в плавающей панели) */
@@ -789,7 +803,7 @@ export function TopBar(props: { store: VetviStore }) {
             className="btn primary sg-status"
             id="bCollab"
             title={statusInfo.title}
-            aria-label="Статус совместной работы"
+            aria-label={'Статус совместной работы: ' + statusInfo.label}
             onClick={() => {
               if (!sc) return;
               if (!sc.enabled) {
@@ -803,7 +817,8 @@ export function TopBar(props: { store: VetviStore }) {
             }}
           >
             <span className={'cc-dot' + (store.syncStatus === 'conn' ? ' pulse' : '')} style={{ background: statusInfo.color }} />
-            {statusInfo.count > 0 && <span className="sg-count">{statusInfo.count}</span>}
+            {/* подпись выдвигается при наведении (CSS .sg-label): точка видна всегда */}
+            <span className="sg-label">{statusInfo.label}</span>
           </button>
         </div>
 

@@ -1077,15 +1077,18 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .cc-dot.pulse{animation:ccPulse 1.1s infinite}
 @keyframes ccPulse{50%{opacity:.3}}
 /* составная кнопка «Поделиться + онлайн»: левая половина — иконка поделиться,
-   правая — статус (красная точка офлайн / зелёная + число участников) */
+   правая — выдвижная: в покое ТОЛЬКО точка-индикатор, при наведении выдвигается
+   и показывает текст (N онлайн / локально / переподключиться) */
 .share-split{display:inline-flex;flex:none;align-items:center}
 /* слева — «Поделиться»: полноценная кнопка (все углы скруглены), лежит ПОВЕРХ правой части */
 .share-split .sg-main{padding:0 11px;position:relative;z-index:1}
-/* справа — статус совместной работы: серая с рамкой, ВЫХОДИТ ИЗ-ПОД левой кнопки
-   (заходит под неё левым краем), все углы скруглены как у отдельной кнопки */
-.share-split .sg-status{position:relative;z-index:0;margin-left:-15px;background:#2e333c;border:1px solid #4a5160;color:var(--tx2);gap:2px;min-width:40px;padding:0 10px; padding-right: 5px !important;}
-.share-split .sg-count{font:700 12px var(--mono);color:var(--tx)}
-.share-split .sg-status:hover{background:#383f4b;border-color:#5a6373;color:var(--tx)}
+/* справа — статус: серая с рамкой, ВЫХОДИТ ИЗ-ПОД левой кнопки (заходит под неё
+   левым краем на 15px), все углы скруглены. В покое — узкая (только точка),
+   при наведении подпись .sg-label раздвигает её до полного текста */
+.share-split .sg-status{position:relative;z-index:0;margin-left:-15px;background:#2e333c;border:1px solid #4a5160;color:var(--tx2);justify-content:flex-start;gap:6px;min-width:39px;padding:0 7px 0 18px;overflow:hidden;transition:min-width .18s ease,background .15s ease,border-color .15s ease,color .15s ease}
+.share-split .sg-status .sg-label{display:block;white-space:nowrap;overflow:hidden;max-width:0;opacity:0;padding:0;font:600 12px var(--body);transition:max-width .22s ease,opacity .18s ease .05s}
+.share-split .sg-status:hover{min-width:0;background:#383f4b;border-color:#5a6373;color:var(--tx)}
+.share-split .sg-status:hover .sg-label{max-width:150px;opacity:1}
 .share-split .sg-status:hover,.share-split .sg-main:hover{transform:none}
 .share-split .sg-status:active,.share-split .sg-main:active{transform:scale(.97)}
 .collab-chip.copy-mode{border-color:rgba(226,165,78,.55);color:var(--acc2);background:var(--accd)}
