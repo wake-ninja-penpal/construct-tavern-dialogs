@@ -289,7 +289,27 @@ function fragOf(text: string, q: string): string {
 
 /* префиксы пунктов деталей: добавленное — «+», удалённое — «−» (logDetSec оригинала) */
 const LOG_PREFIX: Record<string, string> = { nA: '+', nD: '−', eA: '+', eD: '−', gA: '+', gD: '−' };
-const LOG_RB_NO_SNAP = 'Снимок состояния для этой записи недоступен: запись старая, от другого участника, или снимок вытеснен более новыми.';
+const LOG_RB_NO_SNAP = 'Снимок состояния для этой записи недоступен: запись старая, от другого участника, или снимок вытеснен более новыми — откат невозможен.';
+const LOG_RB_APPROX = 'Точный снимок этой записи недоступен — откат к ближайшему доступному снимку (состояние проекта сразу ПОСЛЕ этой правки). Правки между ними тоже будут откачены. Сам откат можно отменить (';
+
+/* Для каждой записи журнала — снимок, к которому можно откатить.
+   Свой снимок записи (состояние ДО правки) — точный откат. Если его нет
+   (старая запись классической версии, снимок вытеснен, запись чужой копии),
+   используем ближайший снимок НОВЕЕ записи: это состояние сразу после
+   правки — «откат к моменту записи» с оговоркой (снимки едут в журнале
+   только для записей, сделанных в React-версии, поэтому старые записи
+   без fallback были вообще недоступны для отката). */
+function buildRollbackMap(entries: LogEntry[]): Map<string, { snap: string; approx: boolean }> {
+  const map = new Map<string, { snap: string; approx: boolean }>();
+  let nearestNewer: string | null = null; // ближайший снимок новее (вверх списка)
+  for (const e of entries) {
+    const own = typeof e.snap === 'string' && e.snap ? (e.snap as string) : null;
+    if (own) map.set(e.id, { snap: own, approx: false });
+    else if (nearestNewer) map.set(e.id, { snap: nearestNewer, approx: true });
+    if (own) nearestNewer = own;
+  }
+  return map;
+}
 
 /* значение поля: hex — цветной ромбик .ld-dot, иначе «текст» старым/новым классом */
 function LdSide({ val, cls }: { val: string; cls: string }) {
@@ -305,6 +325,7 @@ export function LogModal({ store }: { store: VetviStore }) {
   const [applied, setApplied] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const entries = (store.doc.meta.actionLog || []) as LogEntry[];
+  const rbMap = buildRollbackMap(entries);
   void store.revision;
 
   useEffect(() => {
@@ -420,23 +441,30 @@ export function LogModal({ store }: { store: VetviStore }) {
                             </Fragment>
                           ))
                         )}
-                        <button
-                          type="button"
-                          className={'log-rb log-rb-proj' + (e.snap ? '' : ' dis')}
-                          title={e.snap
-                            ? 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').'
-                            : LOG_RB_NO_SNAP}
-                          disabled={!e.snap}
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            if (!e.snap) return;
-                            store.rollbackToSnapshot(e.snap as string);
-                            store.toast('Проект откачен к моменту записи', 'ok');
-                            store.closeModal();
-                          }}
-                        >
-                          {IC_RBACK} Откатить проект к этому моменту
-                        </button>
+                        {(() => {
+                          const rb = rbMap.get(e.id);
+                          return (
+                            <button
+                              type="button"
+                              className={'log-rb log-rb-proj' + (rb ? '' : ' dis')}
+                              title={rb
+                                ? (rb.approx
+                                  ? LOG_RB_APPROX + hkText('undo') + ').'
+                                  : 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').')
+                                : LOG_RB_NO_SNAP}
+                              disabled={!rb}
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                if (!rb) return;
+                                store.rollbackToSnapshot(rb.snap);
+                                store.toast(rb.approx ? 'Проект откачен к ближайшему доступному снимку' : 'Проект откачен к моменту записи', rb.approx ? 'warn' : 'ok');
+                                store.closeModal();
+                              }}
+                            >
+                              {IC_RBACK} {rb && rb.approx ? 'Откатить к ближайшему снимку' : 'Откатить проект к этому моменту'}
+                            </button>
+                          );
+                        })()}
                         <button
                           type="button"
                           className="log-loc"

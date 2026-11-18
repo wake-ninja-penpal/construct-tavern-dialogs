@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { notifyAccessChanged } from '@/lib/syncNotify';
 
 /** POST /api/access/revoke {roomId, login} — забрать доступ (владелец).
  *  У пользователя остаётся уведомление об отзыве. */
@@ -52,6 +53,10 @@ export async function POST(req: NextRequest) {
         }),
       },
     });
+
+    /* мгновенное отключение: участник с открытой комнатой немедленно выгоняется
+       (vetvi:kicked reason=revoked) без перезагрузки страницы */
+    notifyAccessChanged(roomId, [{ userId: target.id, role: null }]);
 
     return NextResponse.json({ ok: true });
   } catch (e) {

@@ -650,24 +650,94 @@ function broadcastUsers(io: Server, room: RoomState) {
 /* ─── свип ролей: доступы могут измениться, пока участник онлайн ───
    Владелец выдал/отозвал/поменял роль через окно «Поделиться» — участник
    получает актуальное право редактирования без переподключения сокета:
-   каждые 10 секунд перечитываем ProjectAccess и обновляем canEdit. */
-const ROLE_SWEEP_MS = 10 * 1000
+   свип каждые ROLE_SWEEP_MS перечитывает ProjectAccess, обновляет canEdit,
+   шлёт vetvi:role (смена прав) и выгоняет отозванных. Мгновенный путь —
+   внутренний HTTP-push (порт VETVI_INTERNAL_PORT) от /api/access/*. */
+const ROLE_SWEEP_MS = 3 * 1000
 
 function sweepRoles(io: Server) {
   for (const room of rooms.values()) {
     if (room.members.size === 0) continue
-    let changed = false
-    for (const m of room.members.values()) {
+    /* legacy-комната (ни одной записи ProjectAccess): роли не применяются —
+       там право правки определяется legacy-claim'ом клиента, не БД */
+    if (accessCount(room.name) === 0) continue
+    const seen = new Map<string, string[]>()
+    for (const [sid, m] of room.members) {
       if (!m.accId) continue
-      const role = accessRole(room.name, m.accId)
-      const canEdit = role === 'owner' || role === 'editor'
-      if (canEdit !== m.canEdit) {
-        m.canEdit = canEdit
-        changed = true
+      const arr = seen.get(m.accId)
+      if (arr) arr.push(sid)
+      else seen.set(m.accId, [sid])
+    }
+    let changed = false
+    for (const [accId, sids] of seen) {
+      const role = accessRole(room.name, accId)
+      for (const sid of sids) {
+        const sock = io.of('/').sockets.get(sid)
+        if (!sock) continue // призрак — уберёт sweepStaleMembers
+        if (applyAccessRole(room, sid, role, sock) !== 'kept') changed = true
       }
     }
     if (changed) broadcastUsers(io, room)
   }
+}
+
+/* ── мгновенное применение смены прав доступа ──
+   Роли (ProjectAccess в общей БД) могут измениться, пока участник в комнате.
+   Сервер замечает это тремя путями: внутренний HTTP-push (Next.js → /internal
+   после grant/revoke), свип ролей (ROLE_SWEEP_MS) и проверка при каждой
+   попытке записи (sockCanEditNow). При отзыве доступа участник немедленно
+   выгоняется из комнаты (vetvi:kicked reason=revoked); при смене роли сразу
+   получает vetvi:role — право правки меняется БЕЗ перезагрузки страницы. */
+
+/* право сокета на правку: по socket.id — чтобы менять извне (не только в join) */
+const sockCanEditMap = new Map<string, boolean>()
+const sockRoleCheckedAt = new Map<string, number>()
+const ROLE_CHECK_MS = 2500
+
+function applyAccessRole(room: RoomState, sid: string, role: string | null, sock: Socket): 'kept' | 'updated' | 'kicked' {
+  const m = room.members.get(sid)
+  if (!m) return 'kicked'
+  /* роль не найдена (запись доступа удалена — отзыв) и в комнате есть записи
+     доступов: участник больше не может быть здесь — выгоняем немедленно */
+  if (!role) {
+    try { sock.emit('vetvi:kicked', { roomId: room.name, reason: 'revoked' }) } catch { /* сокет умер */ }
+    room.members.delete(sid)
+    releaseSocketLocks(io, room, sid)
+    releaseSocketFocus(io, room, sid)
+    sockCanEditMap.set(sid, false)
+    sock.leave(room.name)
+    console.log(`[vetvi-sync] access revoked → kicked "${m.user.name}" from "${room.name}"`)
+    return 'kicked'
+  }
+  const canEdit = role === 'owner' || role === 'editor'
+  const was = sockCanEditMap.get(sid) === true
+  m.role = role
+  m.canEdit = canEdit
+  sockCanEditMap.set(sid, canEdit)
+  if (canEdit !== was) {
+    try { sock.emit('vetvi:role', { roomId: room.name, role, canEdit }) } catch { /* сокет умер */ }
+    console.log(`[vetvi-sync] role "${m.user.name}" in "${room.name}" → ${role} (canEdit=${canEdit})`)
+    return 'updated'
+  }
+  return canEdit ? 'kept' : 'updated'
+}
+
+/* проверка права записи: кэш ROLE_CHECK_MS на сокет, свіжая проверка по БД —
+   смена прав запрещает правки быстрее любого свипа (первая же попытка записи) */
+function sockCanEditNow(socket: Socket, roomName: string | null): boolean {
+  const room = roomName ? rooms.get(roomName) : null
+  if (!room) return false
+  const now = Date.now()
+  const last = sockRoleCheckedAt.get(socket.id) || 0
+  if (now - last < ROLE_CHECK_MS) return sockCanEditMap.get(socket.id) === true
+  sockRoleCheckedAt.set(socket.id, now)
+  if (accessCount(room.name) === 0) return sockCanEditMap.get(socket.id) === true
+  const m = room.members.get(socket.id)
+  if (!m || !m.accId) return sockCanEditMap.get(socket.id) === true
+  const role = accessRole(room.name, m.accId)
+  const st = applyAccessRole(room, socket.id, role, socket)
+  if (st !== 'kept') broadcastUsers(io, room)
+  return sockCanEditMap.get(socket.id) === true
 }
 
 /* ─── блокировки объектов ─── */
@@ -767,8 +837,6 @@ const isSafeRoom = (room: unknown): room is string =>
 
 io.on('connection', (socket: Socket) => {
   let joinedRoom: string | null = null
-  /* право этого сокета на изменение состояния (роль из join) */
-  let canEditSock = false
 
   /* ── вход в комнату ── */
   socket.on(
@@ -889,7 +957,8 @@ io.on('connection', (socket: Socket) => {
         }
 
         joinedRoom = roomName
-        canEditSock = canEdit
+        sockCanEditMap.set(socket.id, canEdit)
+        sockRoleCheckedAt.delete(socket.id)
         socket.join(roomName)
         room.members.set(socket.id, { socketId: socket.id, user, canEdit, accId: acc ? acc.id : null, role: role || 'guest' })
 
@@ -1051,7 +1120,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:state', (msg: { roomId?: string; doc?: unknown }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
-      if (!canEditSock) return // только чтение: снапшоты не принимаются
+      if (!sockCanEditNow(socket, joinedRoom)) return // только чтение: снапшоты не принимаются
       const doc = msg.doc as { nodes?: unknown[] } | undefined
       if (!doc || !Array.isArray(doc.nodes)) return
       const json = JSON.stringify(doc)
@@ -1072,7 +1141,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:replace', (msg: { roomId?: string; doc?: unknown; by?: { name?: string; color?: string } | null }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
-      if (!canEditSock) return // только чтение
+      if (!sockCanEditNow(socket, joinedRoom)) return // только чтение
       const doc = msg.doc as { nodes?: unknown[] } | undefined
       if (!doc || !Array.isArray(doc.nodes)) return
       const json = JSON.stringify(doc)
@@ -1105,7 +1174,7 @@ io.on('connection', (socket: Socket) => {
     }) => {
       try {
         if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
-        if (!canEditSock) return // только чтение: live-события не ретранслируются
+        if (!sockCanEditNow(socket, joinedRoom)) return // только чтение: live-события не ретранслируются
         socket.to(msg.roomId).emit('vetvi:live', {
           roomId: msg.roomId,
           nodes: msg.nodes,
@@ -1274,7 +1343,7 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, denied: [] })
           return
         }
-        if (!me.canEdit) {
+        if (!sockCanEditNow(socket, joinedRoom)) {
           ack?.({ ok: true, denied: [] }) // только чтение: локи не выдаются
           return
         }
@@ -1377,7 +1446,7 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, error: 'no room' })
           return
         }
-        if (!canEditSock) {
+        if (!sockCanEditNow(socket, joinedRoom)) {
           ack?.({ ok: false, error: 'read only' }) // пароль комнаты меняют только редакторы
           return
         }
@@ -1416,6 +1485,8 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('disconnect', () => {
     try {
+      sockCanEditMap.delete(socket.id)
+      sockRoleCheckedAt.delete(socket.id)
       if (!joinedRoom) return
       const room = rooms.get(joinedRoom)
       if (!room) return
@@ -1469,6 +1540,87 @@ httpServer.listen(PORT, () => {
   console.log(`[vetvi-sync] server running on port ${PORT}`)
 })
 
+/* ── внутренний HTTP-push смены прав (порт 3004) ──
+   Next.js (POST /api/access/grant|revoke) сразу после записи в общую БД
+   уведомляет sync-сервер: участник с открытой комнатой мгновенно теряет
+   право правки (vetvi:role) или выгоняется (vetvi:kicked reason=revoked) —
+   без перезагрузки страницы и без ожидания свипа. Защита общим ключом
+   VETVI_INTERNAL_KEY. Отдельный порт: socket.io на path '/' перехватывает
+   ВСЕ запросы основного порта (engine.io check: любой url начинается с '/'). */
+const INTERNAL_PORT = Number(process.env.VETVI_INTERNAL_PORT || 3004)
+const INTERNAL_KEY = process.env.VETVI_INTERNAL_KEY || 'vetvi-internal-key'
+
+function applyAccessSync(msg: { roomId?: string; changed?: { userId?: string; role?: string | null }[] }): { ok: boolean; error?: string; kicked?: number; updated?: number } {
+  const roomId = msg?.roomId
+  if (!isSafeRoom(roomId)) return { ok: false, error: 'bad room' }
+  const room = rooms.get(roomId)
+  const list = Array.isArray(msg?.changed) ? msg!.changed! : []
+  if (!room) return { ok: true, kicked: 0, updated: 0 } // комната не открыта — роли применятся при join
+  let kicked = 0
+  let updated = 0
+  for (const ch of list) {
+    const uid = String(ch?.userId || '')
+    if (!uid) continue
+    const role = ch?.role === 'editor' || ch?.role === 'reader' || ch?.role === 'owner' ? ch.role : null
+    for (const [sid, m] of room.members) {
+      if (m.accId !== uid) continue
+      const sock = io.of('/').sockets.get(sid)
+      if (!sock) continue
+      if (applyAccessRole(room, sid, role, sock) === 'kicked') kicked++
+      else updated++
+    }
+  }
+  if (kicked || updated) {
+    broadcastUsers(io, room)
+    if (room.members.size === 0) scheduleRoomGc(room)
+  }
+  return { ok: true, kicked, updated }
+}
+
+const internalServer = createServer((req, res) => {
+  if (!req.url || !req.url.startsWith('/internal/access-sync') || req.method !== 'POST') {
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'not found' }))
+    return
+  }
+  if (String(req.headers['x-vetvi-key'] || '') !== INTERNAL_KEY) {
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'forbidden' }))
+    return
+  }
+  let body = ''
+  let overflow = false
+  req.on('data', (c: Buffer) => {
+    body += c.toString('utf8')
+    if (body.length > 1e6) { overflow = true; req.destroy() }
+  })
+  req.on('end', () => {
+    if (overflow) return
+    try {
+      const parsed = JSON.parse(body) as { roomId?: string; changed?: { userId?: string; role?: string | null }[] }
+      const out = applyAccessSync(parsed)
+      console.log(`[vetvi-sync] access-sync "${parsed?.roomId || '?'}": kicked=${out.kicked || 0}, updated=${out.updated || 0}`)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(out))
+    } catch (e) {
+      console.error('[vetvi-sync] access-sync error', e)
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'bad payload' }))
+    }
+  })
+})
+
+try {
+  internalServer.listen(INTERNAL_PORT, () => {
+    console.log(`[vetvi-sync] internal access-sync on port ${INTERNAL_PORT}`)
+  })
+  internalServer.on('error', (e) => {
+    console.error('[vetvi-sync] internal port error (свип ролей продолжает работать)', e)
+  })
+} catch (e) {
+  console.error('[vetvi-sync] internal server failed', e)
+}
+
 process.on('SIGTERM', () => {
   console.log('[vetvi-sync] SIGTERM, shutting down...')
   try {
@@ -1476,6 +1628,7 @@ process.on('SIGTERM', () => {
   } catch {
     // уже закрыта
   }
+  try { internalServer.close() } catch { /* уже закрыт */ }
   httpServer.close(() => process.exit(0))
 })
 
@@ -1486,5 +1639,6 @@ process.on('SIGINT', () => {
   } catch {
     // уже закрыта
   }
+  try { internalServer.close() } catch { /* уже закрыт */ }
   httpServer.close(() => process.exit(0))
 })

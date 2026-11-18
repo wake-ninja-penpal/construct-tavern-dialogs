@@ -48,6 +48,10 @@ services:
       # connection_limit=1 — один запрос за раз: вторая запись в SQLite из
       # другого процесса (sync читает ту же базу) не упрётся в busy-конфликт.
       DATABASE_URL: "file:/app/db/custom.db?connection_limit=1&socket_timeout=15"
+      # Внутренний push смены прав в realtime-сервер: участник с открытой
+      # комнатой мгновенно теряет/получает право правки (без перезагрузки).
+      VETVI_SYNC_INTERNAL_URL: "http://sync:3004"
+      VETVI_INTERNAL_KEY: "vetvi-internal-key"
     volumes:
       - web-data:/app/db
     expose:
@@ -78,11 +82,16 @@ services:
       # комнат считаются гостями только для чтения (владелец теряет право
       # редактирования). Монтируем без :ro — WAL-режиму нужны -shm/-wal файлы.
       VETVI_MAIN_DB: "/db/custom.db"
+      # Внутренний push смены прав (порт 3004) — ключ должен совпадать с web.
+      # Свип ролей (каждые 3 с) остаётся запасным каналом: даже если push
+      # недоступен, права применяются без перезагрузки страницы.
+      VETVI_INTERNAL_KEY: "vetvi-internal-key"
     volumes:
       - sync-data:/app/data
       - web-data:/db
     expose:
       - "3003"
+      - "3004"
     networks:
       - internal
     healthcheck:

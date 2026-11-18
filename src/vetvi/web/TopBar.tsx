@@ -433,17 +433,24 @@ export function TopBar(props: { store: VetviStore }) {
     window.addEventListener('pointerup', onGripUp);
   };
 
-  /* закрытие попапов аккаунта/уведомлений кликом мимо (capture, как bindSyncUI) */
+  /* закрытие попапов аккаунта/уведомлений и меню сохранения кликом мимо
+     (capture, как bindSyncUI). Меню сохранения — .save-menu внутри .save-wrap:
+     клик по пункту меню до capture-обработчика не «долетит» (onClick на .sm-i
+     сработает раньше на том же pointerup→click), клик мимо — закрывает меню. */
   useEffect(() => {
     const onDoc = (e: Event) => {
       const t = e.target as Element | null;
       if (!t) return;
       if (store.accPop && !t.closest('.acc-pop') && !t.closest('#accBtn')) store.setAccPop(false);
       if (ntf.open && !t.closest('.ntf-pop') && !t.closest('#bellBtn')) ntf.setOpen(false);
+      if (saveOpen && !t.closest('.save-wrap')) {
+        setSaveOpen(false);
+        setSavePos(null);
+      }
     };
     document.addEventListener('pointerdown', onDoc, true);
     return () => document.removeEventListener('pointerdown', onDoc, true);
-  }, [store, store.accPop, ntf.open, ntf.setOpen]);
+  }, [store, store.accPop, ntf.open, ntf.setOpen, saveOpen]);
 
   const zoomStep = (factor: number) => {
     const r = canvasApi.current?.getRect();

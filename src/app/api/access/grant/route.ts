@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { notifyAccessChanged } from '@/lib/syncNotify';
 
 /** POST /api/access/grant {roomId, login, role, projectId?, projectName?} —
  *  открыть доступ пользователю по ЛОГИНУ аккаунта. Получателю создаётся
@@ -82,6 +83,11 @@ export async function POST(req: NextRequest) {
         }),
       },
     });
+
+    /* мгновенное применение прав в открытой комнате: участник сразу получает
+       vetvi:role (право правки без перезагрузки) — недоступность sync не
+       влияет на ответ (роли применит свип/переподключение) */
+    notifyAccessChanged(roomId, [{ userId: target.id, role }]);
 
     return NextResponse.json({ ok: true });
   } catch (e) {

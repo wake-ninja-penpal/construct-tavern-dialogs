@@ -504,16 +504,32 @@ export class SyncClient {
       this.store.emit();
     });
     /* владелец закрыл ссылку/выключил сетевой режим, пока мы были в комнате:
-       гостей и участников вежливо выгоняет */
+       гостей и участников вежливо выгоняет. reason=revoked — у нас отозвали
+       доступ (окно «Поделиться» → «Отозвать доступ»): выгоняет и участника. */
     sock.on('vetvi:kicked', (m: { roomId?: string; reason?: string }) => {
       if (!m || m.roomId !== this.room) return;
       const why = m.reason === 'members'
         ? 'По ссылке могут войти только участники, добавленные владельцем'
         : m.reason === 'closed'
           ? 'Владелец отключил сетевой доступ — комната закрыта'
-          : 'Владелец закрыл доступ по ссылке';
+          : m.reason === 'revoked'
+            ? 'Владелец закрыл вам доступ к проекту — вы отключены от комнаты'
+            : 'Владелец закрыл доступ по ссылке';
       this.disconnect(true);
       this.store.toast(why, 'warn');
+    });
+    /* права доступа изменились, пока мы в комнате (владелец сменил роль в окне
+       «Поделиться») — сервер прислал новую роль: право правки применяется
+       немедленно, без перезагрузки страницы */
+    sock.on('vetvi:role', (m: { roomId?: string; role?: string; canEdit?: boolean }) => {
+      if (!m || m.roomId !== this.room || this.mode !== 'room') return;
+      const canEdit = m.canEdit !== false;
+      if (typeof m.role === 'string') this.role = m.role;
+      const was = this.store.viewOnly;
+      this.store.viewOnly = !canEdit;
+      if (!canEdit && !was) this.store.toast('Владелец ограничил вас правами только чтения — правки недоступны', 'warn');
+      else if (canEdit && was) this.store.toast('Вам снова доступно редактирование проекта', 'ok');
+      this.store.emit();
     });
   }
 

@@ -14,9 +14,13 @@ body{background:var(--bg);color:var(--tx);font:14px/1.45 var(--body);overflow:hi
 ::-webkit-scrollbar-thumb{background:#2c313a;border-radius:8px;border:2px solid var(--panel)}
 ::-webkit-scrollbar-track{background:transparent}
 kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--tx2)}
-#topbar{height:56px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:linear-gradient(#181a1f,#131519);border-bottom:1px solid #262a31;position:relative;z-index:40;animation:dropIn .5s cubic-bezier(.2,.8,.3,1) both;
+#topbar{height:56px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:linear-gradient(#181a1f,#131519);border-bottom:1px solid #262a31;position:relative;z-index:40;animation:dropIn .5s cubic-bezier(.2,.8,.3,1);
   /* шапка целиком НЕ скроллится: скролл — только у блока кнопок холста (см. .tool-scroll) */
   overflow:hidden}
+/* ВАЖНО: у dropIn нет fill-mode «both». С «both» Chrome после анимации навсегда
+   оставляет computed transform (identity matrix) — шапка становится containing
+   block'ом для position:fixed потомков, и выпадающее меню сохранения обрезается
+   по overflow:hidden шапки. Без fill-mode после анимации transform = none. */
 #topbar > *{flex:none}
 /* фиксированные кнопки слева; при острой нехватке места (узкие окна) тихо
    сжимаются со скрытым скроллом — правый блок (поиск/уведомления/аккаунт)
@@ -26,7 +30,7 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
 /* правый прижатый блок: поиск, уведомления, аккаунт — всегда у края шапки,
    никогда не сдвигаются и не уезжают за экран */
 #topbar > .tb-right{display:inline-flex;align-items:center;gap:10px;flex:none;margin-left:auto}
-@keyframes dropIn{from{transform:translateY(-100%);opacity:0}}
+@keyframes dropIn{from{transform:translateY(-100%);opacity:0}to{transform:none;opacity:1}}
 .brand{display:flex;align-items:center;gap:10px;user-select:none;flex:none}
 .brand svg{width:28px;height:28px}
 .brand .lg{font:700 15px var(--disp);letter-spacing:3px;color:var(--tx)}
