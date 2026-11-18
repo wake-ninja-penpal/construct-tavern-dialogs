@@ -3480,7 +3480,10 @@ export class VetviStore {
     if (roomId && this.sync) {
       this.sync.mode = 'room';
       this.lockAfterUnlock(() => {
-        this.sync!.connect(roomId, id, { own: true, silent: true });
+        /* own=false: открытие проекта НЕ пересоздаёт комнату, выключенную
+           владельцем (сервер ответит room_closed — тихо, без тоста). Комната
+           снова появляется только явным переключателем «Общедоступный». */
+        this.sync!.connect(roomId, id, { silent: true });
         this.sync!.setHash(roomId, id);
       });
     } else if (this.sync) {
@@ -3570,7 +3573,11 @@ export class VetviStore {
     if (this.sync) {
       this.sync.mode = 'room';
       this.lockAfterUnlock(() => {
-        this.sync!.connect(p.roomId, pid, { own: true, silent: true });
+        /* own=false: полученный проект открывается ТОЛЬКО если комната жива на
+           сервере. Раньше own=true создавал пустую комнату с локальной заглушкой,
+           если владелец уже выключил сетевой режим — «проект открывается» без
+           данных. Теперь сервер ответит room_closed → честное «проект офлайн». */
+        this.sync!.connect(p.roomId, pid, { silent: false });
         this.sync!.setHash(p.roomId, pid);
       });
     }
@@ -4640,6 +4647,8 @@ export class VetviStore {
   /**
    * Перезапуск страницы: у открытого проекта есть комната — тихо переподключиться
    * (projInitStartup оригинала: «подключаемся только к комнате этого проекта»).
+   * own=false: комната, удалённая владельцем (сетевой режим выключен), не
+   * «воскрешается» локальной копией — просто остаёмся офлайн, без тоста.
    */
   bootReconnectRoom(): void {
     if (!this.sync || this.sync.enabled) return;
@@ -4652,7 +4661,7 @@ export class VetviStore {
     this.sync.mode = 'room';
     const roomId = entry.roomId;
     this.lockAfterUnlock(() => {
-      this.sync!.connect(roomId, pid, { own: true, silent: true });
+      this.sync!.connect(roomId, pid, { silent: true });
       this.sync!.setHash(roomId, pid);
     });
   }

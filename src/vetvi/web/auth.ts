@@ -94,6 +94,10 @@ export interface AccessMineItem {
   projectName?: string | null;
   role: 'owner' | 'editor' | 'reader';
   ownerName?: string | null;
+  /** комната жива на realtime-сервере? false — владелец выключил сетевой
+   *  режим (проект офлайн: пометка в списке, открытие блокируется);
+   *  null/undefined — статус неизвестен (sync недоступен) */
+  online?: boolean | null;
 }
 
 export interface NotificationItem {

@@ -28,3 +28,36 @@ export function notifyAccessChanged(
     /* уведомление необязательно: свип ролей надёжно применит изменения */
   }
 }
+
+/** Живы ли комнаты на realtime-сервере (vetvi-sync).
+ *
+ *  «Вам открыли доступ» помечает офлайн-проекты: владелец выключил сетевой
+ *  режим — комната удалена с сервера, открывать её нельзя. sync хранит
+ *  комнаты в своей БД, поэтому статус спрашиваем у него по внутреннему
+ *  HTTP-API. Недоступность sync — null (статус неизвестен, решение остаётся
+ *  за сервером комнат при join: он ответит room_closed). */
+export async function syncRoomsStatus(
+  roomIds: string[],
+): Promise<Record<string, { online: boolean; members?: number }> | null> {
+  try {
+    const base = process.env.VETVI_SYNC_INTERNAL_URL || 'http://127.0.0.1:3004';
+    const key = process.env.VETVI_INTERNAL_KEY || 'vetvi-internal-key';
+    const ac = new AbortController();
+    const tm = setTimeout(() => ac.abort(), 2500);
+    try {
+      const res = await fetch(base + '/internal/rooms-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-vetvi-key': key },
+        body: JSON.stringify({ roomIds: roomIds.slice(0, 200) }),
+        signal: ac.signal,
+      });
+      if (!res.ok) return null;
+      const j = (await res.json()) as { rooms?: Record<string, { online: boolean; members?: number }> };
+      return j.rooms || null;
+    } finally {
+      clearTimeout(tm);
+    }
+  } catch {
+    return null; /* sync недоступен — статус неизвестен */
+  }
+}

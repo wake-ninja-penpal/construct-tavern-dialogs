@@ -120,15 +120,29 @@ function ShareAccess({ store }: { store: VetviStore }) {
   }, []);
   const isOwner = meRole === 'owner';
 
-  /** Ввод принимаем как по логину, так и по имени (не зависит от регистра). */
+  /** Ввод принимаем как по логину, так и по имени (не зависит от регистра).
+   *  Подсказки ищут по ВХОЖДЕНИЮ подстроки («bas» → «basya»), поэтому и здесь
+   *  точное совпадение дополняем тем же поиском: иначе частично набранный ник
+   *  из подсказок уходил на сервер как есть — «Пользователь не найден». */
   const resolveLogin = (raw: string): string | null => {
     const q = raw.trim().toLowerCase();
     if (!q) return null;
     const nick = q.startsWith('@') ? q.slice(1) : q;
+    if (!nick) return null;
     const byLogin = users.find((u) => u.login.toLowerCase() === nick);
     if (byLogin) return byLogin.login;
     const byName = users.find((u) => (u.displayName || '').toLowerCase() === nick);
     if (byName) return byName.login;
+    /* частичный ввод: тот же порядок, что у подсказок (логин → имя,
+       сначала начало строки, потом вхождение) */
+    const prefLogin = users.find((u) => u.login.toLowerCase().startsWith(nick));
+    if (prefLogin) return prefLogin.login;
+    const prefName = users.find((u) => (u.displayName || '').toLowerCase().startsWith(nick));
+    if (prefName) return prefName.login;
+    const subLogin = users.find((u) => u.login.toLowerCase().includes(nick));
+    if (subLogin) return subLogin.login;
+    const subName = users.find((u) => (u.displayName || '').toLowerCase().includes(nick));
+    if (subName) return subName.login;
     return nick; /* может, пользователь с таким логином есть, но списка нет */
   };
 

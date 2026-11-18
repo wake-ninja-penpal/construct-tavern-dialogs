@@ -158,6 +158,10 @@ export function TopBar(props: { store: VetviStore }) {
   const [saveOpen, setSaveOpen] = useState(false);
   const [savePos, setSavePos] = useState<{ left: number; top: number } | null>(null);
   const saveRef = useRef<HTMLDivElement>(null);
+  /* подпись статуса составной кнопки «Поделиться»: fixed-плашка рядом с кнопкой
+     (поверх всего — скролл-контейнер шапки её не обрезает и не раздувает скролл) */
+  const [statusPop, setStatusPop] = useState<{ x: number; y: number } | null>(null);
+  const stRef = useRef<HTMLButtonElement>(null);
   const me = getMe();
   const ntf = useNotifications(store);
   void store.revision;
@@ -609,6 +613,23 @@ export function TopBar(props: { store: VetviStore }) {
     return { color, count, title, isCopy, label };
   })();
 
+  /* подпись статуса: выдвигается ПОВЕРХ всего (fixed-плашка рядом с кнопкой).
+     Раньше подпись раздвигала саму кнопку внутри скролл-контейнера шапки —
+     у края контейнера она обрезалась и создавала лишний горизонтальный скролл.
+     Теперь кнопка всегда узкая (только точка), а текст показывается плашкой:
+     она не обрезается, не двигает кнопки и не создаёт скролл. Если кнопка у
+     правого края экрана — плашка раскрывается влево от неё. */
+  const statusPopShow = () => {
+    const el = stRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const est = statusInfo.label.length * 8 + 26; /* примерная ширина плашки */
+    let x = r.right + 7;
+    if (x + est > window.innerWidth - 8) x = Math.max(8, r.left - 7 - est);
+    setStatusPop({ x, y: r.top + r.height / 2 });
+  };
+  const statusPopHide = () => setStatusPop(null);
+
   /* содержимое отсоединяемого блока (одинаково в шапке и в плавающей панели) */
   const toolContent = (
     <>
@@ -696,7 +717,7 @@ export function TopBar(props: { store: VetviStore }) {
             <ArrowIcon dir="l" />
           </button>
         )}
-        <div className="tb-fixed-scroll" ref={menuScrollRef} onScroll={measureArrows}>
+        <div className="tb-fixed-scroll" ref={menuScrollRef} onScroll={() => { measureArrows(); statusPopHide(); }}>
           <button type="button" className="btn ibtn" id="bNew" title={'Новый проект (' + hkText('newProject') + ')'} aria-label="Новый проект" onClick={() => store.createProject()}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
           </button>
@@ -802,8 +823,13 @@ export function TopBar(props: { store: VetviStore }) {
             type="button"
             className="btn primary sg-status"
             id="bCollab"
+            ref={stRef}
             title={statusInfo.title}
             aria-label={'Статус совместной работы: ' + statusInfo.label}
+            onMouseEnter={statusPopShow}
+            onMouseLeave={statusPopHide}
+            onFocus={statusPopShow}
+            onBlur={statusPopHide}
             onClick={() => {
               if (!sc) return;
               if (!sc.enabled) {
@@ -816,9 +842,9 @@ export function TopBar(props: { store: VetviStore }) {
               store.setCollabPop(!store.collabPop);
             }}
           >
+            {/* точка-индикатор видна всегда; текст статуса — fixed-плашка
+                (.st-chip) рядом с кнопкой, появляется при наведении/фокусе */}
             <span className={'cc-dot' + (store.syncStatus === 'conn' ? ' pulse' : '')} style={{ background: statusInfo.color }} />
-            {/* подпись выдвигается при наведении (CSS .sg-label): точка видна всегда */}
-            <span className="sg-label">{statusInfo.label}</span>
           </button>
         </div>
 
@@ -897,6 +923,15 @@ export function TopBar(props: { store: VetviStore }) {
         </button>
       </div>
     </header>
+
+    {/* подпись статуса «Поделиться»: fixed-плашка ПОВЕРХ всего интерфейса —
+        не обрезается скролл-контейнером шапки, не двигает кнопки и не создаёт
+        лишний скролл (позиция — от кнопки статуса, влево у правого края) */}
+    {statusPop && (
+      <div className="st-chip" style={{ left: statusPop.x, top: statusPop.y }} aria-hidden="true">
+        {statusInfo.label}
+      </div>
+    )}
 
     {/* плавающая панель инструментов: у любого края холста — горизонтальная
         (сверху/снизу) или вертикальная (слева/справа), либо в свободной позиции —

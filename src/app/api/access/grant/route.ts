@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { notifyAccessChanged } from '@/lib/syncNotify';
+import { findUserByLogin } from '@/lib/users';
 
 /** POST /api/access/grant {roomId, login, role, projectId?, projectName?} —
  *  открыть доступ пользователю по ЛОГИНУ аккаунта. Получателю создаётся
@@ -35,7 +36,9 @@ export async function POST(req: NextRequest) {
     const login = typeof body.login === 'string' ? body.login.trim().toLowerCase() : '';
     if (!login) return NextResponse.json({ error: 'Некорректный логин' }, { status: 400 });
 
-    const target = await db.authUser.findUnique({ where: { login } });
+    /* логин хранится в оригинальном регистре («Basya») — ищем без учёта регистра,
+       иначе «basya» падал с «не найден» при живом аккаунте */
+    const target = await findUserByLogin(login);
     if (!target) return NextResponse.json({ error: 'Пользователь с таким логином не найден' }, { status: 404 });
     if (target.id === caller.id) {
       return NextResponse.json({ error: 'Это ваш собственный доступ' }, { status: 400 });

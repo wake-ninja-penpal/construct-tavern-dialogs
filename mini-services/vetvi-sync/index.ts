@@ -326,6 +326,9 @@ interface MergeRow {
 const qRoomById = db.prepare(
   'SELECT id, doc, updated_at, pass_salt, pass_hash, link_mode FROM rooms WHERE id = ?',
 )
+/* лёгкая проверка существования комнаты (для статуса «офлайн» в списках доступов:
+   выключенный владельцем сетевой режим удаляет строку комнаты) */
+const qRoomExists = db.prepare('SELECT id FROM rooms WHERE id = ?')
 const qRoomsCount = db.prepare('SELECT COUNT(*) AS c FROM rooms')
 const qMergesCount = db.prepare('SELECT COUNT(*) AS c FROM merges')
 const qRoomUpsertDoc = db.prepare(
@@ -1653,7 +1656,10 @@ function applyAccessSync(msg: { roomId?: string; changed?: { userId?: string; ro
 }
 
 const internalServer = createServer((req, res) => {
-  if (!req.url || !req.url.startsWith('/internal/access-sync') || req.method !== 'POST') {
+  const url = req.url || ''
+  const isStatus = url.startsWith('/internal/rooms-status') && req.method === 'POST'
+  const isAccess = url.startsWith('/internal/access-sync') && req.method === 'POST'
+  if (!isStatus && !isAccess) {
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: false, error: 'not found' }))
     return
@@ -1672,13 +1678,31 @@ const internalServer = createServer((req, res) => {
   req.on('end', () => {
     if (overflow) return
     try {
-      const parsed = JSON.parse(body) as { roomId?: string; changed?: { userId?: string; role?: string | null }[] }
+      const parsed = JSON.parse(body) as { roomId?: string; roomIds?: unknown; changed?: { userId?: string; role?: string | null }[] }
+      if (isStatus) {
+        /* какие из перечисленных комнат живы на сервере: строка в БД или активная
+           комната в памяти. «Вам открыли доступ» помечает офлайн-проекты и не
+           открывает их (владелец выключил сетевой режим — комната удалена). */
+        const ids = Array.isArray(parsed?.roomIds)
+          ? (parsed.roomIds as unknown[]).filter((x): x is string => isSafeRoom(x)).slice(0, 200)
+          : []
+        const out: Record<string, { online: boolean; members: number }> = {}
+        for (const id of ids) {
+          let stored: unknown = null
+          try { stored = qRoomExists.get(id) } catch (e) { console.error('[vetvi-sync] rooms-status db error', e) }
+          const active = rooms.get(id)
+          out[id] = { online: !!stored || !!active, members: active ? active.members.size : 0 }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, rooms: out }))
+        return
+      }
       const out = applyAccessSync(parsed)
       console.log(`[vetvi-sync] access-sync "${parsed?.roomId || '?'}": kicked=${out.kicked || 0}, updated=${out.updated || 0}`)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(out))
     } catch (e) {
-      console.error('[vetvi-sync] access-sync error', e)
+      console.error('[vetvi-sync] internal error', e)
       res.writeHead(400, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: 'bad payload' }))
     }

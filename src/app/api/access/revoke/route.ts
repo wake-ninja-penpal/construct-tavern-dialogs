@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { notifyAccessChanged } from '@/lib/syncNotify';
+import { findUserByLogin } from '@/lib/users';
 
 /** POST /api/access/revoke {roomId, login} — забрать доступ (владелец).
  *  У пользователя остаётся уведомление об отзыве. */
@@ -29,7 +30,8 @@ export async function POST(req: NextRequest) {
     const login = typeof body.login === 'string' ? body.login.trim().toLowerCase() : '';
     if (!login) return NextResponse.json({ error: 'Некорректные данные' }, { status: 400 });
 
-    const target = await db.authUser.findUnique({ where: { login } });
+    /* поиск без учёта регистра — логин в БД хранится в оригинальном регистре */
+    const target = await findUserByLogin(login);
     if (!target) return NextResponse.json({ error: 'Пользователь не найден' }, { status: 404 });
 
     const targetAccess = await db.projectAccess.findUnique({

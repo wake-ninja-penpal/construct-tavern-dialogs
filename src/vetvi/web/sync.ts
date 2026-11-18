@@ -344,7 +344,9 @@ export class SyncClient {
           }
           if (res && res.error === 'room_closed') {
             this.disconnect(true);
-            this.store.toast('Проект сейчас не на сервере — владелец отключил сетевой доступ', 'warn');
+            /* тихий вход (boot-переподключение) — без тоста: просто офлайн.
+               Явное открытие («Вам открыли доступ», ссылка) — с объяснением. */
+            if (!opts.silent) this.store.toast('Проект сейчас не на сервере — владелец отключил сетевой доступ', 'warn');
             return;
           }
           this.setStatus('err');
@@ -605,9 +607,11 @@ export class SyncClient {
     this.store.toast('Переподключение…');
     const room = this.room;
     const pid = this.projectId;
-    const own = this.mode !== 'copy';
+    /* own=false: переподключение не «воскрешает» комнату, удалённую владельцем
+       (выключенный сетевой режим) — сервер ответит room_closed, и мы честно
+       останемся офлайн. Публикация — только явным переключателем. */
     this.lastSent = '';
-    this.connect(room, pid, { silent: true, own });
+    this.connect(room, pid, { silent: true });
   }
 
   disconnect(silent = false): void {

@@ -632,18 +632,40 @@ export function ProjectsModal({ store }: { store: VetviStore }) {
 
   /* проекты, к которым открыли доступ (уведомление/грант) — приходят с сервера;
      названия закрытых проектов в реестре — из /api/rooms/names (кто-то мог
-     переименовать их в комнате, пока у нас они закрыты) */
+     переименовать их в комнате, пока у нас они закрыты). Обновляем список,
+     пока модалка открыта: владелец мог выключить/включить проект (офлайн). */
   useEffect(() => {
     let alive = true;
-    store.refreshRoomNames();
-    void accessMine().then((items) => { if (alive) setShared(items.filter((x) => x.role !== 'owner')); });
-    return () => { alive = false; };
+    const load = () => {
+      store.refreshRoomNames();
+      void accessMine().then((items) => { if (alive) setShared(items.filter((x) => x.role !== 'owner')); });
+    };
+    load();
+    const t = window.setInterval(load, 15000);
+    return () => { alive = false; window.clearInterval(t); };
   }, [store]);
+
+  /* чужие комнаты (мне выдали доступ) НЕ дублируются в «Мои проекты»: открытый
+     полученный проект сохраняется в реестр с roomId — скрываем такие записи из
+     общего списка, они живут только в «Вам открыли доступ» */
+  const sharedRoomIds = new Set(shared.map((s) => s.roomId));
+  const ownList = list.filter((e) => !(e.roomId && sharedRoomIds.has(e.roomId)));
+  const curRoomId = list.find((e) => e.id === cur)?.roomId || '';
+  /** Открыть полученный проект: офлайн (владелец переключил в локальный) —
+   *  не открываем, объясняем почему. */
+  const openSharedItem = (s: AccessMineItem) => {
+    if (s.online === false) {
+      store.toast('Проект сейчас офлайн — владелец переключил его в локальный режим', 'warn');
+      return;
+    }
+    store.openShared({ roomId: s.roomId, projectId: s.projectId, projectName: s.projectName, role: s.role });
+    store.closeModal();
+  };
 
   return (
     <ModalShell title="Мои проекты" onClose={() => store.closeModal()}>
       <div className="pj-list">
-        {list.map((e) => (
+        {ownList.map((e) => (
           <div
             className={'pj-row' + (e.id === cur ? ' cur' : '')}
             key={e.id}
@@ -711,26 +733,33 @@ export function ProjectsModal({ store }: { store: VetviStore }) {
             </div>
           </div>
         ))}
-        {!list.length && <div className="pj-empty">Пока нет проектов — создайте первый</div>}
+        {!ownList.length && <div className="pj-empty">Пока нет проектов — создайте первый</div>}
       </div>
       {shared.length > 0 && (
         <div className="pj-shared">
           <div className="pj-sh-cap">Вам открыли доступ</div>
-          {shared.map((s) => (
-            <div
-              key={s.roomId}
-              className="pj-row shared"
-              title="Открыть проект, к которому вам открыли доступ"
-              onClick={() => { store.openShared({ roomId: s.roomId, projectId: s.projectId, projectName: s.projectName, role: s.role }); store.closeModal(); }}
-            >
-              <div className="pj-main">
-                <div className="pj-name">{s.projectName || 'Проект по ссылке'}</div>
-                <div className="pj-meta">открыл: {s.ownerName || 'владелец'}</div>
+          {shared.map((s) => {
+            const offline = s.online === false;
+            const isCur = !!curRoomId && curRoomId === s.roomId;
+            return (
+              <div
+                key={s.roomId}
+                className={'pj-row shared' + (offline ? ' off' : '')}
+                title={offline ? 'Проект офлайн: владелец переключил его в локальный режим' : 'Открыть проект, к которому вам открыли доступ'}
+                onClick={() => openSharedItem(s)}
+              >
+                <div className="pj-main">
+                  <div className="pj-name">
+                    {s.projectName || 'Проект по ссылке'}
+                    {isCur && <span style={{ color: 'var(--acc)', fontSize: '10px', whiteSpace: 'nowrap' }}> · текущий</span>}
+                  </div>
+                  <div className="pj-meta">открыл: {s.ownerName || 'владелец'}{offline ? ' · проект офлайн' : ''}</div>
+                </div>
+                <span className={'sa-role r-' + s.role}>{s.role === 'reader' ? 'чтение' : 'редактор'}</span>
+                {offline ? <span className="pj-badge off">офлайн</span> : <span className="pj-badge">комната</span>}
               </div>
-              <span className={'sa-role r-' + s.role}>{s.role === 'reader' ? 'чтение' : 'редактор'}</span>
-              <span className="pj-badge">комната</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <div className="pj-foot">
