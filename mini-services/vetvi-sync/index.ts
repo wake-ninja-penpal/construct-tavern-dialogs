@@ -56,6 +56,9 @@ interface RoomMember {
   /* id аккаунта (если вошёл по сессии) — нужен свипу ролей: права
      (owner/editor/reader) могут измениться, пока участник в комнате */
   accId: string | null
+  /* роль вошедшего (owner/editor/reader/guest) — нужна при ограничении ссылки:
+     когда владелец закрывает ссылку, гости вылетают из комнаты */
+  role?: string
 }
 
 interface AccInfo {
@@ -81,6 +84,10 @@ interface StoredRoom {
   updatedAt: string
   /* пароль комнаты (salt + sha256) — персистится вместе с комнатой */
   pass?: { salt: string; hash: string } | null
+  /* доступ по ссылке: off — ссылка закрыта, members — только добавленные
+     участники, open — все по ссылке (только чтение). Меняет владелец
+     в окне «Поделиться» (vetvi:room-settings), персистится с комнатой. */
+  linkMode?: 'off' | 'members' | 'open' | null
 }
 
 /* ─── персистентность: SQLite (bun:sqlite) ───
@@ -195,7 +202,8 @@ db.exec(`
     doc        TEXT,
     updated_at TEXT NOT NULL,
     pass_salt  TEXT,
-    pass_hash  TEXT
+    pass_hash  TEXT,
+    link_mode  TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_rooms_updated ON rooms(updated_at);
   CREATE TABLE IF NOT EXISTS merges (
@@ -214,12 +222,25 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_merges_copy ON merges(room_id, copy_id, status);
 `)
 
+/* миграция существующих БД: колонка link_mode появилась позже — добавляем,
+   если её нет (в старых базах таблица rooms уже создана без неё) */
+try {
+  const cols = db.query("PRAGMA table_info(rooms)").all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'link_mode')) {
+    db.exec('ALTER TABLE rooms ADD COLUMN link_mode TEXT')
+    console.log('[vetvi-sync] rooms: добавлена колонка link_mode')
+  }
+} catch (e) {
+  console.error('[vetvi-sync] миграция link_mode не удалась', e)
+}
+
 interface RoomRow {
   id: string
   doc: string | null
   updated_at: string
   pass_salt: string | null
   pass_hash: string | null
+  link_mode: string | null
 }
 
 interface MergeRow {
@@ -237,7 +258,7 @@ interface MergeRow {
 
 /* подготовленные выражения */
 const qRoomById = db.prepare(
-  'SELECT id, doc, updated_at, pass_salt, pass_hash FROM rooms WHERE id = ?',
+  'SELECT id, doc, updated_at, pass_salt, pass_hash, link_mode FROM rooms WHERE id = ?',
 )
 const qRoomsCount = db.prepare('SELECT COUNT(*) AS c FROM rooms')
 const qMergesCount = db.prepare('SELECT COUNT(*) AS c FROM merges')
@@ -251,6 +272,7 @@ const qRoomUpsertPass = db.prepare(
    ON CONFLICT(id) DO UPDATE SET pass_salt = excluded.pass_salt, pass_hash = excluded.pass_hash`,
 )
 const qRoomClearPass = db.prepare('UPDATE rooms SET pass_salt = NULL, pass_hash = NULL WHERE id = ?')
+const qRoomSetLinkMode = db.prepare('UPDATE rooms SET link_mode = ? WHERE id = ?')
 const qRoomTrim = db.prepare(
   `DELETE FROM rooms WHERE id NOT IN (
      SELECT id FROM rooms ORDER BY updated_at DESC LIMIT ?
@@ -412,7 +434,14 @@ function getStoredRoom(roomId: string): StoredRoom | null {
   }
   const out: StoredRoom = { doc, updatedAt: row.updated_at }
   if (row.pass_salt && row.pass_hash) out.pass = { salt: row.pass_salt, hash: row.pass_hash }
+  if (row.link_mode === 'off' || row.link_mode === 'members' || row.link_mode === 'open') {
+    out.linkMode = row.link_mode
+  }
   return out
+}
+
+function saveRoomLinkMode(roomId: string, mode: 'off' | 'members' | 'open') {
+  qRoomSetLinkMode.run(mode, roomId)
 }
 
 function saveRoomDoc(roomId: string, doc: unknown, updatedAt: string) {
@@ -454,6 +483,8 @@ interface RoomState {
   /* пароль комнаты: первый вошедший с защищённым проектом закрепляет salt+hash,
      дальнейшие join требуют пароль (проверка на сервере) */
   pass: { salt: string; hash: string } | null
+  /* доступ по ссылке (см. StoredRoom.linkMode) — меняет владелец из окна */
+  linkMode: 'off' | 'members' | 'open'
   gcTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -485,10 +516,14 @@ const MAX_LOCKS_PER_SOCKET = 400
 
 const rooms = new Map<string, RoomState>()
 
+function room_members_get(roomName: string, sid: string): RoomMember | null {
+  return rooms.get(roomName)?.members.get(sid) || null
+}
+
 function getRoom(name: string): RoomState {
   let room = rooms.get(name)
   if (!room) {
-    room = { name, members: new Map(), locks: new Map(), focus: new Map(), pass: null, gcTimer: null }
+    room = { name, members: new Map(), locks: new Map(), focus: new Map(), pass: null, linkMode: 'open', gcTimer: null }
     rooms.set(name, room)
   }
   if (room.gcTimer) {
@@ -713,8 +748,21 @@ io.on('connection', (socket: Socket) => {
         if (!room.pass && storedRoom?.pass?.salt && storedRoom?.pass?.hash) {
           room.pass = { salt: String(storedRoom.pass.salt), hash: String(storedRoom.pass.hash) }
         }
+        /* доступ по ссылке: восстановить из SQLite (меняется в окне «Поделиться») */
+        if (storedRoom?.linkMode) room.linkMode = storedRoom.linkMode
 
         const isMember = room.members.has(socket.id)
+
+        /* ограничение ссылки: пользователь БЕЗ записи доступа (гость по ссылке)
+           входит только при linkMode = 'open'. Участники с доступом (и legacy-
+           комнаты вообще без записей доступов) проходят как раньше. */
+        if (!isMember && !role && room.linkMode !== 'open' && accessCount(roomName) > 0) {
+          ack?.({
+            ok: false,
+            error: room.linkMode === 'off' ? 'link_off' : 'members_only',
+          })
+          return
+        }
 
         /* закрепление пароля: комната ещё без пароля, вошедший пришёл salt+hash
            защищённого проекта. Пустая комната — закрепляем сразу; в комнате с
@@ -754,7 +802,7 @@ io.on('connection', (socket: Socket) => {
         joinedRoom = roomName
         canEditSock = canEdit
         socket.join(roomName)
-        room.members.set(socket.id, { socketId: socket.id, user, canEdit, accId: acc ? acc.id : null })
+        room.members.set(socket.id, { socketId: socket.id, user, canEdit, accId: acc ? acc.id : null, role: role || 'guest' })
 
         // удаляем призраков перед расчётом списка — счётчик онлайн всегда актуальный
         if (sweepStaleMembers(io, room)) broadcastUsers(io, room)
@@ -771,6 +819,8 @@ io.on('connection', (socket: Socket) => {
           /* роль вошедшего и право на редактирование */
           role: role || 'guest',
           canEdit,
+          /* режим доступа по ссылке — его показывает окно «Поделиться» */
+          linkMode: room.linkMode,
           /* legacy: в комнате ещё нет ни одной записи доступа — клиент может
              заявить владение (первый перешедший с обновления) */
           legacy: !role && accessCount(roomName) === 0,
@@ -795,6 +845,61 @@ io.on('connection', (socket: Socket) => {
       } catch (error) {
         console.error('[vetvi-sync] join error', error)
         ack?.({ ok: false, error: 'join failed' })
+      }
+    },
+  )
+
+  /* ── настройки комнаты (доступ по ссылке) — меняет только владелец ──
+     linkMode: off — ссылка закрыта, members — по ссылке входят только
+     добавленные участники, open — все по ссылке (только чтение). */
+  socket.on(
+    'vetvi:room-settings',
+    (
+      msg: { roomId?: string; linkMode?: string },
+      ack?: (r: unknown) => void,
+    ) => {
+      try {
+        const roomName = msg?.roomId
+        if (!isSafeRoom(roomName) || roomName !== joinedRoom) {
+          ack?.({ ok: false, error: 'bad room' })
+          return
+        }
+        const mode = msg?.linkMode
+        if (mode !== 'off' && mode !== 'members' && mode !== 'open') {
+          ack?.({ ok: false, error: 'bad mode' })
+          return
+        }
+        /* право менять настройки: только владелец комнаты */
+        const me = room_members_get(roomName, socket.id)
+        const myRole = me && me.accId ? accessRole(roomName, me.accId) : null
+        if (myRole !== 'owner') {
+          ack?.({ ok: false, error: 'Только владелец может менять настройки ссылки' })
+          return
+        }
+        const room = getRoom(roomName)
+        room.linkMode = mode
+        try { saveRoomLinkMode(roomName, mode) } catch (e) { console.error('[vetvi-sync] link_mode save error', e) }
+        ack?.({ ok: true, linkMode: mode })
+        io.to(roomName).emit('vetvi:room-settings', { roomId: roomName, linkMode: mode })
+        /* ссылку закрыли для гостей — они покидают комнату немедленно
+           (участники с доступом остаются: их право — запись ProjectAccess) */
+        if (mode !== 'open') {
+          for (const [sid, m] of room.members) {
+            if (m.role && m.role !== 'guest') continue
+            const sock = io.of('/').sockets.get(sid)
+            if (!sock) continue
+            sock.emit('vetvi:kicked', { roomId: roomName, reason: mode })
+            sock.leave(roomName)
+            room.members.delete(sid)
+            releaseSocketLocks(io, room, sid)
+            releaseSocketFocus(io, room, sid)
+          }
+          broadcastUsers(io, room)
+        }
+        console.log(`[vetvi-sync] room "${roomName}" linkMode → ${mode}`)
+      } catch (error) {
+        console.error('[vetvi-sync] room-settings error', error)
+        ack?.({ ok: false, error: 'settings failed' })
       }
     },
   )

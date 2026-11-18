@@ -173,8 +173,11 @@ export class SyncClient {
   mode: 'local' | 'room' | 'copy' = 'local';
   activeCopy: string | null = null;
   mergeCount = 0;
-  /* роль в комнате из ack (owner/editor/reader/guest) — читает ShareModal */
+  /* роль в комнате из ack входа (owner/editor/reader/guest) — читает ShareModal */
   role: string | null = null;
+  /* режим доступа по ссылке (off/members/open) — отдаёт сервер в ack join
+     и в vetvi:room-settings; показывает окно «Поделиться» */
+  linkMode: 'off' | 'members' | 'open' = 'open';
   rlocks: Record<string, LockInfo> | null = null;
   myLocks: Record<string, number> = {};
   lockHB: ReturnType<typeof setInterval> | null = null;
@@ -314,11 +317,22 @@ export class SyncClient {
       if (jpw) jpay.password = jpw;
       const meta = this.store.doc.meta as unknown as { passHash?: string; passSalt?: string };
       if (meta && meta.passHash) jpay.pass = { salt: String(meta.passSalt || ''), hash: String(meta.passHash) };
-      sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc; role?: string; canEdit?: boolean; legacy?: boolean } | null) => {
+      sock.emit('vetvi:join', jpay, (res: { ok?: boolean; needPassword?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; locks?: LockInfo[]; focus?: { userId: string; nodeId: string }[]; pendingMerges?: number; doc?: SyncDoc; role?: string; canEdit?: boolean; legacy?: boolean; linkMode?: string; error?: string } | null) => {
         if (!res || !res.ok) {
           if (res && res.needPassword) {
             if (jpw) opts._pwWrong = true;
             this.askRoomPassword(roomId, pid, opts);
+            return;
+          }
+          /* ссылку закрыли/ограничили: разрываем соединение с ясным сообщением */
+          if (res && res.error === 'link_off') {
+            this.disconnect(true);
+            this.store.toast('Владелец закрыл доступ по ссылке', 'warn');
+            return;
+          }
+          if (res && res.error === 'members_only') {
+            this.disconnect(true);
+            this.store.toast('По ссылке могут войти только участники, добавленные владельцем', 'warn');
             return;
           }
           this.setStatus('err');
@@ -327,7 +341,8 @@ export class SyncClient {
         }
         opts._pwWrong = false;
         this.setStatus('on');
-        /* роль и право на правку: reader/guest — только чтение (сервер и отклоняет правки) */
+        /* режим ссылки и роль: reader/guest — только чтение (сервер и отклоняет правки) */
+        this.linkMode = res.linkMode === 'off' || res.linkMode === 'members' ? res.linkMode : 'open';
         this.applyRole(res, opts.silent);
         this.store.syncUsers = res.users || [];
         this.lockApplyServerList(res.locks);
@@ -461,6 +476,23 @@ export class SyncClient {
     sock.on('vetvi:error', (m: { message?: string }) => {
       if (m && m.message) this.store.toast(m.message, 'err');
     });
+    /* настройки ссылки изменились владельцем (или мы — из этого окна) */
+    sock.on('vetvi:room-settings', (m: { roomId?: string; linkMode?: string }) => {
+      if (!m || m.roomId !== this.room) return;
+      const next = m.linkMode === 'off' || m.linkMode === 'members' ? m.linkMode : 'open';
+      if (next === this.linkMode) return;
+      this.linkMode = next;
+      this.store.emit();
+    });
+    /* владельца закрыл ссылку, пока мы были в комнате: гостей вежливо выгоняет */
+    sock.on('vetvi:kicked', (m: { roomId?: string; reason?: string }) => {
+      if (!m || m.roomId !== this.room) return;
+      const why = m.reason === 'members'
+        ? 'По ссылке могут войти только участники, добавленные владельцем'
+        : 'Владелец закрыл доступ по ссылке';
+      this.disconnect(true);
+      this.store.toast(why, 'warn');
+    });
   }
 
   askRoomPassword(roomId: string, pid: string | null, opts: JoinOpts): void {
@@ -515,6 +547,7 @@ export class SyncClient {
     this.enabled = false;
     this.room = null;
     this.role = null;
+    this.linkMode = 'open';
     this.store.syncUsers = [];
     this.store.viewOnly = false;
     this.mergeCount = 0;
@@ -960,19 +993,52 @@ export class SyncClient {
 
   /* ═══ «Поделиться» ═══ */
 
+  /** Окно «Поделиться» — САМО ПО СЕБЕ проект не делает сетевым: публикация
+   *  (подключение к серверу) включается только переключателем в окне. */
   shareProject(): void {
     if (this.mode === 'copy') {
       this.store.toast('Это копия — поделиться можно только оригиналом проекта', 'warn');
       return;
     }
-    const p = this.hashParams();
-    if (this.enabled && p.room && this.room === p.room) {
-      this.store.openModal('share');
+    this.store.openModal('share');
+  }
+
+  /** roomId проекта: хранится в meta документа (переживает перезагрузки и
+   *  публикацию), резервируется при первом открытии «Поделиться» — доступы
+   *  (ProjectAccess) заводятся ДО публикации, пока проект ещё локальный. */
+  shareRoomId(): string {
+    const meta = this.store.doc.meta as unknown as { projectId?: string; roomId?: string };
+    if (!meta.projectId) {
+      meta.projectId = uid() + uid();
+      this.store.scheduleSave();
+    }
+    if (!meta.roomId) {
+      meta.roomId = (uid() + uid() + uid()).slice(0, 24);
+      this.store.scheduleSave();
+    }
+    return String(meta.roomId);
+  }
+
+  /** Гарантировать запись владельца комнаты (идемпотентно, без входа в неё).
+   *  Вызывается при открытии окна «Поделиться»: без неё владелец не может
+   *  добавлять участников (API доступов требует роль owner). */
+  ensureOwnerAccess(): void {
+    if (this.mode === 'copy') return;
+    const roomId = this.shareRoomId();
+    const pid = String(this.store.doc.meta.projectId || '');
+    void accessInit(roomId, pid, (this.store.doc.meta.name as string) || null).catch(() => undefined);
+  }
+
+  /** Включить сетевой режим (переключатель в окне «Поделиться»): резервируем
+   *  roomId, заявляем владение, заходим в комнату и публикуем локальный проект. */
+  publishProject(): void {
+    if (this.mode === 'copy') {
+      this.store.toast('Это копия — поделиться можно только оригиналом проекта', 'warn');
       return;
     }
-    const roomId = (uid() + uid() + uid()).slice(0, 24);
-    if (!this.store.doc.meta.projectId) this.store.doc.meta.projectId = uid() + uid();
-    this.store.scheduleSave();
+    if (this.enabled && this.mode === 'room' && this.room) return; // уже опубликован
+    const roomId = this.shareRoomId();
+    const pid = String(this.store.doc.meta.projectId || '');
     /* владелец комнаты: запись доступа СТРОГО ДО смены хеша и входа в комнату.
        Раньше хеш менялся синхронно, а connect шёл параллельно с access/init:
        hashchange успевал войти в комнату по ссылке (join без записи доступа —
@@ -980,14 +1046,38 @@ export class SyncClient {
        publish), а join при собственном connect приходил раньше записи в БД. */
     void (async () => {
       try {
-        await accessInit(roomId, String(this.store.doc.meta.projectId), (this.store.doc.meta.name as string) || null);
+        await accessInit(roomId, pid, (this.store.doc.meta.name as string) || null);
       } catch { /* сервер недоступен — войдём всё равно, роль придёт по legacy */ }
       /* хеш меняем только когда доступ уже записан: hashchange увидит this.room
          и не устроит повторный вход по ссылке */
-      this.setHash(roomId, String(this.store.doc.meta.projectId));
-      this.connect(roomId, String(this.store.doc.meta.projectId), { own: true, pushLocal: true });
-      this.store.openModal('share');
+      this.setHash(roomId, pid);
+      this.connect(roomId, pid, { own: true, pushLocal: true });
     })();
+  }
+
+  /** Выключить сетевой режим: выходим из комнаты, ссылка перестаёт работать
+   *  (hash очищается), проект остаётся локальным — доступы участников сохраняются. */
+  unpublishProject(): void {
+    if (this.mode === 'copy') return;
+    if (!this.enabled) return;
+    this.disconnect(true);
+    this.store.toast('Проект снова локальный — сетевой доступ выключен', 'warn');
+  }
+
+  /** Сменить режим доступа по ссылке (off/members/open) — сервер проверяет роль
+   *  владельца и раздаёт новое значение всем в комнате. */
+  setRoomLinkMode(mode: 'off' | 'members' | 'open'): void {
+    if (this.linkMode === mode) return;
+    this.linkMode = mode;
+    this.store.emit();
+    if (!this.sock || !this.sock.connected || !this.room) return;
+    try {
+      this.sock.emit('vetvi:room-settings', { roomId: this.room, linkMode: mode }, (res: { ok?: boolean; error?: string } | null) => {
+        if (res && res.ok === false) {
+          this.store.toast(res.error || 'Не удалось изменить настройки ссылки', 'warn');
+        }
+      });
+    } catch { /* соединение умерло */ }
   }
 
   copyShareLink(): void {

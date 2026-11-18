@@ -1555,7 +1555,7 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tb-arrow:hover{color:var(--acc);background:rgba(255,255,255,.07)}
 .tb-arrow.l{left:-2px}
 .tb-arrow.r{right:-2px;background:linear-gradient(270deg,#1b1e24,rgba(27,30,36,.65) 70%,transparent)}
-.tool-grip{width:9px;height:26px;flex:none;border:0;background:transparent;color:#4d535e;cursor:grab;padding:0;margin:0 8px 0 2px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;opacity:0;transition:opacity .15s,background .15s,color .15s;touch-action:none}
+.tool-grip{width:15px;height:28px;flex:none;border:0;background:transparent;color:#4d535e;cursor:grab;padding:0;margin:0 5px 0 2px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;opacity:0;transition:opacity .15s,background .15s,color .15s;touch-action:none}
 .tool-block:hover .tool-grip,.tool-float .tool-grip{opacity:.85}
 .tool-grip:hover{color:#8b929c;background:rgba(255,255,255,.07)}
 .tool-grip:active{cursor:grabbing}
@@ -1638,6 +1638,30 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .sa-item .sa-role-sel,.sa-form .sa-new-role{height:26px;width:auto;min-width:0;flex:none;background:#14161a;border:1px solid #2b2f37;border-radius:8px;color:var(--tx2);font:500 11.5px var(--body);padding:0 6px;cursor:pointer;outline:none}
 .sa-item .sa-role-sel:focus,.sa-form .sa-new-role:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
 .sa-form .sa-new-role{width:130px}
+/* подсказки поиска участника (под полем ввода, как dropdown) */
+.sa-form{position:relative}
+.sa-suggest{position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:30;display:flex;flex-direction:column;background:#191c21;border:1px solid #2e333c;border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.55);overflow:hidden;max-height:220px;overflow-y:auto}
+.sa-sug-i{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:transparent;color:var(--tx);cursor:pointer;padding:8px 11px}
+.sa-sug-i:hover,.sa-sug-i:focus{background:rgba(255,255,255,.06)}
+.sa-sug-i b{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sa-sug-i i{font-style:normal;font:11px var(--mono);color:var(--tx3);margin-left:auto;flex:none}
+
+/* переключатель «сетевой проект» / «ссылка» в окне «Поделиться» */
+.share-pub{margin-top:14px;border-top:1px solid var(--line);padding-top:11px}
+.share-linksec{margin-top:14px;border-top:1px solid var(--line);padding-top:11px}
+.pub-row{display:flex;align-items:flex-start;gap:11px;cursor:pointer;user-select:none;margin-top:2px}
+.pub-row-sm{margin-top:8px}
+.pub-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pub-text b{font-size:12.5px;color:var(--tx)}
+.pub-text .sp-st{font-size:11px}
+.pub-switch{appearance:none;-webkit-appearance:none;width:34px;height:19px;flex:none;border-radius:10px;background:#2b2f37;border:1px solid #3a4048;position:relative;cursor:pointer;transition:background .15s,border-color .15s;margin:1px 0}
+.pub-switch:checked{background:var(--acc);border-color:var(--acc)}
+.pub-switch::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#e9ecef;transition:transform .15s;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.pub-switch:checked::after{transform:translateX(15px)}
+.pub-switch:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.pub-policy{display:flex;align-items:center;gap:9px;margin-top:9px;font-size:12px;color:var(--tx2)}
+.pub-policy .inp{height:30px;background:#14161a;border:1px solid #2b2f37;border-radius:8px;color:var(--tx);font:12px var(--body);padding:0 9px;outline:none}
+.pub-policy .inp:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
 /* раздел «Смена пароля» в окне редактирования аккаунта */
 .acc-pw-cap{font:600 10.5px var(--mono);letter-spacing:.9px;text-transform:uppercase;color:var(--tx3);margin:14px 0 4px;border-top:1px solid var(--line);padding-top:10px}
 

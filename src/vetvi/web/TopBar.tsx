@@ -152,16 +152,22 @@ export function TopBar(props: { store: VetviStore }) {
   /* ── отсоединяемый блок инструментов ── */
   const [toolDock, setToolDock] = useState<ToolDock>(loadToolDock);
   const [toolDragging, setToolDragging] = useState(false);
+  /* перетаскивание: держим блок за ту точку, за которую взялись (grabFrac —
+     доля вдоль длинной оси). Размеры перемеряются вживую: шапка даёт блок
+     «растянутым», плавающая панель — по содержимому, ориентация меняет оси. */
   const dragRef = useRef<{
-    moved: boolean; floatStart: boolean; grabX: number; grabY: number; w: number; h: number; pos: { x: number; y: number };
+    moved: boolean; floatStart: boolean;
+    grabFrac: number; grabAlong: number; horiz: boolean; len: number; cross: number;
+    pos: { x: number; y: number };
   } | null>(null);
   const floatRef = useRef<HTMLDivElement>(null);
   const toolDockRef = useRef(toolDock);
   const toolDraggingRef = useRef(false);
-  const fitTRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => { toolDockRef.current = toolDock; }, [toolDock]);
-  useEffect(() => { toolDraggingRef.current = toolDragging; }, [toolDragging]);
-  const savedDockRef = useRef('');
+  /* refs синхронизируются в useLayoutEffect (не useEffect): fitDock и подгонка
+     при перетаскивании читают их ДО отрисовки кадра — иначе на смене ориентации
+     fitDock видит старый edge и возвращает панель по старой оси */
+  useLayoutEffect(() => { toolDockRef.current = toolDock; }, [toolDock]);
+  useLayoutEffect(() => { toolDraggingRef.current = toolDragging; }, [toolDragging]);
 
   /* ── стрелки скролла блока кнопок в шапке ── */
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -235,39 +241,31 @@ export function TopBar(props: { store: VetviStore }) {
   };
 
   /* авто-выравнивание плавающей панели: ничего не вылезает за экран, панель не
-     налезает на боковые панели/статусбар и угловые элементы. Вызывается перед
-     отрисовкой, при ресайзе окна и при изменении размеров панелей (RO).
-     Тянем и быстро отпускаем — панель всё равно встанет целиком (клэмп по
-     фактическому размеру). */
+     налезает на боковые панели/статусбар и угловые элементы. Подгонка НЕ
+     перезаписывает желанную позицию (d.along): пока боковая панель открыта,
+     блок визуально отодвигается (клэмп), а после её закрытия возвращается
+     ровно туда, где его оставили. Вызывается перед отрисовкой, при ресайзе
+     окна и при изменении размеров панелей (RO). */
   const fitDock = () => {
     if (!toolDockRef.current.float || toolDraggingRef.current) return;
-    reservedStrips();
+    const st = reservedStrips();
     const el = floatRef.current;
     if (!el) return;
     const d = toolDockRef.current;
     const r = rectOf(el);
-    const st = reservedStrips();
     const vert = d.edge === 'left' || d.edge === 'right';
+    const len = vert ? r.height : r.width;
     const min = (vert ? st.top : st.left) + GAP;
     const max = vert
-      ? window.innerHeight - st.bottom - GAP - r.height
-      : window.innerWidth - st.right - GAP - r.width;
+      ? window.innerHeight - st.bottom - GAP - len
+      : window.innerWidth - st.right - GAP - len;
     const along = clamp(d.along, min, Math.max(min, max));
-    const rect = dockRect(d.edge, along, r.width, r.height);
     /* позицию панель принимает ДО отрисовки кадра (правим DOM напрямую) —
-       панель никогда не стоит за пределами экрана и не мигает */
-    if (vert) el.style.top = along + 'px'; else el.style.left = along + 'px';
-    pushOverlays(d.edge, rect);
-    /* состояние и localStorage догоняют асинхронно — без setState в теле эффекта */
-    const key = d.float + '|' + d.edge + '|' + along;
-    if (along === d.along && savedDockRef.current === key) return;
-    if (fitTRef.current) clearTimeout(fitTRef.current);
-    fitTRef.current = setTimeout(() => {
-      fitTRef.current = null;
-      savedDockRef.current = key;
-      saveToolDock({ float: true, edge: d.edge, along });
-      if (along !== toolDockRef.current.along) setToolDock((v) => ({ ...v, along }));
-    }, 0);
+       панель никогда не стоит за пределами экрана и не мигает; чужая ось
+       очищается, чтобы не осталось позиции от прошлой ориентации */
+    if (vert) { el.style.top = along + 'px'; el.style.left = ''; }
+    else { el.style.left = along + 'px'; el.style.top = ''; }
+    pushOverlays(d.edge, dockRect(d.edge, along, vert ? r.width : len, vert ? len : r.height));
   };
 
   useLayoutEffect(() => {
@@ -296,6 +294,34 @@ export function TopBar(props: { store: VetviStore }) {
   }, [toolDock.float]);
   useEffect(() => () => resetShiftVars(), []);
 
+  /* перетаскивание: панель меняет размер при отрыве от шапки (там блок
+     «растянут») и при смене ориентации — перемеряем её и пересчитываем точку
+     хвата, чтобы блок не прыгал и не дёргался в руке */
+  useLayoutEffect(() => {
+    if (!toolDragging) return;
+    const d = dragRef.current;
+    const el = floatRef.current;
+    if (!d || !el) return;
+    const r = rectOf(el);
+    const horiz = d.horiz;
+    const len = horiz ? r.width : r.height;
+    const cross = horiz ? r.height : r.width;
+    if (Math.abs(len - d.len) < 1 && Math.abs(cross - d.cross) < 1) return;
+    d.len = len;
+    d.cross = cross;
+    d.grabAlong = d.grabFrac * len;
+    const st = reservedStrips();
+    const min = horiz ? st.left + GAP : st.top + GAP;
+    const max = horiz
+      ? Math.max(min, window.innerWidth - st.right - GAP - len)
+      : Math.max(min, window.innerHeight - st.bottom - GAP - len);
+    const along = clamp((horiz ? d.pos.x : d.pos.y) - d.grabAlong, min, max);
+    /* правим позицию до отрисовки кадра — без прыжка; чужая ось очищается */
+    if (horiz) { el.style.left = along + 'px'; el.style.top = ''; }
+    else { el.style.top = along + 'px'; el.style.left = ''; }
+    pushOverlays(toolDock.edge, dockRect(toolDock.edge, along, horiz ? len : cross, horiz ? cross : len));
+  }, [toolDock.float, toolDock.edge, toolDragging]);
+
   const onGripMove = (e: PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
@@ -320,11 +346,20 @@ export function TopBar(props: { store: VetviStore }) {
       { e: 'right' as ToolEdge, v: Math.abs(e.clientX - cRight) },
     ].sort((a, b) => a.v - b.v)[0].e;
     const horiz = dist === 'top' || dist === 'bottom';
-    /* грубый клэмп при перетаскивании: панель не выходит за края экрана */
-    const along = horiz
-      ? clamp(e.clientX - d.w / 2, cLeft, Math.max(cLeft, iw - st.right - GAP - d.w))
-      : clamp(e.clientY - d.h / 2, cTop, Math.max(cTop, ih - st.bottom - GAP - d.h));
+    /* блок держится за взятую точку (никакого прыжка центром к курсору);
+       при смене ориентации точка хвата переносится пропорционально */
+    if (horiz !== d.horiz) {
+      d.horiz = horiz;
+      d.grabAlong = d.grabFrac * d.len;
+    }
+    /* клэмп при перетаскивании по живому размеру: панель не выходит за края */
+    const pointerAlong = horiz ? e.clientX : e.clientY;
+    const min = horiz ? cLeft : cTop;
+    const max = horiz ? Math.max(min, cRight - d.len) : Math.max(min, cBottom - d.len);
+    const along = clamp(pointerAlong - d.grabAlong, min, max);
     setToolDock((v) => ({ ...v, float: true, edge: dist, along }));
+    /* мини-карта/плашки уступают место СРАЗУ, пока панель тянут над ними */
+    pushOverlays(dist, dockRect(dist, along, horiz ? d.len : d.cross, horiz ? d.cross : d.len));
   };
 
   const onGripUp = () => {
@@ -332,6 +367,9 @@ export function TopBar(props: { store: VetviStore }) {
     window.removeEventListener('pointerup', onGripUp);
     const d = dragRef.current;
     dragRef.current = null;
+    /* флаг сбрасываем СИНХРОННО (до setState): иначе подгонка в useLayoutEffect
+       пропускалась (ref догонял позже) — блок оставался заэкранным до клика */
+    toolDraggingRef.current = false;
     setToolDragging(false);
     if (!d || !d.moved) return;
     const topbarH = document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
@@ -342,9 +380,34 @@ export function TopBar(props: { store: VetviStore }) {
       saveToolDock(next);
       return;
     }
-    /* во всех остальных случаях панель остаётся плавающей у ближайшего края:
-       финальное выравнивание (авто-подгонка по факту размера) делает
-       useLayoutEffect сразу после перерисовки */
+    /* финальный клэмп по фактическому размеру прямо при отпускании: панель
+       немедленно встаёт целиком на экран — «нажать на холст» не требуется */
+    const st = reservedStrips();
+    const el = floatRef.current;
+    const r = el ? rectOf(el) : null;
+    const len = r ? (d.horiz ? r.width : r.height) : d.len;
+    const ih = window.innerHeight;
+    const iw = window.innerWidth;
+    /* край пересчитываем по точке отпускания — ref мог отстать на быстром флипе */
+    const dist: ToolEdge = [
+      { e: 'top' as ToolEdge, v: Math.abs(d.pos.y - (st.top + GAP)) },
+      { e: 'bottom' as ToolEdge, v: Math.abs(d.pos.y - (ih - st.bottom - GAP)) },
+      { e: 'left' as ToolEdge, v: Math.abs(d.pos.x - (st.left + GAP)) },
+      { e: 'right' as ToolEdge, v: Math.abs(d.pos.x - (iw - st.right - GAP)) },
+    ].sort((a, b) => a.v - b.v)[0].e;
+    const horiz = dist === 'top' || dist === 'bottom';
+    if (horiz !== d.horiz) {
+      d.horiz = horiz;
+      d.grabAlong = d.grabFrac * len;
+    }
+    const min = horiz ? st.left + GAP : st.top + GAP;
+    const max = horiz
+      ? Math.max(min, iw - st.right - GAP - len)
+      : Math.max(min, ih - st.bottom - GAP - len);
+    const along = clamp((horiz ? d.pos.x : d.pos.y) - d.grabAlong, min, max);
+    const next: ToolDock = { float: true, edge: dist, along };
+    setToolDock(next);
+    saveToolDock(next);
   };
 
   const onGripDown = (e: React.PointerEvent) => {
@@ -352,13 +415,17 @@ export function TopBar(props: { store: VetviStore }) {
     const el = (e.currentTarget as HTMLElement).closest('.tool-block, .tool-float') as HTMLElement | null;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    const horizStart = !el.classList.contains('vert');
+    const len = horizStart ? r.width : r.height;
+    const along0 = horizStart ? e.clientX - r.left : e.clientY - r.top;
     dragRef.current = {
       moved: false,
       floatStart: el.classList.contains('tool-float'),
-      grabX: e.clientX - r.left,
-      grabY: e.clientY - r.top,
-      w: r.width,
-      h: r.height,
+      grabFrac: len > 0 ? clamp(along0 / len, 0, 1) : 0.5,
+      grabAlong: along0,
+      horiz: horizStart,
+      len,
+      cross: horizStart ? r.height : r.width,
       pos: { x: e.clientX, y: e.clientY },
     };
     e.preventDefault();

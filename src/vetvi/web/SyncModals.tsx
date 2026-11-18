@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { getMe } from '@/vetvi/core/identity';
 import { mergeStats } from '@/vetvi/core/merge';
-import { accessGrant, accessList, accessRevoke, type AccessListItem } from './auth';
+import { accessGrant, accessInit, accessList, accessRevoke, type AccessListItem } from './auth';
 import { copiesAll, syncFmtDate, type MergeRequest } from './sync';
 import type { VetviStore } from './store';
 
@@ -61,36 +61,53 @@ const ROLE_BADGE: Record<string, string> = {
 
 interface UserLite { login: string; displayName: string | null }
 
-/** Секция «Доступы»: ввести имя юзера → открыть доступ; ниже — список всех,
- *  у кого он есть: у каждого можно сменить права (редактор/чтение) и отозвать
- *  доступ. Ссылка на проект — выше (share-link). Грант шлёт получателю
- *  уведомление — проект появится в его списке. */
+/** Секция «Участники»: поиск по имени/нику с подсказками → открыть доступ;
+ *  ниже — список всех, у кого он есть: у каждого можно сменить права
+ *  (редактор/чтение) и отозвать доступ. Работает и для ЛОКАЛЬНОГО проекта:
+ *  roomId резервируется в meta заранее, запись владельца создаётся сразу —
+ *  участники заведены до публикации. Грант шлёт получателю уведомление —
+ *  проект появится в его списке. */
 function ShareAccess({ store }: { store: VetviStore }) {
   const sc = store.sync;
-  const roomId = sc ? sc.room : null;
   const [items, setItems] = useState<AccessListItem[]>([]);
   const [meRole, setMeRole] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [login, setLogin] = useState('');
   const [users, setUsers] = useState<UserLite[]>([]);
+  const [focused, setFocused] = useState(false);
   const [role, setRole] = useState<'editor' | 'reader'>('editor');
   const [busy, setBusy] = useState(false);
   const reload = () => {
-    if (!roomId) return;
-    void accessList(roomId).then((r) => {
+    if (!sc) return;
+    void accessList(sc.shareRoomId()).then((r) => {
       if (r.ok) {
         setItems(r.items);
-        setMeRole(r.meRole ?? null);
+        setMeRole((prev) => prev || r.meRole || null);
       }
       setLoaded(true);
     });
   };
-  useEffect(() => { reload(); }, [roomId]);
   useEffect(() => {
+    if (!sc) return;
+    let alive = true;
+    void (async () => {
+      /* запись владельца: идемпотентна — без неё API доступов отвечает «только
+         владелец может управлять», и добавить участников невозможно */
+      try {
+        const init = await accessInit(
+          sc.shareRoomId(),
+          String(store.doc.meta.projectId || '') || null,
+          (store.doc.meta.name as string) || null,
+        );
+        if (alive && init.ok && init.role) setMeRole((prev) => prev || init.role || null);
+      } catch { /* сервер недоступен — покажем список как есть */ }
+      if (alive) reload();
+    })();
     void fetch('/api/users', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : { list: [] }))
-      .then((j: { list: UserLite[] }) => setUsers(j.list || []))
+      .then((j: { list: UserLite[] }) => { if (alive) setUsers(j.list || []); })
       .catch(() => undefined);
+    return () => { alive = false; };
   }, []);
   const isOwner = meRole === 'owner';
 
@@ -106,12 +123,18 @@ function ShareAccess({ store }: { store: VetviStore }) {
     return nick; /* может, пользователь с таким логином есть, но списка нет */
   };
 
-  const grant = async () => {
-    if (!sc || !roomId || busy) return;
-    const lg = resolveLogin(login);
+  const grant = async (raw?: string) => {
+    if (!sc || busy) return;
+    const lg = resolveLogin(raw !== undefined ? raw : login);
     if (!lg) { store.toast('Введите имя или логин пользователя', 'warn'); return; }
     setBusy(true);
-    const r = await accessGrant(roomId, lg, role, sc.projectId, (store.doc.meta.name as string) || null);
+    const r = await accessGrant(
+      sc.shareRoomId(),
+      lg,
+      role,
+      String(store.doc.meta.projectId || '') || null,
+      (store.doc.meta.name as string) || null,
+    );
     setBusy(false);
     if (!r.ok) { store.toast(r.error || 'Не удалось открыть доступ', 'err'); return; }
     setLogin('');
@@ -120,24 +143,36 @@ function ShareAccess({ store }: { store: VetviStore }) {
     reload();
   };
   const revoke = async (lg: string) => {
-    if (!roomId) return;
-    const r = await accessRevoke(roomId, lg);
+    if (!sc) return;
+    const r = await accessRevoke(sc.shareRoomId(), lg);
     if (!r.ok) { store.toast(r.error || 'Не удалось отозвать доступ', 'err'); return; }
     store.toast('Доступ отозван', 'ok');
     reload();
   };
   const setRoleOf = async (it: AccessListItem, next: 'editor' | 'reader') => {
-    if (!roomId || next === it.role) return;
-    const r = await accessGrant(roomId, it.login, next, null, null);
+    if (!sc || next === it.role) return;
+    const r = await accessGrant(sc.shareRoomId(), it.login, next, null, null);
     if (!r.ok) { store.toast(r.error || 'Не удалось изменить права', 'err'); return; }
     store.toast(it.displayName + ': права — ' + (next === 'editor' ? 'редактор' : 'только чтение'), 'ok');
     reload();
   };
+
+  const q = login.trim().toLowerCase();
+  const suggestions = q
+    ? users
+        .filter((u) => {
+          const lg = u.login.toLowerCase();
+          const nm = (u.displayName || '').toLowerCase();
+          return (lg.includes(q) || nm.includes(q)) && !items.some((it) => it.login === u.login);
+        })
+        .slice(0, 8)
+    : [];
+
   return (
     <div className="share-acc">
-      <div className="sp-cap">Доступы</div>
-      {!loaded && <div className="sa-empty">Загрузка доступов…</div>}
-      {loaded && !items.length && <div className="sa-empty">Пока никого — введите имя пользователя ниже или отправьте ссылку</div>}
+      <div className="sp-cap">Участники проекта</div>
+      {!loaded && <div className="sa-empty">Загрузка участников…</div>}
+      {loaded && !items.length && <div className="sa-empty">Пока никого — найдите пользователя по имени или нику ниже</div>}
       <div className="sa-list">
         {items.map((it) => (
           <div key={it.userId} className="sa-item">
@@ -171,18 +206,33 @@ function ShareAccess({ store }: { store: VetviStore }) {
           <input
             className="inp"
             value={login}
-            placeholder="Имя или логин пользователя…"
-            aria-label="Имя пользователя для доступа"
-            list="saUsersDl"
+            placeholder="Поиск по имени или нику…"
+            aria-label="Поиск пользователя для доступа"
+            autoComplete="off"
             spellCheck={false}
             onChange={(e) => setLogin(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => window.setTimeout(() => setFocused(false), 150)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void grant(); } }}
           />
-          <datalist id="saUsersDl">
-            {users.map((usr) => (
-              <option key={usr.login} value={usr.login}>{usr.displayName ? usr.displayName : '@' + usr.login}</option>
-            ))}
-          </datalist>
+          {focused && suggestions.length > 0 && (
+            <div className="sa-suggest" role="listbox" aria-label="Найденные пользователи">
+              {suggestions.map((usr) => (
+                <button
+                  type="button"
+                  key={usr.login}
+                  role="option"
+                  aria-selected={false}
+                  className="sa-sug-i"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setLogin(usr.login); void grant(usr.login); }}
+                >
+                  <b>{usr.displayName || usr.login}</b>
+                  <i>@{usr.login}</i>
+                </button>
+              ))}
+            </div>
+          )}
           <select
             className="inp sa-new-role"
             value={role}
@@ -194,60 +244,158 @@ function ShareAccess({ store }: { store: VetviStore }) {
             <option value="reader">только чтение</option>
           </select>
           <button type="button" className="btn primary" disabled={busy || !login.trim()} onClick={() => void grant()}>
-            {busy ? 'Открываю…' : 'Открыть доступ'}
+            {busy ? 'Открываю…' : 'Добавить'}
           </button>
         </div>
       )}
-      {isOwner && users.length === 0 && <div className="sa-empty">Зарегистрированных пользователей пока нет — аккаунты создаются по ссылкам-приглашениям</div>}
+      {isOwner && users.length === 0 && loaded && <div className="sa-empty">Зарегистрированных пользователей пока нет — аккаунты создаются по ссылкам-приглашениям</div>}
       <p style={{ fontSize: '11px', color: 'var(--tx3)', margin: '8px 0 0' }}>
-        Пользователь с доступом получит уведомление и увидит проект в своём списке.
-        Переход по ссылке без доступа — только чтение (в комнате увидят уведомление).
+        Участник получит уведомление и увидит проект в своём списке — даже если проект ещё не на сервере.
       </p>
     </div>
   );
 }
 
+/** Окно «Поделиться» (v2): участники с поиском по имени/нику, переключатель
+ *  «общедоступный (сервер)» — проект становится сетевым ТОЛЬКО им, ссылка
+ *  появляется только после публикации, с выключателем и режимом доступа
+ *  (все по ссылке / только добавленные участники). Пароль комнаты — тоже
+ *  только в сетевом режиме. */
 export function ShareModal({ store }: { store: VetviStore }) {
-  const inpRef = useRef<HTMLInputElement>(null);
   void store.revision;
   const sc = store.sync;
-  const u = sc ? sc.shareUrl() : '';
+  const isCopy = !!(sc && sc.mode === 'copy');
+  const isPublic = !!(sc && sc.enabled && sc.mode === 'room');
+  const linkMode = sc ? sc.linkMode : 'open';
   const meta = store.doc.meta as unknown as { passHash?: string };
   const pwSet = !!(meta && meta.passHash);
-  useEffect(() => { if (!u) store.toast('Комната ещё не открыта', 'warn'); }, []);
+  const isOwner = !isCopy && (!isPublic || sc?.role === 'owner');
   /* showShareModal оригинала выделяет ссылку сразу после открытия */
+  const inpRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const tm = window.setTimeout(() => { if (inpRef.current) inpRef.current.select(); }, 80);
     return () => window.clearTimeout(tm);
   }, []);
+  const u = sc && isPublic ? sc.shareUrl() : '';
   return (
-    <SyncShell title="Совместный доступ" onClose={() => store.closeModal()} foot={<button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>}>
-      <p>Отправьте эту ссылку соавторам — пользователи с доступом смогут редактировать проект вместе с вами в реальном времени, остальные увидят проект в режиме «только чтение».</p>
-      <div className="share-link">
-        <input ref={inpRef} readOnly value={u} onClick={(e) => (e.currentTarget as HTMLInputElement).select()} aria-label="Ссылка комнаты" />
-        <button type="button" className="btn primary" title="Скопировать ссылку" onClick={() => sc && sc.copyShareLink()}><Ic name="copy" size={14} /></button>
-      </div>
-      <p style={{ fontSize: '11.5px', color: 'var(--tx3)', margin: '4px 0 0' }}>Проект хранится на сервере комнаты: соавторы смогут подключиться, даже если вы офлайн. Статус — индикатор в панели сверху.</p>
-      <div className="share-pass">
-        <div className="sp-cap">Пароль проекта</div>
-        {pwSet ? (
-          <>
-            <div className="sp-st">Установлен — вход в комнату по паролю: новый участник введёт его при подключении по ссылке.</div>
-            <div className="sp-acts">
-              <button type="button" className="btn" onClick={() => sc && sc.passSetModal(true)}>Сменить…</button>
-              <button type="button" className="btn" onClick={() => store.openModal('passRemove')}>Убрать</button>
-            </div>
-          </>
+    <SyncShell title="Поделиться проектом" onClose={() => store.closeModal()} foot={<button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>}>
+      {/* участники и доступы — работают и пока проект локальный */}
+      {!isCopy ? <ShareAccess store={store} /> : (
+        <div className="share-acc">
+          <div className="sp-cap">Участники проекта</div>
+          <div className="sa-empty">Это локальная копия — участников и ссылку управляет оригинал проекта</div>
+        </div>
+      )}
+
+      {/* сетевой режим: включается ТОЛЬКО явным переключателем */}
+      <div className="share-pub">
+        <div className="sp-cap">Сетевой проект</div>
+        {isCopy ? (
+          <div className="sp-st">Копия не публикуется: откройте оригинал и включите сетевой режим там.</div>
         ) : (
-          <>
-            <div className="sp-st">Не установлен — по ссылке войдут все, но правка доступна только пользователям с доступом (остальным — только чтение).</div>
-            <div className="sp-acts">
-              <button type="button" className="btn" onClick={() => sc && sc.passSetModal(false)}>Задать пароль…</button>
-            </div>
-          </>
+          <label className="pub-row">
+            <input
+              type="checkbox"
+              className="pub-switch"
+              role="switch"
+              aria-label="Общедоступный сетевой проект"
+              checked={isPublic}
+              onChange={(e) => {
+                if (!sc) return;
+                if (e.target.checked) sc.publishProject();
+                else sc.unpublishProject();
+              }}
+            />
+            <span className="pub-text">
+              <b>Общедоступный (на сервере)</b>
+              <span className="sp-st">
+                {isPublic
+                  ? 'Проект на сервере комнаты: соавторы редактируют вместе в реальном времени, данные ждут вас даже офлайн.'
+                  : 'Проект хранится только локально. Включите — появится ссылка, и участники из списка смогут открыть проект с сервера.'}
+              </span>
+            </span>
+          </label>
         )}
       </div>
-      {sc && sc.room && <ShareAccess store={store} />}
+
+      {/* ссылка: появляется только в сетевом режиме */}
+      {isPublic && !isCopy && (
+        <div className="share-linksec">
+          <div className="sp-cap">Ссылка на проект</div>
+          <label className="pub-row pub-row-sm">
+            <input
+              type="checkbox"
+              className="pub-switch"
+              role="switch"
+              aria-label="Ссылка включена"
+              checked={linkMode !== 'off'}
+              onChange={(e) => {
+                if (!sc) return;
+                if (e.target.checked) sc.setRoomLinkMode('open');
+                else sc.setRoomLinkMode('off');
+              }}
+            />
+            <span className="pub-text">
+              <b>{linkMode !== 'off' ? 'Ссылка включена' : 'Ссылка отключена'}</b>
+              <span className="sp-st">
+                {linkMode === 'off'
+                  ? 'Ссылка не работает: войти могут только участники из списка выше (через свой список проектов).'
+                  : 'Отключите, чтобы проект открывался только приглашённым участникам.'}
+              </span>
+            </span>
+          </label>
+          {linkMode !== 'off' && (
+            <>
+              <div className="share-link">
+                <input ref={inpRef} readOnly value={u} onClick={(e) => (e.currentTarget as HTMLInputElement).select()} aria-label="Ссылка комнаты" />
+                <button type="button" className="btn primary" title="Скопировать ссылку" onClick={() => sc && sc.copyShareLink()}><Ic name="copy" size={14} /></button>
+              </div>
+              {isOwner && (
+                <label className="pub-policy">
+                  <span>По ссылке могут войти:</span>
+                  <select
+                    className="inp"
+                    value={linkMode}
+                    aria-label="Кто может войти по ссылке"
+                    onChange={(e) => sc && sc.setRoomLinkMode(e.target.value === 'members' ? 'members' : 'open')}
+                  >
+                    <option value="open">все — просмотр без правки</option>
+                    <option value="members">только добавленные участники</option>
+                  </select>
+                </label>
+              )}
+              <p style={{ fontSize: '11.5px', color: 'var(--tx3)', margin: '4px 0 0' }}>
+                {linkMode === 'members'
+                  ? 'Пользователь без доступа по ссылке войти не сможет.'
+                  : 'Пользователи по ссылке увидят проект в режиме «только чтение»; участники из списка редактируют.'}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* пароль комнаты — смысл имеет только в сетевом режиме */}
+      {isPublic && !isCopy && (
+        <div className="share-pass">
+          <div className="sp-cap">Пароль проекта</div>
+          {pwSet ? (
+            <>
+              <div className="sp-st">Установлен — вход в комнату по паролю: новый участник введёт его при подключении по ссылке.</div>
+              <div className="sp-acts">
+                <button type="button" className="btn" onClick={() => sc && sc.passSetModal(true)}>Сменить…</button>
+                <button type="button" className="btn" onClick={() => store.openModal('passRemove')}>Убрать</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="sp-st">Не установлен — по ссылке войдут все, но правка доступна только пользователям с доступом (остальным — только чтение).</div>
+              <div className="sp-acts">
+                <button type="button" className="btn" onClick={() => sc && sc.passSetModal(false)}>Задать пароль…</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </SyncShell>
   );
 }
