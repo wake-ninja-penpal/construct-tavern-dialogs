@@ -27,6 +27,8 @@ export interface EdgeRender {
   labelPt: { x: number; y: number } | null;
   cond: { vid: string; op: string; val: number | string } | null | undefined;
   pts: { x: number; y: number }[];
+  /** Режим линий, при котором построены d/pts (сравнение в быстром пути кэша). */
+  bend: string;
 }
 
 /* кэш готовых EdgeRender по объекту связи: переиспользуется, пока геометрия та же */
@@ -121,6 +123,21 @@ export function buildEdgeItems(
       g = { x1, y1, x2, y2, pts: (e.pts && e.pts.length ? e.pts : null), bend };
     }
 
+    /* БЫСТРЫЙ ПУТЬ: связь (тот же объект) и её якоря не менялись с прошлого
+       кадра — весь EdgeRender переиспользуется. Кадры перетаскивания/панорамы
+       пересобирают геометрию только у стрелок сдвинутых нод, остальные не
+       платят за edgePathD/сэмплирование кривой (главная стоимость geom-кадра
+       на больших проектах). bend входит в сравнение: смена режима линий
+       перерисовывает все связи. */
+    const prev = edgeRenderCache.get(e);
+    if (
+      prev && prev.e === e && prev.bend === bend
+      && prev.g.x1 === x1 && prev.g.y1 === y1 && prev.g.x2 === x2 && prev.g.y2 === y2
+    ) {
+      out.push(prev);
+      continue;
+    }
+
     const d = edgePathD(g);
     // полилиния для ножа/вейпоинтов/поиска связи — ВИДИМАЯ кривая, не хорды:
     // клик ножа по дуге изгиба обязан попадать (оригинал сэмплировал edgeSample)
@@ -162,21 +179,7 @@ export function buildEdgeItems(
     const labelPt = { x: p0.x + (nx / nl) * lp, y: p0.y + (ny / nl) * lp };
     const cond = (e as unknown as { cond?: { vid: string; op: string; val: number | string } }).cond;
 
-    /* переиспользование кэша: та же связь, та же геометрия и подпись → тот же объект.
-       Мemo-строка EdgeItem не перерисовывается. pts всегда свежие (нож/вейпоинты). */
-    const prev = edgeRenderCache.get(e);
-    if (
-      prev && prev.e === e
-      && prev.d === d
-      && prev.g.x1 === x1 && prev.g.y1 === y1 && prev.g.x2 === x2 && prev.g.y2 === y2
-      && prev.labelPt && prev.labelPt.x === labelPt.x && prev.labelPt.y === labelPt.y
-      && prev.cond === cond
-    ) {
-      prev.pts = pts;
-      out.push(prev);
-      continue;
-    }
-    const item: EdgeRender = { e, g, d, labelPt, cond, pts };
+    const item: EdgeRender = { e, g, d, labelPt, cond, pts, bend };
     edgeRenderCache.set(e, item);
     out.push(item);
   }

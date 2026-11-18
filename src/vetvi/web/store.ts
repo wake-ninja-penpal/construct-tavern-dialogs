@@ -268,12 +268,14 @@ export class VetviStore {
   revision = 0;
   /* ── каналы перерисовки (оптимизация) ──
    * docRev — изменилось содержимое документа; uiRev — UI-состояние (выделение,
-   * модалки, тосты); geomRev — «геометрические» кадры (перетаскивание, панорама,
-   * анимации). Корневой компонент подписан на doc+ui и НЕАТИВЕН к geom-кадрам:
-   * во время жестов перерисовывается только холст. */
+   * модалки, тосты); geomRev — «геометрические» кадры (перетаскивание, анимации —
+   * мир меняется); viewRev — кадры вида (панорама/зум): React НЕ перерисовывается,
+   * вид применяет canvasApi.applyVp императивно. Корневой компонент подписан на
+   * doc+ui и НЕАТИВЕН к geom/view-кадрам: во время жестов перерисовывается только холст. */
   docRev = 0;
   uiRev = 0;
   geomRev = 0;
+  viewRev = 0;
   /** Версия «ссылочных» данных карточек: персонажи/переменные/свои типы/палитра/связи. */
   refVer = 0;
   saveState: SaveState = 'idle';
@@ -282,6 +284,7 @@ export class VetviStore {
   getDocRev = (): number => this.docRev;
   getUiRev = (): number => this.uiRev;
   getGeomRev = (): number => this.geomRev;
+  getViewRev = (): number => this.viewRev;
 
   /** Последняя позиция курсора (lastPtr оригинала) — для showLockTip вне жестов. */
   lastPtr: { x: number; y: number } = { x: 0, y: 0 };
@@ -341,13 +344,15 @@ export class VetviStore {
   getSnapshot = (): number => this.revision;
 
   /** Эмит с каналом: 'all' (по умолчанию) трогает все счётчики — поведение как раньше;
-   *  'doc'/'ui'/'geom' — точечные кадры. Подписчики (useSyncExternalStore) перерисовываются
-   *  только если изменился ИХ счётчик. */
-  emit(ch: 'all' | 'doc' | 'ui' | 'geom' = 'all'): void {
+   *  'doc'/'ui'/'geom' — точечные кадры; 'view' — только вид (панорама/зум), React
+   *  не перерисовывается (вид применяется императивно в canvasApi.applyVp).
+   *  Подписчики (useSyncExternalStore) перерисовываются только если изменился ИХ счётчик. */
+  emit(ch: 'all' | 'doc' | 'ui' | 'geom' | 'view' = 'all'): void {
     this.revision++;
     if (ch === 'all' || ch === 'doc') this.docRev++;
     if (ch === 'all' || ch === 'ui') this.uiRev++;
     if (ch === 'all' || ch === 'geom') this.geomRev++;
+    if (ch === 'all' || ch === 'view') this.viewRev++;
     this.scheduleNotify();
   }
 
@@ -969,8 +974,11 @@ export class VetviStore {
   }
 
   requestFlash(nodeId: string, replyId: string | null): void {
-    const n = this.nodeById(nodeId);
-    if (n && replyId && n.expand === 0) n.expand = 1;
+    /* expand 0→1 иммутабельно (новый объект ноды): карточка обязана
+       перезмерить порты после разворота реплик, иначе стрелки отрываются */
+    const nodes = this.doc.nodes;
+    const i = nodes.findIndex((x) => x.id === nodeId);
+    if (i >= 0 && replyId && nodes[i].expand === 0) nodes[i] = { ...nodes[i], expand: 1 };
     this.flash = { nodeId, replyId, t: Date.now() };
     this.emit();
   }
@@ -3393,7 +3401,8 @@ export class VetviStore {
     if (typeof vp.z === 'number') this.vp.z = clampZoom(vp.z, this.uiZoomMin, this.uiZoomMax);
     canvasApi.current?.applyVp(this.vp);
     this.scheduleSave();
-    this.emit('geom');
+    /* view-кадр: вид применён императивно, React не перерисовывается (мир не менялся) */
+    this.emit('view');
   }
 
   zoomAt(screenX: number, screenY: number, factor: number): void {
@@ -3405,11 +3414,12 @@ export class VetviStore {
     this.vp.x = screenX - w.x * z1;
     this.vp.y = screenY - w.y * z1;
     canvasApi.current?.applyVp(this.vp);
-    /* порты пинов измеряются в экранных px и делятся на z — при смене зума
-       пересчитать (императивно, без перерисовки карточек) */
-    canvasApi.current?.measurePorts();
+    /* порты пинов НЕ зависят от зума (меряются layout-координатами внутри карточки,
+       NodeCard) — пересчёт на каждый шаг зума не нужен и раньше был главным
+       источником лагов: 300+ принудительных layout-чтений на каждое событие колеса */
     this.viewChanged();
-    this.emit('geom');
+    /* view-кадр: вид применён императивно, React не перерисовывается */
+    this.emit('view');
   }
 
   panBy(dx: number, dy: number): void {
@@ -3420,7 +3430,7 @@ export class VetviStore {
 
   panEnd(): void {
     if (this.viewSaveT) { clearTimeout(this.viewSaveT); this.viewSaveT = null; this.scheduleSave(); }
-    this.emit('geom');
+    this.emit('view');
   }
 
   fitView(vw: number, vh: number, sizes: Map<string, NodeSize>): void {
@@ -3436,7 +3446,7 @@ export class VetviStore {
     this.vp.y = vh / 2 - (b.y + b.h / 2) * z;
     canvasApi.current?.applyVp(this.vp);
     this.scheduleSave();
-    this.emit('geom');
+    this.emit('view');
   }
 
   toggleSnap(): void { this.snapOn = !this.snapOn; this.emit(); }

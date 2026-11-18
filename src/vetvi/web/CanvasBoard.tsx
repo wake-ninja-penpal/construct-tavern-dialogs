@@ -281,17 +281,15 @@ export function CanvasBoard(props: { store: VetviStore }) {
     if (zp) zp.textContent = Math.round(v.z * 100) + '%';
   }, []);
 
-  /* пересчёт портов пинов при смене зума: позиции меряются в экранных px и делятся
-     на z — без пересчёта стрелки к репликам/исходам отрываются от пинов.
-     Пишет в portsMap напрямую (без tick) — геометрию связей пересоберёт
-     следующий geom-кадр (items зависят от geomRev). */
-  const lastPortZRef = useRef<number>(-1);
+  /* пересчёт портов всех видимых карточек (императивно, запасной путь — нужен
+     только после внешних подмен DOM; из зума вызов УБРАН: мир-координаты порта
+     не зависят от зума ((rect пина − rect карточки)/z инвариантно), а
+     массовый пересчёт на каждый шаг колеса был главным источником лагов —
+     сотни принудительных layout-чтений на каждое событие) */
   const measurePorts = useCallback(() => {
     const world = worldRef.current;
     if (!world) return;
     const z = store.vp.z || 1;
-    if (lastPortZRef.current === z) return;
-    lastPortZRef.current = z;
     const cards = world.querySelectorAll<HTMLElement>('.node[data-node-id]');
     cards.forEach((card) => {
       const nid = card.getAttribute('data-node-id') || '';
@@ -2206,6 +2204,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             sink={sink}
             flashNow={!!(store.flash && store.flash.nodeId === n.id)}
             flashReplyId={store.flash && store.flash.nodeId === n.id ? store.flash.replyId : null}
+            flashT={store.flash && store.flash.nodeId === n.id ? store.flash.t : 0}
             renaming={store.renameId === n.id}
             depVer={store.refVer}
             lockedBy={store.syncLocks[n.id] || null}

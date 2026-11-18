@@ -44,6 +44,26 @@ let cardDragOid: string | null = null;
 const MAX_DLG_DEPTH = 10;
 const DLG_REPLY_INDENT = 23;
 
+/* ── отложенная запись --lk (углы соединителей вложенных реплик) ──
+   Псевдоэлемент position:absolute — var ни на что в layout не влияет, поэтому
+   запись можно унести в rAF: 86 карточек при загрузке проекта меряются против
+   ОДНОЙ чистой layout-версии вместо 86 принудительных reflow вперемешку с
+   записями стилей (главный источник лага «загрузка проекта на 80+ нод»). */
+const lkWrites = new Map<HTMLElement, string>();
+let lkFlushRaf = 0;
+function flushLkWrites(): void {
+  lkFlushRaf = 0;
+  for (const [el, val] of lkWrites) {
+    if (!el.isConnected) continue;
+    if (el.style.getPropertyValue('--lk') !== val) el.style.setProperty('--lk', val);
+  }
+  lkWrites.clear();
+}
+function queueLkWrite(el: HTMLElement, val: string): void {
+  lkWrites.set(el, val);
+  if (!lkFlushRaf) lkFlushRaf = requestAnimationFrame(flushLkWrites);
+}
+
 /** Иконка заметки на карточке (noteIconSvg оригинала, size 18). */
 function NoteIc({ size }: { size: number }) {
   return (
@@ -140,6 +160,9 @@ function NodeCardImpl(props: {
   flashNow: boolean;
   /** Реплика, к которой прокручивает мигание (для подсветки строки диалога). */
   flashReplyId?: string | null;
+  /** Метка времени запроса мигания: каждый «К ноде» — новый t, даже для той же реплики
+   *  (иначе повторный показ не перезапускает анимацию подсветки). */
+  flashT?: number;
   /** Поле переименования открыто на этой карточке. */
   renaming: boolean;
   /** Версия «ссылочных» данных карточек: персонажи/переменные/свои типы/связи (store.refVer). */
@@ -157,11 +180,19 @@ function NodeCardImpl(props: {
   const { node: n, vp, selected, sink, store, flashNow } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
+  /* последняя замеренная версия ноды: контент меняется только заменой объекта
+     (refreshSigs/mutate) — тот же объект ⇒ размеры/порты не могли измениться */
+  const measuredRef = useRef<VetviNode | null>(null);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
-    if (!el) return;
+    if (!el || measuredRef.current === n) return;
+    measuredRef.current = n;
     sink.setSize(n.id, el.offsetWidth, el.offsetHeight);
+    /* порты: (rect пина − rect карточки)/z — мир-координаты НЕ зависят от зума
+       (разница экранных координат уже промасштабирована, деление возвращает мир),
+       поэтому пересчитывать порты на каждый шаг зума не нужно — раньше это было
+       главным источником лагов: сотни принудительных layout-чтений на колесо */
     const rr = el.getBoundingClientRect();
     const z = vp.z || 1;
     el.querySelectorAll<HTMLElement>('[data-pin]').forEach((pin) => {
@@ -169,7 +200,8 @@ function NodeCardImpl(props: {
       const key = n.id + ':' + String(pin.dataset.pin || '');
       sink.setPort(key, { x: n.x + (pr.left + pr.width / 2 - rr.left) / z, y: n.y + (pr.top + pr.height / 2 - rr.top) / z });
     });
-    /* углы соединителей вложенных реплик (layoutDlgConnectors оригинала) */
+    /* углы соединителей вложенных реплик (layoutDlgConnectors оригинала) —
+       запись отложена в rAF, чтобы не ломать layout между замерами карточек */
     el.querySelectorAll<HTMLElement>('.dlg-children').forEach((ch) => {
       const items = ch.children;
       if (!items.length) return;
@@ -179,7 +211,7 @@ function NodeCardImpl(props: {
       if (!row) return;
       const rowH = row.offsetHeight;
       const topOff = last.previousElementSibling === null ? 7 : 3;
-      last.style.setProperty('--lk', (2 + rowH / 2 + topOff) + 'px');
+      queueLkWrite(last, (2 + rowH / 2 + topOff) + 'px');
     });
   });
 
@@ -191,6 +223,21 @@ function NodeCardImpl(props: {
       renameRef.current.select();
     }
   }, [renaming]);
+
+  /* мигание реплики («К ноде» из проигрывателя / двойной клик): класс .dlg-flash
+     в рендере не перезапускает анимацию, если он УЖЕ на строке (повторный показ
+     той же реплики при выделенной ноде). Перезапускаем вручную: снять класс →
+     принудительный reflow → вернуть (тот же приём, что в DialogModal). */
+  const flashT = props.flashT || 0;
+  const flashReplyId = props.flashReplyId || null;
+  useEffect(() => {
+    if (!flashNow || !flashReplyId) return;
+    const el = rootRef.current?.querySelector('.dlg-flash') as HTMLElement | null;
+    if (!el) return;
+    el.classList.remove('dlg-flash');
+    void el.offsetWidth;
+    el.classList.add('dlg-flash');
+  }, [flashNow, flashReplyId, flashT]);
 
   const isDlg = n.type === 'dialog';
   const info = typeInfo(n.type, store.doc.customTypes);
@@ -648,6 +695,8 @@ export const NodeCard = memo(NodeCardImpl, (a, b) =>
   && a.selected === b.selected
   && a.depVer === b.depVer
   && a.flashNow === b.flashNow
+  && a.flashReplyId === b.flashReplyId
+  && (a.flashT || 0) === (b.flashT || 0)
   && a.renaming === b.renaming
   && lockEq(a.lockedBy, b.lockedBy)
   && lockEq(a.focusBy, b.focusBy)
