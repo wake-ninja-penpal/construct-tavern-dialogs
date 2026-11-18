@@ -182,13 +182,16 @@ export async function roomsNames(roomIds: string[]): Promise<Record<string, stri
   return (data.names as Record<string, string>) || {};
 }
 
-/** Уведомления аккаунта. */
-export async function notificationsFetch(): Promise<{ items: NotificationItem[]; unread: number }> {
+/** Уведомления аккаунта. ok=false — опрос не удался (сеть/сервер/сессия):
+ *  хук колокольчика в этом случае сохраняет прежнее состояние (точка не
+ *  «мигает» и не пропадает из-за сбоя одного опроса). */
+export async function notificationsFetch(): Promise<{ items: NotificationItem[]; unread: number; ok: boolean }> {
   const { status, data } = await getJson('/api/notifications');
-  if (status !== 200) return { items: [], unread: 0 };
+  if (status !== 200) return { items: [], unread: 0, ok: false };
   return {
     items: (data.items as NotificationItem[]) || [],
     unread: typeof data.unread === 'number' ? data.unread : 0,
+    ok: true,
   };
 }
 

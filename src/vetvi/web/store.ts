@@ -3529,6 +3529,46 @@ export class VetviStore {
     this.emit();
   }
 
+  /** Выкидывание из чужого проекта (сервер прислал vetvi:kicked): проект
+   *  ЗАКРЫВАЕТСЯ — вместо чужого содержимого остаётся чистый холст нового
+   *  локального проекта. deleteEntry — убрать записи реестра с этой комнатой
+   *  (отозвали доступ: записи «Вам открыли доступ» больше нет на сервере,
+   *  и без удаления запись «всплыла» бы в «Мои проекты»). При выключении
+   *  сетевого режима запись остаётся — в списке она серая «офлайн». */
+  closeKickedProject(roomId: string, opts: { deleteEntry?: boolean; msg: string }): void {
+    this.flushSave(); /* последнее состояние — до сброса (запись с roomId удалится ниже) */
+    if (opts.deleteEntry) {
+      for (const e of projList().filter((x) => x.roomId === roomId)) projDelete(e.id);
+    }
+    const now = Date.now();
+    const pid = uid() + uid();
+    const n = newNode('scene', 0, 0);
+    this.doc = {
+      meta: { name: 'Новый проект', created: now, modified: now, projectId: pid, actionLog: [], editLog: [] },
+      nodes: [n],
+      edges: [],
+      groups: [],
+      vars: [],
+      chars: [],
+      charGroups: [],
+      customTypes: [],
+      palette: [],
+      listHidden: {},
+    };
+    this.vp = defaultViewport();
+    this.bend = 'smooth';
+    this.sel.clear();
+    this.selEdges.clear();
+    this.selGroups.clear();
+    this.past = [];
+    this.future = [];
+    this.selectOnly(n.id);
+    this.noteEditor();
+    this.persist();
+    this.toast(opts.msg, 'warn');
+    this.emit();
+  }
+
   /** Открыть проект, к которому открыли доступ (уведомление / список «Вам открыли доступ»).
    *  Локального слота может не быть — создаём пустой с projectId комнаты и входим
    *  в комнату: сервер отдаст авторитетный документ. Роль (reader) — предварительная,

@@ -689,6 +689,48 @@ function broadcastUsers(io: Server, room: RoomState) {
   io.to(room.name).emit('vetvi:users', { roomId: room.name, users: userList(room) })
 }
 
+/* ─── push-уведомления аккаунтам (колокольчик) ───
+   Сокет авторизованного аккаунта регистрируется событием vetvi:ntf-hello
+   (токен сессии проверяется по общей БД) — независимо от комнат. Web-сервер
+   (POST /api/access/grant|revoke) после записи уведомления в БД пушит его
+   на /internal/notify — сокетам этого пользователя летит vetvi:ntf, и
+   колокольчик (точка непрочитанного) обновляется мгновенно, без ожидания
+   опроса. Опрос /api/notifications остаётся страховкой (sync перезапустили,
+   сокет умер — новое уведомление всё равно появится). */
+const ntfSockets = new Map<string, Set<Socket>>()
+
+function ntfRegister(userId: string, sock: Socket): void {
+  const uid = String(userId || '')
+  if (!uid) return
+  let set = ntfSockets.get(uid)
+  if (!set) {
+    set = new Set()
+    ntfSockets.set(uid, set)
+  }
+  set.add(sock)
+}
+
+function ntfUnregister(sock: Socket): void {
+  for (const [uid, set] of ntfSockets) {
+    if (set.delete(sock) && set.size === 0) ntfSockets.delete(uid)
+  }
+}
+
+function notifyUser(userId: string, ntf: unknown): number {
+  const set = ntfSockets.get(String(userId || ''))
+  if (!set || set.size === 0) return 0
+  let sent = 0
+  for (const sock of set) {
+    try {
+      sock.emit('vetvi:ntf', ntf)
+      sent++
+    } catch {
+      /* сокет умер — unregister сделает disconnect */
+    }
+  }
+  return sent
+}
+
 /* ─── свип ролей: доступы могут измениться, пока участник онлайн ───
    Владелец выдал/отозвал/поменял роль через окно «Поделиться» — участник
    получает актуальное право редактирования без переподключения сокета:
@@ -1561,8 +1603,25 @@ io.on('connection', (socket: Socket) => {
     },
   )
 
+  /* ── регистрация сокета для push-уведомлений (колокольчик) ──
+     Вне комнат: клиент при старте шлёт токен сессии — сервер проверяет его
+     по общей БД и запоминает сокет за accountId. Re-hello после reconnect
+     безопасен (set dedupe); после перезапуска sync клиент пере-регистрируется
+     на 'connect' автоматически. */
+  socket.on('vetvi:ntf-hello', (payload: { token?: string; userId?: string }) => {
+    try {
+      const acc = verifySession(payload?.token, payload?.userId)
+      if (!acc) return
+      ntfRegister(acc.id, socket)
+      socket.data.ntfUserId = acc.id
+    } catch (e) {
+      console.error('[vetvi-sync] ntf-hello error', e)
+    }
+  })
+
   socket.on('disconnect', () => {
     try {
+      ntfUnregister(socket)
       sockCanEditMap.delete(socket.id)
       sockRoleCheckedAt.delete(socket.id)
       if (!joinedRoom) return
@@ -1659,7 +1718,8 @@ const internalServer = createServer((req, res) => {
   const url = req.url || ''
   const isStatus = url.startsWith('/internal/rooms-status') && req.method === 'POST'
   const isAccess = url.startsWith('/internal/access-sync') && req.method === 'POST'
-  if (!isStatus && !isAccess) {
+  const isNotify = url.startsWith('/internal/notify') && req.method === 'POST'
+  if (!isStatus && !isAccess && !isNotify) {
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: false, error: 'not found' }))
     return
@@ -1678,7 +1738,23 @@ const internalServer = createServer((req, res) => {
   req.on('end', () => {
     if (overflow) return
     try {
-      const parsed = JSON.parse(body) as { roomId?: string; roomIds?: unknown; changed?: { userId?: string; role?: string | null }[] }
+      const parsed = JSON.parse(body) as {
+        roomId?: string
+        roomIds?: unknown
+        changed?: { userId?: string; role?: string | null }[]
+        userId?: string
+        ntf?: unknown
+      }
+      if (isNotify) {
+        /* push одного уведомления аккаунту (grant/revoke в Next.js): раздаём
+           vetvi:ntf всем сокетам пользователя (все вкладки/устройства). */
+        const uid = String(parsed?.userId || '')
+        const sent = uid && parsed?.ntf ? notifyUser(uid, parsed.ntf) : 0
+        if (sent > 0) console.log(`[vetvi-sync] notify push → user ${uid.slice(0, 8)}…, sockets: ${sent}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, sent }))
+        return
+      }
       if (isStatus) {
         /* какие из перечисленных комнат живы на сервере: строка в БД или активная
            комната в памяти. «Вам открыли доступ» помечает офлайн-проекты и не
@@ -1711,7 +1787,7 @@ const internalServer = createServer((req, res) => {
 
 try {
   internalServer.listen(INTERNAL_PORT, () => {
-    console.log(`[vetvi-sync] internal access-sync on port ${INTERNAL_PORT}`)
+    console.log(`[vetvi-sync] internal API (access-sync/rooms-status/notify) on port ${INTERNAL_PORT}`)
   })
   internalServer.on('error', (e) => {
     console.error('[vetvi-sync] internal port error (свип ролей продолжает работать)', e)

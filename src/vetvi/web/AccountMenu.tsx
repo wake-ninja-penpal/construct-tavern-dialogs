@@ -5,12 +5,13 @@
  *
  * Аватар (круг с первой буквой имени) заменяет старую кнопку «Настройки»:
  * клик открывает попап с данными аккаунта, кнопкой «Настройки» и «Выйти».
- * Колокольчик — уведомления сервера (открыли доступ к проекту и т.п.),
- * опрос /api/notifications раз в 20 секунд; клик по уведомлению открывает
+ * Колокольчик — уведомления сервера (открыли доступ к проекту и т.п.):
+ * мгновенный push (vetvi:ntf через vetvi-sync) + опрос /api/notifications
+ * раз в 15 секунд как страховка; клик по уведомлению открывает
  * полученный проект/комнату (store.openShared).
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getMe } from '@/vetvi/core/identity';
 import {
@@ -81,26 +82,86 @@ const ROLE_LABEL: Record<string, string> = {
   reader: 'только чтение',
 };
 
-/** Хук: опрос уведомлений + состояние попапа. Используется в TopBar. */
+/** Хук: опрос уведомлений + push (vetvi:ntf) + состояние попапа. Используется в TopBar.
+ *
+ *  Доставка — два канала: мгновенный push от сервера (grant/revoke пушит
+ *  уведомление через vetvi-sync во все вкладки аккаунта) и опрос раз в 15 с
+ *  как страховка (sync перезапустили, сокет умер — уведомление всё равно
+ *  появится). Сбой одного опроса (сеть/сервер) прежнее состояние НЕ стирает —
+ *  точка непрочитанного не «мигает» и не пропадает. Новое непрочитанное —
+ *  короткий тост (и от push, и от опроса, без дублирования). */
 export function useNotifications(_store: VetviStore) {
   const [state, setState] = useState<NtfState>({ items: [], unread: 0 });
   const [open, setOpen] = useState(false);
+  /* применяется только самый свежий ответ опроса (гонка interval/toggle) */
+  const reqSeq = useRef(0);
+  /* уже показанные в тосте уведомления — без дублей (push + poll) */
+  const seenIds = useRef<Set<string>>(new Set());
+  const firstLoad = useRef(true);
 
-  const refresh = async (markRead = false) => {
+  const toastNtf = useCallback((n: { type?: string; payload?: Record<string, unknown> }) => {
+    const st = getStore();
+    const p = (n.payload || {}) as { projectName?: string };
+    const nm = p.projectName ? ` «${p.projectName}»` : '';
+    if (n.type === 'access_granted') st.toast(`Вам открыли доступ к проекту${nm}`, 'ok');
+    else if (n.type === 'access_revoked') st.toast(`Доступ к проекту${nm} отозван`, 'warn');
+    else st.toast('Новое уведомление — откройте колокольчик', 'ok');
+  }, []);
+
+  const refresh = useCallback(async (markRead = false) => {
+    const seq = ++reqSeq.current;
     const r = await notificationsFetch();
+    if (seq !== reqSeq.current) return; /* устаревший ответ — есть более свежий */
+    if (!r.ok) return; /* сбой опроса — прежнее состояние сохраняется */
+    if (!firstLoad.current) {
+      for (const n of r.items) {
+        if (!n.read && !seenIds.current.has(n.id)) toastNtf(n);
+      }
+    }
+    firstLoad.current = false;
+    for (const n of r.items) seenIds.current.add(n.id);
     setState({ items: r.items, unread: r.unread });
     if (markRead && r.unread > 0) {
       void notificationsRead();
       setState({ items: r.items.map((x) => ({ ...x, read: true })), unread: 0 });
     }
-  };
+  }, [toastNtf]);
 
   useEffect(() => {
     /* первый опрос — вне синхронного тела эффекта (async fetch + setState) */
     const t0 = setTimeout(() => { void refresh(); }, 0);
-    const t = setInterval(() => { void refresh(); }, 20000);
-    return () => { clearTimeout(t0); clearInterval(t); };
-  }, []);
+    const t = setInterval(() => { void refresh(); }, 15000);
+    /* мгновенный канал: push после grant/revoke — тост + обновление точки.
+       sync-клиент создаётся в эффекте VetviApp ПОСЛЕ эффектов детей (TopBar —
+       ребёнок), поэтому при монтировании store.sync ещё null — пробуем
+       зарегистрироваться, пока клиент не появится (короткий ретрай-цикл). */
+    const listener = (n: { id?: string; type?: string; payload?: Record<string, unknown> }) => {
+      if (n && n.id && seenIds.current.has(n.id)) { void refresh(); return; }
+      if (n) {
+        if (n.id) seenIds.current.add(n.id);
+        toastNtf(n);
+      }
+      void refresh();
+    };
+    let regT: ReturnType<typeof setTimeout> | null = null;
+    let registered = false;
+    const tryRegister = (attempt: number) => {
+      const st = getStore();
+      if (st.sync) {
+        st.sync.setNtfListener(listener);
+        registered = true;
+        return;
+      }
+      if (attempt < 60) regT = setTimeout(() => tryRegister(attempt + 1), 250);
+    };
+    tryRegister(0);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(t);
+      if (regT) clearTimeout(regT);
+      if (registered) getStore().sync?.setNtfListener(null);
+    };
+  }, [refresh, toastNtf]);
 
   const toggle = () => {
     const v = !open;

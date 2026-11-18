@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { notifyAccessChanged } from '@/lib/syncNotify';
+import { notifyAccessChanged, notifyUserPush } from '@/lib/syncNotify';
 import { findUserByLogin } from '@/lib/users';
 
 /** POST /api/access/revoke {roomId, login} — забрать доступ (владелец).
@@ -44,16 +44,26 @@ export async function POST(req: NextRequest) {
 
     await db.projectAccess.delete({ where: { id: targetAccess.id } });
 
-    await db.notification.create({
+    const ntfPayload = {
+      roomId,
+      projectName: targetAccess.projectName,
+      ownerName: caller.displayName || caller.login,
+    };
+
+    const created = await db.notification.create({
       data: {
         userId: target.id,
         type: 'access_revoked',
-        payload: JSON.stringify({
-          roomId,
-          projectName: targetAccess.projectName,
-          ownerName: caller.displayName || caller.login,
-        }),
+        payload: JSON.stringify(ntfPayload),
       },
+    });
+
+    /* мгновенный push колокольчику (точка непрочитанного — сразу) */
+    notifyUserPush(target.id, {
+      id: created.id,
+      type: created.type,
+      payload: ntfPayload,
+      createdAt: created.createdAt.toISOString(),
     });
 
     /* мгновенное отключение: участник с открытой комнатой немедленно выгоняется

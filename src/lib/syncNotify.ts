@@ -29,6 +29,30 @@ export function notifyAccessChanged(
   }
 }
 
+/** Мгновенный push одного уведомления аккаунту (колокольчик).
+ *
+ *  После записи уведомления в БД (access_granted / access_revoked) сообщаем
+ *  realtime-серверу — он раздаёт vetvi:ntf всем сокетам этого пользователя
+ *  (все вкладки/устройства): точка непрочитанного на колокольчике появляется
+ *  сразу, без ожидания опроса. Опрос /api/notifications остаётся страховкой —
+ *  недоступность sync или офлайн-получатель не теряют уведомление. */
+export function notifyUserPush(
+  userId: string,
+  ntf: { id: string; type: string; payload: unknown; createdAt: string },
+): void {
+  try {
+    const base = process.env.VETVI_SYNC_INTERNAL_URL || 'http://127.0.0.1:3004';
+    const key = process.env.VETVI_INTERNAL_KEY || 'vetvi-internal-key';
+    void fetch(base + '/internal/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-vetvi-key': key },
+      body: JSON.stringify({ userId, ntf }),
+    }).catch(() => { /* sync недоступен — уведомление доставит опрос */ });
+  } catch {
+    /* push необязателен: опрос доставит уведомление */
+  }
+}
+
 /** Живы ли комнаты на realtime-сервере (vetvi-sync).
  *
  *  «Вам открыли доступ» помечает офлайн-проекты: владелец выключил сетевой

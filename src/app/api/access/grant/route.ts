@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { notifyAccessChanged } from '@/lib/syncNotify';
+import { notifyAccessChanged, notifyUserPush } from '@/lib/syncNotify';
 import { findUserByLogin } from '@/lib/users';
 
 /** POST /api/access/grant {roomId, login, role, projectId?, projectName?} —
@@ -72,19 +72,30 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    await db.notification.create({
+    const ntfPayload = {
+      roomId,
+      projectId,
+      projectName,
+      role,
+      granterName: caller.displayName || caller.login,
+      ownerName: caller.displayName || caller.login,
+    };
+
+    const created = await db.notification.create({
       data: {
         userId: target.id,
         type: 'access_granted',
-        payload: JSON.stringify({
-          roomId,
-          projectId,
-          projectName,
-          role,
-          granterName: caller.displayName || caller.login,
-          ownerName: caller.displayName || caller.login,
-        }),
+        payload: JSON.stringify(ntfPayload),
       },
+    });
+
+    /* мгновенный push колокольчику получателя (все вкладки/устройства):
+       точка непрочитанного появляется сразу, без ожидания опроса */
+    notifyUserPush(target.id, {
+      id: created.id,
+      type: created.type,
+      payload: ntfPayload,
+      createdAt: created.createdAt.toISOString(),
     });
 
     /* мгновенное применение прав в открытой комнате: участник сразу получает

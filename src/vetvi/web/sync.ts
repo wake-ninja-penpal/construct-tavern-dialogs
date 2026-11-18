@@ -26,13 +26,17 @@ import { passRandomSalt, sha256hex } from '@/vetvi/core/passlock';
 import { projList, projReadSlot, projRename } from '@/vetvi/core/projects';
 import { stItem, stSetItem } from '@/vetvi/core/storage';
 import type { VetviChar, VetviCharGroup, VetviEdge, VetviGroup, VetviNode } from '@/vetvi/core/types';
-import { accessInit, getAccountToken } from './auth';
+import { accessInit, getAccount, getAccountToken } from './auth';
 import { canvasApi } from './canvasApi';
 import type { VetviStore } from './store';
 
 const LS_COPIES = 'vetvi-copies-v1';
 const LS_BACKUPS = 'vetvi-backups-v1';
-const SYNC_URL = '/?XTransformPort=3003';
+/* адрес realtime-сервера: в docker/продакшене — через Caddy-шлюз
+   (/?XTransformPort=3003 — НЕ менять, путь нужен шлюзу). NEXT_PUBLIC_SYNC_URL —
+   для локальной разработки без шлюза (next dev + bun mini-services/vetvi-sync):
+   сокет идёт напрямую на :3003 (у sync-сервера разрешён cross-origin). */
+const SYNC_URL = process.env.NEXT_PUBLIC_SYNC_URL || '/?XTransformPort=3003';
 
 export interface SyncCopy {
   copyId: string;
@@ -186,10 +190,18 @@ export class SyncClient {
   myFocus: string | null = null;
   focusSent: string | null = null;
   opSock: Socket | null = null;
+  /* сокет для push-уведомлений (колокольчик): регистрируется сессией аккаунта
+     вне комнат — событие vetvi:ntf приходит мгновенно после grant/revoke */
+  private ntfSock: Socket | null = null;
+  private ntfListener: ((n: { id?: string; type?: string; payload?: Record<string, unknown> }) => void) | null = null;
   /* ожидание пароля комнаты (окно roomPass) */
   pwPending: { roomId: string; pid: string | null; opts: JoinOpts; wrong: boolean } | null = null;
   /* идёт тихий перезаход (обновление роли) — защита от пинг-понга */
   rejoining = false;
+  /* комната legacy (ни одной записи ProjectAccess): роли определяются
+     legacy-claim'ом, не БД — выкидывание такого «владельца по сути» (роль
+     guest в legacy-комнате) не трогает его записи реестра */
+  private legacyRoom = false;
   private pollT: ReturnType<typeof setInterval> | null = null;
 
   constructor(private store: VetviStore) {}
@@ -423,6 +435,7 @@ export class SyncClient {
            сервер пересчитает роль и право редактирования. Один раз на
            подключение — без циклов, если init продолжает падать. */
         const joinedGuest = !res.role || res.role === 'guest';
+        this.legacyRoom = !!res.legacy;
         if (this.mode === 'room' && !this.healDone && (res.legacy || (opts.own === true && joinedGuest))) {
           this.healDone = true;
           void (async () => {
@@ -517,7 +530,12 @@ export class SyncClient {
     });
     /* владелец закрыл ссылку/выключил сетевой режим, пока мы были в комнате:
        гостей и участников вежливо выгоняет. reason=revoked — у нас отозвали
-       доступ (окно «Поделиться» → «Отозвать доступ»): выгоняет и участника. */
+       доступ (окно «Поделиться» → «Отозвать доступ» или «×» в списке
+       участников): проект ЗАКРЫВАЕТСЯ — чистый холст, у отозванного запись
+       реестра с этой комнатой удаляется (доступа больше нет). reason=closed
+       (сетевой режим выключен) и members/off (ссылка закрыта) — тоже закрываем
+       проект, но запись в списке остаётся: в «Вам открыли доступ» она серая
+       «офлайн» (если доступ ещё есть), у гостя запись не сохраняется. */
     sock.on('vetvi:kicked', (m: { roomId?: string; reason?: string }) => {
       if (!m || m.roomId !== this.room) return;
       const why = m.reason === 'members'
@@ -525,10 +543,23 @@ export class SyncClient {
         : m.reason === 'closed'
           ? 'Владелец отключил сетевой доступ — комната закрыта'
           : m.reason === 'revoked'
-            ? 'Владелец закрыл вам доступ к проекту — вы отключены от комнаты'
+            ? 'Владелец закрыл вам доступ к проекту — проект закрыт'
             : 'Владелец закрыл доступ по ссылке';
+      const reason = m.reason || '';
+      /* роль ДО сброса: guest — запись реестра с этой комнатой подчищается
+         (гость по ссылке без записи доступа; запись «всплыла» бы в «Мои
+         проекты»), участник с доступом при выключении сетевого режима —
+         остаётся (в списке она серая «офлайн»); legacy-комнату не чистим */
+      const myRole = this.role;
+      const isLegacy = this.legacyRoom;
       this.disconnect(true);
-      this.store.toast(why, 'warn');
+      if (reason === 'revoked') {
+        this.store.closeKickedProject(m.roomId, { deleteEntry: true, msg: why });
+      } else if (reason === 'closed' || reason === 'members' || reason === 'off') {
+        this.store.closeKickedProject(m.roomId, { deleteEntry: myRole === 'guest' && !isLegacy, msg: why });
+      } else {
+        this.store.toast(why, 'warn');
+      }
     });
     /* права доступа изменились, пока мы в комнате (владелец сменил роль в окне
        «Поделиться») — сервер прислал новую роль: право правки применяется
@@ -1395,6 +1426,40 @@ export class SyncClient {
     };
     if (sock.connected) send();
     else sock.once('connect', send);
+  }
+
+  /* ═══ push-уведомления (колокольчик) ═══ */
+
+  /** Подписка на мгновенные уведомления сервера (vetvi:ntf). Отдельный
+   *  служебный сокет вне комнат — живёт всё время сессии аккаунта: при старте
+   *  и каждом переподключении (в т.ч. после перезапуска sync) шлёт
+   *  vetvi:ntf-hello с токеном сессии. Слушатель ставит хук колокольчика. */
+  setNtfListener(cb: ((n: { id?: string; type?: string; payload?: Record<string, unknown> }) => void) | null): void {
+    this.ntfListener = cb;
+    if (cb) this.ensureNtfSocket();
+  }
+
+  private ensureNtfSocket(): void {
+    if (this.ntfSock) return;
+    const sock = io(SYNC_URL, {
+      path: '/',
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 4000,
+    });
+    this.ntfSock = sock;
+    const hello = () => {
+      const acc = getAccount();
+      const tok = getAccountToken();
+      if (!acc || !tok) return; /* не залогинен — регистрировать нечего */
+      try { sock.emit('vetvi:ntf-hello', { token: tok, userId: acc.id }); } catch { /* сокет умер */ }
+    };
+    sock.on('connect', hello);
+    sock.on('vetvi:ntf', (n: { id?: string; type?: string; payload?: Record<string, unknown> }) => {
+      try { this.ntfListener?.(n); } catch { /* слушатель упал — опрос доставит */ }
+    });
+    if (sock.connected) hello();
   }
 
   sendMerge(): void {
