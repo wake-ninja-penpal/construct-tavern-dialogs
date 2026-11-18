@@ -1091,8 +1091,12 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 /* слева — «Поделиться»: полноценная кнопка (все углы скруглены), лежит ПОВЕРХ правой части */
 .share-split .sg-main{padding:0 11px;position:relative;z-index:1}
 /* справа — статус: серая с рамкой, ВЫХОДИТ ИЗ-ПОД левой кнопки (заходит под неё
-   левым краем на 15px), все углы скруглены; ширина ПОСТОЯННАЯ — только точка */
-.share-split .sg-status{position:relative;z-index:0;margin-left:-15px;background:#2e333c;border:1px solid #4a5160;color:var(--tx2);justify-content:flex-start;gap:6px;min-width:39px;padding:0 7px 0 18px;transition:background .15s ease,border-color .15s ease,color .15s ease}
+   левым краем на 15px), все углы скруглены; ширина ПОСТОЯННАЯ — только точка.
+   Точка центрирована в ВИДИМОЙ части сегмента: слева 15px скрыты под кнопкой,
+   видимая ширина 39−15 = 24px, точка 9px → от левого края сегмента 15+(24−9)/2
+   = 22.5px, из них 1px рамка → padding-left 21.5px (справа 6.5px — сумма с
+   точкой и рамками даёт ровно min-width 39px, flex-распределение не мешает) */
+.share-split .sg-status{position:relative;z-index:0;margin-left:-15px;background:#2e333c;border:1px solid #4a5160;color:var(--tx2);justify-content:flex-start;gap:6px;min-width:39px;padding:0 6.5px 0 21.5px;transition:background .15s ease,border-color .15s ease,color .15s ease}
 .share-split .sg-status:hover{background:#383f4b;border-color:#5a6373;color:var(--tx)}
 .share-split .sg-status:hover,.share-split .sg-main:hover{transform:none}
 .share-split .sg-status:active,.share-split .sg-main:active{transform:scale(.97)}
@@ -1146,6 +1150,10 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   #bCopies .t,#bShare .t,#bMerge .t{display:none}
   #bCopies,#bShare,#bMerge{padding:0 10px;justify-content:center}
   #topbar .btn{padding-left:10px;padding-right:10px}
+  /* уплотнение топбара не должно сдвигать точку статуса: перекрываем
+     #topbar .btn (специфичность 1,1,0) селектором 1,2,0 — центровка точки
+     в видимой части сегмента та же, что в базовом правиле */
+  #topbar .share-split .sg-status{padding:0 6.5px 0 21.5px}
   #zPct{display:none}
   .brand .sub{display:none}
   #topbar{gap:8px}

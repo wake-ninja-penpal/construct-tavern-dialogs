@@ -152,6 +152,35 @@ function docsDiffer(a: unknown, b: unknown): boolean {
   return canonDocJson(a) !== canonDocJson(b);
 }
 
+/** Пустая заглушка «Проект по доступу» (openShared без локальной копии): одна
+ *  нода-сцена без текста и переименования, ни одной связи/группы/переменной/
+ *  персонажа, пустой журнал действий. Такая копия не считается «локальной
+ *  версией» для сравнения с комнатой — иначе вход в заново выданный доступ
+ *  показывал «данные отличаются», а публикация «локальной версии» стирала
+ *  данные комнаты пустым проектом. Страховка и на перезагрузку страницы,
+ *  когда in-memory флаг заглушки уже потерян: содержательной работы в такой
+ *  копии быть не может (любая правка ноды/журнала лишает её признака заглушки). */
+function looksLikeFreshStub(v: unknown): boolean {
+  const d = v as {
+    nodes?: unknown[]; edges?: unknown[]; groups?: unknown[];
+    vars?: unknown[]; chars?: unknown[]; varGroups?: unknown[]; charGroups?: unknown[];
+    meta?: { actionLog?: unknown };
+  } | null;
+  if (!d || !Array.isArray(d.nodes) || d.nodes.length !== 1) return false;
+  if (Array.isArray(d.edges) && d.edges.length) return false;
+  if (Array.isArray(d.groups) && d.groups.length) return false;
+  if (Array.isArray(d.vars) && d.vars.length) return false;
+  if (Array.isArray(d.chars) && d.chars.length) return false;
+  if (Array.isArray(d.varGroups) && d.varGroups.length) return false;
+  if (Array.isArray(d.charGroups) && d.charGroups.length) return false;
+  if (Array.isArray(d.meta?.actionLog) && (d.meta.actionLog as unknown[]).length) return false;
+  const n = d.nodes[0] as { type?: unknown; title?: unknown; text?: unknown } | undefined;
+  if (!n || n.type !== 'scene') return false;
+  if (typeof n.text === 'string' && n.text.trim()) return false;
+  if (typeof n.title === 'string' && n.title.trim() && n.title !== 'Сцена') return false;
+  return true;
+}
+
 function clonePlain(v: unknown): Record<string, unknown> {
   try { return JSON.parse(JSON.stringify(v)) as Record<string, unknown>; } catch { return { nodes: [], edges: [], groups: [] }; }
 }
@@ -755,25 +784,45 @@ export class SyncClient {
   }
 
   /** Локальная копия проекта комнаты для блока сравнения: текущий документ, если
-   *  открыт именно этот проект (включая несохранённые правки), иначе слот проекта. */
+   *  открыт именно этот проект (включая несохранённые правки), иначе слот проекта.
+   *  Заглушка «Проект по доступу» (openShared без локальной копии) НЕ считается
+   *  локальной копией: раньше после отзыва доступа и повторной выдачи вход в
+   *  комнату показывал блок «данные отличаются» с пустой заглушкой, и кнопка
+   *  «Опубликовать локальную версию» стирала данные комнаты пустым проектом. */
   captureLocalVersion(roomPid: string | null): Record<string, unknown> | null {
     if (!roomPid) return null;
-    const metaPid = typeof this.store.doc.meta.projectId === 'string' ? String(this.store.doc.meta.projectId || '') : '';
-    if (metaPid && metaPid === roomPid) return clonePlain(this.store.syncDocObj());
-    try {
-      const slot = projReadSlot(roomPid);
-      if (slot && slot.doc) return clonePlain(slot.doc);
-    } catch { /* нет слота */ }
-    return null;
+    /* активная заглушка (в памяти с момента openShared): серверный документ ещё
+       не приходил — сравнивать не с чем, комната просто применится и сохранится */
+    if (this.store.roomStubPids.has(roomPid)) return null;
+    const metaPid = typeof this.store.doc.meta.projectId === 'string' ? String(this.store.doc.meta.projectId as string || '') : '';
+    let ver: Record<string, unknown> | null = null;
+    if (metaPid && metaPid === roomPid) ver = clonePlain(this.store.syncDocObj());
+    else {
+      try {
+        const slot = projReadSlot(roomPid);
+        if (slot && slot.doc) ver = clonePlain(slot.doc);
+      } catch { /* нет слота */ }
+    }
+    /* страховка на перезагрузку страницы (флаг в памяти теряется): пустая
+       заглушка в слоте — тоже не «локальная версия» */
+    if (ver && looksLikeFreshStub(ver)) return null;
+    return ver;
   }
 
   /* ── действия блока расхождения (SyncDiffModal) ── */
 
   /** «Опубликовать локальную версию на сервер»: локальная версия возвращается в
-   *  редактор и заменяет данные комнаты; соавторы получают её на сравнение. */
+   *  редактор и заменяет данные комнаты; соавторы получают её на сравнение.
+   *  Страховка: заглушку «Проект по доступу» публиковать нельзя — она стёрла бы
+   *  данные комнаты пустым проектом. */
   diffPushLocal(): void {
     const d = this.store.syncDiff;
     if (!d) return;
+    const lp = ((d.localDoc as { meta?: { projectId?: unknown } } | undefined)?.meta?.projectId);
+    if (typeof lp === 'string' && this.store.roomStubPids.has(lp)) {
+      this.store.toast('Публиковать нечего: локальная копия пуста — загрузите данные комнаты', 'warn');
+      return;
+    }
     if (d.kind !== 'foreign') this.applyRemote(d.localDoc as SyncDoc, false);
     this.publishReplace(d.localDoc as SyncDoc);
     this.store.clearSyncDiff();
@@ -793,10 +842,16 @@ export class SyncClient {
   /** «Смерджить»: локальные изменения поверх версии комнаты (объекты, изменённые
    *  локально, берутся из локальной версии; добавления обеих сторон остаются;
    *  удалённые локально объекты выпадают). Результат применяется и публикуется
-   *  как замена данных комнаты. */
+   *  как замена данных комнаты. Заглушка «Проект по доступу» мерджится только
+   *  как «Принять комнату» — публиковать её нельзя (стерла бы данные). */
   diffMerge(): void {
     const d = this.store.syncDiff;
     if (!d) return;
+    const lpM = ((d.localDoc as { meta?: { projectId?: unknown } } | undefined)?.meta?.projectId);
+    if (typeof lpM === 'string' && this.store.roomStubPids.has(lpM)) {
+      this.diffTakeServer();
+      return;
+    }
     const server = d.serverDoc as SyncDoc;
     const local = d.localDoc as SyncDoc;
     const result = mergeDocs(server, local as unknown as Record<string, unknown>, {
@@ -850,6 +905,14 @@ export class SyncClient {
     if (this.store.viewOnly) return; // только чтение: снапшоты не публикуем (сервер и так отклонит)
     if (this.applyingRemote && !force) return;
     const doc = this.store.syncDocObj();
+    /* страховка: заглушку «Проект по доступу» (openShared без локальной копии) не
+       публикуем — иначе она заменяет собой данные комнаты (последний дубль побеждает),
+       и все участники видят пустой проект. Комната подождёт серверный документ. */
+    {
+      const stubPid = (doc.meta && typeof (doc.meta as { projectId?: unknown }).projectId === 'string')
+        ? String((doc.meta as { projectId?: string }).projectId) : '';
+      if (stubPid && this.store.roomStubPids.has(stubPid)) return;
+    }
     /* flushSave больше не публикует, поэтому сюда попадают ТОЛЬКО реальные правки
        открытого документа (scheduleSave мутаций и явные публикации). Если открытый
        документ — другой проект, комната переходит на него (last-write-wins): клиент

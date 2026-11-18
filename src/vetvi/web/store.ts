@@ -226,6 +226,14 @@ export class VetviStore {
   editLockIds: string[] = [];
   /** Расхождение локальной копии и комнаты (см. SyncDiffInfo) — блок в углу холста. */
   syncDiff: SyncDiffInfo | null = null;
+  /** projectId документов-заглушек «Проект по доступу» (openShared без локальной копии):
+   *  заглушка НЕ считается «локальной копией» для блока сравнения с комнатой. Иначе
+   *  после отзыва доступа и повторной выдачи вход в комнату показывал «данные
+   *  отличаются» с ПУСТОЙ заглушкой, а «Опубликовать локальную версию» стирала
+   *  данные комнаты пустым проектом. Флаг снимается, когда заглушка получает
+   *  серверный документ (applyRemoteDoc) или в неё вносят правки (тогда это уже
+   *  настоящий проект, достойный сравнения). */
+  roomStubPids: Set<string> = new Set<string>();
 
   /** Клиент realtime-коллаборации (подключается в VetviApp). */
   sync: SyncClient | null = null;
@@ -597,6 +605,9 @@ export class VetviStore {
     }
     const cur = this.serialize();
     if (cur === pre) return;
+    /* содержательная правка: заглушка «Проект по доступу» стала настоящей работой */
+    const mp = typeof this.doc.meta.projectId === 'string' ? this.doc.meta.projectId : '';
+    if (mp) this.roomStubPids.delete(mp);
     this.pendingLog = { pre, t: Date.now(), label: label || null };
     this.scheduleLogFlush();
     this.past.push(pre);
@@ -648,6 +659,9 @@ export class VetviStore {
     if (this.denyEdit()) return;
     if (!opts || opts.history !== false) this.pushHistory(opts?.label);
     fn(this.doc);
+    /* содержательная правка: заглушка «Проект по доступу» стала настоящей работой */
+    const stubPid = typeof this.doc.meta.projectId === 'string' ? this.doc.meta.projectId : '';
+    if (stubPid) this.roomStubPids.delete(stubPid);
     this.refreshSigs();
     this.noteEditor();
     /* правка после входа в комнату: локальная копия начинает следовать за серверной
@@ -662,6 +676,9 @@ export class VetviStore {
     if (this.denyEdit()) return;
     this.flushPendingLog();
     fn(this.doc);
+    /* содержательная правка: заглушка «Проект по доступу» стала настоящей работой */
+    const stubPid2 = typeof this.doc.meta.projectId === 'string' ? this.doc.meta.projectId : '';
+    if (stubPid2) this.roomStubPids.delete(stubPid2);
     this.noteEditor();
     if (this._manT) clearTimeout(this._manT);
     this._manT = setTimeout(() => this.logManual(act), debounceMs);
@@ -3609,6 +3626,10 @@ export class VetviStore {
     this.viewOnly = p.role === 'reader';
     /* слот + запись реестра с roomId — сразу (обычный persist roomId ставит только при синхронизации) */
     projSaveCurrent(doc, this.vp, this.bend, p.roomId);
+    /* заглушка без локальной копии: не «локальная версия» для блока сравнения
+       (captureLocalVersion) и не кандидат на «Опубликовать локальную версию» —
+       иначе вход в заново выданную комнату предлагал стереть её данные пустышкой */
+    this.roomStubPids.add(pid);
     this.toast('Открыт проект: ' + (p.projectName || 'Без названия'), 'ok');
     if (this.sync) {
       this.sync.mode = 'room';
@@ -4353,6 +4374,10 @@ export class VetviStore {
    */
   applyRemoteDoc(doc: Record<string, unknown> | null, keepPid = false, preserveTouchedAfter = 0, skipSave = false): void {
     if (!doc || !Array.isArray(doc.nodes)) return;
+    /* серверный документ применили: заглушка «Проект по доступу» получила содержимое —
+       дальше это полноценная локальная копия комнаты */
+    const incPid = ((doc as { meta?: { projectId?: unknown } }).meta?.projectId);
+    if (typeof incPid === 'string' && incPid) this.roomStubPids.delete(incPid);
     this.flushPendingLog();
     const d = doc as {
       meta?: Record<string, unknown>;
