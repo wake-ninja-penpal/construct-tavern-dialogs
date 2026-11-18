@@ -34,7 +34,8 @@ export async function POST(req: Request) {
   if (exists) return NextResponse.json({ error: 'Такой логин уже занят' }, { status: 409 });
 
   const user = await db.authUser.create({
-    data: { login, passwordHash: hashPassword(password), displayName: displayName || null, color: pickUserColor() },
+    /* имя не указано — берём ник (логин): имя аккаунта никогда не пустое */
+    data: { login, passwordHash: hashPassword(password), displayName: displayName || login, color: pickUserColor() },
   });
   await db.inviteLink.update({ where: { code }, data: { uses: { increment: 1 } } });
 

@@ -183,6 +183,8 @@ export class SyncClient {
   opSock: Socket | null = null;
   /* ожидание пароля комнаты (окно roomPass) */
   pwPending: { roomId: string; pid: string | null; opts: JoinOpts; wrong: boolean } | null = null;
+  /* идёт тихий перезаход (обновление роли) — защита от пинг-понга */
+  rejoining = false;
   private pollT: ReturnType<typeof setInterval> | null = null;
 
   constructor(private store: VetviStore) {}
@@ -243,6 +245,43 @@ export class SyncClient {
 
   /* ═══ подключение к комнате ═══ */
 
+  /** Роль и право на правку из ack входа: reader/guest — только чтение
+   *  (сервер и сам отклоняет правки). При смене правки на лету — короткий тост. */
+  private applyRole(res: { role?: string; canEdit?: boolean }, silent = false): void {
+    this.role = typeof res.role === 'string' ? res.role : null;
+    const canEdit = res.canEdit !== false;
+    const was = this.store.viewOnly;
+    this.store.viewOnly = !canEdit && this.mode === 'room';
+    if (silent) return;
+    if (!canEdit && !was) this.store.toast('У вас доступ только на чтение — правки недоступны', 'warn');
+    else if (canEdit && was) this.store.toast('Права обновлены — редактирование разрешено', 'ok');
+  }
+
+  /** Тихий перезаход в комнату без разрыва сокета: сервер пересчитает роль
+   *  (после выдачи/отзыва доступа или legacy-claim). Документ из re-ack не
+   *  применяется — обновляется только роль/список участников. */
+  rejoin(): void {
+    const sock = this.sock;
+    if (!sock || !sock.connected || !this.room || this.mode === 'copy') return;
+    if (this.rejoining) return;
+    this.rejoining = true;
+    const me = getMe();
+    const jpay: Record<string, unknown> = { roomId: this.room, user: { id: me.id, name: me.name, color: me.color }, quiet: true };
+    const tok = getAccountToken();
+    if (tok) { jpay.token = tok; jpay.userId = me.id; }
+    const jpw = this.store.syncProjPass || this.joinPass || null;
+    if (jpw) jpay.password = jpw;
+    const meta = this.store.doc.meta as unknown as { passHash?: string; passSalt?: string };
+    if (meta && meta.passHash) jpay.pass = { salt: String(meta.passSalt || ''), hash: String(meta.passHash) };
+    sock.emit('vetvi:join', jpay, (res: { ok?: boolean; role?: string; canEdit?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[] } | null) => {
+      this.rejoining = false;
+      if (!res || !res.ok) return;
+      this.applyRole(res);
+      this.store.syncUsers = res.users || this.store.syncUsers;
+      this.store.emit();
+    });
+  }
+
   connect(roomId: string, pid: string | null, opts: JoinOpts = {}): void {
     if (this.sock) {
       try { this.sock.disconnect(); } catch { /* уже отвалился */ }
@@ -289,12 +328,7 @@ export class SyncClient {
         opts._pwWrong = false;
         this.setStatus('on');
         /* роль и право на правку: reader/guest — только чтение (сервер и отклоняет правки) */
-        this.role = typeof res.role === 'string' ? res.role : null;
-        const canEdit = res.canEdit !== false;
-        this.store.viewOnly = !canEdit && this.mode === 'room';
-        if (!canEdit && !opts.silent) {
-          this.store.toast('У вас доступ только на чтение — правки недоступны', 'warn');
-        }
+        this.applyRole(res, opts.silent);
         this.store.syncUsers = res.users || [];
         this.lockApplyServerList(res.locks);
         this.focusApply(res.focus);
@@ -359,7 +393,7 @@ export class SyncClient {
             if (!isOwn) return;
             const r = await accessInit(roomId, pid, (this.store.doc.meta.name as string) || null);
             if (!r.ok || !r.role) return;
-            try { this.sock?.emit('vetvi:join', jpay, () => { /* re-ack: сервер вернёт новую роль */ }); } catch { /* соединение умерло */ }
+            this.rejoin();
           })();
         }
       });
@@ -370,6 +404,13 @@ export class SyncClient {
     sock.on('vetvi:users', (m: { roomId?: string; users?: { id: string; name: string; color: string; canEdit?: boolean }[] }) => {
       if (!m || m.roomId !== this.room) return;
       this.store.syncUsers = m.users || [];
+      /* самопроверка роли: владелец выдал/отозвал доступ, пока мы в комнате —
+         сервер пересчитал canEdit, перезаходим без разрыва соединения */
+      const meEntry = (m.users || []).find((u) => u.id === getMe().id);
+      if (meEntry && this.mode === 'room' && !this.rejoining) {
+        const canEdit = meEntry.canEdit !== false;
+        if (canEdit === this.store.viewOnly) this.rejoin();
+      }
       this.store.emit();
     });
     /* уведомление о входе участника: кто перешёл по ссылке / вошёл по доступу */
@@ -933,11 +974,16 @@ export class SyncClient {
     if (!this.store.doc.meta.projectId) this.store.doc.meta.projectId = uid() + uid();
     this.store.scheduleSave();
     this.setHash(roomId, String(this.store.doc.meta.projectId));
-    this.connect(roomId, String(this.store.doc.meta.projectId), { pushLocal: true });
-    /* владелец комнаты: запись доступа — получатель гранта увидит проект в своём списке
-       (идемпотентно: повторный вызов не меняет уже существующую роль) */
-    void accessInit(roomId, String(this.store.doc.meta.projectId), (this.store.doc.meta.name as string) || null).catch(() => { /* сервер недоступен */ });
     this.store.openModal('share');
+    /* владелец комнаты: запись доступа СТРОГО ДО входа в комнату. Раньше она
+       шла параллельно с connect — join приходил раньше записи в БД, сервер
+       отвечал «гость» и ставил «только чтение» (потеря доступа при publish). */
+    void (async () => {
+      try {
+        await accessInit(roomId, String(this.store.doc.meta.projectId), (this.store.doc.meta.name as string) || null);
+      } catch { /* сервер недоступен — войдём всё равно, роль придёт по legacy */ }
+      this.connect(roomId, String(this.store.doc.meta.projectId), { pushLocal: true });
+    })();
   }
 
   copyShareLink(): void {

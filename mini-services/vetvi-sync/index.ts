@@ -53,6 +53,9 @@ interface RoomMember {
   socketId: string
   user: UserMeta
   canEdit: boolean
+  /* id аккаунта (если вошёл по сессии) — нужен свипу ролей: права
+     (owner/editor/reader) могут измениться, пока участник в комнате */
+  accId: string | null
 }
 
 interface AccInfo {
@@ -537,6 +540,29 @@ function broadcastUsers(io: Server, room: RoomState) {
   io.to(room.name).emit('vetvi:users', { roomId: room.name, users: userList(room) })
 }
 
+/* ─── свип ролей: доступы могут измениться, пока участник онлайн ───
+   Владелец выдал/отозвал/поменял роль через окно «Поделиться» — участник
+   получает актуальное право редактирования без переподключения сокета:
+   каждые 10 секунд перечитываем ProjectAccess и обновляем canEdit. */
+const ROLE_SWEEP_MS = 10 * 1000
+
+function sweepRoles(io: Server) {
+  for (const room of rooms.values()) {
+    if (room.members.size === 0) continue
+    let changed = false
+    for (const m of room.members.values()) {
+      if (!m.accId) continue
+      const role = accessRole(room.name, m.accId)
+      const canEdit = role === 'owner' || role === 'editor'
+      if (canEdit !== m.canEdit) {
+        m.canEdit = canEdit
+        changed = true
+      }
+    }
+    if (changed) broadcastUsers(io, room)
+  }
+}
+
 /* ─── блокировки объектов ─── */
 
 function lockList(room: RoomState) {
@@ -651,6 +677,8 @@ io.on('connection', (socket: Socket) => {
         /* сессия аккаунта: токен + id — имя/цвет берутся из БД */
         token?: string
         userId?: string
+        /* тихий rejoin (обновление роли): без «X — в комнате» остальным */
+        quiet?: boolean
       },
       ack?: (r: unknown) => void,
     ) => {
@@ -726,7 +754,7 @@ io.on('connection', (socket: Socket) => {
         joinedRoom = roomName
         canEditSock = canEdit
         socket.join(roomName)
-        room.members.set(socket.id, { socketId: socket.id, user, canEdit })
+        room.members.set(socket.id, { socketId: socket.id, user, canEdit, accId: acc ? acc.id : null })
 
         // удаляем призраков перед расчётом списка — счётчик онлайн всегда актуальный
         if (sweepStaleMembers(io, room)) broadcastUsers(io, room)
@@ -750,14 +778,17 @@ io.on('connection', (socket: Socket) => {
 
         broadcastUsers(io, room)
         /* уведомление остальным: кто вошёл (имя аккаунта + роль) — так в комнате
-           сразу видят, кто перешёл по ссылке без доступа */
-        socket.to(roomName).emit('vetvi:notice', {
-          roomId: roomName,
-          kind: 'join',
-          user: { id: user.id, name: user.name, color: user.color },
-          role: role || 'guest',
-          canEdit,
-        })
+           сразу видят, кто перешёл по ссылке без доступа. quiet (rejoin для
+           обновления роли) — без повторного «X — в комнате». */
+        if (!payload?.quiet) {
+          socket.to(roomName).emit('vetvi:notice', {
+            roomId: roomName,
+            kind: 'join',
+            user: { id: user.id, name: user.name, color: user.color },
+            role: role || 'guest',
+            canEdit,
+          })
+        }
         console.log(
           `[vetvi-sync] join "${roomName}" (${user.name}${role ? ', ' + role : ''}), peers: ${userList(room).length}`,
         )
@@ -1175,6 +1206,16 @@ setInterval(() => {
     console.error('[vetvi-sync] sweep error', e)
   }
 }, 60_000)
+
+/* свип ролей: выданные/отозванные/сменённые доступы подхватываются участниками
+   в комнате без переподключения (клиент делает тихий rejoin по canEdit) */
+setInterval(() => {
+  try {
+    sweepRoles(io)
+  } catch (e) {
+    console.error('[vetvi-sync] role sweep error', e)
+  }
+}, ROLE_SWEEP_MS)
 
 httpServer.listen(PORT, () => {
   console.log(`[vetvi-sync] server running on port ${PORT}`)

@@ -169,16 +169,18 @@ export default function VetviApp() {
      в комнате больше не меняются произвольно). */
   useEffect(() => {
     let alive = true;
-    void fetchAuthState()
-      .then((st) => {
-        if (!alive) return;
-        authApplyState(st);
-        setAuthPhase(st.authEnabled && !st.user ? 'gate' : 'ok');
-      })
-      .catch(() => {
-        if (alive) setAuthPhase('ok'); /* сервер недоступен — как раньше */
-      });
-    return () => { alive = false; };
+    const t0 = setTimeout(() => {
+      void fetchAuthState()
+        .then((st) => {
+          if (!alive) return;
+          authApplyState(st);
+          setAuthPhase(st.authEnabled && !st.user ? 'gate' : 'ok');
+        })
+        .catch(() => {
+          if (alive) setAuthPhase('ok'); /* сервер недоступен — как раньше */
+        });
+    }, 0);
+    return () => { alive = false; clearTimeout(t0); };
   }, []);
 
   /* прогрев хранилища (idb) */
@@ -197,6 +199,11 @@ export default function VetviApp() {
   if (adminHash) return <AdminPanel />;
   if (authPhase === 'gate') return <AuthGate onPass={() => setAuthPhase('ok')} />;
   if (!booted) return <main className="rn-app" aria-label="Ветви — React-редактор" />;
+  /* authPhase 'loading': ждём /api/auth/state — токен сессии и личность аккаунта
+     должны быть применены ДО первого входа в комнату. Раньше соединение с комнатой
+     стартовало параллельно с запросом: join уходил без токена, сервер отвечал
+     «гость» и сетевые проекты открывались «только чтение». */
+  if (authPhase === 'loading') return <main className="rn-app" aria-label="Ветви — React-редактор" />;
   return <VetviAppInner />;
 }
 

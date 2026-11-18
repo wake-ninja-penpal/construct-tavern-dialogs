@@ -54,6 +54,9 @@ export function AccountPopover({ store, onClose }: { store: VetviStore; onClose:
         </div>
       </div>
       <div className="cp-acts" style={{ borderTop: '1px solid var(--line)' }}>
+        <button type="button" className="cp-act" onClick={() => { store.setAccPop(false); store.openModal('account'); }}>
+          <IcEdit /> Редактировать аккаунт
+        </button>
         <button type="button" className="cp-act" onClick={() => { store.setAccPop(false); store.openModal('settings'); }}>
           <IcGear /> Настройки
         </button>
@@ -233,6 +236,14 @@ function IcExit() {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <path d="m16 17 5-5-5-5" />
       <path d="M21 12H9" />
+    </svg>
+  );
+}
+function IcEdit() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z" />
+      <path d="M14.5 6.5l3 3" />
     </svg>
   );
 }

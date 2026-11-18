@@ -32,7 +32,7 @@ import { TypeEditorModal } from './TypeEditorModal';
 import { TextsImportModal } from './TextsImportModal';
 import { TypeIcon } from './NodeCard';
 import { CopiesModal, CopyBarModal, MergeModal, PassRemoveModal, PassSetModal, RoomPassModal, ShareModal, SyncDiffModal } from './SyncModals';
-import { accessMine, type AccessMineItem } from './auth';
+import { accessMine, accountUpdate, authRefreshAccount, getAccount, type AccessMineItem } from './auth';
 
 /* ═══════════ иконки оригинала (ic(name,size): viewBox 24, stroke 1.7) ═══════════ */
 
@@ -1137,6 +1137,80 @@ function StoreModal({ store }: { store: VetviStore }) {
   );
 }
 
+/* ═══════════ редактирование аккаунта (имя + пароль; ник неизменяем) ═══════════ */
+
+export function AccountModal({ store }: { store: VetviStore }) {
+  const acc = getAccount();
+  const [name, setName] = useState(acc?.displayName || '');
+  const [cur, setCur] = useState('');
+  const [pwA, setPwA] = useState('');
+  const [pwB, setPwB] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  void store.revision;
+
+  const pwTouched = !!(cur || pwA || pwB);
+  const submit = async () => {
+    if (busy) return;
+    setErr('');
+    /* пароль меняют только всей тройкой */
+    if (pwTouched) {
+      if (!cur) { setErr('Введите текущий пароль'); return; }
+      if (pwA.length < 4) { setErr('Новый пароль — минимум 4 символа'); return; }
+      if (pwA !== pwB) { setErr('Новые пароли не совпадают'); return; }
+    }
+    setBusy(true);
+    const r = await accountUpdate({ displayName: name, currentPassword: pwTouched ? cur : undefined, newPassword: pwTouched ? pwA : undefined });
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'Не удалось сохранить'); return; }
+    /* освежить кэш аккаунта и личность редактора (аватар/имя в шапке) */
+    await authRefreshAccount();
+    store.toast(r.passwordChanged ? 'Аккаунт обновлён · пароль изменён' : 'Аккаунт обновлён', 'ok');
+    store.emit();
+    store.closeModal();
+  };
+
+  return (
+    <div className="modal-wrap" onClick={(e) => { if (e.target === e.currentTarget) store.closeModal(); }} role="dialog" aria-label="Редактирование аккаунта">
+      <div className="m-card">
+        <h3>Редактирование аккаунта</h3>
+        <label className="i-lab">Ник (логин) — изменить нельзя</label>
+        <input className="inp" value={acc ? '@' + acc.login : ''} readOnly disabled aria-label="Ник аккаунта" style={{ opacity: 0.6 }} />
+        <label className="i-lab">Имя (как показывать другим)</label>
+        <input
+          className="inp"
+          value={name}
+          maxLength={60}
+          autoFocus
+          aria-label="Имя аккаунта"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }}
+        />
+        <div className="acc-pw-cap">Смена пароля</div>
+        <label className="i-lab">Текущий пароль</label>
+        <input type="password" className="inp" value={cur} autoComplete="current-password" aria-label="Текущий пароль" onChange={(e) => setCur(e.target.value)} />
+        <label className="i-lab">Новый пароль</label>
+        <input type="password" className="inp" value={pwA} autoComplete="new-password" aria-label="Новый пароль" onChange={(e) => setPwA(e.target.value)} />
+        <label className="i-lab">Повторите новый пароль</label>
+        <input
+          type="password"
+          className="inp"
+          value={pwB}
+          autoComplete="new-password"
+          aria-label="Повторите новый пароль"
+          onChange={(e) => setPwB(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }}
+        />
+        {err && <div className="au-err" style={{ marginTop: 8 }}>{err}</div>}
+        <div className="m-btns">
+          <button type="button" className="btn" onClick={() => store.closeModal()}>Отмена</button>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void submit()}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* хост всех модалок по store.modal */
 export function ModalHost({ store }: { store: VetviStore }) {
   void store.revision;
@@ -1146,6 +1220,7 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'patch': return <PatchModal store={store} />;
     case 'projects': return <ProjectsModal store={store} />;
     case 'groupCreate': return <GroupCreateModal store={store} />;
+    case 'account': return <AccountModal store={store} />;
     case 'settings': return <SettingsModal store={store} section="hub" />;
     case 'settingsHk': return <SettingsModal store={store} section="hk" />;
     case 'settingsStore': return <SettingsModal store={store} section="store" />;

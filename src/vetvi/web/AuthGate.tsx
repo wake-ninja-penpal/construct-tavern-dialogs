@@ -85,10 +85,15 @@ export function AuthGate(props: { onPass: () => void }) {
         setErr(j.error || 'Не удалось выполнить запрос');
         return;
       }
-      /* перезагрузка: сессия в cookie, адрес очищаем от ?invite */
+      /* перезагрузка: сессия в cookie, адрес очищаем от ?invite.
+         Если адрес не изменился (например, открыли ссылку комнаты #room=… и
+         просто вошли) — replace не перезагрузит страницу: делаем reload явно. */
       const u = new URL(window.location.href);
       u.searchParams.delete('invite');
-      window.location.replace(u.pathname + u.search + u.hash);
+      const target = u.pathname + u.search + u.hash;
+      const current = window.location.pathname + window.location.search + window.location.hash;
+      if (target !== current) window.location.replace(target);
+      else window.location.reload();
     } catch {
       setErr('Сервер недоступен');
     } finally {

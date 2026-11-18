@@ -59,6 +59,24 @@ export async function authLogout(): Promise<void> {
   meToken = null;
 }
 
+/** Редактирование аккаунта: имя (ник/логин неизменяем) и/или пароль. */
+export async function accountUpdate(p: { displayName?: string; currentPassword?: string; newPassword?: string }): Promise<{ ok: boolean; error?: string; nameChanged?: boolean; passwordChanged?: boolean }> {
+  const { status, data } = await postJson('/api/auth/account', p);
+  if (status !== 200) return { ok: false, error: String(data.error || 'Не удалось сохранить') };
+  return { ok: true, nameChanged: !!data.nameChanged, passwordChanged: !!data.passwordChanged };
+}
+
+/** Освежить аккаунт из /api/auth/state: после смены имени/цвета на сервере
+ *  обновляем кэш и личность редактора (аватар, имя в тулбаре). Токен не меняется. */
+export async function authRefreshAccount(): Promise<void> {
+  try {
+    const r = await fetch('/api/auth/state', { cache: 'no-store' });
+    if (!r.ok) return;
+    const st = (await r.json()) as { user?: { id?: string; login?: string; displayName?: string; color?: string; token?: string | null } | null };
+    authApplyState(st);
+  } catch { /* сервер недоступен — оставляем как есть */ }
+}
+
 /* ═══ доступы (ProjectAccess) и уведомления — общие хелперы ═══ */
 
 export interface AccessListItem {

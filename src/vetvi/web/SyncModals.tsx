@@ -61,8 +61,10 @@ const ROLE_BADGE: Record<string, string> = {
 
 interface UserLite { login: string; displayName: string | null }
 
-/** Секция «Доступы»: пользователи с доступом к комнате + выдача по логину.
- *  Грант шлёт получателю уведомление — проект появится в его списке. */
+/** Секция «Доступы»: ввести имя юзера → открыть доступ; ниже — список всех,
+ *  у кого он есть: у каждого можно сменить права (редактор/чтение) и отозвать
+ *  доступ. Ссылка на проект — выше (share-link). Грант шлёт получателю
+ *  уведомление — проект появится в его списке. */
 function ShareAccess({ store }: { store: VetviStore }) {
   const sc = store.sync;
   const roomId = sc ? sc.room : null;
@@ -71,7 +73,7 @@ function ShareAccess({ store }: { store: VetviStore }) {
   const [loaded, setLoaded] = useState(false);
   const [login, setLogin] = useState('');
   const [users, setUsers] = useState<UserLite[]>([]);
-  const [reader, setReader] = useState(false);
+  const [role, setRole] = useState<'editor' | 'reader'>('editor');
   const [busy, setBusy] = useState(false);
   const reload = () => {
     if (!roomId) return;
@@ -91,16 +93,29 @@ function ShareAccess({ store }: { store: VetviStore }) {
       .catch(() => undefined);
   }, []);
   const isOwner = meRole === 'owner';
+
+  /** Ввод принимаем как по логину, так и по имени (не зависит от регистра). */
+  const resolveLogin = (raw: string): string | null => {
+    const q = raw.trim().toLowerCase();
+    if (!q) return null;
+    const nick = q.startsWith('@') ? q.slice(1) : q;
+    const byLogin = users.find((u) => u.login.toLowerCase() === nick);
+    if (byLogin) return byLogin.login;
+    const byName = users.find((u) => (u.displayName || '').toLowerCase() === nick);
+    if (byName) return byName.login;
+    return nick; /* может, пользователь с таким логином есть, но списка нет */
+  };
+
   const grant = async () => {
     if (!sc || !roomId || busy) return;
-    const lg = login.trim().toLowerCase();
-    if (!lg) { store.toast('Выберите пользователя', 'warn'); return; }
+    const lg = resolveLogin(login);
+    if (!lg) { store.toast('Введите имя или логин пользователя', 'warn'); return; }
     setBusy(true);
-    const r = await accessGrant(roomId, lg, reader ? 'reader' : 'editor', sc.projectId, (store.doc.meta.name as string) || null);
+    const r = await accessGrant(roomId, lg, role, sc.projectId, (store.doc.meta.name as string) || null);
     setBusy(false);
     if (!r.ok) { store.toast(r.error || 'Не удалось открыть доступ', 'err'); return; }
     setLogin('');
-    setReader(false);
+    setRole('editor');
     store.toast('Доступ открыт — пользователю отправлено уведомление', 'ok');
     reload();
   };
@@ -111,18 +126,18 @@ function ShareAccess({ store }: { store: VetviStore }) {
     store.toast('Доступ отозван', 'ok');
     reload();
   };
-  const toggleRole = async (it: AccessListItem) => {
-    if (!roomId) return;
-    const next = it.role === 'reader' ? 'editor' : 'reader';
+  const setRoleOf = async (it: AccessListItem, next: 'editor' | 'reader') => {
+    if (!roomId || next === it.role) return;
     const r = await accessGrant(roomId, it.login, next, null, null);
-    if (!r.ok) { store.toast(r.error || 'Не удалось изменить роль', 'err'); return; }
+    if (!r.ok) { store.toast(r.error || 'Не удалось изменить права', 'err'); return; }
+    store.toast(it.displayName + ': права — ' + (next === 'editor' ? 'редактор' : 'только чтение'), 'ok');
     reload();
   };
   return (
     <div className="share-acc">
       <div className="sp-cap">Доступы</div>
       {!loaded && <div className="sa-empty">Загрузка доступов…</div>}
-      {loaded && !items.length && <div className="sa-empty">Пока никого — откройте доступ по логину или отправьте ссылку</div>}
+      {loaded && !items.length && <div className="sa-empty">Пока никого — введите имя пользователя ниже или отправьте ссылку</div>}
       <div className="sa-list">
         {items.map((it) => (
           <div key={it.userId} className="sa-item">
@@ -131,38 +146,54 @@ function ShareAccess({ store }: { store: VetviStore }) {
               <b>{it.displayName}</b>
               <i>@{it.login}</i>
             </div>
-            <span className={'sa-role r-' + it.role}>{ROLE_BADGE[it.role] || it.role}</span>
-            {isOwner && it.role !== 'owner' && (
-              <div className="sa-acts">
-                <button type="button" className="btn" title={it.role === 'reader' ? 'Разрешить редактирование' : 'Сделать только чтение'} onClick={() => void toggleRole(it)}>
-                  {it.role === 'reader' ? 'Разрешить правку' : 'Только чтение'}
-                </button>
-                <button type="button" className="btn danger" title="Отозвать доступ" onClick={() => void revoke(it.login)}>×</button>
-              </div>
+            {isOwner && it.role !== 'owner' ? (
+              <>
+                <select
+                  className="inp sa-role-sel"
+                  value={it.role}
+                  aria-label="Права доступа"
+                  title="Сменить права доступа"
+                  onChange={(e) => void setRoleOf(it, e.target.value === 'reader' ? 'reader' : 'editor')}
+                >
+                  <option value="editor">редактор</option>
+                  <option value="reader">только чтение</option>
+                </select>
+                <button type="button" className="btn danger" title="Отозвать доступ" aria-label={'Отозвать доступ у ' + it.displayName} onClick={() => void revoke(it.login)}>×</button>
+              </>
+            ) : (
+              <span className={'sa-role r-' + it.role}>{ROLE_BADGE[it.role] || it.role}</span>
             )}
           </div>
         ))}
       </div>
       {isOwner && (
         <div className="sa-form">
-          <select
+          <input
             className="inp"
             value={login}
-            aria-label="Пользователь"
+            placeholder="Имя или логин пользователя…"
+            aria-label="Имя пользователя для доступа"
+            list="saUsersDl"
+            spellCheck={false}
             onChange={(e) => setLogin(e.target.value)}
-          >
-            <option value="">— выбрать пользователя —</option>
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void grant(); } }}
+          />
+          <datalist id="saUsersDl">
             {users.map((usr) => (
-              <option key={usr.login} value={usr.login} disabled={items.some((it) => it.login === usr.login)}>
-                {usr.displayName ? usr.displayName + ' (@' + usr.login + ')' : '@' + usr.login}
-              </option>
+              <option key={usr.login} value={usr.login}>{usr.displayName ? usr.displayName : '@' + usr.login}</option>
             ))}
+          </datalist>
+          <select
+            className="inp sa-new-role"
+            value={role}
+            aria-label="Права для нового пользователя"
+            title="Права доступа для нового пользователя"
+            onChange={(e) => setRole(e.target.value === 'reader' ? 'reader' : 'editor')}
+          >
+            <option value="editor">редактор</option>
+            <option value="reader">только чтение</option>
           </select>
-          <label className="sa-ro">
-            <input type="checkbox" checked={reader} onChange={(e) => setReader(e.target.checked)} />
-            только чтение
-          </label>
-          <button type="button" className="btn primary" disabled={busy || !login} onClick={() => void grant()}>
+          <button type="button" className="btn primary" disabled={busy || !login.trim()} onClick={() => void grant()}>
             {busy ? 'Открываю…' : 'Открыть доступ'}
           </button>
         </div>

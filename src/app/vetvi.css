@@ -14,13 +14,19 @@ body{background:var(--bg);color:var(--tx);font:14px/1.45 var(--body);overflow:hi
 ::-webkit-scrollbar-thumb{background:#2c313a;border-radius:8px;border:2px solid var(--panel)}
 ::-webkit-scrollbar-track{background:transparent}
 kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--tx2)}
-#topbar{height:56px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:linear-gradient(#181a1f,#131519);border-bottom:1px solid #262a31;position:relative;z-index:40;animation:dropIn .5s cubic-bezier(.2,.8,.3,1) both}
+#topbar{height:56px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:linear-gradient(#181a1f,#131519);border-bottom:1px solid #262a31;position:relative;z-index:40;animation:dropIn .5s cubic-bezier(.2,.8,.3,1) both;
+  /* кнопки больше не залезают за край: шапка горизонтально скроллится */
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#2e333c transparent}
+#topbar::-webkit-scrollbar{height:6px}
+#topbar::-webkit-scrollbar-thumb{background:#2e333c;border-radius:3px}
+#topbar::-webkit-scrollbar-track{background:transparent}
+#topbar > *{flex:none}
 @keyframes dropIn{from{transform:translateY(-100%);opacity:0}}
 .brand{display:flex;align-items:center;gap:10px;user-select:none;flex:none}
 .brand svg{width:28px;height:28px}
 .brand .lg{font:700 15px var(--disp);letter-spacing:3px;color:var(--tx)}
 .brand .sub{font:600 8.5px var(--mono);letter-spacing:2px;color:var(--tx3);text-transform:uppercase;margin-top:3px}
-#projName{flex:0 1 170px;min-width:60px;height:34px;background:transparent;border:1px solid transparent;border-radius:9px;color:var(--tx);font:600 13.5px var(--body);padding:0 10px;transition:.18s;text-overflow:ellipsis}
+#projName{flex:0 0 170px;min-width:60px;height:34px;background:transparent;border:1px solid transparent;border-radius:9px;color:var(--tx);font:600 13.5px var(--body);padding:0 10px;transition:.18s;text-overflow:ellipsis}
 #projName:hover{border-color:var(--line2)}
 #projName:focus{outline:none;border-color:var(--acc);background:#131519;box-shadow:0 0 0 3px var(--accd)}
 .vsep{width:1px;height:24px;background:var(--line);flex:none}
@@ -1101,10 +1107,10 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
   #topbar{gap:8px}
   #topbar .vsep{display:none}
 }
-/* ≤1430: одна строка уже не вмещает — переносим на две, кнопки никогда не сжимаются */
+/* ≤1430: шапка скроллится по горизонтали (перенос строк больше не нужен —
+   блок кнопок можно отсоединить и унести на холст) */
 @media(max-width:1430px){
-  #topbar{height:auto;min-height:56px;flex-wrap:wrap;padding:7px 10px;row-gap:7px}
-  #projName{flex:1 1 120px}
+  #projName{flex:0 0 120px}
 }
 @media(max-width:960px){
   #left{width:210px}
@@ -1523,10 +1529,25 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .avatar-btn{padding:0;overflow:visible}
 .avatar-circle{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#1c1002;font:700 13px/1 var(--body);user-select:none;box-shadow:0 0 0 2px rgba(0,0,0,.25),inset 0 0 6px rgba(0,0,0,.18)}
 .avatar-circle.big{width:44px;height:44px;font-size:20px}
-.bell-badge{position:absolute;top:-6px;right:-7px;min-width:16px;height:16px;border-radius:8px;background:#cf6b5a;color:#fff;font:700 10px/16px var(--mono);text-align:center;padding:0 4px}
 
-/* бейдж «только чтение» в тулбаре */
-.ro-badge{font:600 10.5px var(--mono);letter-spacing:.5px;color:#d8c96f;border:1px solid rgba(216,201,111,.45);background:rgba(216,201,111,.08);border-radius:7px;padding:4px 9px;flex:none;user-select:none}
+/* ── отсоединяемый блок кнопок холста (тулбар) ──
+   В шапке: .tool-block с грипом слева (точки появляются при наведении).
+   На холсте: .tool-float — плавающая панель у края, тянется за грип,
+   при возврате на шапку встаёт на своё место. */
+.tool-block{display:inline-flex;align-items:center;gap:10px;flex:none;padding-left:0;border-radius:10px;transition:background .15s}
+.tool-block:hover{background:rgba(255,255,255,.035)}
+.tool-grip{width:9px;height:26px;flex:none;border:0;background:transparent;color:#4d535e;cursor:grab;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;opacity:0;transition:opacity .15s,background .15s,color .15s;touch-action:none}
+.tool-block:hover .tool-grip,.tool-float .tool-grip{opacity:.85}
+.tool-grip:hover{color:#8b929c;background:rgba(255,255,255,.07)}
+.tool-grip:active{cursor:grabbing}
+.tool-float{position:fixed;z-index:45;display:inline-flex;align-items:center;gap:10px;padding:6px 12px 6px 6px;background:linear-gradient(#181a1f,#131519);border:1px solid #262a31;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5);user-select:none;touch-action:none;max-width:calc(100vw - 24px)}
+.tool-float .vsep{height:22px}
+.tool-float.dragging{z-index:80;cursor:grabbing;box-shadow:0 16px 44px rgba(0,0,0,.65);opacity:.96}
+.tool-float.dragging .btn{pointer-events:none}
+
+/* «только чтение» — полупрозрачная метка в углу холста (переехала из шапки) */
+.vo-corner{position:absolute;left:14px;bottom:14px;z-index:29;pointer-events:none;user-select:none;font:600 10.5px var(--mono);letter-spacing:.5px;color:#d8c96f;border:1px solid rgba(216,201,111,.32);background:rgba(216,201,111,.05);border-radius:7px;padding:4px 10px;opacity:.5}
+.bell-badge{position:absolute;top:-6px;right:-7px;min-width:16px;height:16px;border-radius:8px;background:#cf6b5a;color:#fff;font:700 10px/16px var(--mono);text-align:center;padding:0 4px}
 
 /* попап аккаунта */
 .acc-pop{min-width:230px}
@@ -1575,6 +1596,12 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .sa-ro{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx2);user-select:none;cursor:pointer}
 .sa-ro input{accent-color:var(--acc);width:14px;height:14px;cursor:pointer}
 .sa-empty{font-size:12px;color:var(--tx3);padding:6px 0}
+/* смены прав доступа: компактный select в строке участника и в форме выдачи */
+.sa-item .sa-role-sel,.sa-form .sa-new-role{height:26px;width:auto;min-width:0;flex:none;background:#14161a;border:1px solid #2b2f37;border-radius:8px;color:var(--tx2);font:500 11.5px var(--body);padding:0 6px;cursor:pointer;outline:none}
+.sa-item .sa-role-sel:focus,.sa-form .sa-new-role:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+.sa-form .sa-new-role{width:130px}
+/* раздел «Смена пароля» в окне редактирования аккаунта */
+.acc-pw-cap{font:600 10.5px var(--mono);letter-spacing:.9px;text-transform:uppercase;color:var(--tx3);margin:14px 0 4px;border-top:1px solid var(--line);padding-top:10px}
 
 /* ═══════════ «Вам открыли доступ» в списке проектов ═══════════ */
 
