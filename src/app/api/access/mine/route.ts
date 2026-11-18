@@ -24,7 +24,8 @@ export async function GET() {
     }));
 
     return NextResponse.json({ items });
-  } catch {
+  } catch (e) {
+    console.error(`[access/mine] ошибка:`, e);
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 });
   }
 }

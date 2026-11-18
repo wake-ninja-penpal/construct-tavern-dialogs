@@ -77,14 +77,19 @@ function ShareAccess({ store }: { store: VetviStore }) {
   const [focused, setFocused] = useState(false);
   const [role, setRole] = useState<'editor' | 'reader'>('editor');
   const [busy, setBusy] = useState(false);
-  const reload = () => {
+  const reload = (attempt = 0) => {
     if (!sc) return;
     void accessList(sc.shareRoomId()).then((r) => {
       if (r.ok) {
         setItems(r.items);
         setMeRole((prev) => prev || r.meRole || null);
+        setLoaded(true);
+        return;
       }
-      setLoaded(true);
+      /* запись владельца могла ещё не сохраниться (гонка init/join) —
+         пара тихих повторов, прежде чем показать «список недоступен» */
+      if (attempt < 2) window.setTimeout(() => reload(attempt + 1), 800);
+      else setLoaded(true);
     });
   };
   useEffect(() => {

@@ -51,7 +51,8 @@ export async function GET(req: NextRequest) {
       });
 
     return NextResponse.json({ me: { role: mine.role }, items });
-  } catch {
+  } catch (e) {
+    console.error(`[access/list] ошибка:`, e);
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 });
   }
 }

@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 
 import { currentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 /** POST /api/access/init {roomId, projectId?, projectName?} — заявить владение
  *  комнатой (создание комнаты / первый вошедший с обновления). Идемпотентно:
- *  если запись уже есть — роль не меняется; если владелец уже есть — молчим. */
+ *  если запись уже есть — роль не меняется; если владелец уже есть — молчим.
+ *
+ *  Гонкоустойчивость: окно «Поделиться» и публикация проекта вызывают init
+ *  параллельно — оба запроса не находят запись и оба доходят до INSERT.
+ *  Второй ловит P2002 (нарушение уникального ключа roomId+userId) и раньше
+ *  отвечал 500 — клиент считал init провалом, окно оставалось без поля
+ *  поиска, а join успевал пройти «гостем». Теперь P2002 = «запись уже
+ *  создана параллельным запросом» — перечитываем и отвечаем 200. */
 export async function POST(req: NextRequest) {
   try {
     const me = await currentUser();
@@ -38,22 +46,38 @@ export async function POST(req: NextRequest) {
 
     const ownerRecord = await db.projectAccess.findFirst({ where: { roomId, role: 'owner' } });
     if (ownerRecord) {
-      return NextResponse.json({ ok: true, role: null });
+      /* гонка параллельных init: запись владельца успел создать другой запрос
+         С ЭТИМ ЖЕ аккаунтом — для нас это owner, а не «место занято» */
+      return NextResponse.json({ ok: true, role: ownerRecord.userId === me.id ? 'owner' : null });
     }
 
-    await db.projectAccess.create({
-      data: {
-        roomId,
-        userId: me.id,
-        role: 'owner',
-        projectId,
-        projectName,
-        ownerName: me.displayName || me.login,
-      },
-    });
+    try {
+      await db.projectAccess.create({
+        data: {
+          roomId,
+          userId: me.id,
+          role: 'owner',
+          projectId,
+          projectName,
+          ownerName: me.displayName || me.login,
+        },
+      });
+    } catch (e) {
+      /* P2002 — запись создала параллельная копия этого же запроса: не ошибка */
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const winner = await db.projectAccess.findUnique({
+          where: { roomId_userId: { roomId, userId: me.id } },
+        });
+        if (winner) return NextResponse.json({ ok: true, role: winner.role });
+      }
+      throw e;
+    }
 
     return NextResponse.json({ ok: true, role: 'owner' });
-  } catch {
+  } catch (e) {
+    /* настоящая ошибка — не глотаем молча: без лога в docker logs не видно,
+       почему владелец не может заявить комнату (P2002 отфильтрован выше) */
+    console.error('[access/init] ошибка:', e);
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 });
   }
 }

@@ -181,6 +181,8 @@ export class SyncClient {
   rlocks: Record<string, LockInfo> | null = null;
   myLocks: Record<string, number> = {};
   lockHB: ReturnType<typeof setInterval> | null = null;
+  /* самовосстановление роли владельца — один раз на подключение (см. join-ack) */
+  private healDone = false;
   myFocus: string | null = null;
   focusSent: string | null = null;
   opSock: Socket | null = null;
@@ -294,6 +296,7 @@ export class SyncClient {
     this.room = roomId;
     this.projectId = pid || null;
     if (this.mode !== 'copy') this.mode = 'room';
+    this.healDone = false;
     this.setStatus('conn');
     this.renderUI();
 
@@ -399,16 +402,23 @@ export class SyncClient {
         }
         if (this.mergeCount > 0) this.store.toast('Merge-запросов в очереди: ' + this.mergeCount, 'warn');
 
-        /* legacy-комната (до введения доступов): владелец заявляет владение и
-           перезаходит — сервер пересчитает роль и право редактирования */
-        if (res.legacy && this.mode === 'room') {
+        /* самовосстановление роли владельца: запись доступа могла не успеть
+           сохраниться до join (гонка access/init с подключением) или комната
+           legacy — заявляем владение (init идемпотентен) и тихо перезаходим:
+           сервер пересчитает роль и право редактирования. Один раз на
+           подключение — без циклов, если init продолжает падать. */
+        const joinedGuest = !res.role || res.role === 'guest';
+        if (this.mode === 'room' && !this.healDone && (res.legacy || (opts.own === true && joinedGuest))) {
+          this.healDone = true;
           void (async () => {
             const entry = projList().find((e) => e.roomId === roomId);
             const isOwn = opts.own === true || !!entry;
             if (!isOwn) return;
-            const r = await accessInit(roomId, pid, (this.store.doc.meta.name as string) || null);
-            if (!r.ok || !r.role) return;
-            this.rejoin();
+            try {
+              const r = await accessInit(roomId, pid, (this.store.doc.meta.name as string) || null);
+              if (!r.ok || !r.role) return;
+              this.rejoin();
+            } catch { /* сервер недоступен — роль придёт по свипу ролей */ }
           })();
         }
       });

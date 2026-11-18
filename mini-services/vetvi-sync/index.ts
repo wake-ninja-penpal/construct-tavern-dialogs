@@ -116,14 +116,33 @@ const DB_FILE = DATA_DIR + 'store.db'
 const MAIN_DB_FILE =
   process.env.VETVI_MAIN_DB || new URL('../../db/custom.db', import.meta.url).pathname
 let mainDb: Database | null = null
+let mainDbWarnAt = 0
 let qSessionRow: ReturnType<Database['prepare']> | null = null
 let qAccessRole: ReturnType<Database['prepare']> | null = null
 let qAccessCount: ReturnType<Database['prepare']> | null = null
 
+/* предупреждение о недоступной главной БД — не чаще раза в 30 секунд,
+   чтобы не заспамить лог, но причина «все гости только для чтения»
+   была видна в docker logs сразу */
+function warnMainDb(reason: string, e?: unknown): void {
+  if (Date.now() - mainDbWarnAt < 30_000) return
+  mainDbWarnAt = Date.now()
+  console.error(
+    `[vetvi-sync] главная БД (${reason}): ${MAIN_DB_FILE}\n` +
+      '  → без неё сессии/роли не проверяются, ВСЕ участники комнат — гости только для чтения.\n' +
+      '  → проверьте docker-compose.yml: volume web-data:/db в сервисе sync и env VETVI_MAIN_DB=/db/custom.db,\n' +
+      '    затем docker compose up -d --force-recreate sync',
+    e || '',
+  )
+}
+
 function openMainDb(): void {
   if (mainDb) return
   /* файла ещё нет — не создаём пустую базу вместо Prisma, попробуем позже */
-  if (!existsSync(MAIN_DB_FILE)) return
+  if (!existsSync(MAIN_DB_FILE)) {
+    warnMainDb('файл не найден')
+    return
+  }
   try {
     const d = new Database(MAIN_DB_FILE)
     try { d.exec('PRAGMA journal_mode = WAL;') } catch { /* режим уже установлен */ }
@@ -136,9 +155,10 @@ function openMainDb(): void {
     qAccessRole = d.prepare('SELECT role FROM ProjectAccess WHERE roomId = ? AND userId = ?')
     qAccessCount = d.prepare('SELECT COUNT(*) AS c FROM ProjectAccess WHERE roomId = ?')
     mainDb = d
+    mainDbWarnAt = 0
     console.log('[vetvi-sync] главная БД открыта:', MAIN_DB_FILE)
   } catch (e) {
-    console.error('[vetvi-sync] главная БД недоступна:', MAIN_DB_FILE, e)
+    warnMainDb('ошибка открытия', e)
   }
 }
 

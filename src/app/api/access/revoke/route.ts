@@ -54,7 +54,8 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (e) {
+    console.error(`[access/revoke] ошибка:`, e);
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 });
   }
 }
