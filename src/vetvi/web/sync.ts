@@ -973,16 +973,20 @@ export class SyncClient {
     const roomId = (uid() + uid() + uid()).slice(0, 24);
     if (!this.store.doc.meta.projectId) this.store.doc.meta.projectId = uid() + uid();
     this.store.scheduleSave();
-    this.setHash(roomId, String(this.store.doc.meta.projectId));
-    this.store.openModal('share');
-    /* владелец комнаты: запись доступа СТРОГО ДО входа в комнату. Раньше она
-       шла параллельно с connect — join приходил раньше записи в БД, сервер
-       отвечал «гость» и ставил «только чтение» (потеря доступа при publish). */
+    /* владелец комнаты: запись доступа СТРОГО ДО смены хеша и входа в комнату.
+       Раньше хеш менялся синхронно, а connect шёл параллельно с access/init:
+       hashchange успевал войти в комнату по ссылке (join без записи доступа —
+       сервер отвечал «гость» и ставил «только чтение» — потеря доступа при
+       publish), а join при собственном connect приходил раньше записи в БД. */
     void (async () => {
       try {
         await accessInit(roomId, String(this.store.doc.meta.projectId), (this.store.doc.meta.name as string) || null);
       } catch { /* сервер недоступен — войдём всё равно, роль придёт по legacy */ }
-      this.connect(roomId, String(this.store.doc.meta.projectId), { pushLocal: true });
+      /* хеш меняем только когда доступ уже записан: hashchange увидит this.room
+         и не устроит повторный вход по ссылке */
+      this.setHash(roomId, String(this.store.doc.meta.projectId));
+      this.connect(roomId, String(this.store.doc.meta.projectId), { own: true, pushLocal: true });
+      this.store.openModal('share');
     })();
   }
 

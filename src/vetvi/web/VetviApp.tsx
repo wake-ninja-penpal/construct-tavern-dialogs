@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 
 import { hkIs, hkLoad, hkText } from '@/vetvi/core/hotkeys';
 import { fmtWhenLong, fmtWhenShort } from '@/vetvi/core/projects';
+import { APP_VERSION } from '@/vetvi/core/patchnotes';
 import { storeBoot, storeMode } from '@/vetvi/core/storage';
 import { getStore, type VetviStore } from './store';
 import { useStoreRev } from './rev';
@@ -456,6 +457,16 @@ function VetviAppInner() {
           <span id="stFile">{store.doc.meta?.name || 'Без названия'}</span>
           <span id="stDirty" className={store.saveState === 'pending' ? 'show' : undefined} />
           <a className="st-classic" href="/vetvi/index.html" target="_blank" rel="noreferrer" title="Классическая версия в одном файле">Классическая версия</a>
+          {/* версия приложения: клик открывает «Что нового» (патчноут переехал из шапки) */}
+          <button
+            type="button"
+            className="st-ver"
+            title={'Версия ' + APP_VERSION + ' — что нового'}
+            aria-label={'Версия приложения ' + APP_VERSION + ' — открыть список обновлений'}
+            onClick={() => store.openModal('patch')}
+          >
+            v{APP_VERSION}
+          </button>
         </div>
         <div className="spacer" />
         <div className="st-right">

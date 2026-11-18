@@ -5,14 +5,22 @@
  * Оригинальные классы/ids/иконки (.brand, .vsep, .btn, .ibtn, .save-wrap,
  * .save-menu, .sm-i, .collab-chip, .cc-dot, .m-badge, .spacer) + логика React.
  *
- * Шапка теперь горизонтально скроллится, когда кнопки не вмещаются в экран.
- * Блок кнопок холста (undo/redo/zoom/сетка/привязка/изгибы/мини-карта) —
- * отсоединяемый: тянем за «грип» — блок отстёгивается от шапки и превращается
- * в плавающую панель, которая прилипает к краям холста; перетаскивание обратно
- * на шапку возвращает его на место. Положение хранится в localStorage.
+ * Компоновка шапки: слева фиксированные кнопки, посередине — блок кнопок холста
+ * (undo/redo/zoom/сетка/привязка/изгибы/мини-карта), справа — ПРИЖАТЫЙ к краю
+ * блок (поиск, уведомления, аккаунт): он никогда не двигается и не уезжает за экран.
+ * Шапка целиком не скроллится: скролл есть только у блока кнопок холста, причём
+ * если кнопки скрыты скроллом — на краю панели появляется стрелка «там есть ещё».
+ *
+ * Блок кнопок холста — отсоединяемый: тянем за «грип» — блок отстёгивается от
+ * шапки и превращается в плавающую панель, которую можно поставить у ЛЮБОГО края
+ * холста: сверху/снизу — горизонтально, слева/справа — ВЕРТИКАЛЬНО. Панель сама
+ * выравнивается (ничего не вылезает за экран — в том числе при быстром отпускании
+ * сразу после отсоединения), не налезает на боковые панели (двигается вместе с их
+ * открытием/закрытием) и сдвигает мини-карту/плашки в углах холста. Перетаскивание
+ * обратно на шапку возвращает блок на место. Положение хранится в localStorage.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { hkText } from '@/vetvi/core/hotkeys';
 import { getMe } from '@/vetvi/core/identity';
@@ -23,20 +31,37 @@ import { AccountPopover, NotificationsPopover, useNotifications } from './Accoun
 
 /* ── отсоединяемый блок кнопок холста ── */
 
-const TOOLBLOCK_LS = 'vetvi-toolblock-v1';
-const TOOL_EDGE = 12; // отступ плавающей панели от краёв экрана/шапки
+const TOOLBLOCK_LS = 'vetvi-toolblock-v2';
+const GAP = 12; // отступ плавающей панели от краёв экрана/панелей
 const TOPBAR_H_FALLBACK = 56;
 
-interface ToolDock { float: boolean; x: number; y: number }
+type ToolEdge = 'top' | 'bottom' | 'left' | 'right';
+
+interface ToolDock { float: boolean; edge: ToolEdge; along: number }
 
 function loadToolDock(): ToolDock {
-  const def: ToolDock = { float: false, x: TOOL_EDGE, y: TOPBAR_H_FALLBACK + TOOL_EDGE };
+  const def: ToolDock = { float: false, edge: 'top', along: GAP };
   try {
-    const raw = localStorage.getItem(TOOLBLOCK_LS);
+    /* миграция v1 ({float,x,y}) → v2 (edge+along): ближайший край */
+    const old = localStorage.getItem('vetvi-toolblock-v1');
+    if (old) localStorage.removeItem('vetvi-toolblock-v1');
+    const raw = localStorage.getItem(TOOLBLOCK_LS) || (old && (() => {
+      try {
+        const o = JSON.parse(old) as { float?: boolean; x?: number; y?: number };
+        if (!o || !o.float) return null;
+        const cx = Number(o.x) || 0; const cy = Number(o.y) || 0;
+        const dTop = Math.abs(cy - 68); const dBottom = Math.abs(window.innerHeight - cy);
+        const dLeft = Math.abs(cx); const dRight = Math.abs(window.innerWidth - cx);
+        const edge = dTop < dBottom && dTop < dLeft && dTop < dRight ? 'top'
+          : dBottom < dLeft && dBottom < dRight ? 'bottom' : dLeft < dRight ? 'left' : 'right';
+        return JSON.stringify({ float: true, edge, along: edge === 'top' || edge === 'bottom' ? cx : cy });
+      } catch { return null; }
+    })());
     if (!raw) return def;
-    const d = JSON.parse(raw) as ToolDock;
+    const d = JSON.parse(raw as string) as Partial<ToolDock>;
     if (!d || typeof d !== 'object') return def;
-    return { float: !!d.float, x: Number(d.x) || def.x, y: Number(d.y) || def.y };
+    const edge: ToolEdge = d.edge === 'bottom' || d.edge === 'left' || d.edge === 'right' ? d.edge : 'top';
+    return { float: !!d.float, edge, along: Number(d.along) || def.along };
   } catch { return def; }
 }
 
@@ -44,14 +69,75 @@ function saveToolDock(d: ToolDock): void {
   try { localStorage.setItem(TOOLBLOCK_LS, JSON.stringify(d)); } catch { /* нет доступа */ }
 }
 
-function GripIcon() {
+function GripIcon({ vert }: { vert?: boolean }) {
   return (
-    <svg viewBox="0 0 8 16" width="8" height="16" aria-hidden="true" fill="currentColor">
+    <svg viewBox="0 0 8 16" width="8" height="16" aria-hidden="true" fill="currentColor" style={vert ? { transform: 'rotate(90deg)' } : undefined}>
       <circle cx="2.2" cy="3" r="1.3" /><circle cx="5.8" cy="3" r="1.3" />
       <circle cx="2.2" cy="8" r="1.3" /><circle cx="5.8" cy="8" r="1.3" />
       <circle cx="2.2" cy="13" r="1.3" /><circle cx="5.8" cy="13" r="1.3" />
     </svg>
   );
+}
+
+function ArrowIcon({ dir }: { dir: 'l' | 'r' }) {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {dir === 'l' ? <path d="m14 6-6 6 6 6" /> : <path d="m10 6 6 6-6 6" />}
+    </svg>
+  );
+}
+
+interface Rect { left: number; top: number; right: number; bottom: number; width: number; height: number }
+
+function rectOf(el: HTMLElement): Rect {
+  const r = el.getBoundingClientRect();
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+}
+
+function overlap(a: Rect, b: Rect): boolean {
+  return a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+/* ── сдвиг угловых элементов холста (мини-карта, «только чтение», плашка
+   расхождения) CSS-переменными; текущие значения хранятся здесь, чтобы мерить
+   базовые позиции без уже применённого трансформа ── */
+const shiftVars = { mmX: 0, mmY: 0, voY: 0, sdY: 0 };
+
+function applyShiftVars(): void {
+  const s = document.documentElement.style;
+  s.setProperty('--flt-mm-x', shiftVars.mmX + 'px');
+  s.setProperty('--flt-mm-y', shiftVars.mmY + 'px');
+  s.setProperty('--flt-vo-y', shiftVars.voY + 'px');
+  s.setProperty('--flt-sd-y', shiftVars.sdY + 'px');
+}
+
+function resetShiftVars(): void {
+  shiftVars.mmX = 0; shiftVars.mmY = 0; shiftVars.voY = 0; shiftVars.sdY = 0;
+  applyShiftVars();
+}
+
+/* зарезервированные полосы экрана: шапка сверху, статусбар снизу, левая панель,
+   инспектор справа. Заодно публикует их в CSS-переменные — по ним CSS ставит
+   плавающую панель перпендикулярно её краю (панель двигается вместе с
+   открытием/закрытием боковых панелей и не налезает на них). */
+function reservedStrips(): { top: number; bottom: number; left: number; right: number } {
+  const top = document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
+  const status = document.getElementById('status');
+  const bottom = status ? status.offsetHeight : 0;
+  const leftEl = document.getElementById('left');
+  const left = leftEl ? leftEl.offsetWidth : 0;
+  const rightEl = document.getElementById('right');
+  const right = rightEl ? rightEl.offsetWidth : 0;
+  const s = document.documentElement.style;
+  s.setProperty('--flt-strip-top', top + 'px');
+  s.setProperty('--flt-strip-bottom', bottom + 'px');
+  s.setProperty('--flt-strip-left', left + 'px');
+  s.setProperty('--flt-strip-right', right + 'px');
+  return { top, bottom, left, right };
 }
 
 export function TopBar(props: { store: VetviStore }) {
@@ -67,32 +153,178 @@ export function TopBar(props: { store: VetviStore }) {
   const [toolDock, setToolDock] = useState<ToolDock>(loadToolDock);
   const [toolDragging, setToolDragging] = useState(false);
   const dragRef = useRef<{
-    moved: boolean; grabX: number; grabY: number; w: number; h: number;
-    lastClientY: number; pos: { x: number; y: number };
+    moved: boolean; floatStart: boolean; grabX: number; grabY: number; w: number; h: number; pos: { x: number; y: number };
   } | null>(null);
   const floatRef = useRef<HTMLDivElement>(null);
+  const toolDockRef = useRef(toolDock);
+  const toolDraggingRef = useRef(false);
+  const fitTRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { toolDockRef.current = toolDock; }, [toolDock]);
+  useEffect(() => { toolDraggingRef.current = toolDragging; }, [toolDragging]);
+  const savedDockRef = useRef('');
 
-  const topbarHeight = () => document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
+  /* ── стрелки скролла блока кнопок в шапке ── */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [arrows, setArrows] = useState({ l: false, r: false });
 
-  const clampToolPos = (x: number, y: number, w: number, h: number): { x: number; y: number } => {
-    const minX = TOOL_EDGE;
-    const maxX = Math.max(minX, window.innerWidth - w - TOOL_EDGE);
-    const minY = topbarHeight() + TOOL_EDGE;
-    const maxY = Math.max(minY, window.innerHeight - h - TOOL_EDGE);
-    return { x: Math.max(minX, Math.min(maxX, x)), y: Math.max(minY, Math.min(maxY, y)) };
+  const measureArrows = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const has = el.scrollWidth > el.clientWidth + 2;
+    const l = has && el.scrollLeft > 2;
+    const r = has && el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setArrows((p) => (p.l === l && p.r === r ? p : { l, r }));
   };
+
+  useEffect(() => {
+    const t0 = setTimeout(measureArrows, 0); // первичный замер — вне тела эффекта
+    const el = scrollRef.current;
+    if (!el) return () => clearTimeout(t0);
+    const ro = new ResizeObserver(() => measureArrows());
+    ro.observe(el);
+    const t = setInterval(measureArrows, 1200); // шрифты/контент могли догрузиться
+    return () => { clearTimeout(t0); ro.disconnect(); clearInterval(t); };
+  }, [toolDock.float, toolDock.edge]);
+
+  const scrollTool = (dir: 1 | -1) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * Math.max(160, el.clientWidth * 0.6), behavior: 'smooth' });
+  };
+
+  /* позиция панели по краю (для проверки пересечений с угловыми элементами) */
+  const dockRect = (edge: ToolEdge, along: number, w: number, h: number): Rect => {
+    const st = reservedStrips();
+    const iw = window.innerWidth;
+    const ih = window.innerHeight;
+    if (edge === 'top') return { left: along, top: st.top + GAP, right: along + w, bottom: st.top + GAP + h, width: w, height: h };
+    if (edge === 'bottom') return { left: along, top: ih - st.bottom - GAP - h, right: along + w, bottom: ih - st.bottom - GAP, width: w, height: h };
+    if (edge === 'left') return { left: st.left + GAP, top: along, right: st.left + GAP + w, bottom: along + h, width: w, height: h };
+    return { left: iw - st.right - GAP - w, top: along, right: iw - st.right - GAP, bottom: along + h, width: w, height: h };
+  };
+
+  /* сдвиг угловых элементов (мини-карта, «только чтение», плашка расхождения),
+     чтобы плавающая панель не налезала на них: карта уезжает вниз/влево,
+     плашки — вверх, освобождая полосу панели */
+  const pushOverlays = (edge: ToolEdge, rect: Rect) => {
+    const mmEl = document.getElementById('miniMap');
+    if (mmEl && store.mmOn) {
+      const base = rectOf(mmEl);
+      const mm: Rect = { ...base, left: base.left - shiftVars.mmX, top: base.top - shiftVars.mmY, right: base.right - shiftVars.mmX, bottom: base.bottom - shiftVars.mmY };
+      if (overlap(rect, mm)) {
+        if (edge === 'top') shiftVars.mmY = rect.bottom - mm.top + 10;
+        else if (edge === 'right') shiftVars.mmX = -(mm.right - rect.left) - 10;
+        else { shiftVars.mmX = 0; shiftVars.mmY = 0; }
+      } else { shiftVars.mmX = 0; shiftVars.mmY = 0; }
+    }
+    const voEl = document.querySelector('.vo-corner') as HTMLElement | null;
+    if (voEl) {
+      const base = rectOf(voEl);
+      const vo: Rect = { ...base, top: base.top - shiftVars.voY, bottom: base.bottom - shiftVars.voY };
+      if (overlap(rect, vo)) shiftVars.voY = -(vo.bottom - rect.top) - 10;
+      else shiftVars.voY = 0;
+    }
+    const sdEl = document.getElementById('syncDiffBadge');
+    if (sdEl) {
+      const base = rectOf(sdEl);
+      const sd: Rect = { ...base, top: base.top - shiftVars.sdY, bottom: base.bottom - shiftVars.sdY };
+      if (overlap(rect, sd)) shiftVars.sdY = -(sd.bottom - rect.top) - 10;
+      else shiftVars.sdY = 0;
+    }
+    applyShiftVars();
+  };
+
+  /* авто-выравнивание плавающей панели: ничего не вылезает за экран, панель не
+     налезает на боковые панели/статусбар и угловые элементы. Вызывается перед
+     отрисовкой, при ресайзе окна и при изменении размеров панелей (RO).
+     Тянем и быстро отпускаем — панель всё равно встанет целиком (клэмп по
+     фактическому размеру). */
+  const fitDock = () => {
+    if (!toolDockRef.current.float || toolDraggingRef.current) return;
+    reservedStrips();
+    const el = floatRef.current;
+    if (!el) return;
+    const d = toolDockRef.current;
+    const r = rectOf(el);
+    const st = reservedStrips();
+    const vert = d.edge === 'left' || d.edge === 'right';
+    const min = (vert ? st.top : st.left) + GAP;
+    const max = vert
+      ? window.innerHeight - st.bottom - GAP - r.height
+      : window.innerWidth - st.right - GAP - r.width;
+    const along = clamp(d.along, min, Math.max(min, max));
+    const rect = dockRect(d.edge, along, r.width, r.height);
+    /* позицию панель принимает ДО отрисовки кадра (правим DOM напрямую) —
+       панель никогда не стоит за пределами экрана и не мигает */
+    if (vert) el.style.top = along + 'px'; else el.style.left = along + 'px';
+    pushOverlays(d.edge, rect);
+    /* состояние и localStorage догоняют асинхронно — без setState в теле эффекта */
+    const key = d.float + '|' + d.edge + '|' + along;
+    if (along === d.along && savedDockRef.current === key) return;
+    if (fitTRef.current) clearTimeout(fitTRef.current);
+    fitTRef.current = setTimeout(() => {
+      fitTRef.current = null;
+      savedDockRef.current = key;
+      saveToolDock({ float: true, edge: d.edge, along });
+      if (along !== toolDockRef.current.along) setToolDock((v) => ({ ...v, along }));
+    }, 0);
+  };
+
+  useLayoutEffect(() => {
+    fitDock();
+  });
+
+  /* панель двигается вместе с открытием/закрытием боковых панелей и ресайзом окна:
+     полосы (CSS-переменные перпендикуляра) обновляются, позиция переподгоняется,
+     угловые элементы (мини-карта и т.п.) уступают место заново */
+  useEffect(() => {
+    if (!toolDock.float) return;
+    const onLayout = () => fitDock();
+    const ro = new ResizeObserver(onLayout);
+    const leftEl = document.getElementById('left');
+    const rightEl = document.getElementById('right');
+    if (leftEl) ro.observe(leftEl);
+    if (rightEl) ro.observe(rightEl);
+    if (floatRef.current) ro.observe(floatRef.current);
+    window.addEventListener('resize', onLayout);
+    return () => { ro.disconnect(); window.removeEventListener('resize', onLayout); };
+  }, [toolDock.float]);
+
+  /* возврат блока в шапку (или размонтирование): сдвиги угловых элементов больше не нужны */
+  useEffect(() => {
+    if (!toolDock.float) resetShiftVars();
+  }, [toolDock.float]);
+  useEffect(() => () => resetShiftVars(), []);
 
   const onGripMove = (e: PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    d.lastClientY = e.clientY;
     if (!d.moved) {
       d.moved = true;
       setToolDragging(true);
-      setToolDock((v) => (v.float ? v : { ...v, float: true }));
     }
-    d.pos = clampToolPos(e.clientX - d.grabX, e.clientY - d.grabY, d.w, d.h);
-    setToolDock((v) => ({ ...v, x: d.pos.x, y: d.pos.y }));
+    d.pos = { x: e.clientX, y: e.clientY };
+    /* ближайший край холста — панель ориентируется по нему (сверху/снизу —
+       горизонтально, слева/справа — вертикально) */
+    const st = reservedStrips();
+    const ih = window.innerHeight;
+    const iw = window.innerWidth;
+    const cTop = st.top + GAP;
+    const cBottom = ih - st.bottom - GAP;
+    const cLeft = st.left + GAP;
+    const cRight = iw - st.right - GAP;
+    const dist = [
+      { e: 'top' as ToolEdge, v: Math.abs(e.clientY - cTop) },
+      { e: 'bottom' as ToolEdge, v: Math.abs(e.clientY - cBottom) },
+      { e: 'left' as ToolEdge, v: Math.abs(e.clientX - cLeft) },
+      { e: 'right' as ToolEdge, v: Math.abs(e.clientX - cRight) },
+    ].sort((a, b) => a.v - b.v)[0].e;
+    const horiz = dist === 'top' || dist === 'bottom';
+    /* грубый клэмп при перетаскивании: панель не выходит за края экрана */
+    const along = horiz
+      ? clamp(e.clientX - d.w / 2, cLeft, Math.max(cLeft, iw - st.right - GAP - d.w))
+      : clamp(e.clientY - d.h / 2, cTop, Math.max(cTop, ih - st.bottom - GAP - d.h));
+    setToolDock((v) => ({ ...v, float: true, edge: dist, along }));
   };
 
   const onGripUp = () => {
@@ -102,23 +334,17 @@ export function TopBar(props: { store: VetviStore }) {
     dragRef.current = null;
     setToolDragging(false);
     if (!d || !d.moved) return;
-    /* тянем обратно на шапку — блок встаёт на своё место */
-    if (d.lastClientY <= topbarHeight()) {
-      const next: ToolDock = { float: false, x: 0, y: 0 };
+    const topbarH = document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
+    /* плавающую панель отпустили над шапкой — блок встаёт на своё место */
+    if (d.floatStart && d.pos.y <= topbarH) {
+      const next: ToolDock = { float: false, edge: 'top', along: 0 };
       setToolDock(next);
       saveToolDock(next);
       return;
     }
-    /* на холсте панель прилипает к ближайшим краям (не висит над рабочей областью) */
-    const cx = d.pos.x + d.w / 2;
-    const cy = d.pos.y + d.h / 2;
-    const snapped: ToolDock = {
-      float: true,
-      x: cx < window.innerWidth / 2 ? TOOL_EDGE : window.innerWidth - d.w - TOOL_EDGE,
-      y: cy < (topbarHeight() + window.innerHeight) / 2 ? topbarHeight() + TOOL_EDGE : window.innerHeight - d.h - TOOL_EDGE,
-    };
-    setToolDock(snapped);
-    saveToolDock(snapped);
+    /* во всех остальных случаях панель остаётся плавающей у ближайшего края:
+       финальное выравнивание (авто-подгонка по факту размера) делает
+       useLayoutEffect сразу после перерисовки */
   };
 
   const onGripDown = (e: React.PointerEvent) => {
@@ -126,25 +352,19 @@ export function TopBar(props: { store: VetviStore }) {
     const el = (e.currentTarget as HTMLElement).closest('.tool-block, .tool-float') as HTMLElement | null;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    dragRef.current = { moved: false, grabX: e.clientX - r.left, grabY: e.clientY - r.top, w: r.width, h: r.height, lastClientY: e.clientY, pos: { x: r.left, y: r.top } };
+    dragRef.current = {
+      moved: false,
+      floatStart: el.classList.contains('tool-float'),
+      grabX: e.clientX - r.left,
+      grabY: e.clientY - r.top,
+      w: r.width,
+      h: r.height,
+      pos: { x: e.clientX, y: e.clientY },
+    };
     e.preventDefault();
     window.addEventListener('pointermove', onGripMove);
     window.addEventListener('pointerup', onGripUp);
   };
-
-  /* плавающая панель не должна уехать за экран при ресайзе окна */
-  useEffect(() => {
-    if (!toolDock.float) return;
-    const onResize = () => {
-      const el = floatRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const c = clampToolPos(r.left, r.top, r.width, r.height);
-      setToolDock((v) => ({ ...v, x: c.x, y: c.y }));
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [toolDock.float]);
 
   /* закрытие попапов аккаунта/уведомлений кликом мимо (capture, как bindSyncUI) */
   useEffect(() => {
@@ -263,6 +483,8 @@ export function TopBar(props: { store: VetviStore }) {
     </>
   );
 
+  const vertFloat = toolDock.edge === 'left' || toolDock.edge === 'right';
+
   return (
     <>
     <header id="topbar" role="banner">
@@ -291,76 +513,116 @@ export function TopBar(props: { store: VetviStore }) {
 
       <div className="vsep" />
 
-      <button type="button" className="btn" id="bNew" title={'Новый проект (' + hkText('newProject') + ')'} onClick={() => store.createProject()}>
-        + Новый
-      </button>
-      <button type="button" className="btn" id="bOpen" title={'Открыть (' + hkText('projects') + ')'} onClick={() => store.openModal('projects')}>
-        Открыть
-      </button>
+      {/* фиксированные кнопки слева (в совсем узких окнах тихо скроллятся без полосы) */}
+      <div className="tb-fixed">
+        <button type="button" className="btn" id="bNew" title={'Новый проект (' + hkText('newProject') + ')'} onClick={() => store.createProject()}>
+          + Новый
+        </button>
+        <button type="button" className="btn" id="bOpen" title={'Открыть (' + hkText('projects') + ')'} onClick={() => store.openModal('projects')}>
+          Открыть
+        </button>
 
-      <div className={'save-wrap' + (saveOpen ? ' open' : '')} ref={saveRef}>
-        <button type="button" className="btn primary" id="bSave" title={'Сохранить (' + hkText('save') + ')'} onClick={() => store.saveAs()}>
-          Сохранить
-        </button>
-        <button
-          type="button"
-          className="btn primary caret"
-          id="bSaveMenu"
-          title="Варианты сохранения"
-          aria-haspopup="menu"
-          aria-expanded={saveOpen}
-          onClick={() => {
-            /* меню позиционируется fixed: шапка теперь scroll-контейнер
-               и обрезала бы absolute-выпадашку */
-            const el = saveRef.current;
-            if (el) {
-              const r = el.getBoundingClientRect();
-              setSavePos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 266)), top: r.bottom + 7 });
-            }
-            setSaveOpen((v) => !v);
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-        </button>
-        <div
-          className={'save-menu' + (saveOpen ? ' show' : '')}
-          role="menu"
-          aria-label="Сохранение и экспорт"
-          style={savePos ? { position: 'fixed', left: savePos.left, top: savePos.top } : undefined}
-        >
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.saveAs(); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
-            Сохранить (JSON)
-            <kbd>{hkText('save')}</kbd>
-          </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.saveAs(); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3" /></svg>
-            Сохранить как… (JSON)
-            <kbd>{hkText('saveAs')}</kbd>
-          </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTxtFile(); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
-            Текстовый файл (.txt)
-          </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(false); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h6M9 16h6M9 9h2" /></svg>
-            Тексты (JSON)
-          </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(true); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
-            Тексты выделенных нод (JSON)
-            <kbd>{hkText('exportSel')}</kbd>
-          </div>
-          <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openTextsImport(); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
-            Импорт текстов (JSON)…
+        <div className={'save-wrap' + (saveOpen ? ' open' : '')} ref={saveRef}>
+          <button type="button" className="btn primary" id="bSave" title={'Сохранить (' + hkText('save') + ')'} onClick={() => store.saveAs()}>
+            Сохранить
+          </button>
+          <button
+            type="button"
+            className="btn primary caret"
+            id="bSaveMenu"
+            title="Варианты сохранения"
+            aria-haspopup="menu"
+            aria-expanded={saveOpen}
+            onClick={() => {
+              /* меню позиционируется fixed: не зависит от прокруток шапки */
+              const el = saveRef.current;
+              if (el) {
+                const r = el.getBoundingClientRect();
+                setSavePos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 266)), top: r.bottom + 7 });
+              }
+              setSaveOpen((v) => !v);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          <div
+            className={'save-menu' + (saveOpen ? ' show' : '')}
+            role="menu"
+            aria-label="Сохранение и экспорт"
+            style={savePos ? { position: 'fixed', left: savePos.left, top: savePos.top } : undefined}
+          >
+            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.saveAs(); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
+              Сохранить (JSON)
+              <kbd>{hkText('save')}</kbd>
+            </div>
+            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.saveAs(); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3" /></svg>
+              Сохранить как… (JSON)
+              <kbd>{hkText('saveAs')}</kbd>
+            </div>
+            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTxtFile(); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
+              Текстовый файл (.txt)
+            </div>
+            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(false); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h6M9 16h6M9 9h2" /></svg>
+              Тексты (JSON)
+            </div>
+            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(true); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
+              Тексты выделенных нод (JSON)
+              <kbd>{hkText('exportSel')}</kbd>
+            </div>
+            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openTextsImport(); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
+              Импорт текстов (JSON)…
+            </div>
           </div>
         </div>
+
+        <div className="vsep" />
+
+        <button type="button" className="btn" id="bPlay" title={'Режим новеллы (' + hkText('play') + ') — выделенные блоки по порядку или весь сюжет'} onClick={() => {
+          store.setPlayerStart(null, false);
+          store.openModal('player');
+        }}>
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 5.5v13l10.5-6.5z" /></svg>
+          <span className="t">Играть</span>
+        </button>
+
+        {statusChip}
+
+        {(sc && sc.enabled && store.syncMode !== 'copy') && (
+          <button type="button" className="btn" id="bMerge" title="Merge-запросы копий" onClick={() => store.openModal('merge')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
+            <span className="t">Merge</span>
+            {store.syncMergeCount > 0 && <span className="m-badge">{store.syncMergeCount}</span>}
+          </button>
+        )}
+
+        <button type="button" className="btn" id="bCopies" title="Локальные копии проекта" onClick={() => store.openModal('copies')}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+          <span className="t">Копии</span>
+        </button>
+
+        <button type="button" className="btn" id="bLog" title="Журнал действий: кто и что менял в проекте" onClick={() => { store.setLogFilters(null, null); store.openModal('log'); }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8.6" /><path d="M12 7.4V12l3.2 2" /></svg>
+          <span className="t">Журнал</span>
+        </button>
+
+        <button type="button" className="btn primary" id="bShare" title="Поделиться ссылкой на проект" onClick={() => {
+          if (!sc) return;
+          if (store.syncMode === 'copy') store.openModal('copyBar');
+          else sc.shareProject();
+        }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" /></svg>
+          <span className="t">Поделиться</span>
+        </button>
       </div>
 
-      <div className="vsep" />
-
-      {/* отсоединяемый блок кнопок холста (в шапке — до «Играть») */}
+      {/* отсоединяемый блок кнопок холста: в шапке — со внутренним скроллом и
+          стрелками по краям, если кнопки не вмещаются */}
       {!toolDock.float && (
         <div className="tool-block">
           <button
@@ -372,96 +634,70 @@ export function TopBar(props: { store: VetviStore }) {
           >
             <GripIcon />
           </button>
-          {toolContent}
+          {arrows.l && (
+            <button type="button" className="tb-arrow l" title="Здесь есть ещё кнопки" aria-label="Прокрутить панель влево" onMouseDown={(e) => e.preventDefault()} onClick={() => scrollTool(-1)}>
+              <ArrowIcon dir="l" />
+            </button>
+          )}
+          <div className="tool-scroll" ref={scrollRef} onScroll={measureArrows}>
+            {toolContent}
+          </div>
+          {arrows.r && (
+            <button type="button" className="tb-arrow r" title="Здесь есть ещё кнопки" aria-label="Прокрутить панель вправо" onMouseDown={(e) => e.preventDefault()} onClick={() => scrollTool(1)}>
+              <ArrowIcon dir="r" />
+            </button>
+          )}
         </div>
       )}
 
-      <button type="button" className="btn" id="bPlay" title={'Режим новеллы (' + hkText('play') + ') — выделенные блоки по порядку или весь сюжет'} onClick={() => {
-        store.setPlayerStart(null, false);
-        store.openModal('player');
-      }}>
-        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 5.5v13l10.5-6.5z" /></svg>
-        <span className="t">Играть</span>
-      </button>
-
-      {statusChip}
-
-      {(sc && sc.enabled && store.syncMode !== 'copy') && (
-        <button type="button" className="btn" id="bMerge" title="Merge-запросы копий" onClick={() => store.openModal('merge')}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
-          <span className="t">Merge</span>
-          {store.syncMergeCount > 0 && <span className="m-badge">{store.syncMergeCount}</span>}
-        </button>
-      )}
-
-      <button type="button" className="btn" id="bCopies" title="Локальные копии проекта" onClick={() => store.openModal('copies')}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-        <span className="t">Копии</span>
-      </button>
-
-      <button type="button" className="btn" id="bLog" title="Журнал действий: кто и что менял в проекте" onClick={() => { store.setLogFilters(null, null); store.openModal('log'); }}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8.6" /><path d="M12 7.4V12l3.2 2" /></svg>
-        <span className="t">Журнал</span>
-      </button>
-
-      <button type="button" className="btn primary" id="bShare" title="Поделиться ссылкой на проект" onClick={() => {
-        if (!sc) return;
-        if (store.syncMode === 'copy') store.openModal('copyBar');
-        else sc.shareProject();
-      }}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" /></svg>
-        <span className="t">Поделиться</span>
-      </button>
-
-      {/* React-экстры (в оригинале нет) */}
-      <button type="button" className="btn" id="bSearch" title={'Поиск по проекту (' + hkText('search') + ')'} onClick={() => store.openModal('search')}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-      </button>
-      <button type="button" className="btn" id="bPatch" title={'Что нового (' + hkText('patchnotes') + ')'} onClick={() => store.openModal('patch')}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3c.7 4.9 3.4 7.6 8.3 8.3-4.9.7-7.6 3.4-8.3 8.3-.7-4.9-3.4-7.6-8.3-8.3C8.6 10.6 11.3 7.9 12 3z" /></svg>
-      </button>
-
       <div className="spacer" />
 
-      <button
-        type="button"
-        className="btn ibtn"
-        id="bellBtn"
-        title="Уведомления"
-        aria-label="Уведомления"
-        onClick={() => { ntf.toggle(); store.setAccPop(false); }}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9.5a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
-        {ntf.state.unread > 0 && (
-          <span className="m-badge bell-badge" aria-label={ntf.state.unread + ' непрочитанных уведомлений'}>
-            {ntf.state.unread > 9 ? '9+' : ntf.state.unread}
-          </span>
-        )}
-      </button>
+      {/* правый прижатый блок: поиск, уведомления, аккаунт — всегда у края шапки,
+          никуда не сдвигаются и не уезжают за экран */}
+      <div className="tb-right">
+        <button type="button" className="btn" id="bSearch" title={'Поиск по проекту (' + hkText('search') + ')'} onClick={() => store.openModal('search')}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+        </button>
 
-      {/* аватар аккаунта вместо старой кнопки настроек: инфо о аккаунте, настройки, выход */}
-      <button
-        type="button"
-        className="btn ibtn avatar-btn"
-        id="accBtn"
-        title={me.name + ' — аккаунт'}
-        aria-label="Аккаунт"
-        onClick={() => { store.setAccPop(!store.accPop); ntf.setOpen(false); }}
-      >
-        <span className="avatar-circle" style={{ background: me.color }}>{avatarInitial(me.name)}</span>
-      </button>
+        <button
+          type="button"
+          className="btn ibtn"
+          id="bellBtn"
+          title="Уведомления"
+          aria-label="Уведомления"
+          onClick={() => { ntf.toggle(); store.setAccPop(false); }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9.5a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
+          {ntf.state.unread > 0 && (
+            <span className="m-badge bell-badge" aria-label={ntf.state.unread + ' непрочитанных уведомлений'}>
+              {ntf.state.unread > 9 ? '9+' : ntf.state.unread}
+            </span>
+          )}
+        </button>
 
-      <button type="button" className="btn ibtn" id="bHelp" title="Горячие клавиши" onClick={() => store.openModal('settingsHk')}>
-        ?
-      </button>
+        {/* аватар аккаунта вместо старой кнопки настроек: инфо о аккаунте, настройки, выход */}
+        <button
+          type="button"
+          className="btn ibtn avatar-btn"
+          id="accBtn"
+          title={me.name + ' — аккаунт'}
+          aria-label="Аккаунт"
+          onClick={() => { store.setAccPop(!store.accPop); ntf.setOpen(false); }}
+        >
+          <span className="avatar-circle" style={{ background: me.color }}>{avatarInitial(me.name)}</span>
+        </button>
+      </div>
     </header>
 
-    {/* плавающая панель инструментов: отсоединена от шапки, прилипает к краям холста */}
+    {/* плавающая панель инструментов: у любого края холста — горизонтальная
+        (сверху/снизу) или вертикальная (слева/справа). Перпендикулярная координата
+        — в CSS по data-edge (от полос шапки/панелей), координата вдоль края — here. */}
     {toolDock.float && (
       <div
-        className={'tool-float' + (toolDragging ? ' dragging' : '')}
+        className={'tool-float' + (vertFloat ? ' vert' : '') + (toolDragging ? ' dragging' : '')}
         ref={floatRef}
-        style={{ left: toolDock.x, top: toolDock.y }}
+        style={vertFloat ? { top: toolDock.along } : { left: toolDock.along }}
+        data-edge={toolDock.edge}
         role="toolbar"
         aria-label="Панель инструментов холста"
       >
@@ -472,9 +708,11 @@ export function TopBar(props: { store: VetviStore }) {
           aria-label="Переместить панель инструментов"
           onPointerDown={onGripDown}
         >
-          <GripIcon />
+          <GripIcon vert={vertFloat} />
         </button>
-        {toolContent}
+        <div className="float-scroll">
+          {toolContent}
+        </div>
       </div>
     )}
 

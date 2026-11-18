@@ -1140,14 +1140,28 @@ function StoreModal({ store }: { store: VetviStore }) {
 /* ═══════════ редактирование аккаунта (имя + пароль; ник неизменяем) ═══════════ */
 
 export function AccountModal({ store }: { store: VetviStore }) {
-  const acc = getAccount();
+  /* кэш аккаунта мог ещё не доехать (/api/auth/state в полёте) — дозапрашиваем,
+     чтобы окно ВСЕГДА показывало логин и текущее имя */
+  const [acc, setAcc] = useState(getAccount());
   const [name, setName] = useState(acc?.displayName || '');
   const [cur, setCur] = useState('');
   const [pwA, setPwA] = useState('');
   const [pwB, setPwB] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const nameTouched = useRef(false);
   void store.revision;
+
+  useEffect(() => {
+    if (getAccount()) return;
+    /* дозапрос состояния сессии: логин и имя подтянутся асинхронно */
+    void authRefreshAccount().then(() => {
+      const a = getAccount();
+      if (!a) return;
+      setAcc(a);
+      if (!nameTouched.current) setName(a.displayName || a.login || '');
+    });
+  }, []);
 
   const pwTouched = !!(cur || pwA || pwB);
   const submit = async () => {
@@ -1175,7 +1189,7 @@ export function AccountModal({ store }: { store: VetviStore }) {
       <div className="m-card">
         <h3>Редактирование аккаунта</h3>
         <label className="i-lab">Ник (логин) — изменить нельзя</label>
-        <input className="inp" value={acc ? '@' + acc.login : ''} readOnly disabled aria-label="Ник аккаунта" style={{ opacity: 0.6 }} />
+        <input className="inp" value={acc ? '@' + acc.login : '@…'} readOnly disabled aria-label="Ник аккаунта (логин)" style={{ opacity: 0.6 }} />
         <label className="i-lab">Имя (как показывать другим)</label>
         <input
           className="inp"
@@ -1183,7 +1197,7 @@ export function AccountModal({ store }: { store: VetviStore }) {
           maxLength={60}
           autoFocus
           aria-label="Имя аккаунта"
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => { nameTouched.current = true; setName(e.target.value); }}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }}
         />
         <div className="acc-pw-cap">Смена пароля</div>

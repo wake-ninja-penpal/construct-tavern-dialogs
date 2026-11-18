@@ -15,12 +15,17 @@ body{background:var(--bg);color:var(--tx);font:14px/1.45 var(--body);overflow:hi
 ::-webkit-scrollbar-track{background:transparent}
 kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--tx2)}
 #topbar{height:56px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:linear-gradient(#181a1f,#131519);border-bottom:1px solid #262a31;position:relative;z-index:40;animation:dropIn .5s cubic-bezier(.2,.8,.3,1) both;
-  /* кнопки больше не залезают за край: шапка горизонтально скроллится */
-  overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#2e333c transparent}
-#topbar::-webkit-scrollbar{height:6px}
-#topbar::-webkit-scrollbar-thumb{background:#2e333c;border-radius:3px}
-#topbar::-webkit-scrollbar-track{background:transparent}
+  /* шапка целиком НЕ скроллится: скролл — только у блока кнопок холста (см. .tool-scroll) */
+  overflow:hidden}
 #topbar > *{flex:none}
+/* фиксированные кнопки слева; при острой нехватке места (узкие окна) тихо
+   сжимаются со скрытым скроллом — правый блок (поиск/уведомления/аккаунт)
+   прижат к краю и ВИДЕН всегда; основной скролл с стрелками — у блока кнопок холста */
+#topbar > .tb-fixed{display:inline-flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
+.tb-fixed::-webkit-scrollbar{display:none}
+/* правый прижатый блок: поиск, уведомления, аккаунт — всегда у края шапки,
+   никогда не сдвигаются и не уезжают за экран */
+#topbar > .tb-right{display:inline-flex;align-items:center;gap:10px;flex:none;margin-left:auto}
 @keyframes dropIn{from{transform:translateY(-100%);opacity:0}}
 .brand{display:flex;align-items:center;gap:10px;user-select:none;flex:none}
 .brand svg{width:28px;height:28px}
@@ -1044,7 +1049,7 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .note-view-body{background:#14161a;border:1px solid #2b2f37;border-radius:9px;padding:12px 14px;color:var(--tx);font:13.5px/1.65 var(--body);min-height:80px}
 .note-view-body ol,.note-view-body ul{padding-left:24px;margin:5px 0}
 .note-view-body li{margin:2px 0}
-#miniMap{position:absolute;top:12px;right:12px;width:260px;height:180px;z-index:30;background:rgba(10,11,13,.88);border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.5);overflow:visible;cursor:grab;touch-action:none}
+#miniMap{position:absolute;top:12px;right:12px;width:260px;height:180px;z-index:30;background:rgba(10,11,13,.88);border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.5);overflow:visible;cursor:grab;touch-action:none;transition:transform .18s ease}
 #miniMap.mm-resizing{cursor:default}
 #miniMap.mm-hidden{display:none}
 #mmSvg{display:block;width:100%;height:100%;border-radius:9px;overflow:hidden}
@@ -1212,6 +1217,9 @@ body{overflow:hidden;background:var(--bg)}
 /* React-only: ссылка на классическую версию в статусной строке (оригинал — без неё) */
 .st-classic{white-space:nowrap;color:var(--tx3);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:2px 9px;transition:.15s}
 .st-classic:hover{color:var(--tx2);border-color:var(--line2)}
+/* версия приложения рядом с «Классическая версия»: клик открывает «Что нового» */
+.st-ver{white-space:nowrap;color:var(--tx3);background:none;border:1px solid var(--line);border-radius:8px;padding:2px 9px;font:11px var(--mono);cursor:pointer;transition:.15s}
+.st-ver:hover{color:var(--acc);border-color:rgba(226,165,78,.4)}
 
 /* ═══════════ блок расхождения версий в углу холста (новая система комнат) ═══════════ */
 #syncDiffBadge{
@@ -1531,19 +1539,49 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .avatar-circle.big{width:44px;height:44px;font-size:20px}
 
 /* ── отсоединяемый блок кнопок холста (тулбар) ──
-   В шапке: .tool-block с грипом слева (точки появляются при наведении).
-   На холсте: .tool-float — плавающая панель у края, тянется за грип,
-   при возврате на шапку встаёт на своё место. */
-.tool-block{display:inline-flex;align-items:center;gap:10px;flex:none;padding-left:0;border-radius:10px;transition:background .15s}
+   В шапке: .tool-block с грипом слева и ВНУТРЕННИМ скроллом кнопок: если кнопки
+   не вмещаются, у края панели появляется стрелка (.tb-arrow) «здесь есть ещё».
+   На холсте: .tool-float — плавающая панель у любого края: сверху/снизу —
+   горизонтально (data-edge=top/bottom), слева/справа — ВЕРТИКАЛЬНО
+   (data-edge=left/right, .vert). Перпендикулярная координата панели берётся
+   из CSS-переменных --flt-strip-*, которые выставляет reservedStrips(): панель
+   двигается вместе с открытием/закрытием боковых панелей и не налезает на них. */
+#topbar > .tool-block{position:relative;display:inline-flex;align-items:center;gap:0;flex:1 1 0;min-width:0;border-radius:10px;transition:background .15s}
 .tool-block:hover{background:rgba(255,255,255,.035)}
-.tool-grip{width:9px;height:26px;flex:none;border:0;background:transparent;color:#4d535e;cursor:grab;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;opacity:0;transition:opacity .15s,background .15s,color .15s;touch-action:none}
+.tool-scroll{display:inline-flex;align-items:center;gap:10px;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding:4px 2px}
+.tool-scroll::-webkit-scrollbar{display:none}
+/* стрелки «есть ещё» по краям панели кнопок */
+.tb-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:22px;height:28px;border:0;border-radius:7px;background:linear-gradient(90deg,#1b1e24,rgba(27,30,36,.65) 70%,transparent);color:#8b929c;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:color .15s,background .15s}
+.tb-arrow:hover{color:var(--acc);background:rgba(255,255,255,.07)}
+.tb-arrow.l{left:-2px}
+.tb-arrow.r{right:-2px;background:linear-gradient(270deg,#1b1e24,rgba(27,30,36,.65) 70%,transparent)}
+.tool-grip{width:9px;height:26px;flex:none;border:0;background:transparent;color:#4d535e;cursor:grab;padding:0;margin:0 8px 0 2px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;opacity:0;transition:opacity .15s,background .15s,color .15s;touch-action:none}
 .tool-block:hover .tool-grip,.tool-float .tool-grip{opacity:.85}
 .tool-grip:hover{color:#8b929c;background:rgba(255,255,255,.07)}
 .tool-grip:active{cursor:grabbing}
-.tool-float{position:fixed;z-index:45;display:inline-flex;align-items:center;gap:10px;padding:6px 12px 6px 6px;background:linear-gradient(#181a1f,#131519);border:1px solid #262a31;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5);user-select:none;touch-action:none;max-width:calc(100vw - 24px)}
+.tool-float{position:fixed;z-index:45;display:inline-flex;align-items:center;gap:0;padding:6px 12px 6px 6px;background:linear-gradient(#181a1f,#131519);border:1px solid #262a31;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5);user-select:none;touch-action:none}
+.tool-float .float-scroll{display:inline-flex;align-items:center;gap:10px;min-width:0;max-width:calc(100vw - 140px);overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding:2px}
+.tool-float .float-scroll::-webkit-scrollbar{display:none}
+.tool-float[data-edge="top"]{top:calc(var(--flt-strip-top,56px) + 12px)}
+.tool-float[data-edge="bottom"]{bottom:calc(var(--flt-strip-bottom,0px) + 12px)}
+.tool-float[data-edge="left"]{left:calc(var(--flt-strip-left,0px) + 12px)}
+.tool-float[data-edge="right"]{right:calc(var(--flt-strip-right,0px) + 12px)}
+/* вертикальная ориентация у левого/правого края */
+.tool-float.vert{flex-direction:column;align-items:center;padding:6px 6px 12px}
+.tool-float.vert .float-scroll{flex-direction:column;max-width:none;max-height:calc(100vh - 140px);overflow-x:hidden;overflow-y:auto}
+.tool-float.vert .float-scroll::-webkit-scrollbar{width:6px}
+.tool-float.vert .float-scroll::-webkit-scrollbar-thumb{background:#2e333c;border-radius:3px}
+.tool-float.vert .vsep{width:auto;height:1px;align-self:stretch}
+.tool-float.vert #zPct{width:auto}
 .tool-float .vsep{height:22px}
 .tool-float.dragging{z-index:80;cursor:grabbing;box-shadow:0 16px 44px rgba(0,0,0,.65);opacity:.96}
 .tool-float.dragging .btn{pointer-events:none}
+
+/* угловые элементы холста уступают место плавающей панели через --flt-* переменные
+   (их выставляет TopBar, когда панель поставлена на их полосе) */
+#miniMap{transform:translate(var(--flt-mm-x,0px),var(--flt-mm-y,0px))}
+.vo-corner{transform:translateY(var(--flt-vo-y,0px))}
+#syncDiffBadge{transform:translateY(var(--flt-sd-y,0px))}
 
 /* «только чтение» — полупрозрачная метка в углу холста (переехала из шапки) */
 .vo-corner{position:absolute;left:14px;bottom:14px;z-index:29;pointer-events:none;user-select:none;font:600 10.5px var(--mono);letter-spacing:.5px;color:#d8c96f;border:1px solid rgba(216,201,111,.32);background:rgba(216,201,111,.05);border-radius:7px;padding:4px 10px;opacity:.5}
