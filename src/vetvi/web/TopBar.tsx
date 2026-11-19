@@ -546,16 +546,16 @@ export function TopBar(props: { store: VetviStore }) {
   };
 
   /* закрытие попапов аккаунта/уведомлений и меню сохранения кликом мимо
-     (capture, как bindSyncUI). Меню сохранения — .save-menu внутри .save-wrap:
-     клик по пункту меню до capture-обработчика не «долетит» (onClick на .sm-i
-     сработает раньше на том же pointerup→click), клик мимо — закрывает меню. */
+     (capture, как bindSyncUI). Меню сохранения рендерится ВНЕ шапки (fixed,
+     поверх холста и плавающей панели инструментов): клик по его пунктам —
+     «внутри» (closest .save-menu), клик мимо — закрывает меню. */
   useEffect(() => {
     const onDoc = (e: Event) => {
       const t = e.target as Element | null;
       if (!t) return;
       if (store.accPop && !t.closest('.acc-pop') && !t.closest('#accBtn')) store.setAccPop(false);
       if (ntf.open && !t.closest('.ntf-pop') && !t.closest('#bellBtn')) ntf.setOpen(false);
-      if (saveOpen && !t.closest('.save-wrap')) {
+      if (saveOpen && !t.closest('.save-wrap') && !t.closest('.save-menu')) {
         setSaveOpen(false);
         setSavePos(null);
       }
@@ -739,7 +739,9 @@ export function TopBar(props: { store: VetviStore }) {
               aria-haspopup="menu"
               aria-expanded={saveOpen}
               onClick={() => {
-                /* меню позиционируется fixed: не зависит от прокруток шапки */
+                /* меню позиционируется fixed вне шапки: не зависит от прокруток
+                   шапки и открывается ПОВЕРХ холста, его объектов и плавающей
+                   панели инструментов (z-index вне контекста шапки) */
                 const el = saveRef.current;
                 if (el) {
                   const r = el.getBoundingClientRect();
@@ -750,41 +752,7 @@ export function TopBar(props: { store: VetviStore }) {
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
             </button>
-          <div
-            className={'save-menu' + (saveOpen ? ' show' : '')}
-            role="menu"
-            aria-label="Сохранение и экспорт"
-            style={savePos ? { position: 'fixed', left: savePos.left, top: savePos.top } : undefined}
-          >
-            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.saveAs(); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
-              Сохранить (JSON)
-              <kbd>{hkText('save')}</kbd>
-            </div>
-            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.saveAs(); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3" /></svg>
-              Сохранить как… (JSON)
-              <kbd>{hkText('saveAs')}</kbd>
-            </div>
-            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTxtFile(); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
-              Текстовый файл (.txt)
-            </div>
-            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(false); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h6M9 16h6M9 9h2" /></svg>
-              Тексты (JSON)
-            </div>
-            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.exportTextsJson(true); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
-              Тексты выделенных нод (JSON)
-              <kbd>{hkText('exportSel')}</kbd>
-            </div>
-            <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); store.openTextsImport(); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
-              Импорт текстов (JSON)…
-            </div>
           </div>
-        </div>
 
         <div className="vsep" />
 
@@ -795,10 +763,10 @@ export function TopBar(props: { store: VetviStore }) {
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 5.5v13l10.5-6.5z" /></svg>
         </button>
 
-        {(sc && sc.enabled && store.syncMode !== 'copy') && (
-          <button type="button" className="btn ibtn" id="bMerge" title="Merge-запросы копий" aria-label="Merge-запросы" onClick={() => store.openModal('merge')}>
+        {(sc && sc.enabled && store.syncMode !== 'copy') && store.syncMergeCount > 0 && (
+          <button type="button" className="btn ibtn merge-hint" id="bMerge" title={'Merge-запросов в очереди: ' + store.syncMergeCount + ' — список в блоке расхождения на холсте'} aria-label={'Merge-запросов: ' + store.syncMergeCount} onClick={() => store.openModal('merge')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
-            {store.syncMergeCount > 0 && <span className="m-badge">{store.syncMergeCount}</span>}
+            <span className="m-badge">{store.syncMergeCount}</span>
           </button>
         )}
 
@@ -935,6 +903,45 @@ export function TopBar(props: { store: VetviStore }) {
       </div>
     )}
 
+    {/* меню сохранения: fixed ВНЕ шапки — его z-index работает против
+        плавающей панели инструментов и холста (раньше меню жила внутри шапки
+        со своим z-index:40 и перекрывалась панелью инструментов, z-index:45) */}
+    <div
+      className={'save-menu' + (saveOpen ? ' show' : '')}
+      role="menu"
+      aria-label="Сохранение и экспорт"
+      aria-hidden={!saveOpen}
+      style={saveOpen && savePos ? { position: 'fixed', left: savePos.left, top: savePos.top } : undefined}
+    >
+      <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); setSavePos(null); store.saveAs(); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
+        Сохранить (JSON)
+        <kbd>{hkText('save')}</kbd>
+      </div>
+      <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); setSavePos(null); store.saveAs(); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3" /></svg>
+        Сохранить как… (JSON)
+        <kbd>{hkText('saveAs')}</kbd>
+      </div>
+      <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); setSavePos(null); store.exportTxtFile(); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11v18l-2.8-2-2.7 2-2.7-2L6.5 21z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
+        Текстовый файл (.txt)
+      </div>
+      <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); setSavePos(null); store.exportTextsJson(false); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h6M9 16h6M9 9h2" /></svg>
+        Тексты (JSON)
+      </div>
+      <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); setSavePos(null); store.exportTextsJson(true); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l4 4v14H5z" /><path d="M9 12.5h4M11 10.5v4" /><rect x="3" y="3" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /><rect x="16" y="16" width="5" height="5" rx="1" strokeDasharray="1.6 1.4" /></svg>
+        Тексты выделенных нод (JSON)
+        <kbd>{hkText('exportSel')}</kbd>
+      </div>
+      <div className="sm-i" role="menuitem" onClick={() => { setSaveOpen(false); setSavePos(null); store.openTextsImport(); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10.5" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M4.5 20.5h15" /></svg>
+        Импорт текстов (JSON)…
+      </div>
+    </div>
+
     {/* плавающая панель инструментов: у любого края холста — горизонтальная
         (сверху/снизу) или вертикальная (слева/справа), либо в свободной позиции —
         тянется за курсором и магнитится к местам крепления. Перпендикулярная
@@ -973,6 +980,7 @@ export function TopBar(props: { store: VetviStore }) {
         items={ntf.state.items}
         onOpenItem={(n) => void ntf.openItem(n)}
         onClose={() => ntf.setOpen(false)}
+        onClear={() => void ntf.clearAll()}
       />
     )}
     </>

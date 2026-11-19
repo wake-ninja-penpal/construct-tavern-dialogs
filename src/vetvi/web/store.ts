@@ -516,19 +516,50 @@ export class VetviStore {
     let total = 0;
     for (const e of arr) if (e.snap) total += e.snap.length;
     if (total <= LOG_SNAP_TOTAL) return;
-    /* Вытесняем снимки с САМЫХ СТАРЫХ записей. Хвост из LOG_SNAP_KEEP последних
-     * записей защищён (пользовательский запрос: снимки последних 20–30 правок
-     * доступны всегда); если защищённый хвост сам переполняет бюджет
-     * (гигантские снимки в LS-режиме), продолжаем вытеснение, но минимум
-     * LOG_SNAP_KEEP_MIN последних снимков всё равно остаётся. */
+    /* Вытесняем снимки с САМЫХ СТАРЫХ записей. Хвост из journalSnapKeep()
+     * последних записей защищён (настройка проекта, по умолчанию 30);
+     * если защищённый хвост сам переполняет бюджет (гигантские снимки в
+     * LS-режиме), продолжаем вытеснение, но минимум LOG_SNAP_KEEP_MIN
+     * последних снимков всё равно остаётся. */
+    const keep = this.journalSnapKeep();
     for (let i = arr.length - 1; i >= 0 && total > LOG_SNAP_TOTAL; i--) {
       const sn = arr[i]?.snap;
       if (!sn) continue;
-      if (i < LOG_SNAP_KEEP && i >= LOG_SNAP_KEEP_MIN) break;
+      if (i < keep && i >= LOG_SNAP_KEEP_MIN) break;
       total -= sn.length;
       arr[i].snap = null;
       if (arr[i].snapTooBig) arr[i].snapTooBig = false;
     }
+  }
+
+  /* ── настройки снимков проекта (окно «Настройки → Снимки проекта») ──
+     meta.journalSnapKeep — сколько последних записей журнала хранят снимок
+     состояния (для отката); meta.snapshotsLimit — сколько серверных снимков
+     хранится перед слиянием/заменой проекта (используется vetvi-sync). */
+  journalSnapKeep(): number {
+    const v = Number(this.doc.meta.journalSnapKeep);
+    if (!Number.isFinite(v)) return LOG_SNAP_KEEP;
+    return Math.max(LOG_SNAP_KEEP_MIN, Math.min(100, Math.floor(v)));
+  }
+
+  projectSnapshotsLimit(): number {
+    const v = Number(this.doc.meta.snapshotsLimit);
+    if (!Number.isFinite(v)) return 20;
+    return Math.max(10, Math.min(30, Math.floor(v)));
+  }
+
+  setSnapshotSettings(snapLimit: number, journalKeep: number): void {
+    const sl = Math.max(10, Math.min(30, Math.floor(snapLimit) || 20));
+    const jk = Math.max(LOG_SNAP_KEEP_MIN, Math.min(100, Math.floor(journalKeep) || LOG_SNAP_KEEP));
+    const pre = Number(this.doc.meta.snapshotsLimit) || 20;
+    const preJ = Number(this.doc.meta.journalSnapKeep) || LOG_SNAP_KEEP;
+    if (pre === sl && preJ === jk) return;
+    this.mutateManual((d) => {
+      d.meta.snapshotsLimit = sl;
+      d.meta.journalSnapKeep = jk;
+    }, 'Настройки снимков: ' + sl + ' перед слиянием/заменой · ' + jk + ' в журнале');
+    /* вылетевшие за новый хвост снимки журнала вытесняются сразу */
+    this.logTrimSnaps();
   }
 
   logManual(act: string): void {

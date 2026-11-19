@@ -77,6 +77,13 @@ interface MergeRequest {
   status: 'pending' | 'applied' | 'rejected'
   stats: Record<string, number>
   doc: { current: unknown; base: unknown }
+  /* 'copy' — слияние из локальной копии (трёхсторонний merge);
+     'replace' — запрос на замену данных комнаты версией отправителя
+     («Опубликовать локальную версию» от редактора). Подтверждает
+     владелец или админ комнаты. */
+  kind?: 'copy' | 'replace'
+  decidedBy?: string | null
+  decidedAt?: string | null
 }
 
 interface StoredRoom {
@@ -216,13 +223,13 @@ function verifySession(token: unknown, userId: unknown): AccInfo | null {
   return null
 }
 
-function accessRole(roomId: string, userId: string): 'owner' | 'editor' | 'reader' | null {
+function accessRole(roomId: string, userId: string): 'owner' | 'admin' | 'editor' | 'reader' | null {
   openMainDb()
   if (!mainDb || !qAccessRole) return null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const row = qAccessRole.get(roomId, userId) as { role: string } | null
-      if (row && (row.role === 'owner' || row.role === 'editor' || row.role === 'reader')) return row.role
+      if (row && (row.role === 'owner' || row.role === 'admin' || row.role === 'editor' || row.role === 'reader')) return row.role
       return null
     } catch (e) {
       if (isSchemaError(e)) {
@@ -286,7 +293,36 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_merges_room ON merges(room_id);
   CREATE INDEX IF NOT EXISTS idx_merges_copy ON merges(room_id, copy_id, status);
+  CREATE TABLE IF NOT EXISTS snapshots (
+    id         TEXT PRIMARY KEY,
+    room_id    TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'merge',
+    label      TEXT,
+    doc        TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_snaps_room ON snapshots(room_id, created_at);
 `)
+
+/* миграция существующих БД: колонки kind/decided_name/decided_at в merges
+   появились позже — добавляем, если их нет (ALTER TABLE идемпотентно) */
+try {
+  const mcols = db.query('PRAGMA table_info(merges)').all() as { name: string }[]
+  if (!mcols.some((c) => c.name === 'kind')) {
+    db.exec("ALTER TABLE merges ADD COLUMN kind TEXT NOT NULL DEFAULT 'copy'")
+    console.log('[vetvi-sync] merges: добавлена колонка kind')
+  }
+  if (!mcols.some((c) => c.name === 'decided_name')) {
+    db.exec('ALTER TABLE merges ADD COLUMN decided_name TEXT')
+    console.log('[vetvi-sync] merges: добавлена колонка decided_name')
+  }
+  if (!mcols.some((c) => c.name === 'decided_at')) {
+    db.exec('ALTER TABLE merges ADD COLUMN decided_at TEXT')
+    console.log('[vetvi-sync] merges: добавлена колонка decided_at')
+  }
+} catch (e) {
+  console.error('[vetvi-sync] миграция merges (kind/decided) не удалась', e)
+}
 
 /* миграция существующих БД: колонка link_mode появилась позже — добавляем,
    если её нет (в старых базах таблица rooms уже создана без неё) */
@@ -320,6 +356,9 @@ interface MergeRow {
   stats: string | null
   doc_current: string | null
   doc_base: string | null
+  kind?: string | null
+  decided_name?: string | null
+  decided_at?: string | null
 }
 
 /* подготовленные выражения */
@@ -346,6 +385,7 @@ const qRoomSetLinkMode = db.prepare('UPDATE rooms SET link_mode = ? WHERE id = ?
    комнатой стираются её merge-заявки — в очереди не остаётся мусора */
 const qRoomDelete = db.prepare('DELETE FROM rooms WHERE id = ?')
 const qMergeDelRoom = db.prepare('DELETE FROM merges WHERE room_id = ?')
+const qSnapDelRoom = db.prepare('DELETE FROM snapshots WHERE room_id = ?')
 const qRoomTrim = db.prepare(
   `DELETE FROM rooms WHERE id NOT IN (
      SELECT id FROM rooms ORDER BY updated_at DESC LIMIT ?
@@ -356,11 +396,30 @@ const qPendingCount = db.prepare(
 )
 const qMergeList = db.prepare('SELECT * FROM merges WHERE room_id = ? ORDER BY rowid DESC')
 const qMergeById = db.prepare('SELECT id, room_id, copy_id, status FROM merges WHERE id = ?')
+const qMergeByIdFull = db.prepare('SELECT id, room_id, copy_id, status, doc_current, doc_base FROM merges WHERE id = ?')
 const qMergeSetStatus = db.prepare('UPDATE merges SET status = ? WHERE id = ?')
+const qMergeSetDecided = db.prepare('UPDATE merges SET status = ?, decided_name = ?, decided_at = ? WHERE id = ?')
 const qMergeInsert = db.prepare(
-  `INSERT INTO merges (id, room_id, copy_id, sender_name, sender_color, created_at, status, stats, doc_current, doc_base)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  `INSERT INTO merges (id, room_id, copy_id, sender_name, sender_color, created_at, status, stats, doc_current, doc_base, kind)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 )
+const qMergeKindOf = db.prepare('SELECT kind FROM merges WHERE id = ?')
+
+/* ── снимки проекта перед слиянием/заменой ──
+   Полный снимок документа комнаты сохраняется на сервере ПЕРЕД применением
+   merge-запроса или заменой данных («Опубликовать локальную версию») —
+   с целью контроля и отката. Хранятся последние N снимков на комнату;
+   N берётся из настроек проекта (meta.snapshotsLimit, 10–30, по умолчанию 20). */
+const qSnapInsert = db.prepare(
+  `INSERT INTO snapshots (id, room_id, kind, label, doc, created_at)
+   VALUES (?, ?, ?, ?, ?, ?)`,
+)
+const qSnapTrimRoom = db.prepare(
+  `DELETE FROM snapshots WHERE room_id = ? AND id NOT IN (
+     SELECT id FROM snapshots WHERE room_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?
+   )`,
+)
+const qSnapsCount = db.prepare('SELECT COUNT(*) AS c FROM snapshots')
 const qMergeDelPendingOfCopy = db.prepare(
   "DELETE FROM merges WHERE room_id = ? AND copy_id = ? AND status = 'pending'",
 )
@@ -491,7 +550,40 @@ function rowToMerge(r: MergeRow): MergeRequest {
     status: r.status === 'applied' || r.status === 'rejected' ? r.status : 'pending',
     stats,
     doc: { current, base },
+    kind: r.kind === 'replace' ? 'replace' : 'copy',
+    decidedBy: r.decided_name || null,
+    decidedAt: r.decided_at || null,
   }
+}
+
+/* ── снимки: вставка (полный doc комнаты) + подрезка по лимиту проекта ── */
+function snapshotInsert(roomId: string, kind: 'merge' | 'replace', label: string, doc: unknown): boolean {
+  try {
+    const json = JSON.stringify(doc)
+    if (!json || json === '{"nodes":[]}') return false
+    qSnapInsert.run('sn' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), roomId, kind, label.slice(0, 160), json, new Date().toISOString())
+    qSnapTrimRoom.run(roomId, roomId, snapshotsLimitFor(roomId))
+    return true
+  } catch (e) {
+    console.error('[vetvi-sync] snapshot insert error', e)
+    return false
+  }
+}
+
+/* лимит снимков комнаты: meta.snapshotsLimit из сохранённого документа проекта
+   (настройки проекта синхронизируются с комнатой как обычные правки).
+   10–30 по требованию, по умолчанию 20. */
+function snapshotsLimitFor(roomId: string): number {
+  let limit = 20
+  try {
+    const row = qRoomById.get(roomId) as { doc: string | null } | null
+    if (row && row.doc) {
+      const parsed = JSON.parse(row.doc) as { meta?: { snapshotsLimit?: unknown } } | null
+      const n = Number(parsed?.meta?.snapshotsLimit)
+      if (Number.isFinite(n)) limit = n
+    }
+  } catch { /* нет комнаты/документа — лимит по умолчанию */ }
+  return Math.max(10, Math.min(30, Math.floor(limit)))
 }
 
 function getStoredRoom(roomId: string): StoredRoom | null {
@@ -801,7 +893,7 @@ function applyAccessRole(room: RoomState, sid: string, role: string | null, sock
     m.canEdit = false
     return 'kept'
   }
-  const canEdit = role === 'owner' || role === 'editor'
+  const canEdit = role === 'owner' || role === 'admin' || role === 'editor'
   const was = sockCanEditMap.get(sid) === true
   m.role = role
   m.canEdit = canEdit
@@ -963,7 +1055,7 @@ io.on('connection', (socket: Socket) => {
            Без сессии/доступа — «гость по ссылке»: имя из payload, только чтение. */
         const acc = verifySession(payload?.token, payload?.userId)
         const role = acc ? accessRole(roomName, acc.id) : null
-        const canEdit = role === 'owner' || role === 'editor'
+        const canEdit = role === 'owner' || role === 'admin' || role === 'editor'
         if (process.env.VETVI_DEBUG) {
           console.log(`[vetvi-sync][debug] join "${roomName}" tok=${typeof payload?.token === 'string' ? payload.token.slice(0, 8) : JSON.stringify(payload?.token)} userId=${JSON.stringify(payload?.userId)} acc=${acc ? acc.id : null} role=${role}`)
         }
@@ -1205,6 +1297,7 @@ io.on('connection', (socket: Socket) => {
         try {
           qRoomDelete.run(roomName)
           qMergeDelRoom.run(roomName)
+          qSnapDelRoom.run(roomName)
         } catch (e) {
           console.error('[vetvi-sync] room delete db error', e)
         }
@@ -1320,6 +1413,7 @@ io.on('connection', (socket: Socket) => {
         sender?: { name?: string; color?: string }
         stats?: Record<string, number>
         doc?: { current?: unknown; base?: unknown }
+        kind?: string
       },
       ack?: (r: unknown) => void,
     ) => {
@@ -1329,10 +1423,11 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, error: 'bad merge payload' })
           return
         }
+        const kind = payload.kind === 'replace' ? 'replace' : 'copy'
         const entry: MergeRequest = {
           id: 'mr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
           roomId,
-          copyId: String(payload.copyId),
+          copyId: String(payload.copyId).slice(0, 80),
           sender: {
             name: String(payload.sender?.name || 'Гость').slice(0, 40),
             color: String(payload.sender?.color || '#8b929c').slice(0, 20),
@@ -1341,9 +1436,11 @@ io.on('connection', (socket: Socket) => {
           status: 'pending',
           stats: payload.stats || {},
           doc: { current: payload.doc.current, base: payload.doc.base || null },
+          kind,
         }
-        // повторная отправка из той же копии обновляет существующую заявку:
-        // снимаем прежнюю pending этой копии, вставляем новую, подрезаем лимит
+        // повторная отправка из той же копии (или от того же автора замены)
+        // обновляет существующую заявку: снимаем прежнюю pending этой копии,
+        // вставляем новую, подрезаем лимит
         db.transaction((e: MergeRequest) => {
           qMergeDelPendingOfCopy.run(e.roomId, e.copyId)
           qMergeInsert.run(
@@ -1357,6 +1454,7 @@ io.on('connection', (socket: Socket) => {
             JSON.stringify(e.stats || {}),
             e.doc.current !== undefined && e.doc.current !== null ? JSON.stringify(e.doc.current) : null,
             e.doc.base !== undefined && e.doc.base !== null ? JSON.stringify(e.doc.base) : null,
+            e.kind || 'copy',
           )
           qMergeTrimRoom.run(e.roomId, e.roomId, MAX_MERGES_PER_ROOM)
         })(entry)
@@ -1366,8 +1464,9 @@ io.on('connection', (socket: Socket) => {
           sender: entry.sender,
           stats: entry.stats,
           createdAt: entry.createdAt,
+          kind: entry.kind,
         })
-        console.log(`[vetvi-sync] merge "${entry.id}" → room "${roomId}"`)
+        console.log(`[vetvi-sync] merge "${entry.id}" (${entry.kind}) → room "${roomId}"`)
         ack?.({ ok: true, id: entry.id })
       } catch (error) {
         console.error('[vetvi-sync] merge-send error', error)
@@ -1376,17 +1475,23 @@ io.on('connection', (socket: Socket) => {
     },
   )
 
-  // Список заявок комнаты (для владельца)
+  // Список заявок комнаты (все: активные и выполненные — для контроля).
+  // docs=false — лёгкий список без документов (окно запросов), docs=true — с ними.
   socket.on(
     'vetvi:merge-list',
-    (payload: { roomId?: string }, ack?: (r: unknown) => void) => {
+    (payload: { roomId?: string; docs?: boolean }, ack?: (r: unknown) => void) => {
       try {
         const roomId = payload?.roomId
         if (!isSafeRoom(roomId)) {
           ack?.({ ok: false, error: 'bad room' })
           return
         }
-        ack?.({ ok: true, requests: mergeListOf(roomId), pending: pendingCount(roomId) })
+        const withDocs = payload?.docs !== false
+        const requests = mergeListOf(roomId)
+        if (!withDocs) {
+          for (const r of requests) r.doc = { current: null, base: null }
+        }
+        ack?.({ ok: true, requests, pending: pendingCount(roomId) })
       } catch (error) {
         console.error('[vetvi-sync] merge-list error', error)
         ack?.({ ok: false, error: 'list failed' })
@@ -1394,11 +1499,14 @@ io.on('connection', (socket: Socket) => {
     },
   )
 
-  // Решение владельца: принять/отклонить
+  // Решение владельца/админа: принять/отклонить.
+  // Право подтверждать — роль owner или admin (проверяется по сессии токена).
+  // Перед применением сервер сохраняет ПОЛНЫЙ снимок текущего документа
+  // комнаты (таблица snapshots) — контроль и возможность отката.
   socket.on(
     'vetvi:merge-decide',
     (
-      payload: { roomId?: string; requestId?: string; decision?: string },
+      payload: { roomId?: string; requestId?: string; decision?: string; token?: string; userId?: string },
       ack?: (r: unknown) => void,
     ) => {
       try {
@@ -1409,6 +1517,16 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, error: 'bad room' })
           return
         }
+        const acc = verifySession(payload?.token, payload?.userId)
+        if (!acc) {
+          ack?.({ ok: false, error: 'forbidden: нужна сессия аккаунта' })
+          return
+        }
+        const myRole = accessRole(roomId, acc.id)
+        if (myRole !== 'owner' && myRole !== 'admin') {
+          ack?.({ ok: false, error: 'forbidden: подтверждать слияние может владелец или админ' })
+          return
+        }
         const entry = qMergeById.get(requestId) as
           | { id: string; room_id: string; copy_id: string; status: string }
           | null
@@ -1416,15 +1534,57 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: false, error: 'merge not found' })
           return
         }
-        qMergeSetStatus.run(decision, requestId)
+        const kindRow = qMergeKindOf.get(requestId) as { kind?: string } | null
+        const kind = kindRow?.kind === 'replace' ? 'replace' : 'copy'
+        const decidedAt = new Date().toISOString()
+        let snapshotOk = false
+        if (decision === 'applied') {
+          // снимок ДО применения: текущий документ комнаты
+          const roomRow = qRoomById.get(roomId) as { doc: string | null } | null
+          if (roomRow && roomRow.doc) {
+            try {
+              snapshotOk = snapshotInsert(roomId, kind === 'replace' ? 'replace' : 'merge', `Перед ${kind === 'replace' ? 'заменой' : 'слиянием'} · решил ${acc.name}`, JSON.parse(roomRow.doc))
+            } catch { /* снимок не критичен */ }
+          }
+        }
+        qMergeSetDecided.run(decision, acc.name, decidedAt, requestId)
+
+        if (decision === 'applied' && kind === 'replace') {
+          // замена подтверждена: сервер сам применяет версию отправителя ко всей
+          // комнате (все участники, включая отправителя, получают готовый документ)
+          const full = qMergeByIdFull.get(requestId) as { doc_current: string | null } | null
+          let doc: unknown = null
+          if (full && full.doc_current) {
+            try { doc = JSON.parse(full.doc_current) } catch { doc = null }
+          }
+          if (doc && Array.isArray((doc as { nodes?: unknown }).nodes)) {
+            saveRoomDoc(roomId, doc, decidedAt)
+            scheduleTrim()
+            const nmR = docProjectName(doc)
+            if (nmR) applyRoomRename(roomId, nmR)
+            io.to(roomId).emit('vetvi:replaced', {
+              roomId,
+              doc,
+              by: { name: acc.name, color: acc.color },
+              requestId,
+            })
+            console.log(`[vetvi-sync] replace "${requestId}" applied by ${acc.name} (snapshot: ${snapshotOk ? 'yes' : 'no'})`)
+          } else {
+            ack?.({ ok: false, error: 'повреждённый документ замены' })
+            return
+          }
+        }
+
         io.to(roomId).emit('vetvi:merge-decision', {
           roomId,
           requestId,
           status: decision,
           copyId: entry.copy_id,
+          kind,
+          decidedBy: acc.name,
         })
-        console.log(`[vetvi-sync] merge "${requestId}" → ${decision}`)
-        ack?.({ ok: true, status: decision })
+        console.log(`[vetvi-sync] merge "${requestId}" (${kind}) → ${decision} by ${acc.name}`)
+        ack?.({ ok: true, status: decision, kind, snapshot: snapshotOk })
       } catch (error) {
         console.error('[vetvi-sync] merge-decide error', error)
         ack?.({ ok: false, error: 'decide failed' })
@@ -1648,7 +1808,7 @@ io.on('connection', (socket: Socket) => {
 migrateJsonToSqlite()
 
 console.log(
-  `[vetvi-sync] SQLite «${DB_FILE}»: комнат ${(qRoomsCount.get() as { c: number }).c}, merge-заявок ${(qMergesCount.get() as { c: number }).c}`,
+  `[vetvi-sync] SQLite «${DB_FILE}»: комнат ${(qRoomsCount.get() as { c: number }).c}, merge-заявок ${(qMergesCount.get() as { c: number }).c}, снимков ${(qSnapsCount.get() as { c: number }).c}`,
 )
 
 /* периодическая чистка призраков во всех комнатах — онлайн-счётчик остаётся точным,
@@ -1698,7 +1858,7 @@ function applyAccessSync(msg: { roomId?: string; changed?: { userId?: string; ro
   for (const ch of list) {
     const uid = String(ch?.userId || '')
     if (!uid) continue
-    const role = ch?.role === 'editor' || ch?.role === 'reader' || ch?.role === 'owner' ? ch.role : null
+    const role = ch?.role === 'editor' || ch?.role === 'reader' || ch?.role === 'admin' || ch?.role === 'owner' ? ch.role : null
     for (const [sid, m] of room.members) {
       if (m.accId !== uid) continue
       const sock = io.of('/').sockets.get(sid)

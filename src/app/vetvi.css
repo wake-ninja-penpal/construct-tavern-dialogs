@@ -64,7 +64,10 @@ kbd{font:600 10px var(--mono);background:#22262d;border:1px solid var(--line2);b
     padding-right: 5px !important;}
 .save-wrap .caret svg{width:12px;height:12px;transition:transform .2s; stroke: #a6acb7;}
 .save-wrap.open .caret svg{transform:rotate(180deg)}
-.save-menu{position:absolute;top:calc(100% + 7px);left:0;min-width:250px;background:#1b1e24;border:1px solid #303540;border-radius:11px;padding:6px;box-shadow:var(--sh);display:none;z-index:60;transform-origin:top left;animation:ctxIn .15s cubic-bezier(.2,.9,.3,1.2)}
+/* меню сохранения рендерится ВНЕ шапки (fixed, позиция от кнопки — inline style):
+   z-index работает против плавающей панели инструментов (.tool-float, 45) и
+   холста — меню всегда открывается поверх них, как попапы участников (95) */
+.save-menu{position:fixed;top:calc(100% + 7px);left:0;min-width:250px;background:#1b1e24;border:1px solid #303540;border-radius:11px;padding:6px;box-shadow:var(--sh);display:none;z-index:96;transform-origin:top left;animation:ctxIn .15s cubic-bezier(.2,.9,.3,1.2)}
 .save-menu.show{display:block}
 .sm-i{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;font-size:12.5px;color:var(--tx2);cursor:pointer;transition:.12s}
 .sm-i:hover{background:#262b33;color:var(--tx)}
@@ -1123,7 +1126,19 @@ input[type=range].inp{padding:0;height:26px;accent-color:var(--acc);background:t
 .mrg-item{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;margin:0 0 8px;background:#171a1f}
 .mrg-top{display:flex;align-items:center;gap:8px;font-size:12.5px;flex-wrap:wrap}
 .mrg-dot{width:10px;height:10px;border-radius:50%;flex:none}
+/* тип запроса: «слияние копии» / «замена проекта» */
+.mrg-kind{font:600 10px var(--mono);letter-spacing:.3px;text-transform:uppercase;color:var(--tx3);border:1px solid var(--line2);border-radius:6px;padding:1.5px 7px;background:#1d2026}
+.mrg-kind:only-of-type{color:var(--tx2)}
 .mrg-date{color:var(--tx3);font-size:11px}
+/* фильтр «Активные / Все» */
+.mrg-filters{display:flex;align-items:center;gap:6px;margin:0 0 10px}
+.mrg-fbtn{background:#1d2026;border:1px solid var(--line2);color:var(--tx2);border-radius:8px;padding:5px 12px;font:500 12px var(--body);cursor:pointer;transition:.13s}
+.mrg-fbtn:hover{background:#262b33;color:var(--tx)}
+.mrg-fbtn.on{background:var(--accd);border-color:rgba(226,165,78,.5);color:var(--acc);font-weight:600}
+.mrg-note{font-size:11px;color:var(--tx3);margin-left:auto}
+/* кто и когда решил выполненный запрос */
+.mrg-decided{margin-top:8px;font-size:11px;color:var(--tx3)}
+.mrg-hint{margin:10px 0 0;font-size:11px;color:var(--tx3);line-height:1.5}
 .mrg-status{margin-left:auto;font:600 10.5px var(--mono);padding:2px 8px;border-radius:6px;background:#22262d;color:var(--tx2)}
 .mrg-status.st-pending{background:rgba(216,201,111,.15);color:var(--warn)}
 .mrg-status.st-applied{background:rgba(143,191,127,.15);color:var(--ok)}
@@ -1293,6 +1308,15 @@ body{overflow:hidden;background:var(--bg)}
   width:26px;flex:none;cursor:pointer;font-size:14px;line-height:1;
 }
 .sd-badge-x:hover{color:var(--tx1);background:rgba(255,255,255,.05)}
+/* кнопка «Merge-запросы» внутри блока расхождения */
+.sd-badge-mrg{
+  display:flex;align-items:center;background:none;border:0;border-left:1px solid var(--line);
+  color:var(--acc);cursor:pointer;font:600 11.5px var(--body);padding:0 13px;white-space:nowrap;
+}
+.sd-badge-mrg:hover{background:rgba(226,165,78,.1)}
+/* компактный блок «Merge-запросы: N» — когда расхождения нет, но есть заявки */
+#syncDiffBadge.requests-only{border-color:rgba(216,201,111,.5)}
+#syncDiffBadge.requests-only .sd-badge-dot{background:#d8c96f;box-shadow:0 0 0 0 rgba(216,201,111,.5);animation:sdPulse 2s infinite}
 
 /* окно «Сравнение версий проекта» */
 .sd-head{margin:2px 0 12px;font-size:12.5px;color:var(--tx2);line-height:1.5}
@@ -1650,6 +1674,9 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 
 /* попап уведомлений */
 .ntf-pop{min-width:300px;max-width:340px}
+/* «Очистить список» — красноватая, при наведении фон под цвет danger */
+.ntf-pop .ntf-clear{color:#cf6b5a}
+.ntf-pop .ntf-clear:hover{background:rgba(207,107,90,.12);color:#f0a791}
 .ntf-empty{font-size:12px;color:var(--tx3);padding:8px 11px 4px;line-height:1.5}
 .ntf-list{display:flex;flex-direction:column;gap:2px;padding:4px 6px 2px;max-height:320px;overflow-y:auto}
 .ntf-item{display:flex;align-items:center;gap:9px;padding:8px 7px;border-radius:8px;font-size:12.5px;transition:.12s}
@@ -1680,6 +1707,7 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .sa-who i{font-style:normal;font-size:10.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sa-role{font:600 10px var(--mono);border-radius:5px;padding:1px 7px;flex:none}
 .sa-role.r-owner{color:#e2a54e;border:1px solid rgba(226,165,78,.45);background:rgba(226,165,78,.1)}
+.sa-role.r-admin{color:#e8b46a;border:1px solid rgba(226,165,78,.5);background:rgba(226,165,78,.14)}
 .sa-role.r-editor{color:#8fbf7f;border:1px solid rgba(143,191,127,.4);background:rgba(143,191,127,.08)}
 .sa-role.r-reader{color:#d8c96f;border:1px solid rgba(216,201,111,.4);background:rgba(216,201,111,.08)}
 .sa-acts{display:flex;gap:5px;flex:none}

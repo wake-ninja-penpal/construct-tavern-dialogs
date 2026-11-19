@@ -6,8 +6,9 @@ import { notifyAccessChanged, notifyUserPush } from '@/lib/syncNotify';
 import { findUserByLogin } from '@/lib/users';
 
 /** POST /api/access/grant {roomId, login, role, projectId?, projectName?} —
- *  открыть доступ пользователю по ЛОГИНУ аккаунта. Получателю создаётся
- *  уведомление (access_granted) — проект появится у него в списке. */
+ *  открыть доступ пользователю по ЛОГИНУ аккаунта. Роли: editor, reader,
+ *  admin (администратор — подтверждает merge-запросы и замены проекта).
+ *  Получателю создаётся уведомление (access_granted). */
 export async function POST(req: NextRequest) {
   try {
     const caller = await currentUser();
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     }
 
     const role = typeof body.role === 'string' ? body.role : '';
-    if (role !== 'editor' && role !== 'reader') {
+    if (role !== 'editor' && role !== 'reader' && role !== 'admin') {
       return NextResponse.json({ error: 'Некорректная роль' }, { status: 400 });
     }
 

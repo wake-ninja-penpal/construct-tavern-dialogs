@@ -524,13 +524,16 @@ export class SyncClient {
       if (!m || m.roomId !== this.room) return;
       this.applyLive(m);
     });
-    sock.on('vetvi:merge-new', (m: { roomId?: string; sender?: { name?: string } }) => {
+    sock.on('vetvi:merge-new', (m: { roomId?: string; sender?: { name?: string }; kind?: string }) => {
       if (!m || m.roomId !== this.room) return;
       this.mergeCount = (this.mergeCount || 0) + 1;
       this.renderUI();
-      this.store.toast('Новый merge-запрос от ' + ((m.sender && m.sender.name) || 'гостя'), 'warn');
+      const who = (m.sender && m.sender.name) || 'гостя';
+      this.store.toast(m.kind === 'replace'
+        ? who + ' просит заменить проект своей версией — окно Merge-запросов'
+        : 'Новый merge-запрос от ' + who, 'warn');
     });
-    sock.on('vetvi:merge-decision', (m: { roomId?: string; copyId?: string; status?: string }) => {
+    sock.on('vetvi:merge-decision', (m: { roomId?: string; copyId?: string; requestId?: string; status?: string; kind?: string; decidedBy?: string }) => {
       if (!m) return;
       const list = copiesAll();
       let hit = false;
@@ -539,6 +542,27 @@ export class SyncClient {
       if (m.copyId === this.activeCopy) {
         this.store.toast(m.status === 'applied' ? 'Ваш merge-запрос принят' : 'Ваш merge-запрос отклонён', m.status === 'applied' ? 'ok' : 'warn');
       }
+      /* решивший участник обновляет счётчик pending */
+      if (m.roomId === this.room && this.canDecideMerge()) {
+        this.mergeRequests(() => { /* mergeRequests сам обновит mergeCount */ }, false);
+      }
+      /* отправленный отсюда запрос на замену: решение пришло */
+      if (this.lastReplaceReq && m.requestId === this.lastReplaceReq.id) {
+        const who = m.decidedBy ? ' — решил ' + m.decidedBy : '';
+        if (m.status === 'applied') this.store.toast('Замена проекта подтверждена' + who, 'ok');
+        else this.store.toast('Запрос на замену отклонён' + who, 'warn');
+        this.lastReplaceReq = null;
+      }
+    });
+    /* подтверждённая владельцем/админом замена: применяется сразу (без
+       блока расхождения) — версия уже одобрена и снимок сохранён */
+    sock.on('vetvi:replaced', (m: { roomId?: string; doc?: SyncDoc; by?: { name?: string; color?: string } | null }) => {
+      if (!m || m.roomId !== this.room) return;
+      if (!m.doc || !Array.isArray(m.doc.nodes)) return;
+      if (this.applyingRemote) return;
+      this.applyRemote(m.doc, false);
+      this.store.clearSyncDiff();
+      this.store.toast('Проект заменён одобренной версией' + (m.by && m.by.name ? ' — решил ' + m.by.name : ''), 'ok');
     });
     sock.on('vetvi:error', (m: { message?: string }) => {
       if (m && m.message) this.store.toast(m.message, 'err');
@@ -811,8 +835,9 @@ export class SyncClient {
 
   /* ── действия блока расхождения (SyncDiffModal) ── */
 
-  /** «Опубликовать локальную версию на сервер»: локальная версия возвращается в
-   *  редактор и заменяет данные комнаты; соавторы получают её на сравнение.
+  /** «Опубликовать локальную версию на сервер»: у владельца/админа — прямая
+   *  замена (соавторы получают её на сравнение); у редактора/читателя — ЗАПРОС
+   *  НА ЗАМЕНУ, который подтвердит владелец/админ (сервер сохранит снимок).
    *  Страховка: заглушку «Проект по доступу» публиковать нельзя — она стёрла бы
    *  данные комнаты пустым проектом. */
   diffPushLocal(): void {
@@ -821,6 +846,12 @@ export class SyncClient {
     const lp = ((d.localDoc as { meta?: { projectId?: unknown } } | undefined)?.meta?.projectId);
     if (typeof lp === 'string' && this.store.roomStubPids.has(lp)) {
       this.store.toast('Публиковать нечего: локальная копия пуста — загрузите данные комнаты', 'warn');
+      return;
+    }
+    if (!this.canDecideMerge()) {
+      const stats = mergeStats(d.serverDoc as Record<string, unknown>, d.localDoc as Record<string, unknown>);
+      this.sendReplaceRequest(d.localDoc as SyncDoc, stats);
+      this.store.clearSyncDiff();
       return;
     }
     if (d.kind !== 'foreign') this.applyRemote(d.localDoc as SyncDoc, false);
@@ -881,6 +912,12 @@ export class SyncClient {
       charGroups,
       palette: (Array.isArray(server.palette) ? server.palette : (Array.isArray(local.palette) ? local.palette : [])) as string[],
     };
+    if (!this.canDecideMerge()) {
+      const stats = mergeStats(d.serverDoc as Record<string, unknown>, merged as unknown as Record<string, unknown>);
+      this.sendReplaceRequest(merged, stats);
+      this.store.clearSyncDiff();
+      return;
+    }
     this.applyRemote(merged, false);
     this.publishReplace(merged);
     this.store.clearSyncDiff();
@@ -1472,7 +1509,9 @@ export class SyncClient {
 
   /* ═══ merge-запросы ═══ */
 
-  /** Служебный сокет для merge-операций (вне комнат). */
+  /** Служебный сокет для merge-операций (вне комнат). В каждый payload
+   *  добавляется сессия аккаунта (token+userId): сервер проверяет право
+   *  подтверждать merge-запросы/замены (владелец или админ комнаты). */
   opCall(ev: string, payload: Record<string, unknown>, cb?: (res: { ok?: boolean; [k: string]: unknown }) => void): void {
     if (!this.opSock) {
       this.opSock = io(SYNC_URL, {
@@ -1484,12 +1523,51 @@ export class SyncClient {
       });
     }
     const sock = this.opSock;
+    const tok = getAccountToken();
+    const me = getAccount();
+    const pay: Record<string, unknown> = { ...payload };
+    if (tok) { pay.token = tok; pay.userId = me ? me.id : undefined; }
     const send = () => {
-      try { sock.emit(ev, payload, (res: { ok?: boolean }) => { if (cb) cb(res); }); } catch { if (cb) cb({ ok: false, error: 'emit failed' }); }
+      try { sock.emit(ev, pay, (res: { ok?: boolean }) => { if (cb) cb(res); }); } catch { if (cb) cb({ ok: false, error: 'emit failed' }); }
     };
     if (sock.connected) send();
     else sock.once('connect', send);
   }
+
+  /** Может ли текущий участник подтверждать merge-запросы и замены проекта:
+   *  роль в комнате — владелец или администратор. */
+  canDecideMerge(): boolean {
+    return this.role === 'owner' || this.role === 'admin';
+  }
+
+  /** Отправить запрос на ЗАМЕНУ данных комнаты своей версией («Опубликовать
+   *  локальную версию» / «Смерджить» от участника без права подтверждения).
+   *  Применяется владельцем/админом из окна Merge-запросов: перед применением
+   *  сервер сохраняет снимок текущего проекта. */
+  sendReplaceRequest(newDoc: SyncDoc, stats: MergeStats): void {
+    if (!this.enabled || !this.room) { this.store.toast('Запрос на замену доступен внутри комнаты проекта', 'warn'); return; }
+    if (this.store.viewOnly) { this.store.toast('Только чтение: публикация недоступна', 'warn'); return; }
+    const me = getMe();
+    const copyId = 'replace:' + me.id;
+    this.opCall('vetvi:merge-send', {
+      roomId: this.room,
+      copyId,
+      sender: { name: me.name, color: me.color },
+      stats,
+      doc: { current: newDoc, base: null },
+      kind: 'replace',
+    }, (res) => {
+      if (res && res.ok) {
+        this.lastReplaceReq = { id: String(res.id || ''), at: Date.now() };
+        this.store.toast('Запрос на замену отправлен — его подтвердит владелец или админ комнаты', 'ok');
+      } else {
+        this.store.toast('Не удалось отправить запрос на замену: ' + ((res && res.error) || 'ошибка'), 'err');
+      }
+    });
+  }
+
+  /** Последний отправленный запрос на замену (id) — для тоста о решении. */
+  lastReplaceReq: { id: string; at: number } | null = null;
 
   /* ═══ push-уведомления (колокольчик) ═══ */
 
@@ -1577,15 +1655,13 @@ export class SyncClient {
     });
   }
 
-  mergeRequests(cb: (res: { ok?: boolean; requests?: MergeRequest[]; pending?: number }) => void): void {
+  mergeRequests(cb: (res: { ok?: boolean; requests?: MergeRequest[]; pending?: number }) => void, docs = true): void {
     if (!this.room) {
       this.store.toast('Merge-запросы доступны внутри комнаты проекта', 'warn');
       return;
     }
-    this.opCall('vetvi:merge-list', { roomId: this.room }, (res) => {
+    this.opCall('vetvi:merge-list', { roomId: this.room, docs }, (res) => {
       if (res && res.ok) {
-        const reqs = (res.requests || []) as MergeRequest[];
-        void reqs;
         this.mergeCount = ((res.pending as number | undefined) || 0);
         this.renderUI();
       }
@@ -1596,16 +1672,29 @@ export class SyncClient {
   decideMerge(rid: string, act: 'apply' | 'reject'): void {
     const roomId = this.room;
     if (!roomId) return;
+    if (!this.canDecideMerge()) {
+      this.store.toast('Подтвердить слияние/замену может владелец или админ комнаты', 'warn');
+      return;
+    }
     this.opCall('vetvi:merge-list', { roomId }, (res) => {
       let req: MergeRequest | null = null;
       (((res && res.requests) || []) as MergeRequest[]).forEach((x) => { if (x.id === rid) req = x; });
       if (!req) { this.store.toast('Merge-запрос не найден', 'err'); return; }
+      const kind = (req as MergeRequest).kind === 'replace' ? 'replace' : 'copy';
       if (act === 'apply') {
-        this.applyMergeRequest(req as MergeRequest);
-        this.opCall('vetvi:merge-decide', { roomId, requestId: rid, decision: 'applied' }, () => { /* ack */ });
+        if (kind === 'replace') {
+          /* замена применяет СЕРВЕР (снимок + saveRoomDoc + vetvi:replaced) */
+          this.opCall('vetvi:merge-decide', { roomId, requestId: rid, decision: 'applied' }, (r2) => {
+            if (r2 && r2.ok) this.store.toast('Замена подтверждена — участники получили новую версию', 'ok');
+            else this.store.toast('Не удалось подтвердить замену: ' + ((r2 && r2.error) || 'ошибка'), 'err');
+          });
+        } else {
+          this.applyMergeRequest(req as MergeRequest);
+          this.opCall('vetvi:merge-decide', { roomId, requestId: rid, decision: 'applied' }, () => { /* ack */ });
+        }
       } else {
         this.opCall('vetvi:merge-decide', { roomId, requestId: rid, decision: 'rejected' }, () => { /* ack */ });
-        this.store.toast('Merge-запрос отклонён', 'warn');
+        this.store.toast('Запрос отклонён', 'warn');
       }
     });
   }
@@ -1717,6 +1806,10 @@ export interface MergeRequest {
   status?: string;
   stats?: MergeStats;
   doc?: { current?: Record<string, unknown>; base?: Record<string, unknown> };
+  /** 'copy' — слияние из локальной копии; 'replace' — запрос на замену проекта. */
+  kind?: 'copy' | 'replace';
+  decidedBy?: string | null;
+  decidedAt?: string | null;
   [k: string]: unknown;
 }
 

@@ -17,6 +17,7 @@ import { getMe } from '@/vetvi/core/identity';
 import {
   avatarInitial,
   getAccount,
+  notificationsClear,
   notificationsFetch,
   notificationsRead,
   type NotificationItem,
@@ -78,6 +79,7 @@ interface NtfState {
 
 const ROLE_LABEL: Record<string, string> = {
   owner: 'владелец',
+  admin: 'администратор',
   editor: 'редактор',
   reader: 'только чтение',
 };
@@ -170,6 +172,18 @@ export function useNotifications(_store: VetviStore) {
     if (v) void refresh(true);
   };
 
+  /** Полностью очистить список уведомлений (кнопка «Очистить список»). */
+  const clearAll = useCallback(async () => {
+    const ok = await notificationsClear();
+    if (ok) {
+      seenIds.current = new Set();
+      setState({ items: [], unread: 0 });
+      getStore().toast('Список уведомлений очищен', 'ok');
+    } else {
+      getStore().toast('Не удалось очистить уведомления', 'err');
+    }
+  }, []);
+
   /** Открыть проект/комнату из уведомления. */
   const openItem = (n: NotificationItem) => {
     setOpen(false);
@@ -186,15 +200,16 @@ export function useNotifications(_store: VetviStore) {
     });
   };
 
-  return { state, open, toggle, setOpen, refresh, openItem };
+  return { state, open, toggle, setOpen, refresh, openItem, clearAll };
 }
 
 export function NotificationsPopover(props: {
   items: NotificationItem[];
   onOpenItem: (n: NotificationItem) => void;
   onClose: () => void;
+  onClear?: () => void;
 }) {
-  const { items, onOpenItem, onClose } = props;
+  const { items, onOpenItem, onClose, onClear } = props;
   let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8 };
   if (typeof document !== 'undefined') {
     const anchor = document.querySelector('#bellBtn');
@@ -254,6 +269,11 @@ export function NotificationsPopover(props: {
         ))}
       </div>
       <div className="cp-acts">
+        {onClear && items.length > 0 && (
+          <button type="button" className="cp-act ntf-clear" title="Удалить все уведомления" onClick={onClear}>
+            <IcTrash />Очистить список
+          </button>
+        )}
         <button type="button" className="cp-act" onClick={onClose}><IcX />Закрыть</button>
       </div>
     </div>
@@ -322,6 +342,13 @@ function IcX() {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
       <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+function IcTrash() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
     </svg>
   );
 }

@@ -27,7 +27,7 @@ import { hkConflict, hkDef, hkHuman, hkLoad, hkResetAll, hkSetUser, hkText, hkUs
 import { condText } from '@/vetvi/core/vars';
 import { STATUS_RU, TYPES } from '@/vetvi/core/constants';
 import type { VetviNode } from '@/vetvi/core/types';
-import { LOG_SNAP_KEEP, type LogEntry, type VetviStore } from './store';
+import { type LogEntry, type VetviStore } from './store';
 import { TypeEditorModal } from './TypeEditorModal';
 import { TextsImportModal } from './TextsImportModal';
 import { TypeIcon } from './NodeCard';
@@ -307,7 +307,7 @@ function logRbNoSnapReason(e: LogEntry): string {
   if (e.snapTooBig) {
     return 'Снимок не сохранился: правка слишком большая для снимка (превышен лимит размера одного снимка), ' + tail;
   }
-  return 'Снимок вытеснен более новыми правками: журнал хранит снимки у последних ~' + LOG_SNAP_KEEP + ' записей (в LocalStorage-режиме меньше), ' + tail;
+  return 'Снимок вытеснен более новыми правками: журнал хранит снимки у последних записей (количество — настройка «Настройки проекта → Снимки проекта»), ' + tail;
 }
 
 /* Для каждой записи журнала — что доступно для отката.
@@ -856,10 +856,11 @@ export function GroupCreateModal({ store }: { store: VetviStore }) {
 
 /* ═══════════ настройки: хаб + горячие клавиши + хранилище (.dlg-modal > .set-card) ═══════════ */
 
-export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' | 'ui' }) {
+export function SettingsModal({ store, section }: { store: VetviStore; section: 'hub' | 'hk' | 'store' | 'ui' | 'snap' }) {
   if (section === 'hk') return <HkModal store={store} />;
   if (section === 'store') return <StoreModal store={store} />;
   if (section === 'ui') return <UiModal store={store} />;
+  if (section === 'snap') return <SnapModal store={store} />;
   return (
     <div className="dlg-modal show" role="dialog" aria-label="Настройки проекта">
       <div className="dlg-modal-card set-card">
@@ -907,6 +908,20 @@ export function SettingsModal({ store, section }: { store: VetviStore; section: 
             <span className="set-item-info">
               <span className="set-item-name">Настройки интерфейса</span>
               <span className="set-item-desc">Пределы масштаба холста: отдаление и приближение</span>
+            </span>
+            <span className="set-item-go">→</span>
+          </button>
+          <button type="button" className="set-item" onClick={() => store.openModal('settingsSnap')}>
+            <span className="set-item-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" width="20" height="20" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <circle cx="9" cy="9" r="2.2" />
+                <path d="m5 19 6.5-6.5a2 2 0 0 1 2.8 0L19 17" />
+              </svg>
+            </span>
+            <span className="set-item-info">
+              <span className="set-item-name">Снимки проекта</span>
+              <span className="set-item-desc">Сколько снимков хранить перед слиянием/заменой и в журнале действий</span>
             </span>
             <span className="set-item-go">→</span>
           </button>
@@ -1032,6 +1047,103 @@ function HkModal({ store }: { store: VetviStore }) {
 
 function hkText2(id: string): string {
   return hkText(id);
+}
+
+/* ── настройки снимков проекта: серверные снимки перед слиянием/заменой
+   (10–30, читает vetvi-sync при сохранении снимка) и снимки журнала ── */
+
+function SnapModal({ store }: { store: VetviStore }) {
+  const [snap, setSnap] = useState(String(store.projectSnapshotsLimit()));
+  const [journal, setJournal] = useState(String(store.journalSnapKeep()));
+  const [msg, setMsg] = useState<{ t: string; cls: string } | null>(null);
+  void store.revision;
+
+  const parse = (v: string): number | null => {
+    const n = Number(v.replace(',', '.').trim());
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  };
+  const invalid = (() => {
+    const a = parse(snap);
+    const b = parse(journal);
+    if (a === null || b === null) return 'Введите целые числа';
+    if (a < 10 || a > 30) return 'Снимков перед слиянием/заменой: от 10 до 30';
+    if (b < 5 || b > 100) return 'Снимков в журнале: от 5 до 100';
+    return null;
+  })();
+  const apply = () => {
+    const a = parse(snap);
+    const b = parse(journal);
+    if (a === null || b === null || invalid) return;
+    store.setSnapshotSettings(a, b);
+    setSnap(String(store.projectSnapshotsLimit()));
+    setJournal(String(store.journalSnapKeep()));
+    setMsg({ t: 'Настройки снимков сохранены', cls: 'ok' });
+  };
+
+  return (
+    <div className="dlg-modal sub show" role="dialog" aria-label="Настройки — Снимки проекта">
+      <div className="dlg-modal-card set-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Настройки — Снимки проекта</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={() => store.closeModal()}>×</button>
+        </div>
+        <div className="dlg-modal-body">
+          <div className="set-hint">Снимки — это полные копии состояния проекта на момент изменения. Они позволяют откатить неудачное слияние или замену.</div>
+          <div className="ui-zoom-row">
+            <label className="ui-zoom-field">
+              <span className="ui-zoom-name">Перед слиянием / заменой</span>
+              <span className="ui-zoom-desc">Сколько последних снимков хранит сервер перед принятым merge-запросом или заменой проекта (10–30)</span>
+              <span className="ui-zoom-input">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={snap}
+                  aria-label="Количество снимков перед слиянием или заменой"
+                  onChange={(e) => setSnap(e.target.value)}
+                />
+                <span className="ui-zoom-pct">шт.</span>
+              </span>
+            </label>
+            <label className="ui-zoom-field">
+              <span className="ui-zoom-name">В журнале действий</span>
+              <span className="ui-zoom-desc">У скольких последних записей журнала хранится снимок состояния для отката (5–100)</span>
+              <span className="ui-zoom-input">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={journal}
+                  aria-label="Количество снимков в журнале действий"
+                  onChange={(e) => setJournal(e.target.value)}
+                />
+                <span className="ui-zoom-pct">шт.</span>
+              </span>
+            </label>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--tx3)', margin: '10px 0 0' }}>
+            Настройка хранится в проекте и синхронизируется всем участникам комнаты. Снимки Merge-запросов и замен доступны на сервере комнаты; снимки журнала — в локальном журнале проекта.
+          </p>
+          <div className="set-foot-row">
+            <button type="button" className="btn primary" disabled={!!invalid} title={invalid || 'Сохранить настройки снимков'} onClick={apply}>
+              Применить
+            </button>
+            <button
+              type="button"
+              className="btn"
+              title="Вернуть значения по умолчанию (20 и 30)"
+              onClick={() => { store.setSnapshotSettings(20, 30); setSnap(String(store.projectSnapshotsLimit())); setJournal(String(store.journalSnapKeep())); setMsg({ t: 'Возвращены значения по умолчанию', cls: 'ok' }); }}
+            >
+              Сбросить
+            </button>
+            {msg && <span className={'set-store-msg' + (msg.cls ? ' ' + msg.cls : '')}>{msg.t}</span>}
+          </div>
+        </div>
+        <div className="dlg-modal-foot">
+          <button type="button" className="btn" onClick={() => store.openModal('settings')}>← Назад</button>
+          <button type="button" className="btn primary" onClick={() => store.closeModal()}>Готово</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ── настройки интерфейса: пределы масштаба холста ── */
@@ -1335,6 +1447,7 @@ export function ModalHost({ store }: { store: VetviStore }) {
     case 'settingsHk': return <SettingsModal store={store} section="hk" />;
     case 'settingsStore': return <SettingsModal store={store} section="store" />;
     case 'settingsUi': return <SettingsModal store={store} section="ui" />;
+    case 'settingsSnap': return <SettingsModal store={store} section="snap" />;
     case 'share': return <ShareModal store={store} />;
     case 'passSet': return <PassSetModal store={store} />;
     case 'passRemove': return <PassRemoveModal store={store} />;

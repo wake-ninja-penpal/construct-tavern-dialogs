@@ -79,12 +79,14 @@ export async function authRefreshAccount(): Promise<void> {
 
 /* ═══ доступы (ProjectAccess) и уведомления — общие хелперы ═══ */
 
+export type AccessRole = 'owner' | 'admin' | 'editor' | 'reader';
+
 export interface AccessListItem {
   userId: string;
   login: string;
   displayName: string;
   color: string;
-  role: 'owner' | 'editor' | 'reader';
+  role: AccessRole;
   createdAt?: string;
 }
 
@@ -92,7 +94,7 @@ export interface AccessMineItem {
   roomId: string;
   projectId?: string | null;
   projectName?: string | null;
-  role: 'owner' | 'editor' | 'reader';
+  role: AccessRole;
   ownerName?: string | null;
   /** комната жива на realtime-сервере? false — владелец выключил сетевой
    *  режим (проект офлайн: пометка в списке, открытие блокируется);
@@ -155,8 +157,10 @@ export async function accessList(roomId: string): Promise<{ ok: boolean; meRole?
   return { ok: true, meRole: (data.me as { role?: string } | undefined)?.role || null, items: (data.items as AccessListItem[]) || [] };
 }
 
-/** Открыть доступ пользователю по логину (+ уведомление ему). */
-export async function accessGrant(roomId: string, login: string, role: 'editor' | 'reader', projectId?: string | null, projectName?: string | null): Promise<{ ok: boolean; error?: string }> {
+/** Открыть доступ пользователю по логину (+ уведомление ему). Роли:
+ *  editor (редактор), reader (только чтение), admin (администратор —
+ *  подтверждает merge-запросы и замены проекта, как владелец). */
+export async function accessGrant(roomId: string, login: string, role: 'editor' | 'reader' | 'admin', projectId?: string | null, projectName?: string | null): Promise<{ ok: boolean; error?: string }> {
   const { status, data } = await postJson('/api/access/grant', { roomId, projectId, projectName, login, role });
   return { ok: status === 200, error: status === 200 ? undefined : String(data.error || 'Не удалось открыть доступ') };
 }
@@ -204,6 +208,16 @@ export async function notificationsRead(ids?: string[]): Promise<void> {
       body: JSON.stringify(ids && ids.length ? { ids } : { all: true }),
     });
   } catch { /* не критично */ }
+}
+
+/** Полностью очистить список уведомлений (кнопка в попапе колокольчика). */
+export async function notificationsClear(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/notifications/clear', { method: 'POST' });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Первая буква имени для аватара. */

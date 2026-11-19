@@ -14,7 +14,7 @@
  */
 export function notifyAccessChanged(
   roomId: string,
-  changed: { userId: string; role: 'editor' | 'reader' | null }[],
+  changed: { userId: string; role: 'owner' | 'admin' | 'editor' | 'reader' | null }[],
 ): void {
   try {
     const base = process.env.VETVI_SYNC_INTERNAL_URL || 'http://127.0.0.1:3004';

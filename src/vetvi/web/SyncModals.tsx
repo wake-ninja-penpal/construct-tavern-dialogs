@@ -55,6 +55,7 @@ function SyncShell(props: { title: string; onClose: () => void; children: React.
 
 const ROLE_BADGE: Record<string, string> = {
   owner: 'владелец',
+  admin: 'администратор',
   editor: 'редактор',
   reader: 'чтение',
 };
@@ -76,7 +77,7 @@ function ShareAccess({ store }: { store: VetviStore }) {
   const [login, setLogin] = useState('');
   const [users, setUsers] = useState<UserLite[]>([]);
   const [focused, setFocused] = useState(false);
-  const [role, setRole] = useState<'editor' | 'reader'>('editor');
+  const [role, setRole] = useState<'admin' | 'editor' | 'reader'>('editor');
   const [busy, setBusy] = useState(false);
   /* проект сейчас на сервере? серость участников и автопубликация
      привязаны к этому состоянию (обновляется emit'ом стора) */
@@ -180,11 +181,12 @@ function ShareAccess({ store }: { store: VetviStore }) {
     store.toast('Доступ отозван', 'ok');
     reload();
   };
-  const setRoleOf = async (it: AccessListItem, next: 'editor' | 'reader') => {
+  const ROLE_NAME: Record<string, string> = { admin: 'администратор', editor: 'редактор', reader: 'только чтение' };
+  const setRoleOf = async (it: AccessListItem, next: 'admin' | 'editor' | 'reader') => {
     if (!sc || next === it.role) return;
     const r = await accessGrant(sc.shareRoomId(), it.login, next, null, null);
     if (!r.ok) { store.toast(r.error || 'Не удалось изменить права', 'err'); return; }
-    store.toast(it.displayName + ': права — ' + (next === 'editor' ? 'редактор' : 'только чтение'), 'ok');
+    store.toast(it.displayName + ': права — ' + (ROLE_NAME[next] || next), 'ok');
     reload();
   };
 
@@ -225,9 +227,10 @@ function ShareAccess({ store }: { store: VetviStore }) {
                   className="inp sa-role-sel"
                   value={it.role}
                   aria-label="Права доступа"
-                  title="Сменить права доступа"
-                  onChange={(e) => void setRoleOf(it, e.target.value === 'reader' ? 'reader' : 'editor')}
+                  title="Сменить права доступа (администратор подтверждает merge-запросы и замены)"
+                  onChange={(e) => void setRoleOf(it, e.target.value === 'reader' ? 'reader' : e.target.value === 'admin' ? 'admin' : 'editor')}
                 >
+                  <option value="admin">администратор</option>
                   <option value="editor">редактор</option>
                   <option value="reader">только чтение</option>
                 </select>
@@ -276,8 +279,9 @@ function ShareAccess({ store }: { store: VetviStore }) {
             value={role}
             aria-label="Права для нового пользователя"
             title="Права доступа для нового пользователя"
-            onChange={(e) => setRole(e.target.value === 'reader' ? 'reader' : 'editor')}
+            onChange={(e) => setRole(e.target.value === 'reader' ? 'reader' : e.target.value === 'admin' ? 'admin' : 'editor')}
           >
+            <option value="admin">администратор</option>
             <option value="editor">редактор</option>
             <option value="reader">только чтение</option>
           </select>
@@ -614,11 +618,36 @@ export function CopyBarModal({ store }: { store: VetviStore }) {
   );
 }
 
-/** Небольшой блок в углу холста: «данные отличаются» — клик открывает сравнение версий. */
+/** Небольшой блок в углу холста: «данные отличаются» — клик открывает сравнение
+ *  версий. В блоке есть кнопка «Merge-запросы» (список всех заявок комнаты);
+ *  когда расхождения нет, но есть запросы в очереди — показывается компактный
+ *  блок «Merge-запросы: N» (контроль входящих заявок копий и замен). */
 export function SyncDiffBadge({ store }: { store: VetviStore }) {
   void store.revision;
   const d = store.syncDiff;
-  if (!d) return null;
+  const sc = store.sync;
+  const pending = store.syncMergeCount || 0;
+  if (!d) {
+    /* нет расхождения — есть ли запросы в очереди? */
+    if (!sc || !sc.enabled || store.syncMode === 'copy' || !pending) return null;
+    return (
+      <div id="syncDiffBadge" className="requests-only" role="status" aria-label="Merge-запросы в очереди">
+        <button
+          type="button"
+          className="sd-badge-btn"
+          title="Список Merge-запросов (активные и выполненные)"
+          onClick={(e) => { e.stopPropagation(); store.openModal('merge'); }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <span className="sd-badge-dot pulse" />
+          <span className="sd-badge-text">
+            <b>Merge-запросы: {pending}</b>
+            <i>нажмите, чтобы открыть список запросов</i>
+          </span>
+        </button>
+      </div>
+    );
+  }
   const stats = mergeStats(d.serverDoc as Record<string, unknown>, d.localDoc as Record<string, unknown>);
   const n = stats.addedNodes + stats.changedNodes + stats.removedNodes + stats.addedEdges + stats.changedEdges + stats.removedEdges + stats.addedGroups + stats.changedGroups + stats.removedGroups + stats.changedTypes;
   const label = d.kind === 'incoming'
@@ -641,6 +670,17 @@ export function SyncDiffBadge({ store }: { store: VetviStore }) {
           <i>{n ? 'различий: ' + n + ' — нажмите для сравнения' : 'нажмите для сравнения версий'}</i>
         </span>
       </button>
+      {sc && sc.enabled && store.syncMode !== 'copy' && (
+        <button
+          type="button"
+          className="sd-badge-mrg"
+          title="Список Merge-запросов копий и замен (активные и выполненные)"
+          onClick={(e) => { e.stopPropagation(); store.openModal('merge'); }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          Merge-запросы{pending > 0 ? ' · ' + pending : ''}
+        </button>
+      )}
       <button
         type="button"
         className="sd-badge-x"
@@ -711,6 +751,9 @@ export function SyncDiffModal({ store }: { store: VetviStore }) {
       : <>Локальная копия проекта отличается от данных комнаты. Комната загружена как рабочая версия, локальная копия сохранена — сравните и решите, что делать.</>;
   const localCap = d.kind === 'incoming' ? 'Ваша текущая версия' : 'Локальная копия';
   const serverCap = d.kind === 'incoming' ? 'Пришедшая версия (замена)' : 'Версия комнаты (сервер)';
+  /* замена/слияние от участника без права подтверждения уходит ЗАПРОСОМ:
+     применит владелец или админ комнаты (снимок сохранит сервер) */
+  const canDecide = !!sc.canDecideMerge();
   return (
     <SyncShell
       title="Сравнение версий проекта"
@@ -720,8 +763,8 @@ export function SyncDiffModal({ store }: { store: VetviStore }) {
         <>
           {d.kind === 'incoming' && <button type="button" className="btn primary" onClick={() => { sc.diffTakeServer(); store.closeModal(); }}>Принять изменения</button>}
           {d.kind !== 'incoming' && <button type="button" className="btn primary" onClick={() => { sc.diffTakeServer(); store.closeModal(); }}>{d.kind === 'foreign' ? 'Загрузить из комнаты' : 'Перезаписать локальные данные'}</button>}
-          {d.kind !== 'incoming' && <button type="button" className="btn" onClick={() => { sc.diffPushLocal(); store.closeModal(); }}>{d.kind === 'foreign' ? 'Опубликовать мою (комнату)' : 'Опубликовать локальную версию'}</button>}
-          <button type="button" className="btn" onClick={() => { sc.diffMerge(); store.closeModal(); }}>Смерджить</button>
+          {d.kind !== 'incoming' && <button type="button" className="btn" title={canDecide ? 'Заменить данные комнаты вашей версией' : 'Отправить запрос на замену — применит владелец или админ'} onClick={() => { sc.diffPushLocal(); store.closeModal(); }}>{canDecide ? (d.kind === 'foreign' ? 'Опубликовать мою (комнату)' : 'Опубликовать локальную версию') : 'Запрос на замену'}</button>}
+          <button type="button" className="btn" title={canDecide ? 'Объединить версии и опубликовать результат' : 'Отправить объединённую версию запросом на замену'} onClick={() => { sc.diffMerge(); store.closeModal(); }}>{canDecide ? 'Смерджить' : 'Смерджить (запросом)'}</button>
           <button type="button" className="btn" onClick={() => { sc.diffDismiss(); store.closeModal(); }}>{d.kind === 'incoming' ? 'Отклонить' : 'Закрыть'}</button>
         </>
       }
@@ -765,13 +808,22 @@ export function SyncDiffModal({ store }: { store: VetviStore }) {
   );
 }
 
-/* ═══════════ merge-запросы копий (mergeModal) ═══════════ */
+/* ═══════════ merge-запросы: копий + замен проекта (mergeModal) ═══════════ */
 
+const MRG_KIND: Record<string, string> = {
+  copy: 'слияние копии',
+  replace: 'замена проекта',
+};
+
+/** Окно списка Merge-запросов: АКТИВНЫЕ и ВЫПОЛНЕННЫЕ (контроль).
+ *  Подтвердить (принять/отклонить) может владелец комнаты и админ.
+ *  Перед применением замены/слияния сервер сохраняет снимок проекта. */
 export function MergeModal({ store }: { store: VetviStore }) {
   void store.revision;
   const sc = store.sync;
   const [list, setList] = useState<MergeRequest[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [onlyPending, setOnlyPending] = useState(true);
   const reload = () => {
     if (!sc) return;
     sc.mergeRequests((res) => {
@@ -780,10 +832,13 @@ export function MergeModal({ store }: { store: VetviStore }) {
     });
   };
   useEffect(() => { reload(); }, []);
+  const canDecide = !!(sc && sc.canDecideMerge());
   const chip = (v: number | undefined, label: string) => (v ? <span className="mrg-chip">{label}: {v}</span> : null);
+  const shown = onlyPending ? list.filter((r) => (r.status || 'pending') === 'pending') : list;
+  const pendingN = list.filter((r) => (r.status || 'pending') === 'pending').length;
   return (
     <SyncShell
-      title="Merge-запросы копий"
+      title="Merge-запросы"
       wide
       onClose={() => store.closeModal()}
       foot={
@@ -793,17 +848,37 @@ export function MergeModal({ store }: { store: VetviStore }) {
         </>
       }
     >
-      {loaded && !list.length && <p className="mrg-empty">Merge-запросов пока нет. Копии проекта будут отправлять изменения сюда.</p>}
-      {list.map((r) => {
+      <div className="mrg-filters" role="tablist" aria-label="Фильтр запросов">
+        <button type="button" className={'mrg-fbtn' + (onlyPending ? ' on' : '')} onClick={() => setOnlyPending(true)}>
+          Активные{pendingN ? ' · ' + pendingN : ''}
+        </button>
+        <button type="button" className={'mrg-fbtn' + (!onlyPending ? ' on' : '')} onClick={() => setOnlyPending(false)}>
+          Все ({list.length})
+        </button>
+        {!canDecide && (
+          <span className="mrg-note">Подтверждает владелец комнаты или админ</span>
+        )}
+      </div>
+      {loaded && !shown.length && (
+        <p className="mrg-empty">
+          {onlyPending
+            ? 'Активных запросов нет — копии проекта и участники будут отправлять изменения сюда.'
+            : 'Запросов пока не было.'}
+        </p>
+      )}
+      {shown.map((r) => {
         const s = r.stats || {} as Record<string, number>;
+        const status = r.status || 'pending';
+        const kind = r.kind === 'replace' ? 'replace' : 'copy';
         return (
           <div key={r.id} className="mrg-item">
             <div className="mrg-top">
               <span className="mrg-dot" style={{ background: (r.sender && r.sender.color) || '#8b929c' }} />
               <b>{(r.sender && r.sender.name) || 'Гость'}</b>
+              <span className="mrg-kind">{MRG_KIND[kind]}</span>
               <span className="mrg-date">{syncFmtDate(r.createdAt)}</span>
-              <span className={'mrg-status st-' + (r.status || 'pending')}>
-                {r.status === 'pending' ? 'ожидает' : r.status === 'applied' ? 'принят' : 'отклонён'}
+              <span className={'mrg-status st-' + status}>
+                {status === 'pending' ? 'ожидает' : status === 'applied' ? 'принят' : 'отклонён'}
               </span>
             </div>
             <div className="mrg-stats">
@@ -818,15 +893,41 @@ export function MergeModal({ store }: { store: VetviStore }) {
               {chip(s.addedGroups, '+ групп')}
               {chip(s.changedGroups, '~ групп')}
             </div>
-            {r.status === 'pending' && (
+            {status !== 'pending' && (
+              <div className="mrg-decided">
+                {status === 'applied' ? 'Принят' : 'Отклонён'}
+                {r.decidedBy ? ' — ' + r.decidedBy : ''}
+                {r.decidedAt ? ' · ' + syncFmtDate(r.decidedAt) : ''}
+                {' · снимок проекта сохранён'}
+              </div>
+            )}
+            {status === 'pending' && canDecide && (
               <div className="mrg-acts">
-                <button type="button" className="btn primary" onClick={() => { if (sc) { sc.decideMerge(r.id, 'apply'); setList((l) => l.map((x) => (x.id === r.id ? { ...x, status: 'applied' } : x))); } }}>Принять</button>
-                <button type="button" className="btn danger" onClick={() => { if (sc) { sc.decideMerge(r.id, 'reject'); setList((l) => l.map((x) => (x.id === r.id ? { ...x, status: 'rejected' } : x))); } }}>Отклонить</button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  title={kind === 'replace'
+                    ? 'Применить версию отправителя ко всей комнате (снимок сохранится на сервере)'
+                    : 'Смерджить изменения копии в проект (снимок сохранится на сервере)'}
+                  onClick={() => { if (sc) { sc.decideMerge(r.id, 'apply'); setList((l) => l.map((x) => (x.id === r.id ? { ...x, status: 'applied', decidedBy: 'вы' } : x))); } }}
+                >
+                  Принять
+                </button>
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={() => { if (sc) { sc.decideMerge(r.id, 'reject'); setList((l) => l.map((x) => (x.id === r.id ? { ...x, status: 'rejected', decidedBy: 'вы' } : x))); } }}
+                >
+                  Отклонить
+                </button>
               </div>
             )}
           </div>
         );
       })}
+      {canDecide && (
+        <p className="mrg-hint">Перед применением любого запроса сервер сохраняет полный снимок проекта (хранятся последние {store.projectSnapshotsLimit()} — настройка в «Настройки проекта → Снимки»).</p>
+      )}
     </SyncShell>
   );
 }
