@@ -29,6 +29,8 @@ import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
 import { avatarInitial } from './auth';
 import { AccountPopover, NotificationsPopover, useNotifications } from './AccountMenu';
+import { ServiceSwitcher } from '@/services/ServiceSwitcher';
+import { VETVI_SERVICE_KEY } from '@/services/hub';
 
 /* ── отсоединяемый блок кнопок холста ── */
 
@@ -698,6 +700,10 @@ export function TopBar(props: { store: VetviStore }) {
           <div className="sub">конструктор нарратива · react</div>
         </div>
       </div>
+
+      {/* переключатель сервисов хаба: единый аккаунт, быстрый переход
+          к другим приложениям (редактор спрайтов, аниматор, менеджер задач) */}
+      <ServiceSwitcher current={VETVI_SERVICE_KEY} />
 
       <input
         id="projName"

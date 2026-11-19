@@ -31,6 +31,8 @@ import { canvasApi } from './canvasApi';
 import { AuthGate, fetchAuthState } from './AuthGate';
 import { AdminPanel, isAdminHash } from './AdminPanel';
 import { authApplyState } from './auth';
+import { ServiceScreen } from '@/services/ServiceScreen';
+import { fetchServices, parseServiceHash, VETVI_SERVICE_KEY } from '@/services/hub';
 
 /* Рендер после монтирования: документ читается из localStorage при создании стора. */
 const emptySubscribe = () => () => {};
@@ -157,9 +159,24 @@ export default function VetviApp() {
   const [adminHash, setAdminHash] = useState(false);
   const [authPhase, setAuthPhase] = useState<'loading' | 'ok' | 'gate'>('loading');
   const [booted, setBooted] = useState(() => storeMode() !== 'idb');
+  /* хаб сервисов: #service=<path> в адресе — открыт сторонний сервис,
+     пустой хеш — «Ветви». Как и админка, живёт на единственном маршруте «/». */
+  const [svcKey, setSvcKey] = useState<string | null>(null);
+  /* «Ветви» тоже сервис: админ может запретить его пользователю — тогда
+     редактор не открывается вовсе (экран «нет доступа» вместо холста). */
+  const [vetviBlocked, setVetviBlocked] = useState(false);
 
   useEffect(() => {
-    const check = () => setAdminHash(isAdminHash());
+    const check = () => {
+      setAdminHash(isAdminHash());
+      setSvcKey(parseServiceHash());
+      /* уход из редактора в другой сервис: сбрасываем отложенное сохранение,
+         чтобы последняя правка гарантированно легла в хранилище */
+      if (parseServiceHash()) {
+        const st = (window as unknown as { __vetvi?: VetviStore }).__vetvi;
+        try { st?.flushSave(); } catch { /* хранилище ещё не создано */ }
+      }
+    };
     check();
     window.addEventListener('hashchange', check);
     return () => window.removeEventListener('hashchange', check);
@@ -184,9 +201,23 @@ export default function VetviApp() {
     return () => { alive = false; clearTimeout(t0); };
   }, []);
 
-  /* прогрев хранилища (idb) */
+  /* доступ к «Ветвям»: сервис в списке разрешённых? Проверяем после входа
+     и при каждом возврате из другого сервиса (админ мог закрыть доступ,
+     пока пользователь был в другом приложении). Сбой сервера — как раньше. */
   useEffect(() => {
-    if (booted) return;
+    if (authPhase !== 'ok') return;
+    let alive = true;
+    void fetchServices()
+      .then((list) => {
+        if (alive) setVetviBlocked(!list.some((s) => s.key === VETVI_SERVICE_KEY));
+      })
+      .catch(() => { if (alive) setVetviBlocked(false); });
+    return () => { alive = false; };
+  }, [authPhase, svcKey]);
+
+  /* прогрев хранилища (idb) — сторонний сервис в прогреве не нуждается */
+  useEffect(() => {
+    if (booted || svcKey) return;
     let alive = true;
     void storeBoot().catch(() => { /* нет idb — стартуем с пустой памятью */ }).finally(() => {
       if (alive) {
@@ -195,16 +226,21 @@ export default function VetviApp() {
       }
     });
     return () => { alive = false; };
-  }, [booted]);
+  }, [booted, svcKey]);
 
   if (adminHash) return <AdminPanel />;
   if (authPhase === 'gate') return <AuthGate onPass={() => setAuthPhase('ok')} />;
+  /* сторонний сервис: авторизация уже решена (или выключена) — экран сервиса
+     вместо редактора; хранилище редактора не греем и не монтируем */
+  if (svcKey && authPhase !== 'loading') return <ServiceScreen svcKey={svcKey} />;
   if (!booted) return <main className="rn-app" aria-label="Ветви — React-редактор" />;
   /* authPhase 'loading': ждём /api/auth/state — токен сессии и личность аккаунта
      должны быть применены ДО первого входа в комнату. Раньше соединение с комнатой
      стартовало параллельно с запросом: join уходил без токена, сервер отвечал
      «гость» и сетевые проекты открывались «только чтение». */
   if (authPhase === 'loading') return <main className="rn-app" aria-label="Ветви — React-редактор" />;
+  /* «Ветви» запрещены пользователю админом — вместо редактора экран «нет доступа» */
+  if (vetviBlocked) return <ServiceScreen svcKey={VETVI_SERVICE_KEY} />;
   return <VetviAppInner />;
 }
 

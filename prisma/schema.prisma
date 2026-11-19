@@ -76,3 +76,31 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 }
+
+/* ── сервисы хаба: несколько приложений под одной учётной записью ──
+   ServiceApp — реестр подключённых сервисов (ключ, имя, адрес, статус,
+   вкл/выкл). «Ветви» — первый сервис, остальные подключаются админом.
+   ServiceAccess — персональные ограничения: строка с allowed=false
+   запрещает пользователю сервис; отсутствие строки — доступ разрешён. */
+model ServiceApp {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String   @default("")
+  icon        String   @default("grid")
+  path        String   @default("")
+  status      String   @default("placeholder")
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model ServiceAccess {
+  id         String   @id @default(cuid())
+  serviceKey String
+  userId     String
+  allowed    Boolean  @default(true)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([serviceKey, userId])
+}

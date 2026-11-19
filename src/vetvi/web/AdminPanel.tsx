@@ -42,6 +42,24 @@ interface UserRec {
   createdAt: string;
 }
 
+/* ── хаб сервисов: реестр приложений и персональные доступы ── */
+
+interface ServiceRec {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  path: string;
+  status: string;
+  enabled: boolean;
+  sortOrder: number;
+}
+
+interface ServiceUserRec extends UserRec {
+  access: Record<string, boolean>; // serviceKey → разрешено? нет записи — разрешено
+}
+
 export function isAdminHash(): boolean {
   return typeof window !== 'undefined' && window.location.hash === ADMIN_PANEL_HASH;
 }
@@ -55,12 +73,17 @@ export function AdminPanel() {
 
   const [authOn, setAuthOn] = useState(true);
   const [regOn, setRegOn] = useState(true);
-  const [tab, setTab] = useState<'settings' | 'invites' | 'users'>('settings');
+  const [tab, setTab] = useState<'settings' | 'invites' | 'users' | 'services'>('settings');
 
   const [invites, setInvites] = useState<InviteRec[]>([]);
   const [users, setUsers] = useState<UserRec[]>([]);
   const [newMaxUses, setNewMaxUses] = useState('1');
   const [newNote, setNewNote] = useState('');
+  /* сервисы хаба */
+  const [svcList, setSvcList] = useState<ServiceRec[]>([]);
+  const [svcUsers, setSvcUsers] = useState<ServiceUserRec[]>([]);
+  const [newSvc, setNewSvc] = useState({ key: '', name: '', description: '', path: '' });
+  const [svcErr, setSvcErr] = useState('');
   const [toast, setToast] = useState('');
 
   const flash = (t: string) => {
@@ -89,6 +112,15 @@ export function AdminPanel() {
     }
   }, []);
 
+  const loadServices = useCallback(async () => {
+    const r = await fetch('/api/admin/services', { cache: 'no-store' });
+    if (r.ok) {
+      const j = (await r.json()) as { list: ServiceRec[]; users: ServiceUserRec[] };
+      setSvcList(j.list || []);
+      setSvcUsers(j.users || []);
+    }
+  }, []);
+
   useEffect(() => {
     let alive = true;
     void (async () => {
@@ -99,7 +131,7 @@ export function AdminPanel() {
         setBootstrapping(!j.configured);
         if (j.authed) {
           setPhase('open');
-          await Promise.all([loadSettings(), loadInvites(), loadUsers()]);
+          await Promise.all([loadSettings(), loadInvites(), loadUsers(), loadServices()]);
         } else {
           setPhase('gate');
         }
@@ -131,7 +163,7 @@ export function AdminPanel() {
       }
       setPassword('');
       setPhase('open');
-      await Promise.all([loadSettings(), loadInvites(), loadUsers()]);
+      await Promise.all([loadSettings(), loadInvites(), loadUsers(), loadServices()]);
     } catch {
       setErr('Сервер недоступен');
     } finally {
@@ -218,6 +250,69 @@ export function AdminPanel() {
     }
   };
 
+  /* ── сервисы хаба ── */
+
+  const createService = async () => {
+    setSvcErr('');
+    const r = await fetch('/api/admin/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSvc),
+    });
+    const j = (await r.json().catch(() => ({}))) as { error?: string };
+    if (r.ok) {
+      setNewSvc({ key: '', name: '', description: '', path: '' });
+      await loadServices();
+      flash('Сервис подключён');
+    } else {
+      setSvcErr(j.error || 'Не удалось подключить сервис');
+    }
+  };
+
+  const patchService = async (key: string, data: Record<string, unknown>) => {
+    const r = await fetch('/api/admin/services/' + encodeURIComponent(key), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      flash(j.error || 'Ошибка сохранения');
+      return false;
+    }
+    await loadServices();
+    return true;
+  };
+
+  const deleteService = async (svc: ServiceRec) => {
+    if (!window.confirm('Удалить сервис «' + svc.name + '» из реестра? Персональные ограничения по нему тоже сотрутся.')) return;
+    const r = await fetch('/api/admin/services/' + encodeURIComponent(svc.key), { method: 'DELETE' });
+    if (!r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      flash(j.error || 'Не удалось удалить');
+      return;
+    }
+    await loadServices();
+    flash('Сервис удалён');
+  };
+
+  const setAccess = async (userId: string, serviceKey: string, allowed: boolean) => {
+    /* оптимистично: чекбокс переключается сразу, сервер догоняет */
+    setSvcUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, access: { ...u.access, [serviceKey]: allowed } } : u)));
+    const r = await fetch('/api/admin/services/access', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, serviceKey, allowed }),
+    });
+    if (!r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      flash(j.error || 'Не удалось изменить доступ');
+      await loadServices();
+    } else {
+      flash(allowed ? 'Доступ открыт — пользователь уведомлён' : 'Доступ закрыт — пользователь уведомлён');
+    }
+  };
+
   /* ── рендер ── */
 
   if (phase === 'check') {
@@ -267,6 +362,7 @@ export function AdminPanel() {
           <button type="button" role="tab" aria-selected={tab === 'settings'} className={'adm-tab' + (tab === 'settings' ? ' active' : '')} onClick={() => setTab('settings')}>Настройки</button>
           <button type="button" role="tab" aria-selected={tab === 'invites'} className={'adm-tab' + (tab === 'invites' ? ' active' : '')} onClick={() => setTab('invites')}>Ссылки-приглашения</button>
           <button type="button" role="tab" aria-selected={tab === 'users'} className={'adm-tab' + (tab === 'users' ? ' active' : '')} onClick={() => setTab('users')}>Пользователи</button>
+          <button type="button" role="tab" aria-selected={tab === 'services'} className={'adm-tab' + (tab === 'services' ? ' active' : '')} onClick={() => { setTab('services'); void loadServices(); }}>Сервисы</button>
         </nav>
 
         <div className="adm-body">
@@ -355,6 +451,109 @@ export function AdminPanel() {
                 </div>
               ))}
             </div>
+          )}
+
+          {tab === 'services' && (
+            <>
+              {/* ── реестр подключённых сервисов ── */}
+              <div className="adm-sec-cap">Реестр сервисов</div>
+              <div className="adm-create">
+                <label className="adm-field">
+                  <span>Ключ</span>
+                  <input className="au-input" value={newSvc.key} onChange={(e) => setNewSvc({ ...newSvc, key: e.target.value.toLowerCase() })} placeholder="напр. sprite-editor" />
+                </label>
+                <label className="adm-field">
+                  <span>Название</span>
+                  <input className="au-input" value={newSvc.name} onChange={(e) => setNewSvc({ ...newSvc, name: e.target.value })} placeholder="Редактор спрайтов" />
+                </label>
+                <label className="adm-field adm-field-grow">
+                  <span>Описание</span>
+                  <input className="au-input" value={newSvc.description} onChange={(e) => setNewSvc({ ...newSvc, description: e.target.value })} placeholder="короткое описание для переключателя" />
+                </label>
+                <button className="au-btn" type="button" disabled={!newSvc.key.trim() || !newSvc.name.trim()} onClick={createService}>Подключить</button>
+              </div>
+              {svcErr && <div className="au-err">{svcErr}</div>}
+              <p className="adm-note">
+                Ключ — латиница/цифры/дефис, он же адрес сервиса (#service=ключ). Пользователь без прототипа увидит заглушку
+                «в разработке». Отключённый сервис пропадает из переключателя у всех и не открывается по прямой ссылке.
+              </p>
+
+              <div className="adm-list">
+                {svcList.length === 0 && <div className="adm-empty">Реестр пуст — подключите первый сервис</div>}
+                {svcList.map((svc) => (
+                  <div className="adm-row" key={svc.id}>
+                    <div className="adm-row-main">
+                      <b className="adm-login">{svc.name}</b>
+                      <code className="adm-code" title={svc.key}>{svc.key}</code>
+                      <span className={'adm-badge' + (svc.status === 'ready' ? ' on' : ' done')}>{svc.status === 'ready' ? 'подключён' : 'в разработке'}</span>
+                      <span className={'adm-badge' + (svc.enabled ? ' on' : ' off')}>{svc.enabled ? 'видим всем' : 'выключен'}</span>
+                    </div>
+                    {svc.description && (
+                      <div className="adm-row-sub">
+                        <span className="adm-uses">{svc.description}</span>
+                      </div>
+                    )}
+                    <div className="adm-acts">
+                      <button className="adm-ib" type="button" onClick={() => void patchService(svc.key, { enabled: !svc.enabled })}>{svc.enabled ? 'выключить' : 'включить'}</button>
+                      {svc.key !== 'vetvi' && (
+                        <button className="adm-ib danger" type="button" onClick={() => void deleteService(svc)}>удалить</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── матрица доступов: пользователи × сервисы ── */}
+              <div className="adm-sec-cap">Доступы пользователей</div>
+              <p className="adm-note">
+                Галочка — сервис разрешён (по умолчанию доступ есть у всех). Снимите галочку, чтобы ЗАПРЕТИТЬ сервис пользователю:
+                он пропадёт из его переключателя, по прямой ссылке откроется «нет доступа», пользователь получит уведомление.
+              </p>
+              <div className="adm-matrix-wrap">
+                {svcUsers.length === 0 || svcList.length === 0 ? (
+                  <div className="adm-empty">{svcList.length === 0 ? 'Сначала подключите сервисы' : 'Аккаунтов пока нет'}</div>
+                ) : (
+                  <table className="adm-matrix">
+                    <thead>
+                      <tr>
+                        <th className="adm-mx-user">Пользователь</th>
+                        {svcList.map((s) => (
+                          <th key={s.key} title={s.name + ' · ' + s.key} className={s.enabled ? '' : 'offsvc'}>
+                            {s.name}
+                            {!s.enabled && <i>выкл</i>}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {svcUsers.map((u) => (
+                        <tr key={u.id} className={u.disabled ? 'offuser' : ''}>
+                          <td className="adm-mx-user">
+                            <b>{u.displayName || u.login}</b>
+                            <span>@{u.login}{u.disabled ? ' · отключён' : ''}</span>
+                          </td>
+                          {svcList.map((s) => {
+                            const allowed = u.access[s.key] !== false;
+                            return (
+                              <td key={s.key} className={s.enabled ? '' : 'offsvc'}>
+                                <input
+                                  type="checkbox"
+                                  checked={allowed}
+                                  disabled={u.disabled}
+                                  aria-label={(allowed ? 'Запретить' : 'Разрешить') + ' сервис «' + s.name + '» для ' + (u.displayName || u.login)}
+                                  title={(allowed ? 'Запретить' : 'Разрешить') + ' «' + s.name + '» для ' + (u.displayName || u.login)}
+                                  onChange={(e) => void setAccess(u.id, s.key, e.target.checked)}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
