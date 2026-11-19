@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isAdmin } from '@/lib/auth'
 import { notifyServiceAccess } from '@/lib/services'
+import { notifyServicesChanged } from '@/lib/syncNotify'
 
 /**
  * PUT /api/admin/services/access — персональное ограничение доступа к сервису.
@@ -35,6 +36,10 @@ export async function PUT(req: NextRequest) {
       update: { allowed: body.allowed },
     })
     void notifyServiceAccess(userId, svc, body.allowed).catch(() => undefined)
+    /* адресный сигнал: пользователь сразу перечитает список сервисов —
+       запрещённый пропадает без перезагрузки; если он был в этом сервисе,
+       его выведет в доступный (защита записей — на сервере) */
+    notifyServicesChanged([userId])
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

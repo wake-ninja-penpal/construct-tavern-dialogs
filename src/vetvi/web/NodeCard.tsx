@@ -75,6 +75,20 @@ function NoteIc({ size }: { size: number }) {
   );
 }
 
+/** Иконка задач на бейдже над карточкой (клипборд/галочка). */
+function TaskBadgeIcon({ done }: { done: boolean }) {
+  return done ? (
+    <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m5 13 4 4L19 7" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4.5" y="4.5" width="15" height="15" rx="3.5" />
+      <path d="M8.5 12l2.3 2.3L15.5 9.6" />
+    </svg>
+  );
+}
+
 /** Одиночная иконка оригинала (ic(): stroke 1.7, currentColor). */
 function Ic({ d, size }: { d: string; size: number }) {
   return (
@@ -165,6 +179,9 @@ function NodeCardImpl(props: {
   flashT?: number;
   /** Поле переименования открыто на этой карточке. */
   renaming: boolean;
+  /** Подсказка задач менеджера задач (иконка над нодой): {n, a, s} или null.
+   *  Объект стабилен между обновлениями — memo-карточка не перекатывается. */
+  taskHint?: { n: number; a: number; s: string; ts: { id: string; title: string; done: boolean }[] } | null;
   /** Версия «ссылочных» данных карточек: персонажи/переменные/свои типы/связи (store.refVer). */
   depVer: number;
   lockedBy?: { id?: string; name: string; color: string } | null;
@@ -659,6 +676,20 @@ function NodeCardImpl(props: {
         title={poutTitle}
         onMouseDown={(e) => { e.stopPropagation(); if (e.ctrlKey || e.metaKey) props.onPinReattach(e, n.id); else props.onPinDown(e, n.id, null, null); }}
       />
+      {props.taskHint && props.taskHint.n > 0 && (
+        <button
+          type="button"
+          className={'node-tasks s-' + props.taskHint.s}
+          data-nodrag
+          title={'Задачи этой ноды в Менеджере задач:\n' + props.taskHint.ts.map((t) => (t.done ? '✓ ' : '· ') + t.title).join('\n') + '\nКлик — открыть менеджер задач'}
+          aria-label={'Задачи ноды: ' + props.taskHint.n + ', активных: ' + props.taskHint.a}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); store.openTaskManagerForNode(n.id); }}
+        >
+          <TaskBadgeIcon done={props.taskHint.s === 'done'} />
+          <span>{props.taskHint.s === 'done' ? '✓' : props.taskHint.a}</span>
+        </button>
+      )}
       {visNotes.length > 0 && (
         <div className="node-notes">
           {visNotes.map(({ note, ni }) => (
@@ -698,6 +729,7 @@ export const NodeCard = memo(NodeCardImpl, (a, b) =>
   && a.flashReplyId === b.flashReplyId
   && (a.flashT || 0) === (b.flashT || 0)
   && a.renaming === b.renaming
+  && a.taskHint === b.taskHint
   && lockEq(a.lockedBy, b.lockedBy)
   && lockEq(a.focusBy, b.focusBy)
 );

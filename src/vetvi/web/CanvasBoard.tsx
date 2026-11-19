@@ -2207,6 +2207,7 @@ export function CanvasBoard(props: { store: VetviStore }) {
             flashT={store.flash && store.flash.nodeId === n.id ? store.flash.t : 0}
             renaming={store.renameId === n.id}
             depVer={store.refVer}
+            taskHint={store.taskHints.get(n.id) || null}
             lockedBy={store.syncLocks[n.id] || null}
             focusBy={focusByNode.get(n.id) || null}
             onDragStart={onNodeDragStart}

@@ -53,6 +53,31 @@ export function notifyUserPush(
   }
 }
 
+/** Мгновенное оповещение об изменении реестра/доступов сервисов хаба.
+ *
+ *  Админ включил/выключил сервис или сменил персональный доступ — клиент
+ *  должен СРАЗУ перечитать /api/services: сервис появляется/исчезает из
+ *  переключателя без перезагрузки, а пользователь, находящийся в закрытом
+ *  сервисе, принудительно выходит из него (кик на любой доступный сервис).
+ *
+ *  userIds — кому адресовано (смена персонального доступа); без userIds —
+ *  широковещательно всем подключённым клиентам (смена реестра). Событие
+ *  vetvi:services принимают и редактор «Ветвей», и экраны других сервисов
+ *  (у них свой служебный сокет — src/services/live.ts). */
+export function notifyServicesChanged(userIds?: string[]): void {
+  try {
+    const base = process.env.VETVI_SYNC_INTERNAL_URL || 'http://127.0.0.1:3004';
+    const key = process.env.VETVI_INTERNAL_KEY || 'vetvi-internal-key';
+    void fetch(base + '/internal/services-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-vetvi-key': key },
+      body: JSON.stringify({ userIds: Array.isArray(userIds) ? userIds.slice(0, 200) : null }),
+    }).catch(() => { /* sync недоступен — список перечитается при открытии попапа */ });
+  } catch {
+    /* push необязателен: список сервисов перечитается при следующем открытии */
+  }
+}
+
 /** Живы ли комнаты на realtime-сервере (vetvi-sync).
  *
  *  «Вам открыли доступ» помечает офлайн-проекты: владелец выключил сетевой

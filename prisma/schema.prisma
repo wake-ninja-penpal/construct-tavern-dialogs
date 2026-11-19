@@ -104,3 +104,59 @@ model ServiceAccess {
 
   @@unique([serviceKey, userId])
 }
+
+/* ── менеджер задач (сервис task-manager) ──
+   Командное kanban-пространство хаба: проекты → доски → колонки → задачи.
+   Общая для всех пользователей сервиса (единая команда), автор записывается
+   в задачи для истории. Связи с нодами «Ветвей» — JSON-массив links в задаче:
+   [{ pid (roomId || projectId слота), nid (id ноды), room (roomId|null),
+      t (название ноды на момент связывания) }] — по ним рисуются чипы
+   в менеджере задач и иконки прогресса над нодами в «Ветвях». */
+model TaskProject {
+  id        String   @id @default(cuid())
+  title     String
+  color     String   @default("#e2a54e")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  boards    TaskBoard[]
+}
+
+model TaskBoard {
+  id        String      @id @default(cuid())
+  projectId String
+  project   TaskProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title     String
+  sortOrder Int         @default(0)
+  createdAt DateTime    @default(now())
+  columns   TaskColumn[]
+}
+
+model TaskColumn {
+  id        String    @id @default(cuid())
+  boardId   String
+  board     TaskBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title     String
+  color     String    @default("#8b929c")
+  kind      String    @default("") // new | progress | done | "" — семантическая колонка
+  locked    Boolean   @default(false)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+}
+
+model TaskItem {
+  id          String    @id @default(cuid())
+  projectId   String
+  boardId     String?
+  columnId    String? // null — задача в бэклоге проекта
+  parentId    String?
+  title       String
+  description String    @default("")
+  stickers    String    @default("{}") // JSON {assignees:[login], deadline, priority}
+  links       String    @default("[]") // JSON — связи с нодами «Ветвей»
+  done        Boolean   @default(false)
+  completedAt DateTime?
+  order       Float     @default(0) // дробный порядок — перестановка без перенумерации
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}

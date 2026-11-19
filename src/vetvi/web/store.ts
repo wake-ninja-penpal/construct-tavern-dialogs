@@ -39,6 +39,7 @@ import { cleanupVarRefs, defValOf, VARS_OPS, varCastVal, varType, type Cond } fr
 import { collapsedAncestorOf, groupCardRect, groupDepth, groupFrameRect } from './ggroups';
 import { canvasApi } from './canvasApi';
 import { noteModalOpen } from './NoteModals';
+import { fetchServices, goTaskCreate, goTaskFilter } from '@/services/hub';
 import type { SyncClient } from './sync';
 
 type Listener = () => void;
@@ -62,6 +63,11 @@ export interface ShiftTarget {
 
 /** Запись своих типов (customTypes оригинала). */
 export interface CustomTypeRec { id: string; name: string; color: string; icon: string }
+
+/** Подсказка задач менеджера задач для ноды (иконка над карточкой):
+ *  n — всего задач, a — активных, s — состояние ('new'|'progress'|'done'),
+ *  ts — короткий список задач (для подсказки при наведении). */
+export interface NodeTaskHint { n: number; a: number; s: string; ts: { id: string; title: string; done: boolean }[] }
 
 export interface LogEntry {
   id: string;
@@ -278,6 +284,17 @@ export class VetviStore {
   viewRev = 0;
   /** Версия «ссылочных» данных карточек: персонажи/переменные/свои типы/палитра/связи. */
   refVer = 0;
+
+  /* ── менеджер задач: подсказки задач на нодах (иконки прогресса) ── */
+  taskHints: Map<string, NodeTaskHint> = new Map();
+  taskVer = 0;
+  private taskTimer: ReturnType<typeof setInterval> | null = null;
+  private taskBusy = false;
+  private taskScopeSeen = '';
+  private onVisHints = (): void => {
+    if (typeof document === 'undefined' || !document.hidden) void this.refreshTaskHints(true);
+  };
+
   saveState: SaveState = 'idle';
   lastSavedAt = 0;
 
@@ -1002,6 +1019,130 @@ export class VetviStore {
   requestCenter(id: string): void {
     this.centerReq = { id, t: Date.now() };
     this.emit();
+  }
+
+  /* ═══ менеджер задач (сервис task-manager): интеграция с нодами ═══
+     Задачи хранятся в общей БД хаба; связь задача↔нода — links на задаче
+     (pid = roomId или id слота проекта, как taskScope()). Иконка над нодой
+     показывает количество задач и цвет-статус: серый «не взяты», янтарный
+     «в работе», зелёный «выполнено». */
+
+  /** Идентификатор проекта для связей с задачами: roomId сетевой комнаты
+   *  (стабилен между пользователями) или id локального слота. */
+  taskScope(): string {
+    const room = this.sync && this.sync.enabled ? this.sync.room : null;
+    if (room) return room;
+    return String(this.doc.meta.projectId || '');
+  }
+
+  /** Подсказки задач для текущего проекта (опрос /api/tm/nodes). */
+  async refreshTaskHints(force = false): Promise<void> {
+    if (this.taskBusy) return;
+    if (!force && typeof document !== 'undefined' && document.hidden) return;
+    const scope = this.taskScope();
+    if (!scope || !this.doc.nodes.length) {
+      if (this.taskHints.size) { this.taskHints = new Map(); this.taskVer++; this.emit('ui'); }
+      this.taskScopeSeen = scope;
+      return;
+    }
+    /* смена проекта — старые подсказки чужого проекта не показываем */
+    if (this.taskScopeSeen && this.taskScopeSeen !== scope) {
+      this.taskHints = new Map();
+      this.taskVer++;
+      this.emit('ui');
+    }
+    this.taskScopeSeen = scope;
+    this.taskBusy = true;
+    try {
+      const ids = this.doc.nodes.map((n) => n.id).join(',');
+      const res = await fetch('/api/tm/nodes?scope=' + encodeURIComponent(scope) + '&ids=' + encodeURIComponent(ids), { cache: 'no-store' });
+      if (res.status === 403) {
+        /* сервис закрыт (выключен/запрещён) — иконки задач исчезают */
+        if (this.taskHints.size) { this.taskHints = new Map(); this.taskVer++; this.emit('ui'); }
+        return;
+      }
+      if (!res.ok) return; /* сбой — прежние подсказки остаются */
+      const data = (await res.json()) as { items?: Record<string, NodeTaskHint> };
+      const items = data.items || {};
+      /* обновляем только изменившиеся записи: идентичные объекты сохраняют
+         ссылки — memo-карточки не перекатываются без причины */
+      let changed = this.taskHints.size !== Object.keys(items).length;
+      const next = new Map<string, NodeTaskHint>();
+      for (const [nid, h] of Object.entries(items)) {
+        const prev = this.taskHints.get(nid);
+        if (prev && prev.n === h.n && prev.a === h.a && prev.s === h.s) next.set(nid, prev);
+        else { next.set(nid, h); changed = true; }
+      }
+      if (!changed) return;
+      this.taskHints = next;
+      this.taskVer++;
+      this.emit('ui');
+    } catch {
+      /* сервер недоступен — прежние подсказки остаются */
+    } finally {
+      this.taskBusy = false;
+    }
+  }
+
+  /** Запуск опроса подсказок (15 с + возврат на вкладку). */
+  startTaskHints(): void {
+    if (this.taskTimer || typeof window === 'undefined') return;
+    void this.refreshTaskHints(true);
+    this.taskTimer = setInterval(() => { void this.refreshTaskHints(); }, 15000);
+    document.addEventListener('visibilitychange', this.onVisHints);
+  }
+
+  /** Создать задачу для выделенных нод: переход в менеджер задач с готовыми
+   *  связями (#service=task-manager&mk=1&…). Сервис недоступен — тост. */
+  async createTaskForSelection(ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    const scope = this.taskScope();
+    if (!scope) {
+      this.toast('Откройте или сохраните проект — задачи привязываются к проекту', 'warn');
+      return;
+    }
+    try {
+      const list = await fetchServices();
+      if (!list.some((s) => s.key === 'task-manager')) {
+        this.toast('Менеджер задач недоступен: сервис выключен или запрещён вам', 'warn');
+        return;
+      }
+    } catch { /* fail-open: список не получен — экран сервиса сам покажет запрет */ }
+    const nodes = ids.slice(0, 40).map((id) => {
+      const n = this.nodeById(id);
+      return { id, title: (n && (n.title || TYPES[n.type]?.name)) || 'Нода' };
+    });
+    this.flushSave();
+    goTaskCreate({ projectId: scope, roomId: this.sync && this.sync.enabled ? this.sync.room : null, nodes });
+  }
+
+  /** Открыть задачи ноды в менеджере задач (клик по иконке над нодой). */
+  openTaskManagerForNode(nodeId: string): void {
+    const scope = this.taskScope();
+    if (!scope) {
+      this.toast('Сохраните проект — задачи привязываются к проекту', 'warn');
+      return;
+    }
+    const n = this.nodeById(nodeId);
+    goTaskFilter({ projectId: scope, nodeId, title: (n && n.title) || undefined });
+  }
+
+  /** Прямая ссылка на ноду (из задачи менеджера задач): #…room=…&node=… —
+     открыть свой проект по слоту или чужой по roomId, центр+выделение ноды. */
+  gotoNodeFromHash(nodeId: string): void {
+    const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+    const roomM = /room=([A-Za-z0-9_-]+)/.exec(hash);
+    if (roomM) {
+      const entry = projList().find((e) => e.roomId === roomM[1]);
+      const cur = String(this.doc.meta.projectId || '');
+      if (entry && entry.id !== cur) this.openProject(entry.id);
+    }
+    if (!this.nodeById(nodeId)) {
+      this.toast('Нода не найдена в этом проекте — возможно, у вас более старая версия проекта', 'warn');
+      return;
+    }
+    this.selectOnly(nodeId);
+    this.requestCenter(nodeId);
   }
 
   requestFlash(nodeId: string, replyId: string | null): void {

@@ -128,6 +128,11 @@ let qSessionRow: ReturnType<Database['prepare']> | null = null
 let qAccessRole: ReturnType<Database['prepare']> | null = null
 let qAccessCount: ReturnType<Database['prepare']> | null = null
 let qAccessRename: ReturnType<Database['prepare']> | null = null
+/* доступ к сервису «Ветви» (ServiceApp/ServiceAccess) — защита записей:
+   у пользователя с закрытым сервисом правки не сохраняются и не
+   ретранслируются, даже если принудительный выход не сработал */
+let qSvcEnabled: ReturnType<Database['prepare']> | null = null
+let qSvcAllowed: ReturnType<Database['prepare']> | null = null
 
 /* предупреждение о недоступной главной БД — не чаще раза в 30 секунд,
    чтобы не заспамить лог, но причина «все гости только для чтения»
@@ -163,6 +168,8 @@ function openMainDb(): void {
     qAccessRole = d.prepare('SELECT role FROM ProjectAccess WHERE roomId = ? AND userId = ?')
     qAccessCount = d.prepare('SELECT COUNT(*) AS c FROM ProjectAccess WHERE roomId = ?')
     qAccessRename = d.prepare('UPDATE ProjectAccess SET projectName = ? WHERE roomId = ?')
+    qSvcEnabled = d.prepare("SELECT enabled FROM ServiceApp WHERE key = 'vetvi'")
+    qSvcAllowed = d.prepare("SELECT allowed FROM ServiceAccess WHERE serviceKey = 'vetvi' AND userId = ?")
     mainDb = d
     mainDbWarnAt = 0
     console.log('[vetvi-sync] главная БД открыта:', MAIN_DB_FILE)
@@ -178,6 +185,73 @@ function dropMainDb(): void {
   qAccessRole = null
   qAccessCount = null
   qAccessRename = null
+  qSvcEnabled = null
+  qSvcAllowed = null
+}
+
+/* ── доступ к сервису «Ветви» ──
+   Сервис выключен админом в реестре или запрещён пользователю (матрица
+   доступов) → все попытки записи в комнаты этого пользователя отклоняются,
+   сокет выгоняется из комнаты (vetvi:kicked reason=service_denied) — клиент
+   уводит его в любой доступный сервис. Кэш 3 с: смена доступа перекрывает
+   записи быстрее любого свипа, свип (SVC_SWEEP) надёжно доводит до конца. */
+const svcCache = new Map<string, { at: number; ok: boolean }>()
+const SVC_CHECK_MS = 3000
+
+function vetviServiceAllowed(accId: string, opts: { fresh?: boolean } = {}): boolean {
+  /* записи проверяются БЕЗ кэша: попытка записи должна отражать актуальное
+     состояние доступа мгновенно (два SELECT по индексам — дёшево). Кэш остаётся
+     только для свипа (массовая проверка сокетов каждые 3 с). */
+  const hit = opts.fresh ? undefined : svcCache.get(accId)
+  if (hit && Date.now() - hit.at < SVC_CHECK_MS) return hit.ok
+  openMainDb()
+  let ok = true
+  if (mainDb && qSvcEnabled && qSvcAllowed) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const svcRow = qSvcEnabled.get() as { enabled: number | boolean } | undefined
+        if (!svcRow || !(svcRow.enabled === 1 || svcRow.enabled === true)) { ok = false; break }
+        const acc = qSvcAllowed.get(accId) as { allowed: number | boolean } | undefined
+        if (acc && !(acc.allowed === 1 || acc.allowed === true)) { ok = false; break }
+        ok = true
+        break
+      } catch (e) {
+        if (isSchemaError(e)) { dropMainDb(); openMainDb(); if (!mainDb) { ok = true; break } continue }
+        if (attempt === 2) console.error('[vetvi-sync] service access check error', e)
+        const spin = Date.now() + 60
+        while (Date.now() < spin) { /* busy spin */ }
+      }
+    }
+  }
+  svcCache.set(accId, { at: Date.now(), ok })
+  if (svcCache.size > 500) {
+    const now = Date.now()
+    for (const [k, v] of svcCache) if (now - v.at > 60000) svcCache.delete(k)
+  }
+  return ok
+}
+
+/** Сокет запрещённого сервиса: выгоняем из комнаты (клиент уводит пользователя
+ *  в доступный сервис). true — запись отклонять. Гости без аккаунта не трогаются. */
+function sockServiceBlocked(socket: Socket, roomName: string | null): boolean {
+  const room = roomName ? rooms.get(roomName) : null
+  const m = roomName && room ? room.members.get(socket.id) : undefined
+  /* личность сокета: участник комнаты (accId из join) или служебный сокет
+     уведомлений (ntfUserId из vetvi:ntf-hello) */
+  const accId = (m && m.accId) || (socket.data as { ntfUserId?: string }).ntfUserId || ''
+  if (!accId) return false // гость — доступ по ссылке (linkMode), не по сервису
+  if (vetviServiceAllowed(accId, { fresh: true })) return false
+  if (roomName && room && m) {
+    try { socket.emit('vetvi:kicked', { roomId: roomName, reason: 'service_denied' }) } catch { /* сокет умер */ }
+    room.members.delete(socket.id)
+    releaseSocketLocks(io, room, socket.id)
+    releaseSocketFocus(io, room, socket.id)
+    sockCanEditMap.set(socket.id, false)
+    socket.leave(roomName)
+    broadcastUsers(io, room)
+    console.log(`[vetvi-sync] service denied → kicked "${m.user.name}" from "${roomName}"`)
+  }
+  return true
 }
 
 /* после «no such table» (база создана, но init-db ещё не отработал)
@@ -823,6 +897,22 @@ function notifyUser(userId: string, ntf: unknown): number {
   return sent
 }
 
+/** Сигнал «сервисы изменились» одному аккаунту (все его вкладки/устройства). */
+function notifyServiceEvent(userId: string): number {
+  const set = ntfSockets.get(String(userId || ''))
+  if (!set || set.size === 0) return 0
+  let sent = 0
+  for (const sock of set) {
+    try {
+      sock.emit('vetvi:services')
+      sent++
+    } catch {
+      /* сокет умер — unregister сделает disconnect */
+    }
+  }
+  return sent
+}
+
 /* ─── свип ролей: доступы могут измениться, пока участник онлайн ───
    Владелец выдал/отозвал/поменял роль через окно «Поделиться» — участник
    получает актуальное право редактирования без переподключения сокета:
@@ -832,6 +922,26 @@ function notifyUser(userId: string, ntf: unknown): number {
 const ROLE_SWEEP_MS = 3 * 1000
 
 function sweepRoles(io: Server) {
+  /* свип доступа к сервису «Ветви»: закрыли сервис/доступ — участник выгоняется
+     из комнаты даже если HTTP-push не дошёл (страховка принудительного выхода) */
+  for (const room of rooms.values()) {
+    if (room.members.size === 0) continue
+    for (const [sid, m] of room.members) {
+      if (!m.accId) continue
+      if (!vetviServiceAllowed(m.accId)) {
+        const sock = io.of('/').sockets.get(sid)
+        if (sock) {
+          try { sock.emit('vetvi:kicked', { roomId: room.name, reason: 'service_denied' }) } catch { /* сокет умер */ }
+          room.members.delete(sid)
+          releaseSocketLocks(io, room, sid)
+          releaseSocketFocus(io, room, sid)
+          sockCanEditMap.set(sid, false)
+          sock.leave(room.name)
+          console.log(`[vetvi-sync] service denied sweep → kicked "${m.user.name}" from "${room.name}"`)
+        }
+      }
+    }
+  }
   for (const room of rooms.values()) {
     if (room.members.size === 0) continue
     /* legacy-комната (ни одной записи ProjectAccess): роли не применяются —
@@ -1314,6 +1424,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:state', (msg: { roomId?: string; doc?: unknown }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      if (sockServiceBlocked(socket, msg.roomId)) return // сервис «Ветви» закрыт — записи не сохраняются
       if (!sockCanEditNow(socket, joinedRoom)) return // только чтение: снапшоты не принимаются
       const doc = msg.doc as { nodes?: unknown[] } | undefined
       if (!doc || !Array.isArray(doc.nodes)) return
@@ -1338,6 +1449,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:rename', (msg: { roomId?: string; name?: string }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      if (sockServiceBlocked(socket, msg.roomId)) return // сервис закрыт — записи не принимаются
       if (!sockCanEditNow(socket, joinedRoom)) return // только чтение
       const nm = typeof msg?.name === 'string' ? msg.name.trim().slice(0, 120) : ''
       if (!nm) return
@@ -1352,6 +1464,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('vetvi:replace', (msg: { roomId?: string; doc?: unknown; by?: { name?: string; color?: string } | null }) => {
     try {
       if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+      if (sockServiceBlocked(socket, msg.roomId)) return // сервис закрыт — записи не принимаются
       if (!sockCanEditNow(socket, joinedRoom)) return // только чтение
       const doc = msg.doc as { nodes?: unknown[] } | undefined
       if (!doc || !Array.isArray(doc.nodes)) return
@@ -1387,6 +1500,7 @@ io.on('connection', (socket: Socket) => {
     }) => {
       try {
         if (!isSafeRoom(msg?.roomId) || msg.roomId !== joinedRoom) return
+        if (sockServiceBlocked(socket, msg.roomId)) return // сервис закрыт — live-события не ретранслируются
         if (!sockCanEditNow(socket, joinedRoom)) return // только чтение: live-события не ретранслируются
         socket.to(msg.roomId).emit('vetvi:live', {
           roomId: msg.roomId,
@@ -1421,6 +1535,10 @@ io.on('connection', (socket: Socket) => {
         const roomId = payload?.roomId
         if (!isSafeRoom(roomId) || !payload?.copyId || !payload?.doc?.current) {
           ack?.({ ok: false, error: 'bad merge payload' })
+          return
+        }
+        if (sockServiceBlocked(socket, roomId)) {
+          ack?.({ ok: false, error: 'Сервис «Ветви» недоступен — изменения не сохраняются' })
           return
         }
         const kind = payload.kind === 'replace' ? 'replace' : 'copy'
@@ -1627,6 +1745,10 @@ io.on('connection', (socket: Socket) => {
           ack?.({ ok: true, denied: [] }) // только чтение: локи не выдаются
           return
         }
+        if (sockServiceBlocked(socket, payload.roomId)) {
+          ack?.({ ok: true, denied: [] }) // сервис закрыт: локи не выдаются
+          return
+        }
         const ids = (Array.isArray(payload.ids) ? payload.ids : [])
           .map(String)
           .filter(Boolean)
@@ -1728,6 +1850,10 @@ io.on('connection', (socket: Socket) => {
         }
         if (!sockCanEditNow(socket, joinedRoom)) {
           ack?.({ ok: false, error: 'read only' }) // пароль комнаты меняют только редакторы
+          return
+        }
+        if (sockServiceBlocked(socket, payload.roomId)) {
+          ack?.({ ok: false, error: 'Сервис «Ветви» недоступен — изменения не сохраняются' })
           return
         }
         if (room.pass) {
@@ -1879,7 +2005,8 @@ const internalServer = createServer((req, res) => {
   const isStatus = url.startsWith('/internal/rooms-status') && req.method === 'POST'
   const isAccess = url.startsWith('/internal/access-sync') && req.method === 'POST'
   const isNotify = url.startsWith('/internal/notify') && req.method === 'POST'
-  if (!isStatus && !isAccess && !isNotify) {
+  const isServices = url.startsWith('/internal/services-sync') && req.method === 'POST'
+  if (!isStatus && !isAccess && !isNotify && !isServices) {
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: false, error: 'not found' }))
     return
@@ -1904,6 +2031,26 @@ const internalServer = createServer((req, res) => {
         changed?: { userId?: string; role?: string | null }[]
         userId?: string
         ntf?: unknown
+        userIds?: unknown
+      }
+      if (isServices) {
+        /* смена реестра/доступов сервисов: клиенты перечитывают /api/services.
+           userIds — адресная доставка (персональный запрет/разрешение),
+           без userIds — широковещательно всем (вкл/выкл сервиса). */
+        const uids = Array.isArray(parsed?.userIds)
+          ? (parsed.userIds as unknown[]).map(String).filter(Boolean).slice(0, 200)
+          : null
+        let sent = 0
+        if (uids) {
+          for (const uid of uids) sent += notifyServiceEvent(uid)
+          console.log(`[vetvi-sync] services-sync → targeted users: ${uids.length}, sockets: ${sent}`)
+        } else {
+          try { io.emit('vetvi:services') ; sent = -1 } catch { /* сервер мёртв */ }
+          console.log('[vetvi-sync] services-sync → broadcast всем клиентам')
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, sent }))
+        return
       }
       if (isNotify) {
         /* push одного уведомления аккаунту (grant/revoke в Next.js): раздаём
@@ -1947,7 +2094,7 @@ const internalServer = createServer((req, res) => {
 
 try {
   internalServer.listen(INTERNAL_PORT, () => {
-    console.log(`[vetvi-sync] internal API (access-sync/rooms-status/notify) on port ${INTERNAL_PORT}`)
+    console.log(`[vetvi-sync] internal API (access-sync/rooms-status/notify/services-sync) on port ${INTERNAL_PORT}`)
   })
   internalServer.on('error', (e) => {
     console.error('[vetvi-sync] internal port error (свип ролей продолжает работать)', e)

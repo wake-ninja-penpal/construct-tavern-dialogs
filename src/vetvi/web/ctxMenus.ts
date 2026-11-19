@@ -8,6 +8,7 @@ import { hkText } from '@/vetvi/core/hotkeys';
 import { NODE_W, TYPES } from '@/vetvi/core/constants';
 import { screenToWorld } from '@/vetvi/core/geometry';
 import { countReplies } from '@/vetvi/core/dialog';
+import { peekServices } from '@/services/hub';
 import type { CtxItem, VetviStore } from './store';
 
 /** countReplies(n.dialog.replies) оригинала (9430–9431) — все реплики с вложенными. */
@@ -53,6 +54,18 @@ export function ctxMenus(store: VetviStore) {
       /* 1:1 (9428): «Экспорт выделенных в JSON» — Тексты (JSON) выделения */
       items.push({ label: 'Экспорт выделенных в JSON (' + hkText('exportSel') + ')', fn: () => store.exportTextsJson(true) });
       items.push({ label: 'Центрировать (' + hkText('centerSel') + ')', fn: () => store.requestCenter(id) });
+      /* менеджер задач: создать задачу для ноды/выделенных (связи узел↔задача).
+         Сервис доступен? Синхронная проверка кэша списка сервисов; если кэш
+         пуст (ещё не грузился) — пункт показываем, store сам проверит. */
+      const svcCache = peekServices();
+      if (!svcCache || svcCache.some((s) => s.key === 'task-manager')) {
+        items.push({
+          label: selCount > 1
+            ? 'Задача для выделенных (' + selCount + ') — в Менеджер задач'
+            : 'Задача для ноды — в Менеджер задач',
+          fn: () => void store.createTaskForSelection(selCount > 1 ? [...store.sel] : [id]),
+        });
+      }
       items.push({ label: 'Журнал изменений', fn: () => { store.setLogFilters(id, null); store.openModal('log'); } });
       if (n.type === 'dialog' && n.dialog && n.dialog.replies.length >= 2) {
         items.push({ label: 'Разбить на реплики (' + n.dialog.replies.length + ')', fn: () => store.splitDialogNode(id, false) });

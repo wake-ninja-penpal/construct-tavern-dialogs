@@ -58,7 +58,7 @@ const SEED_SERVICES = [
     description: 'Планы, задачи и прогресс по проектам команды',
     icon: 'tasks',
     path: 'task-manager',
-    status: 'placeholder',
+    status: 'ready',
     sortOrder: 3,
   },
 ];
@@ -71,8 +71,12 @@ export async function ensureServicesSeeded(): Promise<void> {
   if (seeded) return;
   try {
     for (const s of SEED_SERVICES) {
-      const exists = await db.serviceApp.findUnique({ where: { key: s.key }, select: { id: true } });
+      const exists = await db.serviceApp.findUnique({ where: { key: s.key } });
       if (!exists) await db.serviceApp.create({ data: s });
+      else if (s.key === 'task-manager' && exists.status === 'placeholder') {
+        /* прототип менеджера задач интегрирован — строка реестра становится «подключён» */
+        await db.serviceApp.update({ where: { key: s.key }, data: { status: 'ready' } });
+      }
     }
     seeded = true;
   } catch {

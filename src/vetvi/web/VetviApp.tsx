@@ -32,7 +32,14 @@ import { AuthGate, fetchAuthState } from './AuthGate';
 import { AdminPanel, isAdminHash } from './AdminPanel';
 import { authApplyState } from './auth';
 import { ServiceScreen } from '@/services/ServiceScreen';
-import { fetchServices, parseServiceHash, VETVI_SERVICE_KEY } from '@/services/hub';
+import {
+  fetchServices,
+  invalidateServicesCache,
+  onServicesChanged,
+  parseHash,
+  VETVI_SERVICE_KEY,
+} from '@/services/hub';
+import { ensureServicesLive, servicesLiveHello } from '@/services/live';
 
 /* Рендер после монтирования: документ читается из localStorage при создании стора. */
 const emptySubscribe = () => () => {};
@@ -165,21 +172,50 @@ export default function VetviApp() {
   /* «Ветви» тоже сервис: админ может запретить его пользователю — тогда
      редактор не открывается вовсе (экран «нет доступа» вместо холста). */
   const [vetviBlocked, setVetviBlocked] = useState(false);
+  /* прямая ссылка на ноду (из задачи менеджера задач): #…node=<id> —
+     после монтирования редактора центрируем и подсвечиваем ноду */
+  const [nodeGoto, setNodeGoto] = useState<string | null>(null);
+
+  useEffect(() => {
+    /* служебный сокет сервисов: живёт и в редакторе, и на экранах сервисов —
+       мгновенная реакция на вкл/выкл сервисов и смену персональных доступов */
+    ensureServicesLive();
+  }, []);
 
   useEffect(() => {
     const check = () => {
+      const info = parseHash();
       setAdminHash(isAdminHash());
-      setSvcKey(parseServiceHash());
+      setSvcKey(info.service);
       /* уход из редактора в другой сервис: сбрасываем отложенное сохранение,
          чтобы последняя правка гарантированно легла в хранилище */
-      if (parseServiceHash()) {
+      if (info.service) {
         const st = (window as unknown as { __vetvi?: VetviStore }).__vetvi;
         try { st?.flushSave(); } catch { /* хранилище ещё не создано */ }
+      }
+      /* прямая ссылка на ноду (#project=<id>&node=<nid> или #room=<rid>&node=<nid>) */
+      setNodeGoto(info.params.node || null);
+      /* пользователь вернулся в «Ветви» из сервиса — подсказки задач могли
+         измениться (задачи создали/перенесли) */
+      if (!info.service) {
+        const st = (window as unknown as { __vetvi?: VetviStore }).__vetvi;
+        try { st?.refreshTaskHints(true); } catch { /* ещё не готово */ }
       }
     };
     check();
     window.addEventListener('hashchange', check);
     return () => window.removeEventListener('hashchange', check);
+  }, []);
+
+  /* реестр/доступы сервисов изменились (push от vetvi-sync) — «Ветви» тоже
+     сервис: пропали из списка → экран «нет доступа» БЕЗ перезагрузки */
+  useEffect(() => {
+    return onServicesChanged(() => {
+      invalidateServicesCache();
+      void fetchServices(true)
+        .then((list) => setVetviBlocked(!list.some((s) => s.key === VETVI_SERVICE_KEY)))
+        .catch(() => { /* сервер недоступен — прежнее состояние */ });
+    });
   }, []);
 
   /* кто я: если авторизация включена и не залогинен — гейт входа/регистрации.
@@ -193,6 +229,9 @@ export default function VetviApp() {
           if (!alive) return;
           authApplyState(st);
           setAuthPhase(st.authEnabled && !st.user ? 'gate' : 'ok');
+          /* токен сессии появился — регистрируем служебный сокет сервисов
+             (вход мог случиться уже после его подключения) */
+          servicesLiveHello();
         })
         .catch(() => {
           if (alive) setAuthPhase('ok'); /* сервер недоступен — как раньше */
@@ -241,10 +280,10 @@ export default function VetviApp() {
   if (authPhase === 'loading') return <main className="rn-app" aria-label="Ветви — React-редактор" />;
   /* «Ветви» запрещены пользователю админом — вместо редактора экран «нет доступа» */
   if (vetviBlocked) return <ServiceScreen svcKey={VETVI_SERVICE_KEY} />;
-  return <VetviAppInner />;
+  return <VetviAppInner nodeGoto={nodeGoto} />;
 }
 
-function VetviAppInner() {
+function VetviAppInner({ nodeGoto }: { nodeGoto: string | null }) {
   const store = useMemo(() => getStore(), []);
   /* Каналы doc+ui: геометрические кадры (жесты холста) не перерисовывают корень —
      их подхватывает сам CanvasBoard своей подпиской, панели/модалки не трогаются. */
@@ -273,6 +312,14 @@ function VetviAppInner() {
     /* свежие имена проектов в комнатах: соавторы могли переименовать их, пока
        страница была закрыта (названия в списке проектов актуальны сразу) */
     store.refreshRoomNames();
+    /* иконки задач над нодами: первый сбор + опрос + при возврате на вкладку */
+    store.startTaskHints();
+    /* прямая ссылка на ноду (из менеджера задач): открыть проект (в т.ч. чужой —
+       по roomId), центрировать ноду и подсветить выделением */
+    if (nodeGoto) {
+      store.gotoNodeFromHash(nodeGoto);
+      try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* нет history */ }
+    }
   }, [store]);
 
   /* попап участников закрывается кликом мимо (capture, как bindSyncUI оригинала) */

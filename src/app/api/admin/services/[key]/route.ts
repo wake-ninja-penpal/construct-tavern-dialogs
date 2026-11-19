@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isAdmin } from '@/lib/auth'
 import { PROTECTED_KEYS } from '@/lib/services'
+import { notifyServicesChanged } from '@/lib/syncNotify'
 
 /**
  * PATCH /api/admin/services/[key] — правка сервиса: name/description/icon/
@@ -32,6 +33,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ key: stri
     if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
 
     const updated = await db.serviceApp.update({ where: { key }, data })
+    /* вкл/выкл сервиса — мгновенно всем: список обновится без перезагрузки,
+       кто был в выключенном сервисе — выйдет в доступный */
+    if (typeof data.enabled === 'boolean') notifyServicesChanged()
     return NextResponse.json({ item: updated })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -48,6 +52,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ key: st
     const svc = await db.serviceApp.findUnique({ where: { key } })
     if (!svc) return NextResponse.json({ error: 'Сервис не найден' }, { status: 404 })
     await db.$transaction([db.serviceAccess.deleteMany({ where: { serviceKey: key } }), db.serviceApp.delete({ where: { key } })])
+    notifyServicesChanged()
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

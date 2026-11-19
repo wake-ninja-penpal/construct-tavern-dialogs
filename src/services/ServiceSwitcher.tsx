@@ -8,14 +8,24 @@
  * переключает приложение через адресный хеш (#service=<path>) — вход общий,
  * страница не перезагружается, «Ветви» возвращаются очисткой хеша.
  *
- * Список перечитывается при каждом открытии попапа: админ открыл/закрыл
- * доступ — переключатель покажет это без перезагрузки страницы.
+ * Список обновляется сам: push vetvi:services (см. live.ts) + перечитывание
+ * при каждом открытии попапа. Админ включил/выключил сервис или сменил
+ * персональный доступ — переключатель меняется без перезагрузки страницы.
+ *
+ * Попап рендерится через портал ВНЕ шапки (document.body): шапка создаёт
+ * stacking context (z-index 40), внутри него попап перекрывался бы плавающей
+ * панелью инструментов холста (z-index 45) — как раньше страдало меню
+ * сохранения. Портал с z-index 95 — попап поверх ВСЕХ объектов холста,
+ * как окна онлайн-участников и сохранения.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   fetchServices,
+  invalidateServicesCache,
+  onServicesChanged,
   setServiceHash,
   VETVI_SERVICE_KEY,
   type ServiceDTO,
@@ -33,6 +43,9 @@ export function ServiceSwitcher({ current, id }: Props) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ServiceDTO[] | null>(null);
   const [err, setErr] = useState(false);
+  /* портал доступен только после монтирования (SSR): как useMounted в VetviApp */
+  const emptySubscribe = () => () => {};
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
 
   const load = useCallback(() => {
     setErr(false);
@@ -46,6 +59,16 @@ export function ServiceSwitcher({ current, id }: Props) {
       const next = !v;
       if (next) load();
       return next;
+    });
+  }, [load]);
+
+  /* сервисы изменились (вкл/выкл админом, персональный доступ): перечитать
+     список сразу — открытый попап обновляется на глазах, закрытый — кэш
+     сбрасывается к следующему открытию */
+  useEffect(() => {
+    return onServicesChanged(() => {
+      invalidateServicesCache();
+      load();
     });
   }, [load]);
 
@@ -91,6 +114,60 @@ export function ServiceSwitcher({ current, id }: Props) {
     }
   }
 
+  const popup = (
+    <div
+      className={'svc-pop' + (open ? ' show' : '')}
+      style={open ? popStyle : undefined}
+      role="menu"
+      aria-label="Сервисы"
+      aria-hidden={!open}
+    >
+      <div className="cp-cap">Сервисы</div>
+      {!items && !err && (
+        <div className="svc-empty">Загрузка списка…</div>
+      )}
+      {err && (
+        <div className="svc-empty">Список недоступен — попробуйте ещё раз</div>
+      )}
+      {items && items.length === 0 && !err && (
+        <div className="svc-empty">Доступных сервисов нет</div>
+      )}
+      {items && items.length > 0 && (
+        <div className="svc-list" role="presentation">
+          {items.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              role="menuitem"
+              className={'svc-row' + (s.key === current ? ' cur' : '')}
+              onClick={() => go(s)}
+              title={s.key === current ? 'Открытый сейчас сервис' : s.description || s.name}
+            >
+              <span className="svc-ico"><ServiceIcon icon={s.icon} size={17} /></span>
+              <span className="svc-txt">
+                <b>{s.name}</b>
+                <i>{s.key === current ? 'открыт сейчас' : (s.description || '')}</i>
+              </span>
+              {s.status !== 'ready' && <span className="svc-badge">скоро</span>}
+              {s.key === current && <span className="svc-here">вы здесь</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="svc-foot">
+        Одна учётная запись для всех сервисов
+        {current !== VETVI_SERVICE_KEY && items?.some((s) => s.key === VETVI_SERVICE_KEY) && (
+          <button type="button" className="svc-back" onClick={() => {
+            const v = items!.find((x) => x.key === VETVI_SERVICE_KEY);
+            if (v) go(v);
+          }}>
+            ← Ветви
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <>
       <button
@@ -106,57 +183,7 @@ export function ServiceSwitcher({ current, id }: Props) {
         <ServicesGridIcon />
       </button>
 
-      <div
-        className={'svc-pop' + (open ? ' show' : '')}
-        style={open ? popStyle : undefined}
-        role="menu"
-        aria-label="Сервисы"
-        aria-hidden={!open}
-      >
-        <div className="cp-cap">Сервисы</div>
-        {!items && !err && (
-          <div className="svc-empty">Загрузка списка…</div>
-        )}
-        {err && (
-          <div className="svc-empty">Список недоступен — попробуйте ещё раз</div>
-        )}
-        {items && items.length === 0 && !err && (
-          <div className="svc-empty">Доступных сервисов нет</div>
-        )}
-        {items && items.length > 0 && (
-          <div className="svc-list" role="presentation">
-            {items.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                role="menuitem"
-                className={'svc-row' + (s.key === current ? ' cur' : '')}
-                onClick={() => go(s)}
-                title={s.key === current ? 'Открытый сейчас сервис' : s.description || s.name}
-              >
-                <span className="svc-ico"><ServiceIcon icon={s.icon} size={17} /></span>
-                <span className="svc-txt">
-                  <b>{s.name}</b>
-                  <i>{s.key === current ? 'открыт сейчас' : (s.description || '')}</i>
-                </span>
-                {s.status !== 'ready' && <span className="svc-badge">скоро</span>}
-                {s.key === current && <span className="svc-here">вы здесь</span>}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="svc-foot">
-          Одна учётная запись для всех сервисов
-          {current !== VETVI_SERVICE_KEY && items?.some((s) => s.key === VETVI_SERVICE_KEY) && (
-            <button type="button" className="svc-back" onClick={() => {
-              const v = items!.find((x) => x.key === VETVI_SERVICE_KEY);
-              if (v) go(v);
-            }}>
-              ← Ветви
-            </button>
-          )}
-        </div>
-      </div>
+      {mounted && createPortal(popup, document.body)}
     </>
   );
 }

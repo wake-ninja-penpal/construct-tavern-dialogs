@@ -7,6 +7,14 @@
  * Переключение сервисов живёт в адресном хеше: #service=<path> — открыт сервис,
  * пустой хеш — «Ветви». Один маршрут «/» (как скрытая админка по своему хешу),
  * одна учётная запись (cookie vv_sess работает во всех сервисах).
+ *
+ * Хеш — общий формат пар «ключ=значение» через «&»: помимо service там живут
+ * прямые ссылки интеграции «Ветви ↔ Менеджер задач»:
+ *  #project=<id>&room=<rid>&node=<nid>   — открыть «Ветви» на ноде (из задачи);
+ *  #service=task-manager&mk=1&p=<pid>&r=<rid>&n=<ids>&t=<titles>
+ *                                        — создать задачу для нод (из «Ветвей»);
+ *  #service=task-manager&nf=<pid>&nn=<nid>&nt=<title>
+ *                                        — задачи конкретной ноды (из «Ветвей»).
  */
 
 /* ── типы ── */
@@ -39,11 +47,34 @@ export function serviceMeta(key: string): { name: string; description: string; i
 
 /* ── адресный хеш ── */
 
+export interface HashInfo {
+  /** Ключ стороннего сервиса (service≠vetvi) или null — открыт «Ветви». */
+  service: string | null;
+  /** Остальные пары хеша (node/p/r/mk/nf/…). */
+  params: Record<string, string>;
+}
+
+/** Разбор хеша «#k=v&k=v» — сервис и дополнительные параметры интеграций. */
+export function parseHash(): HashInfo {
+  if (typeof window === 'undefined') return { service: null, params: {} };
+  const raw = window.location.hash.replace(/^#/, '');
+  const params: Record<string, string> = {};
+  for (const part of raw.split('&')) {
+    if (!part) continue;
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    const k = part.slice(0, i);
+    let v = part.slice(i + 1);
+    try { v = decodeURIComponent(v); } catch { /* сырой вид */ }
+    params[k] = v;
+  }
+  const service = params.service && params.service !== VETVI_SERVICE_KEY ? params.service : null;
+  return { service, params };
+}
+
 /** Ключ сервиса из адреса (#service=<path>) — null, если открыт «Ветви». */
 export function parseServiceHash(): string | null {
-  if (typeof window === 'undefined') return null;
-  const m = /^#service=([a-z0-9-]+)$/i.exec(window.location.hash);
-  return m ? m[1] : null;
+  return parseHash().service;
 }
 
 /** Перейти к сервису (path пуст — вернуться в «Ветви», хеш очищается). */
@@ -58,6 +89,58 @@ export function setServiceHash(svc: { key: string; path: string }): void {
   window.location.hash = 'service=' + svc.path;
 }
 
+/* ── прямые ссылки «Ветви ↔ Менеджер задач» ── */
+
+/** Открыть «Ветви» на конкретной ноде (переход из задачи менеджера задач).
+ *  project — id локального слота (свой проект), room — id сетевой комнаты
+ *  (чужой проект: ищем слот по roomId). */
+export function goVetviNode(p: { projectId?: string | null; roomId?: string | null; nodeId: string }): void {
+  const segs: string[] = [];
+  if (p.projectId) segs.push('project=' + encodeURIComponent(p.projectId));
+  if (p.roomId) segs.push('room=' + encodeURIComponent(p.roomId));
+  segs.push('node=' + encodeURIComponent(p.nodeId));
+  window.location.hash = segs.join('&');
+}
+
+/** Ссылка «создать задачу для нод» из «Ветвей»: менеджер задач откроет
+ *  новое окно задачи с уже привязанными нодами. */
+export function goTaskCreate(payload: {
+  projectId: string;
+  roomId: string | null;
+  nodes: { id: string; title: string }[];
+}): void {
+  const segs: string[] = ['service=task-manager', 'mk=1', 'p=' + encodeURIComponent(payload.projectId)];
+  if (payload.roomId) segs.push('r=' + encodeURIComponent(payload.roomId));
+  segs.push('n=' + payload.nodes.map((x) => encodeURIComponent(x.id)).join(','));
+  segs.push('t=' + encodeURIComponent(JSON.stringify(payload.nodes.map((x) => x.title))));
+  window.location.hash = segs.join('&');
+}
+
+/** Ссылка «задачи этой ноды» из «Ветвей»: менеджер задач откроет фильтр
+ *  по привязанным задачам. */
+export function goTaskFilter(p: { projectId: string; nodeId: string; title?: string }): void {
+  const segs: string[] = ['service=task-manager', 'nf=' + encodeURIComponent(p.projectId), 'nn=' + encodeURIComponent(p.nodeId)];
+  if (p.title) segs.push('nt=' + encodeURIComponent(p.title));
+  window.location.hash = segs.join('&');
+}
+
+/* ── события realtime-сервисов (доставка — src/services/live.ts) ──
+   Админ включил/выключил сервис или сменил персональный доступ → sync-сервер
+   пушит vetvi:services, live.ts диспатчит window-событие, слушатели
+   (переключатель, экраны сервисов, «Ветви») перечитывают список БЕЗ
+   перезагрузки; кто находился в закрытом сервисе — выходит в доступный. */
+
+export const SVC_EVENT = 'vetvi:services-changed';
+
+export function dispatchServicesChanged(): void {
+  try { window.dispatchEvent(new CustomEvent(SVC_EVENT)); } catch { /* нет CustomEvent */ }
+}
+
+export function onServicesChanged(cb: () => void): () => void {
+  window.addEventListener(SVC_EVENT, cb);
+  return () => window.removeEventListener(SVC_EVENT, cb);
+}
+
 /* ── загрузка списка сервисов (короткий кэш: шапка и переключатель
    не дёргают API на каждый клик, но админские правки видны быстро) ── */
 
@@ -66,6 +149,11 @@ const CACHE_MS = 8000;
 
 export function invalidateServicesCache(): void {
   cache = null;
+}
+
+/** Текущий кэш без запроса (для синхронных проверок доступности сервиса). */
+export function peekServices(): ServiceDTO[] | null {
+  return cache ? cache.items : null;
 }
 
 export async function fetchServices(force = false): Promise<ServiceDTO[]> {
