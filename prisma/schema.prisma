@@ -119,6 +119,7 @@ model TaskProject {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   boards    TaskBoard[]
+  access    TaskProjectAccess[]
 }
 
 model TaskBoard {
@@ -153,10 +154,70 @@ model TaskItem {
   description String    @default("")
   stickers    String    @default("{}") // JSON {assignees:[login], deadline, priority}
   links       String    @default("[]") // JSON — связи с нодами «Ветвей»
+  messages    String    @default("[]") // JSON — чат задачи: [{id,login,text,ts,system}]
+  labelIds    String    @default("[]") // JSON — метки задачи [TaskLabel.id]
   done        Boolean   @default(false)
   completedAt DateTime?
   order       Float     @default(0) // дробный порядок — перестановка без перенумерации
   createdBy   String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+}
+
+/* ── метки задач (глобальные для сервиса, как в прототипе «Поток») ──
+   Задача ссылается на метки списком labelIds. */
+model TaskLabel {
+  id        String   @id @default(cuid())
+  name      String
+  color     String   @default("#8b7cff")
+  createdAt DateTime @default(now())
+}
+
+/* ── команды хаба ──
+   Глобальные группы пользователей (логины). Команду добавляют в проект
+   целиком с ролью — доступ к доске задач получает каждый её участник. */
+model TaskTeam {
+  id        String           @id @default(cuid())
+  name      String
+  color     String           @default("#8b7cff")
+  icon      String           @default("shield")
+  createdAt DateTime         @default(now())
+  members   TaskTeamMember[]
+  access    TaskProjectAccess[]
+}
+
+model TaskTeamMember {
+  id     String   @id @default(cuid())
+  teamId String
+  team   TaskTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  login  String
+
+  @@unique([teamId, login])
+}
+
+/* ── доступ к проекту менеджера задач ──
+   Строки двух видов: персональные (login задан) и командные (teamId задан).
+   Роль берётся максимумом из персональной и командных: admin — управляет
+   доступом, editor — создаёт/правит задачи, viewer — читает и комментирует.
+   Если строк нет вовсе — проект открыт всем пользователям сервиса. */
+model TaskProjectAccess {
+  id        String    @id @default(cuid())
+  projectId String
+  project   TaskProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  login     String?
+  teamId    String?
+  team      TaskTeam? @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  role      String    @default("editor") // admin | editor | viewer
+  createdAt DateTime  @default(now())
+}
+
+/* ── сохранённые виды (пресеты фильтров) — личные, на владельца ──
+   state JSON: {view, projectId, boardId, userId, sort, filters:{...}} */
+model TaskView {
+  id        String   @id @default(cuid())
+  login     String
+  name      String
+  icon      String   @default("bookmark")
+  state     String   @default("{}")
+  createdAt DateTime @default(now())
 }

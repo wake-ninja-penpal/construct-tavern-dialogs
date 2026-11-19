@@ -4,7 +4,8 @@
  * Менеджер задач (сервис task-manager) — клиентские типы и модели.
  * Формат повторяет прототип «Поток»: проекты → доски → колонки → задачи,
  * системные колонки (Не взяты / В работе / Выполнено) задают статус,
- * стикеры (исполнители/дедлайн/приоритет) и связи с нодами «Ветвей».
+ * стикеры (исполнители/дедлайн/приоритет), метки, чат задачи и связи
+ * с нодами «Ветвей».
  */
 
 export interface TmColumn {
@@ -48,6 +49,70 @@ export interface TmLink {
   t?: string;
 }
 
+/** Запись чата задачи (комментарий или системная история). */
+export interface TmMessage {
+  id: string;
+  login: string;
+  text: string;
+  ts: number;
+  system?: boolean;
+}
+
+export interface TmLabel {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface TmTeamMember {
+  id: string;
+  teamId: string;
+  login: string;
+}
+
+export interface TmTeam {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  members: TmTeamMember[];
+}
+
+/** Строка доступов проекта: персональная (login) или командная (teamId). */
+export interface TmAccessRow {
+  id: string;
+  projectId: string;
+  login: string | null;
+  teamId: string | null;
+  role: string; // admin | editor | viewer
+}
+
+/** Сохранённый вид (пресет фильтров) — личный. */
+export interface TmView {
+  id: string;
+  login: string;
+  name: string;
+  icon: string;
+  state: TmViewState;
+}
+
+export interface TmFilters {
+  assignee: string; // '' | 'me' | 'none' | login
+  priorities: string[];
+  labelId: string;
+  due: string; // any | overdue | today | week | none
+  showDone: boolean;
+}
+
+export interface TmViewState {
+  view: string; // my | board | backlog | user
+  projectId: string | null;
+  boardId: string | null;
+  userId: string | null;
+  sort: string; // manual | due | priority | title | created
+  filters: TmFilters;
+}
+
 export interface TmTask {
   id: string;
   projectId: string;
@@ -58,6 +123,8 @@ export interface TmTask {
   description: string;
   stickers: TmStickers;
   links: TmLink[];
+  messages: TmMessage[];
+  labelIds: string[];
   done: boolean;
   completedAt: string | null;
   order: number;
@@ -83,6 +150,22 @@ export const TM_KIND_COLOR: Record<string, string> = {
 
 export const TM_PALETTE = ['#e2a54e', '#8fbf7f', '#cf6b5a', '#646bd0', '#2f9e77', '#12a594', '#c951a2', '#9aa1ac'];
 
+/** Метки ролей проекта (как в прототипе: админ/редактор/наблюдатель). */
+export const TM_ROLE_LABEL: Record<string, string> = {
+  admin: 'Админ',
+  editor: 'Редактор',
+  viewer: 'Наблюдатель',
+};
+
+export const TM_ROLE_RANK: Record<string, number> = { viewer: 1, editor: 2, admin: 3 };
+
+export const TM_TEAM_ICONS = ['shield', 'users', 'rocket', 'code', 'megaphone', 'star', 'flame', 'kanban'];
+
+export function childrenOf(ws: { tasks: TmTask[] } | null, parentId: string): TmTask[] {
+  if (!ws) return [];
+  return ws.tasks.filter((t) => t.parentId === parentId);
+}
+
 export function parseStickers(raw: string | null | undefined): TmStickers {
   try {
     const o = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
@@ -107,14 +190,48 @@ export function parseLinks(raw: string | null | undefined): TmLink[] {
   }
 }
 
-export function taskOf(ws: { projects: TmProject[]; tasks: TmTask[] } | null, id: string): TmTask | null {
-  if (!ws) return null;
-  return ws.tasks.find((t) => t.id === id) || null;
+export function parseMessages(raw: string | null | undefined): TmMessage[] {
+  try {
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((x): x is TmMessage => !!x && typeof x === 'object' && typeof (x as TmMessage).text === 'string');
+  } catch {
+    return [];
+  }
 }
 
-export function childrenOf(ws: { tasks: TmTask[] } | null, parentId: string): TmTask[] {
-  if (!ws) return [];
-  return ws.tasks.filter((t) => t.parentId === parentId);
+export function parseLabelIds(raw: string | null | undefined): string[] {
+  try {
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((x): x is string => typeof x === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export function parseViewState(raw: string | null | undefined): TmViewState {
+  const fallback: TmViewState = { view: 'my', projectId: null, boardId: null, userId: null, sort: 'manual', filters: { assignee: '', priorities: [], labelId: '', due: 'any', showDone: true } };
+  try {
+    const o = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const f = (o.filters && typeof o.filters === 'object' ? o.filters : {}) as Record<string, unknown>;
+    return {
+      view: typeof o.view === 'string' ? o.view : 'my',
+      projectId: typeof o.projectId === 'string' ? o.projectId : null,
+      boardId: typeof o.boardId === 'string' ? o.boardId : null,
+      userId: typeof o.userId === 'string' ? o.userId : null,
+      sort: typeof o.sort === 'string' ? o.sort : 'manual',
+      filters: {
+        assignee: typeof f.assignee === 'string' ? f.assignee : '',
+        priorities: Array.isArray(f.priorities) ? f.priorities.filter((x): x is string => typeof x === 'string') : [],
+        labelId: typeof f.labelId === 'string' ? f.labelId : '',
+        due: typeof f.due === 'string' ? f.due : 'any',
+        showDone: f.showDone !== false,
+      },
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 /** Дедлайн — короткий формат: Сегодня / Завтра / Вчера / 12 мар. */
@@ -149,4 +266,46 @@ export function userColor(login: string): string {
   let h = 0;
   for (let i = 0; i < login.length; i++) h = (h * 31 + login.charCodeAt(i)) >>> 0;
   return TM_PALETTE[h % TM_PALETTE.length];
+}
+
+/** Порядок сортировки списка задач по ключу (как в прототипе «Поток»). */
+export function sortTasks(list: TmTask[], sort: string): TmTask[] {
+  const c = [...list];
+  const w: Record<string, number> = { critical: 0, high: 1, normal: 2, low: 3 };
+  if (sort === 'manual') c.sort((a, b) => a.order - b.order);
+  else if (sort === 'due') c.sort((a, b) => (a.stickers.deadline || '9999').localeCompare(b.stickers.deadline || '9999'));
+  else if (sort === 'priority') c.sort((a, b) => (w[a.stickers.priority || ''] ?? 4) - (w[b.stickers.priority || ''] ?? 4));
+  else if (sort === 'title') c.sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+  else if (sort === 'created') c.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+  return c;
+}
+
+/** Применение фильтров к списку задач (как applyFilters прототипа). */
+export function applyFilters(list: TmTask[], f: TmFilters, meLogin: string): TmTask[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tIso = today.toISOString().slice(0, 10);
+  let out = list;
+  if (f.assignee === 'me') out = out.filter((x) => x.stickers.assignees.includes(meLogin));
+  else if (f.assignee === 'none') out = out.filter((x) => !x.stickers.assignees.length);
+  else if (f.assignee) out = out.filter((x) => x.stickers.assignees.includes(f.assignee));
+  if (f.priorities.length) out = out.filter((x) => x.stickers.priority && f.priorities.includes(x.stickers.priority));
+  if (f.labelId) out = out.filter((x) => (x.labelIds || []).includes(f.labelId));
+  if (f.due === 'overdue') out = out.filter((x) => x.stickers.deadline && x.stickers.deadline < tIso && !x.done);
+  else if (f.due === 'today') out = out.filter((x) => x.stickers.deadline && x.stickers.deadline <= tIso);
+  else if (f.due === 'week') {
+    const week = new Date(today.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    out = out.filter((x) => x.stickers.deadline && x.stickers.deadline >= tIso && x.stickers.deadline <= week);
+  } else if (f.due === 'none') out = out.filter((x) => !x.stickers.deadline);
+  if (!f.showDone) out = out.filter((x) => !x.done);
+  return out;
+}
+
+/** Число активных фильтров (бейдж на кнопке-воронке). */
+export function filterBadge(f: TmFilters): number {
+  return (f.assignee ? 1 : 0) + f.priorities.length + (f.labelId ? 1 : 0) + (f.due !== 'any' ? 1 : 0) + (f.showDone ? 0 : 1);
+}
+
+export function emptyFilters(): TmFilters {
+  return { assignee: '', priorities: [], labelId: '', due: 'any', showDone: true };
 }

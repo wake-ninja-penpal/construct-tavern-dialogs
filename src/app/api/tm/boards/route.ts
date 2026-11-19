@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { ensureDefaultColumns, requireTaskService } from '@/lib/tasks'
+import { canEditProject, ensureDefaultColumns, requireTaskService } from '@/lib/tasks'
 
 /**
  * POST /api/tm/boards — новая доска проекта { projectId, title }.
@@ -17,6 +17,9 @@ export async function POST(req: NextRequest) {
     if (!projectId || !title) return NextResponse.json({ error: 'Нужны проект и название' }, { status: 400 })
     const project = await db.taskProject.findUnique({ where: { id: projectId }, select: { id: true } })
     if (!project) return NextResponse.json({ error: 'Проект не найден' }, { status: 404 })
+    if (!(await canEditProject(projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     const maxOrder = await db.taskBoard.aggregate({ where: { projectId }, _max: { sortOrder: true } })
     const board = await db.taskBoard.create({ data: { projectId, title, sortOrder: (maxOrder._max.sortOrder ?? 0) + 1 } })
     await ensureDefaultColumns(board.id)

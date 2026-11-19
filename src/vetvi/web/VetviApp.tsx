@@ -175,6 +175,8 @@ export default function VetviApp() {
   /* прямая ссылка на ноду (из задачи менеджера задач): #…node=<id> —
      после монтирования редактора центрируем и подсвечиваем ноду */
   const [nodeGoto, setNodeGoto] = useState<string | null>(null);
+  /* режим привязки нод к задаче менеджера задач: #attach=<taskId>&at=<title> */
+  const [attachTask, setAttachTask] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     /* служебный сокет сервисов: живёт и в редакторе, и на экранах сервисов —
@@ -195,6 +197,8 @@ export default function VetviApp() {
       }
       /* прямая ссылка на ноду (#project=<id>&node=<nid> или #room=<rid>&node=<nid>) */
       setNodeGoto(info.params.node || null);
+      /* режим привязки нод к задаче (кнопка «привязать ноды» в задаче) */
+      setAttachTask(info.params.attach ? { id: info.params.attach, title: info.params.at || '' } : null);
       /* пользователь вернулся в «Ветви» из сервиса — подсказки задач могли
          измениться (задачи создали/перенесли) */
       if (!info.service) {
@@ -280,10 +284,10 @@ export default function VetviApp() {
   if (authPhase === 'loading') return <main className="rn-app" aria-label="Ветви — React-редактор" />;
   /* «Ветви» запрещены пользователю админом — вместо редактора экран «нет доступа» */
   if (vetviBlocked) return <ServiceScreen svcKey={VETVI_SERVICE_KEY} />;
-  return <VetviAppInner nodeGoto={nodeGoto} />;
+  return <VetviAppInner nodeGoto={nodeGoto} attachTask={attachTask} />;
 }
 
-function VetviAppInner({ nodeGoto }: { nodeGoto: string | null }) {
+function VetviAppInner({ nodeGoto, attachTask }: { nodeGoto: string | null; attachTask: { id: string; title: string } | null }) {
   const store = useMemo(() => getStore(), []);
   /* Каналы doc+ui: геометрические кадры (жесты холста) не перерисовывают корень —
      их подхватывает сам CanvasBoard своей подпиской, панели/модалки не трогаются. */
@@ -320,7 +324,11 @@ function VetviAppInner({ nodeGoto }: { nodeGoto: string | null }) {
       store.gotoNodeFromHash(nodeGoto);
       try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* нет history */ }
     }
-  }, [store]);
+    /* режим привязки нод к задаче (из менеджера задач): баннер + выбор нод.
+       attachTask в зависимостях: хеш могли поставить и без перемонтирования
+       (Ветви уже открыты) — эффект обязан перезапуститься. */
+    if (attachTask) store.startAttach(attachTask.id, attachTask.title);
+  }, [store, attachTask]);
 
   /* попап участников закрывается кликом мимо (capture, как bindSyncUI оригинала) */
   useEffect(() => {
@@ -575,10 +583,60 @@ function VetviAppInner({ nodeGoto }: { nodeGoto: string | null }) {
       <CtxMenuHost store={store} />
       <ToastHost store={store} />
       <CollabPopover store={store} />
+      {store.attachTask && <AttachBar store={store} />}
       <LockTipHost store={store} />
       <LockScreen store={store} />
       {/* подсказки сочетаний на кнопках обновляет hkText при рендере */}
       <span hidden data-hk-play={hkText('play')} />
     </main>
+  );
+}
+
+/* ── баннер режима привязки нод к задаче менеджера задач ──
+   Задача нажала «+ привязать ноды из „Ветвей"» → «Ветви» открылись с
+   #attach=<taskId>: здесь пользователь выделяет ноды (клик/рамка) и
+   подтверждает — сервер дописывает связи, возврат в менеджер задач
+   открывает ту же задачу (#service=task-manager&ot=…). */
+
+function AttachBar({ store }: { store: VetviStore }) {
+  void store.revision;
+  const at = store.attachTask;
+  if (!at) return null;
+  const n = store.sel.size;
+  return (
+    <div className="tm-attachbar" role="toolbar" aria-label="Привязка нод к задаче">
+      <span className="tm-attachbar-cap">
+        <VetviMarkInline />
+        Привязка нод к задаче{at.title ? <> «{at.title.slice(0, 44)}»</> : ''}
+      </span>
+      <span className="tm-attachbar-n">{n ? 'выделено: ' + n : 'выделите ноды кликом или рамкой'}</span>
+      <span className="spacer" />
+      <button
+        type="button"
+        className="btn"
+        onClick={() => store.cancelAttach()}
+        disabled={store.attachBusy}
+      >
+        Отмена
+      </button>
+      <button
+        type="button"
+        className="btn primary"
+        onClick={() => void store.confirmAttach()}
+        disabled={!n || store.attachBusy}
+        title="Привязать выделенные ноды к задаче"
+      >
+        {store.attachBusy ? 'Привязываю…' : n ? 'Привязать (' + n + ')' : 'Привязать'}
+      </button>
+    </div>
+  );
+}
+
+function VetviMarkInline() {
+  return (
+    <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M7.5 12h3c3.2 0 2.4-6.5 6-6.5M10.5 12c3.2 0 2.4 6.5 6 6.5" />
+      <circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
   );
 }

@@ -1127,6 +1127,77 @@ export class VetviStore {
     goTaskFilter({ projectId: scope, nodeId, title: (n && n.title) || undefined });
   }
 
+  /* ── привязка нод к существующей задаче (режим из менеджера задач) ──
+     Задача нажала «привязать ноды из „Ветвей"» — хеш #attach=<taskId>&at=<title>
+     открыл «Ветви» в режиме привязки: пользователь выделяет ноды и
+     подтверждает — они дописываются в links задачи, возврат в менеджер задач
+     (#service=task-manager&ot=<taskId>) открывает ту же задачу. */
+
+  attachTask: { id: string; title: string } | null = null;
+  attachBusy = false;
+
+  startAttach(taskId: string, taskTitle: string): void {
+    if (this.attachTask?.id === taskId) return;
+    this.attachTask = { id: taskId, title: taskTitle };
+    this.clearSelection();
+    this.emit('ui');
+    this.toast('Режим привязки: выделите ноды (клик или рамка) и подтвердите', 'ok');
+  }
+
+  cancelAttach(): void {
+    this.attachTask = null;
+    this.emit('ui');
+    try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* нет history */ }
+  }
+
+  async confirmAttach(): Promise<void> {
+    const at = this.attachTask;
+    if (!at || this.attachBusy) return;
+    const ids = [...this.sel].slice(0, 40);
+    if (!ids.length) {
+      this.toast('Выделите ноды для привязки', 'warn');
+      return;
+    }
+    const scope = this.taskScope();
+    if (!scope) {
+      this.toast('Откройте или сохраните проект — ноды привязываются к проекту', 'warn');
+      return;
+    }
+    this.attachBusy = true;
+    this.emit('ui');
+    const room = this.sync && this.sync.enabled ? this.sync.room : null;
+    const links = ids.map((id) => {
+      const n = this.nodeById(id);
+      return { pid: scope, nid: id, room, t: (n && (n.title || TYPES[n.type]?.name)) || 'Нода' };
+    });
+    try {
+      const res = await fetch('/api/tm/tasks/' + encodeURIComponent(at.id) + '/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ links }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string; added?: number };
+      if (!res.ok) {
+        this.toast(j.error || 'Не удалось привязать ноды — возможно, у вас нет прав на задачу', 'err');
+        this.attachBusy = false;
+        this.emit('ui');
+        return;
+      }
+      const added = j.added || 0;
+      this.toast(added > 0 ? 'Привязано нод: ' + added : 'Эти ноды уже привязаны к задаче', 'ok');
+      this.attachTask = null;
+      this.attachBusy = false;
+      this.flushSave();
+      /* возврат в менеджер задач: открыть задачу с новыми связями */
+      window.location.hash = 'service=task-manager&ot=' + encodeURIComponent(at.id);
+      this.emit('ui');
+    } catch {
+      this.toast('Сервер недоступен — попробуйте позже', 'err');
+      this.attachBusy = false;
+      this.emit('ui');
+    }
+  }
+
   /** Прямая ссылка на ноду (из задачи менеджера задач): #…room=…&node=… —
      открыть свой проект по слоту или чужой по roomId, центр+выделение ноды. */
   gotoNodeFromHash(nodeId: string): void {

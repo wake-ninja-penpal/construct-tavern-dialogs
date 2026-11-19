@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { canAdminProject, canEditProject, requireTaskService } from '@/lib/tasks'
 
 /**
- * PATCH /api/tm/projects/[id] — переименование/цвет/порядок проекта.
+ * PATCH /api/tm/projects/[id] — переименование/цвет/порядок проекта
+ * (editor/admin проекта).
  * DELETE /api/tm/projects/[id] — удалить проект вместе с досками и задачами
- * (каскад по схеме БД).
+ * (каскад по схеме БД) — только админ проекта.
  */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     const { id } = await ctx.params
+    if (!(await canEditProject(id, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'Некорректные данные' }, { status: 400 })
     const data: Record<string, unknown> = {}
@@ -31,6 +35,9 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     const { id } = await ctx.params
+    if (!(await canAdminProject(id, user.login))) {
+      return NextResponse.json({ error: 'Удалить проект может только админ проекта' }, { status: 403 })
+    }
     await db.taskItem.deleteMany({ where: { projectId: id } })
     await db.taskProject.delete({ where: { id } })
     return NextResponse.json({ ok: true })

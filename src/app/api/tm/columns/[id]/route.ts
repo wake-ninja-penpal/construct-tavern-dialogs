@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { canEditProject, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/columns/[id] — правка колонки: название/цвет/порядок.
@@ -15,6 +15,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const { id } = await ctx.params
     const col = await db.taskColumn.findUnique({ where: { id } })
     if (!col) return NextResponse.json({ error: 'Колонка не найдена' }, { status: 404 })
+    const board = await db.taskBoard.findUnique({ where: { id: col.boardId }, select: { projectId: true } })
+    if (!(board && await canEditProject(board.projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'Некорректные данные' }, { status: 400 })
     const data: Record<string, unknown> = {}
@@ -36,6 +40,10 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     const { id } = await ctx.params
     const col = await db.taskColumn.findUnique({ where: { id } })
     if (!col) return NextResponse.json({ error: 'Колонка не найдена' }, { status: 404 })
+    const board = await db.taskBoard.findUnique({ where: { id: col.boardId }, select: { projectId: true } })
+    if (!(board && await canEditProject(board.projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     if (col.locked) return NextResponse.json({ error: 'Системную колонку удалить нельзя' }, { status: 400 })
     await db.taskItem.updateMany({ where: { columnId: id }, data: { boardId: null, columnId: null } })
     await db.taskColumn.delete({ where: { id } })

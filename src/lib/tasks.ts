@@ -120,6 +120,175 @@ export function sanitizeStickers(input: unknown): string {
   });
 }
 
+/* ── метки задачи (labelIds) ── */
+
+export function parseLabelIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const arr: unknown = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((x): x is string => typeof x === 'string').slice(0, 30);
+  } catch {
+    return [];
+  }
+}
+
+export function sanitizeLabelIds(input: unknown): string {
+  if (!Array.isArray(input)) return '[]';
+  return JSON.stringify(input.filter((x): x is string => typeof x === 'string').slice(0, 30));
+}
+
+/* ── чат задачи (messages) ── */
+
+export interface TaskMessage {
+  id: string;
+  login: string;
+  text: string;
+  ts: number;
+  system?: boolean;
+}
+
+export function parseMessages(raw: string | null | undefined): TaskMessage[] {
+  if (!raw) return [];
+  try {
+    const arr: unknown = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const out: TaskMessage[] = [];
+    for (const x of arr) {
+      if (!x || typeof x !== 'object') continue;
+      const o = x as Record<string, unknown>;
+      const text = typeof o.text === 'string' ? o.text.slice(0, 4000) : '';
+      if (!text) continue;
+      out.push({
+        id: typeof o.id === 'string' ? o.id.slice(0, 64) : '',
+        login: typeof o.login === 'string' ? o.login.slice(0, 80) : '',
+        text,
+        ts: typeof o.ts === 'number' ? o.ts : Date.now(),
+        system: o.system === true,
+      });
+    }
+    return out.slice(-500);
+  } catch {
+    return [];
+  }
+}
+
+export function sanitizeMessages(input: unknown): string {
+  if (!Array.isArray(input)) return '[]';
+  const out: TaskMessage[] = [];
+  for (const x of input) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const text = typeof o.text === 'string' ? o.text.slice(0, 4000) : '';
+    if (!text) continue;
+    out.push({
+      id: typeof o.id === 'string' ? o.id.slice(0, 64) : '',
+      login: typeof o.login === 'string' ? o.login.slice(0, 80) : '',
+      text,
+      ts: typeof o.ts === 'number' ? o.ts : Date.now(),
+      system: o.system === true,
+    });
+  }
+  return JSON.stringify(out.slice(-500));
+}
+
+/** Системная запись в чат задачи (история действий: «назначил(а)…», «перенёс(ла)…»). */
+export function appendSysMsg(rawMessages: string, login: string, text: string): string {
+  const list = parseMessages(rawMessages);
+  list.push({ id: Math.random().toString(36).slice(2, 10), login, text, ts: Date.now(), system: true });
+  return JSON.stringify(list.slice(-500));
+}
+
+/* ── доступ к проектам менеджера задач (роли) ──
+   Роль = максимум из персональной и всех командных. Нет строк доступа —
+   проект открыт всем пользователям сервиса (editor). */
+
+export type TmRole = 'admin' | 'editor' | 'viewer';
+
+const ROLE_RANK: Record<string, number> = { viewer: 1, editor: 2, admin: 3 };
+
+export interface TmAccessRowDTO {
+  id: string;
+  projectId: string;
+  login: string | null;
+  teamId: string | null;
+  role: string;
+}
+
+/** Логины команд, где состоит пользователь (для расчёта командных ролей). */
+export async function myTeamIds(login: string): Promise<string[]> {
+  const rows = await db.taskTeamMember.findMany({ where: { login }, select: { teamId: true } });
+  return [...new Set(rows.map((r) => r.teamId))];
+}
+
+/** Роль в проекте по строкам доступа (rows можно передать готовые — без запроса). */
+export function roleFromRows(
+  rows: { login: string | null; teamId: string | null; role: string }[],
+  login: string,
+  teamIds: string[],
+): TmRole | null {
+  if (!rows.length) return 'admin'; /* нет строк — открытый проект: правят все */
+  let best: TmRole | null = null;
+  for (const r of rows) {
+    const mine = (r.login && r.login === login) || (r.teamId && teamIds.includes(r.teamId));
+    if (!mine) continue;
+    const role = (ROLE_RANK[r.role] ? r.role : 'viewer') as TmRole;
+    if (!best || ROLE_RANK[role] > ROLE_RANK[best]) best = role;
+  }
+  return best;
+}
+
+/** Роль пользователя в проекте (null — доступа нет). */
+export async function projectRole(projectId: string, login: string, teamIds?: string[]): Promise<TmRole | null> {
+  const [rows, teams] = await Promise.all([
+    db.taskProjectAccess.findMany({
+      where: { projectId },
+      select: { login: true, teamId: true, role: true },
+    }),
+    teamIds ? Promise.resolve(teamIds) : myTeamIds(login),
+  ]);
+  return roleFromRows(rows, login, teams);
+}
+
+/** Право редактирования: создание/правка/удаление задач и перенос. */
+export async function canEditProject(projectId: string, login: string, teamIds?: string[]): Promise<boolean> {
+  const role = await projectRole(projectId, login, teamIds);
+  return role === 'admin' || role === 'editor';
+}
+
+/** Право управления доступом (строки доступов, удаление проекта). */
+export async function canAdminProject(projectId: string, login: string, teamIds?: string[]): Promise<boolean> {
+  const role = await projectRole(projectId, login, teamIds);
+  return role === 'admin';
+}
+
+/* ── уведомления о задачах (колокольчик + мгновенный push) ── */
+
+/** Уведомление пользователю по логину: запись в БД + push через vetvi-sync.
+ *  Ошибки глушатся — уведомление не должно ломать основной ответ API. */
+export async function notifyTaskUser(
+  login: string,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const target = await db.authUser.findUnique({ where: { login }, select: { id: true } });
+    if (!target) return;
+    const created = await db.notification.create({
+      data: { userId: target.id, type, payload: JSON.stringify(payload) },
+    });
+    const { notifyUserPush } = await import('@/lib/syncNotify');
+    notifyUserPush(target.id, {
+      id: created.id,
+      type,
+      payload,
+      createdAt: created.createdAt.toISOString(),
+    });
+  } catch {
+    /* уведомление необязательно: опрос доставит */
+  }
+}
+
 /** Проверка доступа к сервису «Менеджер задач».
  *  Возвращает пользователя или null — маршруты отвечают 403. */
 export async function requireTaskService(): Promise<AuthUser | null> {

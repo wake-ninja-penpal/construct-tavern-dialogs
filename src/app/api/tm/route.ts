@@ -1,24 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService, sanitizeLinks, sanitizeStickers } from '@/lib/tasks'
+import {
+  appendSysMsg,
+  canEditProject,
+  myTeamIds,
+  notifyTaskUser,
+  requireTaskService,
+  sanitizeLabelIds,
+  sanitizeLinks,
+  sanitizeStickers,
+} from '@/lib/tasks'
 
 /**
  * GET /api/tm — всё пространство менеджера задач: проекты (с досками и
- * колонками) + задачи. Единый снапшот — UI держит его в памяти и шлёт
+ * колонками) + задачи + метки + команды + строки доступов + мои сохранённые
+ * виды + роли в проектах. Единый снапшот — UI держит его в памяти и шлёт
  * точечные мутации (POST/PATCH/DELETE).
+ *
+ * Доступ: проекты без строк доступов открыты всем; проект со строками виден
+ * только тем, у кого есть персональный/командный доступ (в ответе roles:
+ * null — проекта нет в списке).
  */
 export async function GET() {
   try {
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
-    const [projects, tasks] = await Promise.all([
+    const [projects, tasks, labels, teams, accessRows, views, teamIds] = await Promise.all([
       db.taskProject.findMany({
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         include: { boards: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], include: { columns: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] } } } },
       }),
       db.taskItem.findMany({ orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] }),
+      db.taskLabel.findMany({ orderBy: [{ name: 'asc' }] }),
+      db.taskTeam.findMany({ orderBy: [{ name: 'asc' }], include: { members: { orderBy: { login: 'asc' } } } }),
+      db.taskProjectAccess.findMany({ orderBy: [{ projectId: 'asc' }, { createdAt: 'asc' }] }),
+      db.taskView.findMany({ where: { login: user.login }, orderBy: [{ createdAt: 'asc' }] }),
+      myTeamIds(user.login),
     ])
-    return NextResponse.json({ projects, tasks, me: { login: user.login, displayName: user.displayName, color: user.color } })
+    /* роли: projectId → admin|editor|null (viewer тоже отбрасываем — проект
+       недоступен целиком? Нет: viewer видит. Оставляем роль как есть) */
+    const roles: Record<string, string | null> = {}
+    const visible: typeof projects = []
+    for (const p of projects) {
+      const rows = accessRows.filter((r) => r.projectId === p.id)
+      let best: string | null = null
+      const rank: Record<string, number> = { viewer: 1, editor: 2, admin: 3 }
+      if (!rows.length) best = 'editor'
+      else {
+        for (const r of rows) {
+          const mine = (r.login && r.login === user.login) || (r.teamId && teamIds.includes(r.teamId))
+          if (!mine) continue
+          const role = rank[r.role] ? r.role : 'viewer'
+          if (!best || rank[role] > rank[best]) best = role
+        }
+      }
+      roles[p.id] = best
+      if (best) visible.push(p)
+    }
+    const visibleIds = new Set(visible.map((p) => p.id))
+    return NextResponse.json({
+      projects: visible,
+      tasks: tasks.filter((t) => visibleIds.has(t.projectId)),
+      labels,
+      teams,
+      access: accessRows.filter((r) => visibleIds.has(r.projectId)),
+      views,
+      roles,
+      me: { login: user.login, displayName: user.displayName, color: user.color },
+    })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
   }
@@ -27,7 +76,9 @@ export async function GET() {
 /**
  * POST /api/tm — создание задачи.
  * { title, projectId, boardId?, columnId? (null — бэклог), parentId?,
- *   description?, stickers?, links?, order? }
+ *   description?, stickers?, links?, labelIds? }
+ * Нужен доступ editor/admin к проекту. Назначенные исполнители получают
+ * уведомление (колокольчик + мгновенный push).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -41,6 +92,9 @@ export async function POST(req: NextRequest) {
     if (!projectId || !title) return NextResponse.json({ error: 'Нужны проект и название' }, { status: 400 })
     const project = await db.taskProject.findUnique({ where: { id: projectId } })
     if (!project) return NextResponse.json({ error: 'Проект не найден' }, { status: 404 })
+    if (!(await canEditProject(projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
 
     /* позиция: конец указанной колонки/бэклога (order = max + 1000) */
     let boardId: string | null = typeof body.boardId === 'string' && body.boardId ? body.boardId : null
@@ -64,6 +118,14 @@ export async function POST(req: NextRequest) {
       if (!parent || parent.projectId !== projectId) return NextResponse.json({ error: 'Родительская задача не найдена' }, { status: 400 })
     }
 
+    const stickers = sanitizeStickers(body.stickers)
+    const stickersObj = JSON.parse(stickers) as { assignees?: string[]; deadline?: string | null; priority?: string | null }
+    /* системная история: создал(а)… + назначил(а)… */
+    let messages = appendSysMsg('[]', user.login, 'создал(а) ' + (parentId ? 'подзадачу' : 'задачу') + ' «' + title.slice(0, 80) + '»')
+    if (stickersObj.assignees?.length) {
+      messages = appendSysMsg(messages, user.login, 'назначил(а): ' + stickersObj.assignees.join(', '))
+    }
+
     const created = await db.taskItem.create({
       data: {
         projectId,
@@ -72,12 +134,28 @@ export async function POST(req: NextRequest) {
         parentId,
         title: title.slice(0, 200),
         description: String(body.description || '').slice(0, 20000),
-        stickers: sanitizeStickers(body.stickers),
+        stickers,
         links: sanitizeLinks(body.links),
+        labelIds: sanitizeLabelIds(body.labelIds),
+        messages,
         order: (last?.order ?? 0) + 1000,
         createdBy: user.login,
       },
     })
+
+    /* уведомления назначенным (кроме автора) */
+    const by = user.displayName || user.login
+    for (const login of stickersObj.assignees || []) {
+      if (login === user.login) continue
+      void notifyTaskUser(login, 'task_assigned', {
+        taskId: created.id,
+        taskTitle: created.title,
+        projectId,
+        projectName: project.title,
+        byLogin: user.login,
+        byName: by,
+      })
+    }
     return NextResponse.json({ item: created })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

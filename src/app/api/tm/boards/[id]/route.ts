@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { canEditProject, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/boards/[id] — переименование/порядок доски.
@@ -12,6 +12,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     const { id } = await ctx.params
+    const board = await db.taskBoard.findUnique({ where: { id } })
+    if (!board) return NextResponse.json({ error: 'Доска не найдена' }, { status: 404 })
+    if (!(await canEditProject(board.projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'Некорректные данные' }, { status: 400 })
     const data: Record<string, unknown> = {}
@@ -32,6 +37,9 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     const { id } = await ctx.params
     const board = await db.taskBoard.findUnique({ where: { id } })
     if (!board) return NextResponse.json({ error: 'Доска не найдена' }, { status: 404 })
+    if (!(await canEditProject(board.projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     /* задачи доски возвращаются в бэклог проекта */
     await db.taskItem.updateMany({ where: { boardId: id }, data: { boardId: null, columnId: null } })
     await db.taskBoard.delete({ where: { id } })

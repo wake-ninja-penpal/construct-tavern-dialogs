@@ -1,15 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService, sanitizeLinks, sanitizeStickers } from '@/lib/tasks'
+import {
+  appendSysMsg,
+  canEditProject,
+  parseStickers,
+  notifyTaskUser,
+  requireTaskService,
+  sanitizeLabelIds,
+  sanitizeLinks,
+  sanitizeStickers,
+} from '@/lib/tasks'
+
+/**
+ * GET /api/tm/tasks/[id] — одна задача (для режима привязки нод из «Ветвей»
+ * и прямых ссылок #service=task-manager&ot=<id>).
+ */
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const user = await requireTaskService()
+    if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
+    const { id } = await ctx.params
+    const task = await db.taskItem.findUnique({ where: { id } })
+    if (!task) return NextResponse.json({ error: 'Задача не найдена' }, { status: 404 })
+    return NextResponse.json({ item: task })
+  } catch {
+    return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
+  }
+}
 
 /**
  * PATCH /api/tm/tasks/[id] — правка задачи: название/описание/стикеры/связи/
- * выполненность/перенос (boardId+columnId, null+null — бэклог) /порядок.
+ * метки/выполненность/перенос (boardId+columnId, null+null — бэклог) /порядок.
+ *
+ * Права: editor/admin проекта (наблюдателю отказ — 403 «режим наблюдателя»).
+ * Сервер сам пишет системную историю в чат задачи (назначил/перенёс/выполнил…)
+ * и шлёт уведомления newly-назначенным исполнителям.
  *
  * Перенос в колонку с kind='done' помечает задачу выполненной (и наоборот —
  * возвращает в работу), как в прототипе: позиция в колонках = статус.
  *
- * DELETE /api/tm/tasks/[id] — удалить задачу вместе с подзадачами (каскад).
+ * DELETE — удалить задачу вместе с подзадачами (каскад), нужно editor/admin.
  */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -18,14 +48,53 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const { id } = await ctx.params
     const task = await db.taskItem.findUnique({ where: { id } })
     if (!task) return NextResponse.json({ error: 'Задача не найдена' }, { status: 404 })
+    if (!(await canEditProject(task.projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав: режим наблюдателя' }, { status: 403 })
+    }
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'Некорректные данные' }, { status: 400 })
 
+    const oldSt = { ...parseStickers(task.stickers), assignees: parseStickers(task.stickers).assignees || [] }
     const data: Record<string, unknown> = {}
-    if (typeof body.title === 'string' && body.title.trim()) data.title = body.title.trim().slice(0, 200)
+    const sys: string[] = []
+    const project = await db.taskProject.findUnique({ where: { id: task.projectId }, select: { title: true } })
+
+    if (typeof body.title === 'string' && body.title.trim() && body.title.trim() !== task.title) {
+      data.title = body.title.trim().slice(0, 200)
+      sys.push('переименовал(а): «' + task.title.slice(0, 60) + '» → «' + (data.title as string).slice(0, 60) + '»')
+    }
     if (typeof body.description === 'string') data.description = body.description.slice(0, 20000)
-    if (body.stickers !== undefined) data.stickers = sanitizeStickers(body.stickers)
+    if (body.labelIds !== undefined) data.labelIds = sanitizeLabelIds(body.labelIds)
     if (body.links !== undefined) data.links = sanitizeLinks(body.links)
+
+    /* стикеры: дифф для истории и уведомлений */
+    if (body.stickers !== undefined) {
+      const next = sanitizeStickers(body.stickers)
+      data.stickers = next
+      const st = JSON.parse(next) as { assignees: string[]; deadline: string | null; priority: string | null }
+      const added = st.assignees.filter((a) => !oldSt.assignees.includes(a))
+      const removed = oldSt.assignees.filter((a) => !st.assignees.includes(a))
+      if (added.length) sys.push('назначил(а): ' + added.join(', '))
+      if (removed.length) sys.push('снял(а) исполнителя: ' + removed.join(', '))
+      if (st.priority !== oldSt.priority) {
+        sys.push(st.priority ? 'приоритет: ' + st.priority : 'приоритет снят')
+      }
+      if (st.deadline !== oldSt.deadline) {
+        sys.push(st.deadline ? 'дедлайн: ' + st.deadline : 'дедлайн убран')
+      }
+      /* уведомления только новым исполнителям (кроме автора правки) */
+      for (const login of added) {
+        if (login === user.login) continue
+        void notifyTaskUser(login, 'task_assigned', {
+          taskId: task.id,
+          taskTitle: typeof data.title === 'string' ? data.title : task.title,
+          projectId: task.projectId,
+          projectName: project?.title || '',
+          byLogin: user.login,
+          byName: user.displayName || user.login,
+        })
+      }
+    }
 
     /* перенос между колонками/досками/бэклогом */
     if ('columnId' in body || 'boardId' in body) {
@@ -40,9 +109,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         if (col.kind === 'done') {
           data.done = true
           data.completedAt = new Date()
+          sys.push('перенёс(ла) в «' + col.title + '» — выполнено')
         } else if (task.done) {
           data.done = false
           data.completedAt = null
+          sys.push('вернул(а) в работу → «' + col.title + '»')
+        } else if (task.columnId !== moveCol) {
+          sys.push('переместил(а) в «' + col.title + '»')
         }
       } else {
         /* бэклог проекта */
@@ -51,6 +124,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         if (task.done) {
           data.done = false
           data.completedAt = null
+          sys.push('вернул(а) в работу → бэклог')
+        } else if (task.columnId) {
+          sys.push('переместил(а) в бэклог')
         }
       }
       void moveBoard
@@ -64,12 +140,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.order === 'number' && Number.isFinite(body.order)) data.order = body.order
 
     /* прямой флаг выполненности (задача в бэклоге, без колонок) */
-    if (typeof body.done === 'boolean') {
+    if (typeof body.done === 'boolean' && !('columnId' in body || 'boardId' in body)) {
       data.done = body.done
       data.completedAt = body.done ? new Date() : null
+      sys.push(body.done ? 'отметил(а) выполненной' : 'вернул(а) в работу')
     }
 
-    if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
+    if (!Object.keys(data).length && !sys.length) {
+      return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
+    }
+    if (sys.length) {
+      data.messages = appendSysMsg(task.messages, user.login, sys.join(' · '))
+    }
     const item = await db.taskItem.update({ where: { id }, data })
     return NextResponse.json({ item })
   } catch {
@@ -82,6 +164,11 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     const { id } = await ctx.params
+    const task = await db.taskItem.findUnique({ where: { id }, select: { projectId: true } })
+    if (!task) return NextResponse.json({ error: 'Задача не найдена' }, { status: 404 })
+    if (!(await canEditProject(task.projectId, user.login))) {
+      return NextResponse.json({ error: 'Недостаточно прав для удаления' }, { status: 403 })
+    }
     /* подзадачи (parentId=id) удаляем вручную — на один уровень вложенности,
        затем сама задача; более глубокие вложения удаляются рекурсивно */
     const deleteDeep = async (pid: string): Promise<void> => {

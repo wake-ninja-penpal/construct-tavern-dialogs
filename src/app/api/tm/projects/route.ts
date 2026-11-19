@@ -6,6 +6,8 @@ import { requireTaskService } from '@/lib/tasks'
  * POST /api/tm/projects — новый проект менеджера задач.
  * { title, color? } — вместе с проектом создаётся доска «Основная»
  * с тремя системными колонками (Не взяты / В работе / Выполнено).
+ * Создатель становится админом проекта (строка доступов): далее доступ
+ * раздаётся командам и людям в окне «Доступ».
  */
 export async function POST(req: NextRequest) {
   try {
@@ -16,6 +18,7 @@ export async function POST(req: NextRequest) {
     const title = String(body.title || '').trim().slice(0, 120)
     if (!title) return NextResponse.json({ error: 'Нужно название' }, { status: 400 })
     const color = /^#[0-9a-fA-F]{6}$/.test(String(body.color || '')) ? String(body.color) : '#e2a54e'
+    const open = body.open !== false // open:false — закрытый проект (админ = создатель)
     const maxOrder = await db.taskProject.aggregate({ _max: { sortOrder: true } })
     const project = await db.taskProject.create({
       data: {
@@ -35,6 +38,11 @@ export async function POST(req: NextRequest) {
           { boardId: board.id, title: 'Выполнено', color: '#8fbf7f', kind: 'done', locked: true, sortOrder: 2 },
         ],
       })
+    }
+    /* закрытый проект: создатель — админ (доступ раздаётся в окне «Доступ»);
+       открытый — строк не пишем, редактировать могут все */
+    if (!open) {
+      await db.taskProjectAccess.create({ data: { projectId: project.id, login: user.login, role: 'admin' } })
     }
     const full = await db.taskProject.findUnique({
       where: { id: project.id },

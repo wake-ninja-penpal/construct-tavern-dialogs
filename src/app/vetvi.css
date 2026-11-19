@@ -2082,3 +2082,217 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
   .tm-head .tm-search{min-width:120px}
   .tm-head .tm-new{padding:0 10px}
 }
+
+/* ═══════ Менеджер задач 1.8: режимы дровера, markdown, чат, метки, фильтры, команды ═══════ */
+
+/* верхняя полоска дровера в цвет задачи */
+.tm-drawer-topline{height:3px;flex:none;background:linear-gradient(90deg,var(--dpc,var(--acc)) 0%,rgba(143,191,127,.65) 100%)}
+.tm-drawer-sizes{display:flex;gap:2px;background:#121417;border-radius:8px;padding:2px;flex:none}
+.tm-drawer-sizes button{width:26px;height:24px;border:none;background:none;border-radius:6px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.tm-drawer-sizes button:hover{color:var(--tx)}
+.tm-drawer-sizes button.on{background:var(--accd);color:var(--tx)}
+.tm-drawer-back{width:26px;height:26px;flex:none;border:none;background:rgba(143,191,127,.12);border-radius:8px;color:#8fbf7f;cursor:pointer;font-size:14px;line-height:1}
+.tm-drawer-back:hover{background:rgba(143,191,127,.22)}
+
+/* три режима: side (в потоке), wide (окно с полем), full (на весь экран) */
+@media(min-width:901px){
+  .tm-drawer.wide{position:fixed;z-index:115;inset:14px;width:auto;border:1px solid #303540;border-radius:16px;box-shadow:0 40px 100px rgba(0,0,0,.55);animation:tmWin .22s cubic-bezier(.2,.8,.3,1.1)}
+  .tm-drawer.full{position:fixed;z-index:115;inset:0;width:auto;border:none;border-radius:0;animation:tmWin .18s ease}
+}
+@media(max-width:900px){
+  .tm-drawer.wide,.tm-drawer.full{position:fixed;inset:0;width:auto;border:none;border-radius:0}
+}
+@keyframes tmWin{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+
+.tm-drawer-layout{flex:1;display:flex;flex-direction:column;min-height:0}
+.tm-drawer.side .tm-drawer-layout{overflow-y:auto}
+.tm-drawer.wide .tm-drawer-body,.tm-drawer.full .tm-drawer-body{padding:16px 20px 24px}
+@media(min-width:901px){
+  .tm-drawer.wide .tm-drawer-layout,.tm-drawer.full .tm-drawer-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px);overflow:hidden}
+  .tm-drawer.wide .tm-drawer-body,.tm-drawer.full .tm-drawer-body{overflow-y:auto;min-height:0}
+  .tm-drawer.wide .tm-drawer-chat,.tm-drawer.full .tm-drawer-chat{border-left:1px solid var(--line);border-top:none}
+}
+/* в боковой панели чат идёт после содержимого, ограниченный по высоте */
+.tm-drawer.side .tm-drawer-chat{flex:none;max-height:360px;border-top:1px solid var(--line)}
+
+/* чат задачи */
+.tm-drawer-chat{display:flex;flex-direction:column;min-height:0;background:rgba(0,0,0,.14)}
+.tm-chat-head{display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid var(--line);font:600 10px var(--mono);letter-spacing:1.6px;text-transform:uppercase;color:var(--tx3);flex:none}
+.tm-chat-cnt{margin-left:auto;font:600 10px var(--mono);color:var(--acc2)}
+.tm-chat{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:9px;min-height:110px;scrollbar-width:thin}
+.tm-chat-empty{font:400 11.5px/1.5 var(--body);color:var(--tx3);padding:8px 4px}
+.tm-msg{display:flex;gap:8px;max-width:100%}
+.tm-msg-b{background:#1d2026;border:1px solid #2a2f38;border-radius:11px;padding:6px 11px;max-width:calc(100% - 34px)}
+.tm-msg.own{flex-direction:row-reverse}
+.tm-msg.own .tm-msg-b{background:rgba(226,165,78,.07);border-color:rgba(226,165,78,.22)}
+.tm-msg-h{display:flex;gap:8px;align-items:baseline}
+.tm-msg-n{font:600 11px var(--body)}
+.tm-msg-t{font:400 9.5px var(--mono);color:var(--tx3)}
+.tm-msg-x{font:400 12.5px/1.5 var(--body);color:var(--tx2);word-break:break-word}
+.tm-msg-x p{margin:0 0 4px}
+.tm-msg-x p:last-child{margin-bottom:0}
+.tm-chat-sys{display:flex;flex-direction:column;gap:5px;padding:7px 10px;border:1px dashed var(--line);border-radius:10px;background:rgba(255,255,255,.015);margin-bottom:2px}
+.tm-sysmsg{display:flex;flex-direction:column;font:400 10.5px/1.45 var(--body);color:var(--tx3)}
+.tm-sysmsg b{color:var(--tx2);font-weight:600}
+.tm-sysmsg i{font-style:normal;font:400 9px var(--mono);color:var(--tx3);opacity:.75}
+.tm-composer{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line);flex:none;align-items:flex-end}
+.tm-composer textarea{flex:1;min-height:34px;max-height:120px;resize:none;background:#14161a;border:1px solid #2b2f37;border-radius:10px;color:var(--tx);font:12.5px/1.45 var(--body);padding:8px 10px;outline:none;color-scheme:dark;transition:border-color .18s}
+.tm-composer textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+.tm-send{width:34px;height:34px;border:none;border-radius:10px;background:var(--acc);color:#221604;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:.15s}
+.tm-send:hover{filter:brightness(1.12)}
+
+/* markdown-редактор с панелью инструментов */
+.tm-md{display:flex;flex-direction:column;border:1px solid #2b2f37;border-radius:10px;overflow:hidden;background:#14161a}
+.tm-md-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;border-bottom:1px solid #262a31;background:#181b20;flex-wrap:wrap}
+.tm-md-tools{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.tm-md-tools button{width:26px;height:24px;border:none;background:none;border-radius:6px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.tm-md-tools button:hover{background:#262b33;color:var(--tx)}
+.tm-md-sep{width:1px;height:14px;background:#2e333c;margin:0 4px;display:inline-block;flex:none}
+.tm-md-modes{display:flex;gap:2px;background:#121417;border-radius:7px;padding:2px}
+.tm-md-modes button{border:none;background:none;border-radius:5px;color:var(--tx3);font:600 10.5px var(--body);padding:3px 8px;cursor:pointer}
+.tm-md-modes button.on{background:var(--accd);color:var(--tx)}
+.tm-md-body{display:flex;min-height:0;flex:1}
+.tm-md.edit .tm-md-prev{display:none}
+.tm-md.preview .tm-desc-ta{display:none}
+.tm-md.edit .tm-desc-ta{border:none;border-radius:0;box-shadow:none!important;flex:1;min-height:120px}
+.tm-md.preview .tm-md-body{min-height:130px}
+.tm-md.split .tm-desc-ta{border:none;border-right:1px solid #262a31;border-radius:0;box-shadow:none!important;flex:1;min-height:150px}
+.tm-md.split .tm-md-prev{flex:1;overflow:auto;max-height:420px}
+@media(max-width:760px){.tm-md.split .tm-md-body{flex-direction:column}.tm-md.split .tm-desc-ta{border-right:none;border-bottom:1px solid #262a31;min-height:110px}}
+.tm-md-prev{padding:9px 12px;overflow:auto;min-height:40px}
+.tm-md-empty{margin:0;font:400 11.5px var(--body);color:var(--tx3)}
+
+/* отрисованный markdown (описание и комментарии) */
+.md-body{font:13px/1.55 var(--body);color:var(--tx2);word-break:break-word;overflow-wrap:anywhere}
+.md-body h1,.md-body h2,.md-body h3,.md-body h4,.md-body h5,.md-body h6{margin:10px 0 4px;color:var(--tx);font-weight:700;line-height:1.3}
+.md-body h1{font-size:16px}.md-body h2{font-size:14.5px}.md-body h3{font-size:13.5px}
+.md-body h4,.md-body h5,.md-body h6{font-size:12.5px}
+.md-body h1:first-child,.md-body h2:first-child,.md-body h3:first-child{margin-top:0}
+.md-body p{margin:0 0 7px}
+.md-body p:last-child{margin-bottom:0}
+.md-body ul,.md-body ol{margin:0 0 7px;padding-left:20px}
+.md-body ul:last-child,.md-body ol:last-child{margin-bottom:0}
+.md-body li{margin:2px 0}
+.md-body li.mdtask{list-style:none;display:flex;gap:7px;align-items:flex-start;margin-left:-18px}
+.md-body .mdchk{width:14px;height:14px;border:1.5px solid #3d434f;border-radius:4px;display:inline-block;flex:none;margin-top:3px;position:relative;background:#101216}
+.md-body .mdchk.on{background:#8fbf7f;border-color:#8fbf7f}
+.md-body .mdchk.on::after{content:'';position:absolute;left:3.5px;top:.5px;width:4px;height:8px;border:solid #1c1503;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.md-body code{background:#101216;border:1px solid #262a31;border-radius:5px;padding:1px 5px;font:600 11px var(--mono);color:#d9c8a9}
+.md-body pre{position:relative;background:#101216;border:1px solid #262a31;border-radius:9px;padding:10px 12px;overflow-x:auto;margin:0 0 8px}
+.md-body pre:last-child{margin-bottom:0}
+.md-body pre .lang{position:absolute;top:6px;right:9px;font:600 9px var(--mono);color:var(--tx3);text-transform:uppercase;letter-spacing:1px}
+.md-body pre code{background:none;border:none;padding:0;font:12px/1.55 var(--mono);color:#c9d1d9;display:block;white-space:pre}
+.md-body blockquote{margin:0 0 8px;padding:6px 12px;border-left:3px solid var(--acc);background:rgba(226,165,78,.06);border-radius:0 8px 8px 0;color:var(--tx2)}
+.md-body blockquote p:last-child{margin-bottom:0}
+.md-body table{border-collapse:collapse;margin:0 0 8px;font-size:12px;max-width:100%;display:block;overflow-x:auto}
+.md-body th,.md-body td{border:1px solid #2e333c;padding:4px 9px;text-align:left}
+.md-body th{background:#1a1d22;font-weight:700;color:var(--tx)}
+.md-body a{color:var(--acc2);text-decoration:underline}
+.md-body img{max-width:100%;border-radius:8px}
+.md-body hr{border:none;border-top:1px solid var(--line);margin:10px 0}
+.md-body strong{color:var(--tx)}
+
+/* метки задачи */
+.tm-labels{display:flex;flex-direction:column;gap:6px}
+.tm-label-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tm-sticker.label{height:26px;color:var(--lc);border-color:var(--lc);background:transparent;font-weight:600;cursor:default}
+.tm-sticker.add{border-style:dashed;color:var(--tx3);height:26px}
+.tm-label-manager{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tm-fchip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--tx2);font:500 11.5px var(--body);cursor:pointer;transition:.14s;padding:0}
+.tm-fchip>button:first-child{background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:4px 8px 4px 9px;display:flex;align-items:center;gap:4px}
+.tm-fchip.on{border-color:var(--pc);color:var(--pc);background:rgba(255,255,255,.02)}
+.tm-fchip .tm-link-x{width:16px;height:16px;font-size:12px}
+.tm-label-new{height:28px;background:#14161a;border:1px dashed #2b2f37;border-radius:8px;color:var(--tx);font:11.5px var(--body);padding:0 9px;outline:none;width:180px}
+.tm-label-new:focus{border-color:var(--acc);border-style:solid}
+.tm-qdates{display:flex;gap:4px;flex-basis:100%}
+.tm-qdates button{flex:1;height:24px;border:1px solid var(--line2);background:var(--card);border-radius:7px;color:var(--tx3);font:600 10px var(--body);cursor:pointer;transition:.14s}
+.tm-qdates button:hover{color:var(--tx);border-color:#3d434f}
+
+/* кнопки-иконки в шапке вида + попап фильтров */
+.tm-ibtn{position:relative;width:34px;height:34px;border:1px solid var(--line2);background:var(--card);border-radius:9px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
+.tm-ibtn:hover{border-color:#3d434f;color:var(--tx)}
+.tm-ibtn.on{border-color:var(--acc);color:var(--acc2)}
+.tm-fbadge{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;border-radius:8px;background:var(--acc);color:#221604;font:700 9.5px var(--body);display:flex;align-items:center;justify-content:center;padding:0 4px}
+.tm-sortsel{height:34px;background:#14161a;border:1px solid var(--line2);border-radius:9px;color:var(--tx2);font:500 12px var(--body);padding:0 8px;outline:none;cursor:pointer;color-scheme:dark}
+.tm-filterpop{position:fixed;top:60px;right:16px;z-index:125;width:290px;max-height:calc(100vh - 90px);overflow-y:auto;background:#1a1d22;border:1px solid #303540;border-radius:13px;box-shadow:var(--sh);animation:mIn .16s ease}
+.tm-fp-cap{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font:700 13px var(--body);color:var(--tx)}
+.tm-fp-sec{padding:9px 14px 2px}
+.tm-fp-h{font:600 9.5px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);margin-bottom:6px}
+.tm-fp-sec select{width:100%;height:30px;background:#14161a;border:1px solid var(--line2);border-radius:8px;color:var(--tx2);font:12px var(--body);padding:0 8px;outline:none;color-scheme:dark}
+.tm-fp-chips{display:flex;gap:5px;flex-wrap:wrap;padding-bottom:8px}
+.tm-fp-radios{display:flex;flex-direction:column;gap:5px;padding-bottom:6px}
+.tm-fp-radios label{display:flex;gap:7px;align-items:center;font:500 12px var(--body);color:var(--tx2);cursor:pointer}
+.tm-fp-check{display:flex;gap:8px;align-items:center;font:500 12.5px var(--body);color:var(--tx2);cursor:pointer;padding:4px 0 10px}
+.tm-fp-foot{display:flex;justify-content:space-between;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+
+/* колокольчик уведомлений менеджера задач */
+.tm-bell-wrap{position:relative;flex:none}
+.tm-bell{position:relative;width:34px;height:34px;border:1px solid var(--line2);background:var(--card);border-radius:9px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
+.tm-bell:hover{color:var(--tx);border-color:#3d434f}
+.tm-bell.has{color:var(--acc2)}
+.tm-bell-badge{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;border-radius:8px;background:var(--acc);color:#221604;font:700 9.5px var(--body);display:flex;align-items:center;justify-content:center;padding:0 4px}
+.tm-ntfpop{position:fixed;top:52px;right:12px;z-index:125;width:min(360px,calc(100vw - 24px));max-height:min(430px,70vh);display:flex;flex-direction:column;background:#1a1d22;border:1px solid #303540;border-radius:13px;box-shadow:var(--sh);animation:mIn .16s ease}
+.tm-ntf-list{overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:4px}
+.tm-ntf-item{display:flex;flex-direction:column;gap:2px;text-align:left;padding:8px 10px;border:none;background:none;border-radius:9px;cursor:pointer}
+.tm-ntf-item:hover{background:#262b33}
+.tm-ntf-item.unread{background:rgba(226,165,78,.07)}
+.tm-ntf-item b{font:600 12px var(--body);color:var(--tx)}
+.tm-ntf-item i{font:400 10.5px var(--body);color:var(--tx3);font-style:normal}
+.tm-ntf-empty{font:400 11.5px var(--body);color:var(--tx3);padding:14px 10px;text-align:center}
+
+/* команды и люди */
+.tm-teams{display:flex;flex-direction:column;gap:9px;padding:12px 20px 20px;overflow-y:auto}
+.tm-teamcard{display:flex;flex-direction:column;gap:9px;padding:12px 14px;background:var(--card);border:1px solid var(--line2);border-left:3px solid var(--tc,var(--line2));border-radius:11px}
+.tm-teamcard.people{cursor:pointer;transition:.15s;text-align:left;flex-direction:row;align-items:center}
+.tm-teamcard.people:hover{border-color:#3d434f;transform:translateX(2px)}
+.tm-teamcard-top{display:flex;align-items:center;gap:10px}
+.tm-team-ico{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;color:#221604}
+.tm-team-ico.sm{width:26px;height:26px;border-radius:8px}
+.tm-teamcard-name b{display:block;font:600 13.5px var(--body);color:var(--tx)}
+.tm-teamcard-name i{font:400 11px var(--body);color:var(--tx3);font-style:normal}
+.tm-teamcard-avs{display:flex;gap:3px;flex-wrap:wrap}
+.tm-teamcard-acts{display:flex;gap:8px;flex-wrap:wrap}
+.tm-people-cnt{margin-left:auto;font:500 11px var(--body);color:var(--tx3);white-space:nowrap}
+.tm-av.big{width:34px;height:34px;font-size:12px}
+
+/* модалка доступов проекта */
+.tm-modal.wide{width:min(680px,calc(100vw - 24px))}
+.tm-modal-sub{margin:0;padding:10px 16px 0;font:400 12px/1.5 var(--body);color:var(--tx3)}
+.tm-modal-sp{flex:1}
+.tm-note{margin:10px 16px 0;padding:8px 12px;border:1px solid rgba(226,165,78,.35);background:rgba(226,165,78,.07);border-radius:9px;color:var(--acc2);font:500 11.5px var(--body)}
+.tm-acc-list{display:flex;flex-direction:column;gap:5px}
+.tm-acc-row{display:flex;align-items:center;gap:9px;padding:7px 10px;background:var(--card);border:1px solid var(--line2);border-radius:9px}
+.tm-acc-name{flex:1;min-width:0;font:500 12.5px var(--body);color:var(--tx)}
+.tm-acc-name i{display:block;font:400 10px var(--body);color:var(--tx3);font-style:normal}
+.tm-acc-row select{height:28px;background:#14161a;border:1px solid var(--line2);border-radius:7px;color:var(--tx2);font:12px var(--body);padding:0 6px;outline:none;color-scheme:dark}
+.tm-acc-role{font:600 11px var(--body);color:var(--tx3);white-space:nowrap}
+.tm-acc-empty{font:400 11.5px var(--body);color:var(--tx3);padding:6px 2px}
+.tm-acc-add{display:flex;flex-direction:column;gap:4px;border:1px dashed var(--line);border-radius:9px;padding:6px}
+.tm-acc-add.scroll{max-height:190px;overflow-y:auto}
+.tm-acc-pick{display:flex;align-items:center;gap:8px;padding:6px 8px;border:none;background:none;border-radius:7px;color:var(--tx2);font:500 12px var(--body);cursor:pointer;text-align:left}
+.tm-acc-pick:hover{background:#262b33;color:var(--tx)}
+.tm-acc-pick i{margin-left:auto;font:400 10px var(--mono);color:var(--tx3);font-style:normal}
+
+/* сохранённые виды в сайдбаре */
+.tm-view-row{display:flex;align-items:center}
+.tm-view-row .tm-nav-row{flex:1;min-width:0}
+.tm-view-del{width:20px;height:20px;flex:none;border:none;background:none;color:var(--tx3);cursor:pointer;border-radius:6px;font-size:13px;opacity:0;transition:.15s;padding:0}
+.tm-view-row:hover .tm-view-del{opacity:1}
+.tm-view-del:hover{color:#e0967f;background:rgba(207,107,90,.14)}
+.tm-nav-plus.hint{background:rgba(226,165,78,.2);color:var(--acc2)}
+.tm-viewchips{display:flex;gap:5px;flex-wrap:wrap}
+.tm-lockchip{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:1px 8px;border:1px solid rgba(226,165,78,.4);border-radius:6px;color:var(--acc2);font:600 10px var(--body);background:rgba(226,165,78,.08)}
+
+/* баннер привязки нод в «Ветвях» */
+.tm-attachbar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:210;display:flex;align-items:center;gap:10px;padding:10px 14px;background:#1a1d22;border:1px solid rgba(156,184,120,.45);border-radius:13px;box-shadow:0 18px 50px rgba(0,0,0,.5);max-width:calc(100vw - 32px);flex-wrap:wrap}
+.tm-attachbar-cap{display:flex;align-items:center;gap:7px;font:600 12.5px var(--body);color:#9cb878}
+.tm-attachbar-n{font:500 11.5px var(--body);color:var(--tx3)}
+
+/* адаптив новых блоков */
+@media(max-width:900px){
+  .tm-filterpop{right:10px;left:10px;width:auto}
+  .tm-ntfpop{right:10px}
+  .tm-drawer.side .tm-drawer-chat{max-height:300px}
+}
+.tm-sticker.ro{cursor:default}
+.tm-sticker.ro:hover{border-color:var(--line2);color:var(--tx2)}
