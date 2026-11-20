@@ -39,8 +39,9 @@ import {
 } from './tmTypes';
 import type { TmUser, Ws } from './TaskManagerApp';
 import { VetviMark } from './TaskViews';
-import { MD_TOOLS, mdToHtml } from './md';
+import { MD_TOOLS, checklistStats, mdToHtml } from './md';
 import { MdWysiwyg, type MdWysiwygHandle } from './MdWysiwyg';
+import { tmOpenMenu } from './TmMenu';
 
 type UserMap = Map<string, TmUser>;
 export type DrawerMode = 'side' | 'wide' | 'full';
@@ -60,6 +61,10 @@ export function TmDrawer(props: {
   onDelete: (id: string) => Promise<boolean>;
   onDuplicate: (task: TmTask) => Promise<void>;
   onSendComment: (taskId: string, text: string) => Promise<boolean>;
+  /** правка/реакция комментария (PATCH /comments/[msgId]) */
+  onPatchComment: (taskId: string, msgId: string, patch: { text?: string; react?: string }) => Promise<boolean>;
+  /** удаление комментария (DELETE /comments/[msgId]) */
+  onDeleteComment: (taskId: string, msgId: string) => Promise<boolean>;
   onAttachNodes: (taskId: string, taskTitle: string) => void;
   onCreateLabel: (name: string, color: string) => Promise<TmLabel | null>;
   onDeleteLabel: (id: string) => Promise<void>;
@@ -83,6 +88,10 @@ export function TmDrawer(props: {
   const [newLabel, setNewLabel] = useState('');
   const [labelInput, setLabelInput] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
+  /* комментарий в режиме правки + черновик правки */
+  const [editMsgId, setEditMsgId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const editRef = useRef<HTMLTextAreaElement>(null);
   const debounceT = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alphaT = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef({ title: task?.title || '', desc: task?.description || '' });
@@ -123,6 +132,35 @@ export function TmDrawer(props: {
     return () => window.removeEventListener('tm-focus-child', onFocusChild);
   }, []);
 
+  /* действия из ПКМ-меню комментария: ответить (префикс в композере) и
+     редактировать (поле правки под сообщением). Задача в меню = текущая */
+  useEffect(() => {
+    const onReply = (e: Event) => {
+      const d = (e as CustomEvent<{ login: string; text: string }>).detail || { login: '', text: '' };
+      setEditMsgId(null);
+      setChatDraft((prev) => (prev ? prev : '') + (d.login ? '@' + firstName(props.userMap.get(d.login)?.displayName, d.login) + ': ' : ''));
+      window.setTimeout(() => { try { chatEdRef.current?.focus(); } catch { /* нет фокуса */ } }, 30);
+    };
+    const onEdit = (e: Event) => {
+      const d = (e as CustomEvent<{ msgId: string; text: string }>).detail;
+      if (!d || !d.msgId) return;
+      setChatDraft('');
+      setEditMsgId(d.msgId);
+      setEditDraft(d.text);
+    };
+    window.addEventListener('tm-msg-reply', onReply);
+    window.addEventListener('tm-msg-edit', onEdit);
+    return () => {
+      window.removeEventListener('tm-msg-reply', onReply);
+      window.removeEventListener('tm-msg-edit', onEdit);
+    };
+  }, [props.userMap]);
+
+  /* фокус в поле правки комментария, когда оно открыто */
+  useEffect(() => {
+    if (editMsgId && editRef.current) { editRef.current.focus(); editRef.current.setSelectionRange(editDraft.length, editDraft.length); }
+  }, [editMsgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* чат: автоскролл к низу при новых сообщениях */
   const chatKey = task ? task.messages.map((m) => m.id).join(',') : '';
   useEffect(() => {
@@ -152,6 +190,15 @@ export function TmDrawer(props: {
     if (!ok) setChatDraft(text);
   };
 
+  /* сохранение правки комментария (Ctrl+Enter тоже) */
+  const saveEdit = async () => {
+    if (!task || !editMsgId) return;
+    const text = editDraft.trim();
+    if (!text) return;
+    const ok = await props.onPatchComment(task.id, editMsgId, { text });
+    if (ok) setEditMsgId(null);
+  };
+
   /* права: наблюдатель читает и комментирует, но не правит */
   const ed = props.canEdit;
 
@@ -177,6 +224,8 @@ export function TmDrawer(props: {
   const parent = task.parentId ? ws.tasks.find((t) => t.id === task.parentId) : null;
   const sysMsgs = (task.messages || []).filter((m) => m.system);
   const chatMsgs = (task.messages || []).filter((m) => !m.system);
+  /* шкала чек-листов описания — пересчитывается на каждую правку */
+  const chk = checklistStats(desc);
 
   const setStickers = (next: Partial<typeof st>) => {
     void props.onPatch(task.id, { stickers: { ...st, ...next } });
@@ -518,6 +567,13 @@ export function TmDrawer(props: {
               ariaLabel="Описание задачи"
             />
           </div>
+          {/* шкала чек-листа описания (как в прототипе: заполненные [x] считаются) */}
+          {chk && (
+            <div className="tm-checkbar-row" title={'Чек-лист: ' + chk.done + ' из ' + chk.total}>
+              <div className="tm-checkbar"><span style={{ width: Math.round((chk.done / chk.total) * 100) + '%' }} /></div>
+              <span className="tm-checkbar-cap">✓ {chk.done}/{chk.total}</span>
+            </div>
+          )}
 
           {/* подзадачи */}
           <div className="tm-sec-cap">Дочерние задачи {kids.length > 0 && <b>{kidsDone}/{kids.length}</b>}</div>
@@ -692,15 +748,66 @@ export function TmDrawer(props: {
             {chatMsgs.map((m) => {
               const own = m.login === ws.me.login;
               const u = props.userMap.get(m.login);
+              const reacts = m.reactions || {};
+              const reactKeys = Object.keys(reacts);
+              const editing = editMsgId === m.id;
               return (
-                <div key={m.id} className={'tm-msg' + (own ? ' own' : '')}>
+                <div
+                  key={m.id}
+                  className={'tm-msg' + (own ? ' own' : '')}
+                  onContextMenu={(e) => {
+                    /* ПКМ на комментарии: ответить/реагировать/копировать/править/удалить */
+                    e.preventDefault();
+                    e.stopPropagation();
+                    tmOpenMenu('comment', { taskId: task.id, msgId: m.id, login: m.login, mine: own ? '1' : '0', text: m.text.slice(0, 60) }, e.clientX, e.clientY);
+                  }}
+                >
                   <span className="tm-av" style={{ background: userColor(m.login) }}>{initialsOf(u?.displayName, m.login)}</span>
                   <div className="tm-msg-b">
                     <div className="tm-msg-h">
                       <span className="tm-msg-n" style={{ color: userColor(m.login) }}>{firstName(u?.displayName, m.login)}</span>
                       <span className="tm-msg-t">{msgTime(m.ts)}</span>
                     </div>
-                    <div className="tm-msg-x md-body" dangerouslySetInnerHTML={{ __html: mdToHtml(m.text) }} />
+                    {editing ? (
+                      <div className="tm-msg-editwrap">
+                        <textarea
+                          ref={editRef}
+                          className="tm-msg-edit"
+                          value={editDraft}
+                          aria-label="Правка комментария"
+                          onChange={(e2) => setEditDraft(e2.target.value)}
+                          onKeyDown={(e2) => {
+                            if (e2.key === 'Enter' && (e2.ctrlKey || e2.metaKey)) { e2.preventDefault(); void saveEdit(); }
+                            if (e2.key === 'Escape') { e2.preventDefault(); setEditMsgId(null); }
+                          }}
+                        />
+                        <div className="tm-msg-edit-row">
+                          <button type="button" className="btn" onClick={() => setEditMsgId(null)}>Отмена</button>
+                          <button type="button" className="btn primary" onClick={() => void saveEdit()}>Сохранить</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="tm-msg-x md-body" dangerouslySetInnerHTML={{ __html: mdToHtml(m.text) }} />
+                    )}
+                    {reactKeys.length > 0 && (
+                      <div className="tm-msg-reacts">
+                        {reactKeys.map((r) => {
+                          const who = reacts[r] || [];
+                          const mine = who.includes(ws.me.login);
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              className={'tm-react' + (mine ? ' mine' : '')}
+                              title={who.map((l) => firstName(props.userMap.get(l)?.displayName, l)).join(', ') + ' — клик: снять/поставить'}
+                              onClick={() => void props.onPatchComment(task.id, m.id, { react: r })}
+                            >
+                              {r} <b>{who.length}</b>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

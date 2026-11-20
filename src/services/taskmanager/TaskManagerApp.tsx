@@ -43,8 +43,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseHash, goVetviNode } from '../hub';
 import { ServiceSwitcher } from '../ServiceSwitcher';
 import { ServiceIcon } from '../ServiceIcon';
-import { AccountChip } from '../ServiceScreen';
-import { BoardView, BacklogView, MyView, NodeFilterView, TmSidebar, TmTeamsView, TmPeopleView, TmFilterPop, TmAccessModal, TmTeamModal, TmSaveViewModal, TmBell, type TmFilterState } from './TaskViews';
+import { BoardView, BacklogView, MyView, NodeFilterView, TmSidebar, TmTeamsView, TmPeopleView, TmFilterPop, TmAccessModal, TmTeamModal, TmSaveViewModal, TmBell, TmAccountMenu, type TmFilterState } from './TaskViews';
 import { TmDrawer, TmCreateModal } from './TaskDrawer';
 import { TmMenuHost, tmOpenMenu, tmCloseMenu, tmMenuPos } from './TmMenu';
 import {
@@ -708,11 +707,20 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     setNodeFilter(null);
     setFilters(st.filters);
     setSort(st.sort);
-    if (st.view === 'board' && st.projectId && st.boardId) setView({ kind: 'board', projectId: st.projectId, boardId: st.boardId });
-    else if (st.view === 'backlog' && st.projectId) setView({ kind: 'backlog', projectId: st.projectId });
-    else if (st.view === 'user' && st.userId) setView({ kind: 'user', userId: st.userId });
-    else setView({ kind: 'my' });
-  }, []);
+    /* доска/бэклог вида могла быть удалена — тогда мягкий фоллбек:
+       первая доска проекта, иначе бэклог, иначе «Мои задачи» */
+    if (st.view === 'board' && st.projectId && st.boardId) {
+      const p = ws?.projects.find((x) => x.id === st.projectId);
+      if (p?.boards.some((b) => b.id === st.boardId)) { setView({ kind: 'board', projectId: st.projectId, boardId: st.boardId }); return; }
+      if (p?.boards[0]) { setView({ kind: 'board', projectId: st.projectId, boardId: p.boards[0].id }); return; }
+      if (p) { setView({ kind: 'backlog', projectId: st.projectId }); return; }
+      setView({ kind: 'my' });
+      return;
+    }
+    if (st.view === 'backlog' && st.projectId && ws?.projects.some((x) => x.id === st.projectId)) { setView({ kind: 'backlog', projectId: st.projectId }); return; }
+    if (st.view === 'user' && st.userId) { setView({ kind: 'user', userId: st.userId }); return; }
+    setView({ kind: 'my' });
+  }, [ws]);
 
   const deleteView = useCallback(async (id: string) => {
     try {
@@ -731,6 +739,32 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     } catch (e) {
       if (e instanceof TmDenied) { say(e.msg, 'warn'); return false; }
       say(e instanceof Error ? e.message : 'Не удалось отправить комментарий', 'err');
+      return false;
+    }
+  }, [putTask, say]);
+
+  /* правка/реакция комментария */
+  const patchComment = useCallback(async (taskId: string, msgId: string, patch: { text?: string; react?: string }): Promise<boolean> => {
+    try {
+      const j = await tmJson<{ item: TmTask }>('/api/tm/tasks/' + taskId + '/comments/' + msgId, { method: 'PATCH', body: JSON.stringify(patch) });
+      putTask(j.item);
+      return true;
+    } catch (e) {
+      if (e instanceof TmDenied) { say(e.msg, 'warn'); return false; }
+      say(e instanceof Error ? e.message : 'Не удалось сохранить комментарий', 'err');
+      return false;
+    }
+  }, [putTask, say]);
+
+  /* удаление комментария */
+  const deleteComment = useCallback(async (taskId: string, msgId: string): Promise<boolean> => {
+    try {
+      const j = await tmJson<{ item: TmTask }>('/api/tm/tasks/' + taskId + '/comments/' + msgId, { method: 'DELETE' });
+      putTask(j.item);
+      return true;
+    } catch (e) {
+      if (e instanceof TmDenied) { say(e.msg, 'warn'); return false; }
+      say(e instanceof Error ? e.message : 'Не удалось удалить комментарий', 'err');
       return false;
     }
   }, [putTask, say]);
@@ -872,9 +906,50 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
       case 'new-team': close(); setTeamModal({ team: null, mode: null }); return;
       case 'toggle-rail': close(); toggleRail(); return;
       case 'save-view': close(); setSaveViewOpen(true); return;
+      /* ── действия над комментариями (ПКМ в чате задачи) ── */
+      case 'msg-reply': {
+        close();
+        const t = ws?.tasks.find((x) => x.id === A.taskId);
+        const msg = t?.messages.find((m) => m.id === A.msgId);
+        try { window.dispatchEvent(new CustomEvent('tm-msg-reply', { detail: { login: A.login || msg?.login || '', text: msg?.text || '' } })); } catch { /* нет CustomEvent */ }
+        return;
+      }
+      case 'msg-edit': {
+        close();
+        const t = ws?.tasks.find((x) => x.id === A.taskId);
+        const msg = t?.messages.find((m) => m.id === A.msgId);
+        if (!msg) return;
+        try { window.dispatchEvent(new CustomEvent('tm-msg-edit', { detail: { msgId: msg.id, text: msg.text } })); } catch { /* нет CustomEvent */ }
+        return;
+      }
+      case 'msg-react': {
+        const t = ws?.tasks.find((x) => x.id === A.taskId);
+        if (!t) return;
+        await patchComment(A.taskId, A.msgId, { react: A.react || '👍' });
+        return;
+      }
+      case 'msg-copy': {
+        close();
+        for (const t of ws?.tasks || []) {
+          const msg = t.messages.find((m) => m.id === A.msgId);
+          if (msg) {
+            try { await navigator.clipboard.writeText(msg.text); say('Текст комментария скопирован'); } catch { say('Не удалось скопировать', 'warn'); }
+            return;
+          }
+        }
+        return;
+      }
+      case 'msg-del': {
+        close();
+        const t = ws?.tasks.find((x) => x.id === A.taskId);
+        const msg = t?.messages.find((m) => m.id === A.msgId);
+        if (!msg) return;
+        if (window.confirm('Удалить комментарий' + (msg.login !== ws?.me.login ? ' участника @' + msg.login : '') + '?')) await deleteComment(A.taskId, A.msgId);
+        return;
+      }
       default: return;
     }
-  }, [applySavedView, clearColumn, createBoard, createColumn, deleteBoard, deleteColumnFate, deleteProject, deleteTeam, deleteTask, deleteView, duplicateTask, guardEdit, moveColumn, patchTask, renameBoard, renameProject, say, toggleRail, updateColumn, ws]);
+  }, [applySavedView, clearColumn, createBoard, createColumn, deleteBoard, deleteColumnFate, deleteComment, deleteProject, deleteTeam, deleteTask, deleteView, duplicateTask, guardEdit, moveColumn, patchComment, patchTask, renameBoard, renameProject, say, toggleRail, updateColumn, ws]);
 
   /* ── готовые данные для представлений ── */
   const userMap = useMemo(() => {
@@ -959,7 +1034,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
             Задача
           </button>
-          <AccountChip />
+          <TmAccountMenu say={say} />
         </div>
       </header>
 
@@ -973,12 +1048,24 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             myCount={myTasks.length}
             rail={rail}
             onToggleRail={toggleRail}
-            onMy={() => { setView({ kind: 'my' }); setNodeFilter(null); }}
-            onTeams={() => { setView({ kind: 'teams' }); setNodeFilter(null); }}
-            onPeople={() => { setView({ kind: 'people' }); setNodeFilter(null); }}
-            onUser={(login) => { setView({ kind: 'user', userId: login }); setNodeFilter(null); }}
-            onBoard={(projectId, boardId) => { setView({ kind: 'board', projectId, boardId }); setNodeFilter(null); }}
-            onBacklog={(projectId) => { setView({ kind: 'backlog', projectId }); setNodeFilter(null); }}
+            /* переход на любой раздел СБРАСЫВАЕТ фильтры сохранённого вида
+               (жалоба: «фильтр вида не сбрасывается при клике на доску») */
+            onMy={() => { setView({ kind: 'my' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+            onTeams={() => { setView({ kind: 'teams' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+            onPeople={() => { setView({ kind: 'people' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+            onUser={(login) => { setView({ kind: 'user', userId: login }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+            onBoard={(projectId, boardId) => { setView({ kind: 'board', projectId, boardId }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+            onBacklog={(projectId) => { setView({ kind: 'backlog', projectId }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+            onOpenProject={(projectId) => {
+              /* клик по проекту — сразу основная (первая) доска или бэклог */
+              const p = ws.projects.find((x) => x.id === projectId);
+              if (!p) return;
+              if (p.boards[0]) setView({ kind: 'board', projectId, boardId: p.boards[0].id });
+              else setView({ kind: 'backlog', projectId });
+              setNodeFilter(null);
+              setFilters(emptyFilters());
+              setSavedId(null);
+            }}
             onApplyView={applySavedView}
             onDeleteView={(id) => void deleteView(id)}
             onSaveView={() => setSaveViewOpen(true)}
@@ -1105,6 +1192,20 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
                 if (board && col) await patchTask(t.id, { boardId: board.id, columnId: col.id });
                 else say('У проекта нет досок — создайте доску', 'warn');
               }}
+              onDropBoard={async (t, boardId) => {
+                /* перетянули строку бэклога на доску в сайдбаре (внутри проекта
+                   и между проектами): первая системная колонка цели */
+                if (!guardEdit(t.projectId)) return;
+                const b = ws.projects.flatMap((x) => x.boards).find((x) => x.id === boardId);
+                const col = b ? (b.columns.find((c) => c.kind === 'new') || b.columns[0]) : null;
+                if (b && col) await patchTask(t.id, { boardId: b.id, columnId: col.id });
+                else say('У этого проекта нет досок — задача осталась в бэклоге', 'warn');
+              }}
+              onDropBacklog={async (t) => {
+                if (t.projectId === view.projectId) return; /* уже в этом бэклоге */
+                if (!guardEdit(t.projectId)) return;
+                await patchTask(t.id, { boardId: null, columnId: null });
+              }}
               headExtra={(
                 <TmFilterButtons
                   badge={badge}
@@ -1222,6 +1323,8 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             onDelete={deleteTask}
             onDuplicate={duplicateTask}
             onSendComment={sendComment}
+            onPatchComment={patchComment}
+            onDeleteComment={deleteComment}
             onAttachNodes={goAttachNodes}
             onCreateLabel={createLabel}
             onDeleteLabel={deleteLabel}

@@ -11,13 +11,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { authLogout, avatarInitial, getAccount } from '@/vetvi/web/auth';
 import { childrenOf, colorVars, firstName, fmtDeadline, initialsOf, TM_KIND_COLOR, TM_PRIO, TM_ROLE_LABEL, TM_ROLE_RANK, TM_PALETTE, TM_TEAM_ICONS, TM_SYS_COL_INFO, userColor, type TmColumn, type TmFilters, type TmLabel, type TmLink, type TmProject, type TmTask, type TmTeam } from './tmTypes';
-import { mdPlain } from './md';
+import { checklistStats, mdPlain } from './md';
 import { ColumnIcon } from './icons';
 import { tmOpenMenu } from './TmMenu';
+import { TmPanelTab } from './TmPanelTab';
 import type { TmUser, Ws } from './TaskManagerApp';
 
 type UserMap = Map<string, TmUser>;
+
+type TmTipHandlers = {
+  onMouseEnter: (e: React.MouseEvent<HTMLElement>) => void;
+  onMouseLeave: () => void;
+  onFocus: (e: React.FocusEvent<HTMLElement>) => void;
+  onBlur: () => void;
+};
 
 export type TmFilterState = TmFilters;
 
@@ -44,13 +53,14 @@ function BoardNavRow(props: {
   projectId: string; boardId: string; title: string; count: number; active: boolean; rail: boolean;
   onOpen: () => void;
   onCtx: (x: number, y: number) => void;
+  tipH?: (text: string) => TmTipHandlers;
 }) {
   if (props.rail) {
     return (
       <button
         type="button"
         className={'tm-rail-item sub' + (props.active ? ' cur' : '')}
-        data-tip={props.title + ' · ' + props.count}
+        {...(props.tipH ? props.tipH(props.title + ' · ' + props.count) : { title: props.title + ' · ' + props.count })}
         data-drop-board={props.boardId}
         aria-label={props.title}
         onClick={props.onOpen}
@@ -79,13 +89,14 @@ function BacklogNavRow(props: {
   projectId: string; count: number; active: boolean; rail: boolean;
   onOpen: () => void;
   onCtx: (x: number, y: number) => void;
+  tipH?: (text: string) => TmTipHandlers;
 }) {
   if (props.rail) {
     return (
       <button
         type="button"
         className={'tm-rail-item sub' + (props.active ? ' cur' : '')}
-        data-tip={'Бэклог · ' + props.count}
+        {...(props.tipH ? props.tipH('Бэклог · ' + props.count) : { title: 'Бэклог · ' + props.count })}
         data-drop-backlog={props.projectId}
         aria-label="Бэклог"
         onClick={props.onOpen}
@@ -124,6 +135,8 @@ export function TmSidebar(props: {
   onUser: (login: string) => void;
   onBoard: (projectId: string, boardId: string) => void;
   onBacklog: (projectId: string) => void;
+  /** клик по проекту: сразу основная (первая) доска или бэклог */
+  onOpenProject: (projectId: string) => void;
   onApplyView: (v: Ws['views'][number]) => void;
   onDeleteView: (id: string) => void;
   onSaveView: () => void;
@@ -138,23 +151,52 @@ export function TmSidebar(props: {
   /* активный проект: тот, чья доска/бэклог открыта */
   const activePid = view.kind === 'board' || view.kind === 'backlog' ? view.projectId : undefined;
 
+  /* подсказки rail: fixed-слой (CSS ::after обрезался скролл-контейнером рейка) */
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const showTip = useCallback((text: string, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const W = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    /* сначала вправо от иконки; у правого края — влево */
+    const est = Math.min(320, Math.max(90, text.length * 7.2 + 26));
+    const toLeft = r.right + 12 + est > W - 8;
+    const x = toLeft ? Math.max(8, r.left - est - 10) : r.right + 10;
+    setTip({ text, x, y: r.top + r.height / 2 });
+  }, []);
+  const hideTip = useCallback(() => setTip(null), []);
+  const tipH = useCallback((text: string) => ({
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => showTip(text, e.currentTarget),
+    onMouseLeave: hideTip,
+    onFocus: (e: React.FocusEvent<HTMLElement>) => showTip(text, e.currentTarget),
+    onBlur: hideTip,
+  }), [hideTip, showTip]);
+
+  const openProject = (p: TmProject) => {
+    const b = p.boards[0];
+    if (b) props.onBoard(p.id, b.id);
+    else props.onBacklog(p.id);
+  };
+
   if (rail) {
-    /* РЕЙК: свёрнутый сайдбар — только иконки с подсказками (как rail прототипа) */
+    /* РЕЙК: свёрнутый сайдбар — только иконки с подсказками (как rail прототипа);
+       хлястик торчит справа — панель разворачивается кликом или потягиванием */
     const curProject = ws.projects.find((p) => p.id === activePid);
     return (
       <aside className="tm-side rail" aria-label="Разделы (свёрнуто — наведите для подсказки)">
+        {tip && (
+          <span className="tm-rtip" style={{ left: tip.x, top: tip.y }} role="tooltip">{tip.text}</span>
+        )}
         <div className="tm-rail-scroll">
-          <button type="button" className="tm-rail-item prime" data-tip="Развернуть панель · [" aria-label="Развернуть панель" onClick={props.onToggleRail}>
+          <button type="button" className="tm-rail-item prime" {...tipH('Развернуть панель · [')} aria-label="Развернуть панель" onClick={props.onToggleRail}>
             <Ico d="M11 19l-7-7 7-7M19 19l-7-7" size={16} />
           </button>
-          <button type="button" className={'tm-rail-item' + (view.kind === 'my' ? ' cur' : '')} data-tip={'Мои задачи · ' + props.myCount} aria-label="Мои задачи" onClick={props.onMy}>
+          <button type="button" className={'tm-rail-item' + (view.kind === 'my' ? ' cur' : '')} {...tipH('Мои задачи · ' + props.myCount)} aria-label="Мои задачи" onClick={props.onMy}>
             <Ico d={ICO_MY} size={17} />
             {props.myCount > 0 && <span className="tm-rail-cnt">{props.myCount}</span>}
           </button>
-          <button type="button" className={'tm-rail-item' + (view.kind === 'teams' ? ' cur' : '')} data-tip="Команды" aria-label="Команды" onClick={props.onTeams}>
+          <button type="button" className={'tm-rail-item' + (view.kind === 'teams' ? ' cur' : '')} {...tipH('Команды')} aria-label="Команды" onClick={props.onTeams}>
             <Ico d={ICO_TEAM} size={17} />
           </button>
-          <button type="button" className={'tm-rail-item' + (view.kind === 'people' || view.kind === 'user' ? ' cur' : '')} data-tip="Люди" aria-label="Люди" onClick={props.onPeople}>
+          <button type="button" className={'tm-rail-item' + (view.kind === 'people' || view.kind === 'user' ? ' cur' : '')} {...tipH('Люди')} aria-label="Люди" onClick={props.onPeople}>
             <Ico d={ICO_PEOPLE} size={17} />
           </button>
           <div className="tm-rail-div" />
@@ -164,13 +206,9 @@ export function TmSidebar(props: {
                 type="button"
                 className={'tm-rail-item proj' + (activePid === p.id ? ' cur' : '')}
                 style={{ '--c': p.color } as React.CSSProperties}
-                data-tip={p.title}
+                {...tipH(p.title)}
                 aria-label={p.title}
-                onClick={() => {
-                  const b = p.boards[0];
-                  if (b) props.onBoard(p.id, b.id);
-                  else props.onBacklog(p.id);
-                }}
+                onClick={() => openProject(p)}
                 onContextMenu={(e) => { e.preventDefault(); tmOpenMenu('project', { pid: p.id }, e.clientX, e.clientY); }}
               >
                 <span className="tm-rail-ptile" style={{ background: p.color }}>
@@ -190,6 +228,7 @@ export function TmSidebar(props: {
                       active={view.kind === 'board' && view.boardId === b.id}
                       onOpen={() => props.onBoard(p.id, b.id)}
                       onCtx={(x, y) => tmOpenMenu('board', { bid: b.id }, x, y)}
+                      tipH={tipH}
                     />
                   ))}
                   <BacklogNavRow
@@ -199,13 +238,14 @@ export function TmSidebar(props: {
                     active={view.kind === 'backlog'}
                     onOpen={() => props.onBacklog(p.id)}
                     onCtx={(x, y) => tmOpenMenu('backlog', { pid: p.id }, x, y)}
+                    tipH={tipH}
                   />
                 </span>
               )}
             </span>
           ))}
           {!ws.projects.length && (
-            <button type="button" className="tm-rail-item sub" data-tip="Новый проект" aria-label="Новый проект" onClick={props.onNewProject}>
+            <button type="button" className="tm-rail-item sub" {...tipH('Новый проект')} aria-label="Новый проект" onClick={props.onNewProject}>
               <Ico d="M12 5v14M5 12h14" size={14} />
             </button>
           )}
@@ -215,7 +255,7 @@ export function TmSidebar(props: {
               <button
                 type="button"
                 className={'tm-rail-item sub' + (props.savedId === v.id ? ' cur' : '')}
-                data-tip={'Вид: ' + v.name}
+                {...tipH('Вид: ' + v.name)}
                 aria-label={'Вид: ' + v.name}
                 onClick={() => props.onApplyView(v)}
                 onContextMenu={(e) => { e.preventDefault(); tmOpenMenu('view', { id: v.id, name: v.name }, e.clientX, e.clientY); }}
@@ -224,13 +264,20 @@ export function TmSidebar(props: {
               </button>
             </span>
           ))}
-          <button type="button" className={'tm-rail-item sub' + (props.filtersActive ? ' hint' : '')} data-tip="Сохранить текущий вид" aria-label="Сохранить вид" onClick={props.onSaveView}>
+          <button type="button" className={'tm-rail-item sub' + (props.filtersActive ? ' hint' : '')} {...tipH('Сохранить текущий вид')} aria-label="Сохранить вид" onClick={props.onSaveView}>
             <Ico d="M12 5v14M5 12h14" size={14} />
           </button>
         </div>
         <div className="tm-side-foot rail">
           {curProject && <span className="tm-proj-dot" style={{ background: curProject.color }} />}
         </div>
+        <TmPanelTab
+          side="l"
+          open={false}
+          title="Развернуть панель — нажать или потянуть вправо"
+          onToggle={props.onToggleRail}
+          onPull={(dir) => { if (dir === 1) props.onToggleRail(); }}
+        />
       </aside>
     );
   }
@@ -282,14 +329,19 @@ export function TmSidebar(props: {
           <div className="tm-proj" key={p.id}>
             <div
               className="tm-proj-head"
+              onClick={(e) => {
+                /* клик по проекту (мимо кнопок) — сразу основная доска */
+                if ((e.target as Element).closest('.tm-proj-acts')) return;
+                openProject(p);
+              }}
               onContextMenu={(e) => { e.preventDefault(); tmOpenMenu('project', { pid: p.id }, e.clientX, e.clientY); }}
             >
               <span className="tm-proj-tile" style={{ background: p.color }}><Ico d={ICO_BOARD} size={12} /></span>
               <button
                 type="button"
                 className="tm-proj-name"
-                title={p.title + ' — двойной клик: переименовать, ПКМ: меню'}
-                onDoubleClick={() => props.onRenameProject(p)}
+                title={p.title + ' — клик: открыть основную доску, двойной клик: переименовать, ПКМ: меню'}
+                onDoubleClick={(e) => { e.stopPropagation(); props.onRenameProject(p); }}
               >
                 {p.title}
               </button>
@@ -297,7 +349,7 @@ export function TmSidebar(props: {
                 <button type="button" className="tm-mini" title="Меню проекта: новая доска, задача, доступ…" onClick={(e) => { e.stopPropagation(); tmOpenMenu('project', { pid: p.id }, e.clientX, e.clientY); }}>
                   <Ico d="M12 5v14M5 12h14" size={11} />
                 </button>
-                <button type="button" className="tm-mini" title="Доступ команд и людей" onClick={() => props.onAccessProject(p)}>
+                <button type="button" className="tm-mini" title="Доступ команд и людей" onClick={(e) => { e.stopPropagation(); props.onAccessProject(p); }}>
                   <Ico d={ICO_TEAM} size={11} />
                 </button>
               </span>
@@ -353,10 +405,14 @@ export function TmSidebar(props: {
       </nav>
       <div className="tm-side-foot">
         <span>Общее пространство команды</span>
-        <button type="button" className="tm-mini" title="Свернуть панель · [" aria-label="Свернуть панель" onClick={props.onToggleRail}>
-          <Ico d="M19 12H5M11 6l-6 6 6 6" size={12} />
-        </button>
       </div>
+      <TmPanelTab
+        side="l"
+        open
+        title="Свернуть панель — нажать или потянуть влево"
+        onToggle={props.onToggleRail}
+        onPull={(dir) => { if (dir === -1) props.onToggleRail(); }}
+      />
     </aside>
   );
 }
@@ -1076,6 +1132,8 @@ export function TaskCard(props: {
   const links = t.links || [];
   const comments = (t.messages || []).filter((m) => !m.system).length;
   const plain = mdPlain(t.description);
+  /* чек-лист описания: шкала прогресса видна на карточке (как в прототипе) */
+  const chk = checklistStats(t.description);
   return (
     <article
       className={'tm-card' + (t.done ? ' done' : '') + (t.color ? ' colored' : '') + (props.canDrag ? ' grab' : '')}
@@ -1114,6 +1172,12 @@ export function TaskCard(props: {
         <span className="tm-card-title">{t.title}</span>
       </div>
       {plain && <p className="tm-card-desc">{plain.slice(0, 132)}</p>}
+      {chk && (
+        <div className="tm-card-check" title={'Чек-лист описания: ' + chk.done + ' из ' + chk.total}>
+          <div className="tm-checkbar"><span style={{ width: Math.round((chk.done / chk.total) * 100) + '%' }} /></div>
+          <span className="tm-checkbar-cap">✓ {chk.done}/{chk.total}</span>
+        </div>
+      )}
       {(prio || st.deadline || kids.length > 0 || st.assignees.length > 0 || links.length > 0 || (t.labelIds || []).length > 0 || comments > 0) && (
         <div className="tm-card-chips">
           {prio && <span className="tm-chip prio" style={{ color: prio.color, borderColor: prio.color }}>{prio.label}</span>}
@@ -1165,6 +1229,8 @@ export function TaskRow(props: {
   onToggleDone?: (t: TmTask) => void;
   context?: React.ReactNode;
   action?: React.ReactNode;
+  /** перетягивание строки (бэклог → доски в сайдбаре) */
+  onDragPointerDown?: (e: React.PointerEvent, t: TmTask) => void;
 }) {
   const t = props.task;
   const st = t.stickers;
@@ -1172,8 +1238,9 @@ export function TaskRow(props: {
   const project = props.ws.projects.find((p) => p.id === t.projectId);
   return (
     <div
-      className={'tm-row' + (t.done ? ' done' : '') + (t.color ? ' colored' : '')}
+      className={'tm-row' + (t.done ? ' done' : '') + (t.color ? ' colored' : '') + (props.onDragPointerDown ? ' grab' : '')}
       onClick={() => props.onOpen(t)}
+      onPointerDown={props.onDragPointerDown ? (e) => props.onDragPointerDown?.(e, t) : undefined}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); tmOpenMenu('card', { id: t.id }, e.clientX, e.clientY); }}
       role="button"
       tabIndex={0}
@@ -1215,7 +1282,26 @@ export function TaskRow(props: {
   );
 }
 
-/* ═══ бэклог проекта ═══ */
+/* ═══ бэклог проекта ═══
+   Строки бэклога перетягиваются мышью, как карточки на доске: призрак летит
+   за курсором, цели — строки ДОСОК/БЭКЛОГА в сайдбаре (внутри проекта и
+   между проектами, как перенос карточек). */
+
+interface RowDragState {
+  el: HTMLElement;
+  task: TmTask;
+  rect: DOMRect;
+  ox: number;
+  oy: number;
+  px: number;
+  py: number;
+  sx: number;
+  sy: number;
+  started: boolean;
+  wrap: HTMLElement | null;
+  sb: HTMLElement | null;
+  raf: number;
+}
 
 export function BacklogView(props: {
   ws: Ws;
@@ -1229,6 +1315,9 @@ export function BacklogView(props: {
   onOpen: (t: TmTask) => void;
   onQuickAdd: (title: string) => void;
   onToBoard: (t: TmTask) => void;
+  /** перетягивание строки: на доску (первая системная колонка) / в бэклог проекта */
+  onDropBoard?: (t: TmTask, boardId: string) => void;
+  onDropBacklog?: (t: TmTask) => void;
   headExtra?: React.ReactNode;
 }) {
   const project = props.ws.projects.find((p) => p.id === props.projectId);
@@ -1237,9 +1326,111 @@ export function BacklogView(props: {
     props.ws.tasks.filter((t) => t.projectId === props.projectId && !t.columnId && props.matchQuery(t, props.query)),
   ).sort((a, b) => a.order - b.order);
   if (!project) return <div className="tm-loading">Проект не найден</div>;
+
+  /* перенос строки из бэклога: тот же принцип, что DnD карточек на сайдбар */
+  const beginRowDrag = (e: React.PointerEvent, t: TmTask): void => {
+    if (!props.canEdit || !(props.onDropBoard || props.onDropBacklog)) return;
+    if (e.pointerType !== 'mouse' || (e.button !== undefined && e.button !== 0)) return;
+    const target = e.target as Element;
+    if (target.closest('button,input,textarea,select,a')) return;
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const st: RowDragState = {
+      el,
+      task: t,
+      rect,
+      ox: Math.min(60, e.clientX - rect.left),
+      oy: Math.min(18, e.clientY - rect.top),
+      px: e.clientX,
+      py: e.clientY,
+      sx: e.clientX,
+      sy: e.clientY,
+      started: false,
+      wrap: null,
+      sb: null,
+      raf: 0,
+    };
+    let finished = false;
+
+    const place = (): void => {
+      const u = document.elementFromPoint(st.px, st.py);
+      let sb: HTMLElement | null = null;
+      if (u && u.closest) sb = u.closest<HTMLElement>('[data-drop-board],[data-drop-backlog]');
+      if (st.sb && st.sb !== sb) st.sb.classList.remove('drop-hint');
+      st.sb = sb;
+      if (st.wrap) st.wrap.classList.toggle('mini', !!sb);
+      if (sb) sb.classList.add('drop-hint');
+    };
+
+    const loop = (): void => {
+      if (!st.started || finished) return;
+      place();
+      st.raf = requestAnimationFrame(loop);
+    };
+
+    const start = (): void => {
+      st.started = true;
+      document.body.classList.add('dragging');
+      const wrap = document.createElement('div');
+      wrap.className = 'tm-ghostwrap';
+      wrap.style.width = st.rect.width + 'px';
+      const g = el.cloneNode(true) as HTMLElement;
+      g.classList.add('tm-ghost');
+      g.style.width = st.rect.width + 'px';
+      g.style.height = st.rect.height + 'px';
+      wrap.appendChild(g);
+      document.body.appendChild(wrap);
+      st.wrap = wrap;
+      el.classList.add('dragsrc');
+      wrap.style.transform = 'translate3d(' + (st.px - st.ox) + 'px,' + (st.py - st.oy) + 'px,0)';
+      st.raf = requestAnimationFrame(loop);
+    };
+
+    const finish = (commit: boolean): void => {
+      if (finished) return;
+      finished = true;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', cancel);
+      document.removeEventListener('keydown', escH, true);
+      cancelAnimationFrame(st.raf);
+      const sb = commit && st.started ? st.sb : null;
+      const side = sb
+        ? { kind: sb.dataset.dropBoard ? ('board' as const) : ('backlog' as const), id: sb.dataset.dropBoard || sb.dataset.dropBacklog || '' }
+        : null;
+      if (st.wrap) st.wrap.remove();
+      el.classList.remove('dragsrc');
+      if (st.sb) st.sb.classList.remove('drop-hint');
+      document.body.classList.remove('dragging');
+      if (!st.started) return;
+      if (side && props.onDropBoard && props.onDropBacklog) {
+        if (side.kind === 'board') props.onDropBoard(st.task, side.id);
+        else props.onDropBacklog(st.task);
+      }
+    };
+
+    const move = (ev: PointerEvent): void => {
+      st.px = ev.clientX;
+      st.py = ev.clientY;
+      if (!st.started) {
+        if (Math.hypot(ev.clientX - st.sx, ev.clientY - st.sy) < 5) return;
+        start();
+      }
+      if (st.wrap) st.wrap.style.transform = 'translate3d(' + (ev.clientX - st.ox) + 'px,' + (ev.clientY - st.oy) + 'px,0)';
+    };
+    const up = (): void => finish(true);
+    const cancel = (): void => finish(false);
+    const escH = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.stopPropagation(); ev.preventDefault(); finish(false); } };
+
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', cancel);
+    document.addEventListener('keydown', escH, true);
+  };
+
   return (
     <div className="tm-listwrap">
-      <TmViewHead title={'Бэклог · ' + project.title} sub="Идеи и будущие задачи живут здесь, пока не попадут на доску">
+      <TmViewHead title={'Бэклог · ' + project.title} sub="Идеи и будущие задачи живут здесь, пока не попадут на доску — строку можно перетянуть на доску в сайдбаре">
         {props.headExtra}
       </TmViewHead>
       {props.canEdit && (
@@ -1266,6 +1457,7 @@ export function BacklogView(props: {
             userMap={props.userMap}
             labels={props.labels}
             onOpen={props.onOpen}
+            onDragPointerDown={props.canEdit ? beginRowDrag : undefined}
             action={props.canEdit ? (
               <button
                 type="button"
@@ -1880,6 +2072,43 @@ interface NtfItem {
   createdAt: string;
 }
 
+/* подписи ролей в уведомлениях (как в «Ветвях») */
+const ROLE_NTF: Record<string, string> = {
+  owner: 'владелец',
+  admin: 'администратор',
+  editor: 'редактор',
+  reader: 'только чтение',
+  viewer: 'наблюдатель',
+};
+
+/* подпись для ЛЮБОГО типа уведомления — общий колокольчик всех сервисов:
+   доступы к проектам «Ветвей», доступы к сервисам, задачи и комментарии */
+function ntfText(n: NtfItem): { b: string; i: string } {
+  const p = (n.payload || {}) as Record<string, unknown>;
+  const pn = p.projectName ? ' «' + String(p.projectName) + '»' : '';
+  const sn = p.serviceName ? ' «' + String(p.serviceName) + '»' : '';
+  const tn = p.taskTitle ? ' «' + String(p.taskTitle).slice(0, 46) + '»' : '';
+  const by = p.byName ? String(p.byName) : p.granterName ? String(p.granterName) : '';
+  const when = fmtNtfDate(n.createdAt);
+  switch (n.type) {
+    case 'task_assigned': return { b: 'Вам назначили задачу' + tn, i: (by ? by + ' · ' : '') + when };
+    case 'task_comment': return { b: 'Комментарий к задаче' + tn, i: ((p.preview ? String(p.preview).slice(0, 70) + ' · ' : '') + (by ? by + ' · ' : '') + when) };
+    case 'access_granted': return { b: 'Вам открыли доступ к проекту' + pn, i: (by ? by + ' · ' : '') + (ROLE_NTF[p.role as string] || 'доступ') + ' · ' + when };
+    case 'access_revoked': return { b: 'Доступ к проекту' + pn + ' отозван', i: (by ? by + ' · ' : '') + when };
+    case 'service_granted': return { b: 'Доступ к сервису' + sn + ' открыт', i: 'Администратор · сервис появится в меню «Сервисы» · ' + when };
+    case 'service_denied': return { b: 'Доступ к сервису' + sn + ' закрыт', i: 'Администратор · сервис пропал из меню «Сервисы» · ' + when };
+    case 'tm_service_denied': return { b: 'Доступ к менеджеру задач закрыт', i: (by ? by + ' · ' : '') + when };
+    case 'tm_access_granted': return { b: 'Вам дали доступ к проекту' + pn, i: (by ? by + ' · ' : '') + (ROLE_NTF[p.role as string] || '') + ' · ' + when };
+    default: {
+      const human = String(n.type || '')
+        .replace(/[_.]/g, ' ')
+        .replace(/^tm\s/, '')
+        .trim();
+      return { b: human ? human.charAt(0).toUpperCase() + human.slice(1) : 'Уведомление', i: when };
+    }
+  }
+}
+
 export function TmBell(props: {
   me: Ws['me'];
   say: (text: string, tone?: 'ok' | 'warn' | 'err') => void;
@@ -1900,9 +2129,8 @@ export function TmBell(props: {
       if (!first.current) {
         for (const n of j.items) {
           if (!n.read && !seen.current.has(n.id)) {
-            const p = n.payload || {};
-            if (n.type === 'task_assigned') say('Вам назначили задачу «' + String(p.taskTitle || '').slice(0, 40) + '»', 'ok');
-            else if (n.type === 'task_comment') say('Комментарий к задаче от ' + String(p.byName || ''), 'ok');
+            const t = ntfText(n);
+            say(t.b, n.type === 'access_revoked' || n.type === 'service_denied' || n.type === 'tm_service_denied' ? 'warn' : 'ok');
           }
         }
       }
@@ -1931,6 +2159,17 @@ export function TmBell(props: {
     if (p.taskId) props.onOpenTask(String(p.taskId));
   };
 
+  /* очистить весь список (как в «Ветвях») */
+  const clearAll = async () => {
+    try {
+      await fetch('/api/notifications/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      seen.current = new Set();
+      setItems([]);
+      setUnread(0);
+      say('Список уведомлений очищен');
+    } catch { /* не критично */ }
+  };
+
   return (
     <div className="tm-bell-wrap">
       <button
@@ -1953,30 +2192,29 @@ export function TmBell(props: {
             </div>
             <div className="tm-ntf-list">
               {items.map((n) => {
-                const p = n.payload || {};
-                const isTask = n.type === 'task_assigned' || n.type === 'task_comment';
+                const t = ntfText(n);
+                const clickable = !!(n.payload || {}).taskId;
+                const neg = n.type === 'access_revoked' || n.type === 'service_denied' || n.type === 'tm_service_denied';
                 return (
                   <button
                     type="button"
                     key={n.id}
-                    className={'tm-ntf-item' + (n.read ? '' : ' unread') + (isTask ? ' task' : '')}
-                    onClick={() => void openItem(n)}
+                    className={'tm-ntf-item' + (n.read ? '' : ' unread') + (clickable ? ' task' : '')}
+                    onClick={() => clickable ? void openItem(n) : void fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [n.id] }) })}
+                    title={clickable ? 'Открыть задачу' : undefined}
                   >
-                    <b>
-                      {n.type === 'task_assigned' && <>Вам назначили задачу{p.taskTitle ? <> «{String(p.taskTitle).slice(0, 50)}»</> : ''}</>}
-                      {n.type === 'task_comment' && <>Комментарий к задаче{p.taskTitle ? <> «{String(p.taskTitle).slice(0, 40)}»</> : ''}</>}
-                      {!isTask && <>Уведомление</>}
-                    </b>
-                    <i>
-                      {n.type === 'task_assigned' && (String(p.byName || '') + ' · ')}
-                      {n.type === 'task_comment' && ((p.preview ? String(p.preview).slice(0, 60) + ' · ' : '') + String(p.byName || '') + ' · ')}
-                      {fmtNtfDate(n.createdAt)}
-                    </i>
+                    <b className={neg ? ' neg' : ''}>{t.b}</b>
+                    <i>{t.i}</i>
                   </button>
                 );
               })}
-              {items.length === 0 && <div className="tm-ntf-empty">Пока пусто — здесь появится назначение задач и комментарии</div>}
+              {items.length === 0 && <div className="tm-ntf-empty">Пока пусто — здесь появляются уведомления всех сервисов: доступы, задачи и комментарии</div>}
             </div>
+            {items.length > 0 && (
+              <div className="tm-ntf-foot">
+                <button type="button" className="btn" onClick={() => void clearAll()}>Очистить список</button>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1992,4 +2230,76 @@ function fmtNtfDate(iso: string): string {
   } catch {
     return '';
   }
+}
+
+/* ═══ аккаунт в шапке — оформление «Ветвей»: кнопка-аватар + попап
+   (.acc-pop/.acc-head/.cp-act — те же классы, что в «Ветвях») ═══ */
+
+export function TmAccountMenu(props: {
+  say: (text: string, tone?: 'ok' | 'warn' | 'err') => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const acc = getAccount();
+  if (!acc) return null;
+  const logout = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await authLogout(); } catch { /* уже вышли */ }
+    window.location.reload();
+  };
+  return (
+    <div className="tm-bell-wrap">
+      <button
+        type="button"
+        className="btn ibtn tm-accbtn"
+        title={acc.displayName + ' (@' + acc.login + ') — аккаунт'}
+        aria-label="Аккаунт"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="avatar-circle" style={{ background: acc.color }}>{avatarInitial(acc.displayName)}</span>
+      </button>
+      {open && (
+        <>
+          <div className="tm-pop-scrim" onClick={() => setOpen(false)} />
+          <div className="collab-pop show acc-pop tm-accpop" role="dialog" aria-label="Аккаунт">
+            <div className="acc-head">
+              <span className="avatar-circle big" style={{ background: acc.color }}>{avatarInitial(acc.displayName)}</span>
+              <div className="acc-head-txt">
+                <b>{acc.displayName}</b>
+                <i>@{acc.login}</i>
+              </div>
+            </div>
+            <div className="cp-acts" style={{ borderTop: '1px solid var(--line)' }}>
+              <button type="button" className="cp-act" onClick={() => { setOpen(false); try { window.location.hash = ''; } catch { /* нет window */ } }}>
+                <IcVetvi /> Перейти в «Ветви»
+              </button>
+              <button type="button" className="cp-act acc-logout" disabled={busy} onClick={() => void logout()}>
+                <IcExitSm />{busy ? 'Выходим…' : 'Выйти'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function IcVetvi() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+      <path d="M7.5 12h3c3.2 0 2.4-6.5 6-6.5M10.5 12c3.2 0 2.4 6.5 6 6.5" />
+      <circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function IcExitSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  );
 }

@@ -19,7 +19,7 @@ import type { Ws } from './TaskManagerApp';
 
 /* ── модульный стор состояния меню ── */
 
-export type TmMenuKind = 'card' | 'column' | 'board' | 'project' | 'backlog' | 'view' | 'team' | 'user' | 'app' | 'color';
+export type TmMenuKind = 'card' | 'column' | 'board' | 'project' | 'backlog' | 'view' | 'team' | 'user' | 'app' | 'color' | 'comment';
 
 export interface TmMenuState {
   kind: TmMenuKind;
@@ -186,6 +186,7 @@ export function TmMenuHost(props: {
       {st.kind === 'team' && <TeamMenu id={c.id || ''} name={c.name || ''} act={act} />}
       {st.kind === 'user' && <UserMenu ws={ws} login={c.login || ''} act={act} />}
       {st.kind === 'app' && <AppMenu act={act} rail={c.rail === '1'} />}
+      {st.kind === 'comment' && <CommentMenu ctx={c} act={act} />}
     </div>
   );
 }
@@ -477,6 +478,41 @@ function UserMenu(props: { ws: Ws; login: string; act: (n: string, a?: unknown) 
     <>
       <MTitle icon={<I d="M8.5 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2.5 19c.6-3 3-5 6-5s5.4 2 6 5" />} text={props.login} />
       <MItem icon={<I d="M9 6h6l3 6-3 6H9" />} label="Задачи участника" onClick={() => props.act('open-user', props.login)} />
+    </>
+  );
+}
+
+/* ── меню комментария чата: ответить / реагировать / копировать / править / удалить ── */
+
+const TM_REACTS = ['👍', '❤️', '😂', '🔥', '🙏', '👀'];
+
+function CommentMenu(props: { ctx: Record<string, string>; act: (n: string, a?: unknown) => void }) {
+  const c = props.ctx;
+  const mine = c.mine === '1';
+  const [reactsOpen, setReactsOpen] = useState(false);
+  if (reactsOpen) {
+    return (
+      <>
+        <MTitle icon={<I d="M9 12l2 2 4-5M12 3a9 9 0 1 0 .3 0z" />} text="Реакция" />
+        <div className="tm-m-reacts">
+          {TM_REACTS.map((r) => (
+            <button key={r} type="button" onClick={() => props.act('msg-react', { taskId: c.taskId, msgId: c.msgId, react: r })}>{r}</button>
+          ))}
+        </div>
+        <MSep />
+        <MItem icon={<I d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />} label="Назад" onClick={() => setReactsOpen(false)} />
+      </>
+    );
+  }
+  return (
+    <>
+      <MTitle icon={<I d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z" />} text={'Комментарий · @' + (c.login || '')} />
+      <MItem icon={<I d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />} label="Ответить" onClick={() => props.act('msg-reply', { taskId: c.taskId, msgId: c.msgId, login: c.login })} />
+      <MItem icon={<I d="M12 21c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8zM9 12l2 2 4-5" />} label="Реагировать…" onClick={() => setReactsOpen(true)} />
+      <MItem icon={<I d="M8 8h12v12H8zM4 4h12v3M4 4v12h3" />} label="Копировать текст" onClick={() => props.act('msg-copy', { msgId: c.msgId })} />
+      {mine && <MItem icon={<I d="M4 20l4-1L20 7l-3-3L5 16z" />} label="Редактировать" onClick={() => props.act('msg-edit', { taskId: c.taskId, msgId: c.msgId })} />}
+      <MSep />
+      <MItem icon={<I d="M6 6l12 12M18 6 6 18" />} label="Удалить" danger onClick={() => props.act('msg-del', { taskId: c.taskId, msgId: c.msgId, text: c.text || '' })} />
     </>
   );
 }

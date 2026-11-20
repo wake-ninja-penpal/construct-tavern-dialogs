@@ -57,6 +57,8 @@ export interface TmMessage {
   text: string;
   ts: number;
   system?: boolean;
+  /** реакции: эмодзи → логины (только у обычных комментариев) */
+  reactions?: Record<string, string[]>;
 }
 
 export interface TmLabel {

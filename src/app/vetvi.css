@@ -2216,16 +2216,24 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .md-body p:last-child{margin-bottom:0}
 .md-body ul,.md-body ol{margin:0 0 7px;padding-left:20px}
 .md-body ul:last-child,.md-body ol:last-child{margin-bottom:0}
+/* маркеры списков видимы всегда (Tailwind preflight обнуляет list-style) */
+.md-body ul{list-style:disc}
+.md-body ol{list-style:decimal}
+.md-body ul ul{list-style:circle}
+.md-body ul ul ul{list-style:square}
+.md-body li::marker{color:var(--acc)}
 .md-body li{margin:2px 0}
 .md-body li.mdtask{list-style:none;display:flex;gap:7px;align-items:flex-start;margin-left:-18px}
 .md-body .mdchk{width:14px;height:14px;border:1.5px solid #3d434f;border-radius:4px;display:inline-block;flex:none;margin-top:3px;position:relative;background:#101216}
 .md-body .mdchk.on{background:#8fbf7f;border-color:#8fbf7f}
 .md-body .mdchk.on::after{content:'';position:absolute;left:3.5px;top:.5px;width:4px;height:8px;border:solid #1c1503;border-width:0 2px 2px 0;transform:rotate(45deg)}
-.md-body code{background:#101216;border:1px solid #262a31;border-radius:5px;padding:1px 5px;font:600 11px var(--mono);color:#d9c8a9}
-.md-body pre{position:relative;background:#101216;border:1px solid #262a31;border-radius:9px;padding:10px 12px;overflow-x:auto;margin:0 0 8px}
+/* код и блок кода — как в прототипе: инлайн-код акцентный БЕЗ рамки,
+   блок — на тёмном фоне с рамкой и подписью языка */
+.md-body code{background:color-mix(in srgb,var(--acc) 14%,transparent);color:var(--acc2);border:none;border-radius:5px;padding:1px 5px;font:600 11.5px var(--mono)}
+.md-body pre{position:relative;background:#0e1013;border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow-x:auto;margin:0 0 8px}
 .md-body pre:last-child{margin-bottom:0}
 .md-body pre .lang{position:absolute;top:6px;right:9px;font:600 9px var(--mono);color:var(--tx3);text-transform:uppercase;letter-spacing:1px}
-.md-body pre code{background:none;border:none;padding:0;font:12px/1.55 var(--mono);color:#c9d1d9;display:block;white-space:pre}
+.md-body pre code{background:none;color:#c9d1d9;border:none;padding:0;font:12px/1.55 var(--mono);display:block;white-space:pre}
 .md-body blockquote{margin:0 0 8px;padding:6px 12px;border-left:3px solid var(--acc);background:rgba(226,165,78,.06);border-radius:0 8px 8px 0;color:var(--tx2)}
 .md-body blockquote p:last-child{margin-bottom:0}
 .md-body table{border-collapse:collapse;margin:0 0 8px;font-size:12px;max-width:100%;display:block;overflow-x:auto}
@@ -2418,6 +2426,10 @@ body.dragging *{cursor:grabbing!important}
 .tm-m-alpha{display:flex;align-items:center;gap:9px;padding:7px 2px 0}
 .tm-m-alpha input{flex:1;accent-color:var(--acc);min-width:0}
 .tm-m-alpha b{font:700 11.5px var(--body);min-width:38px;text-align:right;color:var(--tx)}
+/* выбор реакции в меню комментария */
+.tm-m-reacts{display:flex;flex-wrap:wrap;gap:4px;padding:2px 4px}
+.tm-m-reacts button{width:38px;height:34px;border:1px solid var(--line2);background:var(--card);border-radius:9px;font:500 17px var(--body);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.13s;padding:0}
+.tm-m-reacts button:hover{border-color:var(--acc);background:var(--accd);transform:scale(1.1)}
 .tm-m-demo{margin:8px 2px 2px;border-radius:9px;padding:8px 10px;border:1px solid var(--line);font:600 11.5px var(--body);color:var(--tx2)}
 
 /* rail — свёрнутый сайдбар: только иконки с всплывающими подсказками */
@@ -2435,9 +2447,9 @@ body.dragging *{cursor:grabbing!important}
 .tm-rail-proj{display:flex;flex-direction:column;align-items:center;gap:4px}
 .tm-rail-ptile{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#221604}
 .tm-rail-subs{display:flex;flex-direction:column;align-items:center;gap:3px}
-/* всплывающая подсказка rail (справа от иконки, как railTip прототипа) */
-.tm-rail-item::after{content:attr(data-tip);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%) translateX(-6px);background:#1a1d22;border:1px solid #303540;color:var(--tx);font:700 12px var(--body);padding:6px 11px;border-radius:9px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .14s,transform .14s;z-index:60;box-shadow:0 10px 30px rgba(0,0,0,.5)}
-.tm-rail-item:hover::after{opacity:1;transform:translateY(-50%)}
+/* всплывающая подсказка rail — рисуется fixed-слоем .tm-rtip (React):
+   ::after обрезался overflow скролл-контейнера рейка и не был виден целиком */
+.tm-rail-item::after{content:none!important}
 .tm-side-foot.rail{border-top:1px solid var(--line);width:100%;display:flex;justify-content:center;padding:10px 0}
 
 /* строки досок/бэклога в сайдбаре — цели переноса задач (подсветка при DnD) */
@@ -2499,3 +2511,47 @@ body.dragging *{cursor:grabbing!important}
 .tm-drawer.side .tm-drawer-body{flex:none;overflow-y:visible;min-height:0}
 .tm-drawer.side .tm-drawer-chat{flex:none;max-height:300px}
 .tm-drawer.side .tm-drawer-layout{scrollbar-width:thin}
+
+/* ═══════ Менеджер задач 1.11: чек-шкала, реакции, хлястик, аккаунт ═══════ */
+
+/* шкала чек-листа описания (в дровере под описанием и на карточке задачи) */
+.tm-checkbar{height:5px;border-radius:4px;background:#22262d;overflow:hidden;max-width:420px}
+.tm-checkbar span{display:block;height:100%;background:linear-gradient(90deg,#8fbf7f,#a9d69b);border-radius:4px;transition:width .3s}
+.tm-checkbar-row{display:flex;align-items:center;gap:8px}
+.tm-checkbar-row .tm-checkbar{flex:1}
+.tm-checkbar-cap{font:600 10px var(--mono);color:#8fbf7f;white-space:nowrap}
+/* чип чек-листа на карточке */
+.tm-chip.chk{color:#8fbf7f;border-color:rgba(143,191,127,.4)}
+.tm-card-check{display:flex;align-items:center;gap:7px;margin-top:7px}
+.tm-card-check .tm-checkbar{flex:1;max-width:none}
+.tm-card-check .tm-checkbar-cap{font-size:9px}
+
+/* реакции на комментарии */
+.tm-msg-reacts{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.tm-react{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line2);background:var(--card);border-radius:99px;padding:1px 7px;font:500 11px var(--body);color:var(--tx2);cursor:pointer;transition:.13s}
+.tm-react:hover{border-color:#3d434f;color:var(--tx)}
+.tm-react.mine{border-color:rgba(226,165,78,.55);background:rgba(226,165,78,.1);color:var(--acc2)}
+.tm-react b{font-weight:600}
+/* редактирование комментария */
+.tm-msg-edit{width:100%;min-height:54px;resize:vertical;background:#14161a;border:1px solid var(--acc);border-radius:9px;color:var(--tx);font:12.5px/1.5 var(--body);padding:7px 9px;outline:none}
+.tm-msg-edit-row{display:flex;gap:6px;justify-content:flex-end;margin-top:5px}
+.tm-msg-edit-row .btn{height:26px;font-size:11px;padding:0 10px}
+/* строка ответа (reply) */
+.tm-msg-reply{margin:0 0 3px;font:500 10.5px var(--body);color:var(--tx3);border-left:2px solid var(--acc);padding-left:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* хлястик сворачивания сайдбара (как .ptab «Ветвей»: потянуть или нажать) */
+.tm-side{position:relative;transition:width .26s cubic-bezier(.2,.8,.3,1)}
+/* подсказки rail: fixed-слой вместо ::after — не обрезается скролл-контейнером */
+.tm-rtip{position:fixed;z-index:180;background:#1a1d22;border:1px solid #303540;color:var(--tx);font:700 12px var(--body);padding:6px 11px;border-radius:9px;white-space:nowrap;pointer-events:none;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:tmPop .12s ease}
+/* негативные уведомления (отзыв доступа) — красный заголовок */
+.tm-ntf-item b.neg{color:#e0967f}
+.tm-ntf-foot{flex:none;padding:8px 10px;border-top:1px solid var(--line);display:flex;justify-content:center}
+.tm-ntf-foot .btn{height:28px;font-size:11.5px}
+/* попап аккаунта менеджера задач — оформление «Ветвей» (.acc-pop/.acc-head/.cp-act глобальные) */
+.tm-accbtn{display:flex;align-items:center;padding:0;width:34px;height:34px;justify-content:center}
+.tm-accbtn .avatar-circle{width:26px;height:26px;font:700 12px var(--body);color:#1c1503;flex:none}
+.tm-accpop{position:fixed;top:56px;right:12px;z-index:125;display:flex;min-width:230px}
+/* счётчик непрочитанных на аватаре не нужен: колокольчик рядом */
+
+/* avatar-circle глобально существует (ветви); для дровера/меню — big вариант */
+.avatar-circle.big{width:38px;height:38px;font-size:16px}

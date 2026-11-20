@@ -123,6 +123,20 @@ export function mdPlain(s: string): string {
     .trim();
 }
 
+/** Статистика чек-листов описания: сколько пунктов [ ] / [x] в тексте.
+    Подпункты с отступом тоже считаются. null — чек-листов в тексте нет. */
+export function checklistStats(s: string): { total: number; done: number } | null {
+  let total = 0;
+  let done = 0;
+  const re = /^\s*[-*+]\s+\[([ xX])\]/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(String(s || ''))) !== null) {
+    total++;
+    if (m[1].toLowerCase() === 'x') done++;
+  }
+  return total ? { total, done } : null;
+}
+
 /* ═══ WYSIWYG: сериализация DOM редактора обратно в markdown ═══
    Редактор живой: пользователь видит отрисованный markdown и правит его.
    На каждый ввод содержимое contenteditable сериализуется в markdown-исходник

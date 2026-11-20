@@ -166,6 +166,23 @@ export interface TaskMessage {
   text: string;
   ts: number;
   system?: boolean;
+  /** реакции: эмодзи → логины (только у обычных комментариев) */
+  reactions?: Record<string, string[]>;
+}
+
+/** Реакции из сырой записи: эмодзи → список логинов (максимум 6 эмодзи). */
+function parseReactions(o: Record<string, unknown>): Record<string, string[]> | undefined {
+  const raw = o.reactions;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string[]> = {};
+  let n = 0;
+  for (const [emoji, logins] of Object.entries(raw as Record<string, unknown>)) {
+    if (n >= 6) break;
+    if (!Array.isArray(logins)) continue;
+    const list = logins.filter((x): x is string => typeof x === 'string').slice(0, 30);
+    if (list.length) { out[emoji.slice(0, 8)] = list; n++; }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function parseMessages(raw: string | null | undefined): TaskMessage[] {
@@ -185,6 +202,7 @@ export function parseMessages(raw: string | null | undefined): TaskMessage[] {
         text,
         ts: typeof o.ts === 'number' ? o.ts : Date.now(),
         system: o.system === true,
+        ...(o.system === true ? {} : { reactions: parseReactions(o) }),
       });
     }
     return out.slice(-500);
@@ -201,12 +219,14 @@ export function sanitizeMessages(input: unknown): string {
     const o = x as Record<string, unknown>;
     const text = typeof o.text === 'string' ? o.text.slice(0, 4000) : '';
     if (!text) continue;
+    const reactions = parseReactions(o);
     out.push({
       id: typeof o.id === 'string' ? o.id.slice(0, 64) : '',
       login: typeof o.login === 'string' ? o.login.slice(0, 80) : '',
       text,
       ts: typeof o.ts === 'number' ? o.ts : Date.now(),
       system: o.system === true,
+      ...(o.system === true ? {} : { reactions }),
     });
   }
   return JSON.stringify(out.slice(-500));
