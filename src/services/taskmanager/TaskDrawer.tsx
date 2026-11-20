@@ -82,12 +82,28 @@ export function TmDrawer(props: {
   const [saving, setSaving] = useState(false);
   const [stickerPop, setStickerPop] = useState(false);
   const [newLabel, setNewLabel] = useState('');
+  const [labelInput, setLabelInput] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
   const debounceT = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef({ title: task?.title || '', desc: task?.description || '' });
   const chatEndRef = useRef<HTMLDivElement>(null);
   const mdAreaRef = useRef<HTMLTextAreaElement>(null);
+  const labelInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
+
+  /* в боковой панели при открытии сразу показываем конец содержимого —
+     как в прототипе: внизу оказывается чат задачи с полем ввода */
+  useEffect(() => {
+    if (props.mode !== 'side') return;
+    const l = layoutRef.current;
+    if (l) l.scrollTop = l.scrollHeight;
+  }, [props.mode]);
+
+  /* открыли ввод названия метки — фокус внутрь */
+  useEffect(() => {
+    if (labelInput) labelInputRef.current?.focus();
+  }, [labelInput]);
 
   /* сменился режим — split→edit в боковой панели */
   useEffect(() => {
@@ -128,12 +144,15 @@ export function TmDrawer(props: {
 
   if (!task || !project) {
     return (
-      <aside className="tm-drawer show" aria-label="Задача">
-        <div className="tm-drawer-head">
-          <span className="tm-drawer-crumb">Задача не найдена</span>
-          <button type="button" className="btn ibtn" onClick={props.onClose} aria-label="Закрыть">×</button>
-        </div>
-      </aside>
+      <>
+        <div className="tm-drawer-scrim" onClick={props.onClose} aria-hidden="true" />
+        <aside className="tm-drawer show" aria-label="Задача">
+          <div className="tm-drawer-head">
+            <span className="tm-drawer-crumb">Задача не найдена</span>
+            <button type="button" className="btn ibtn" onClick={props.onClose} aria-label="Закрыть">×</button>
+          </div>
+        </aside>
+      </>
     );
   }
 
@@ -170,6 +189,7 @@ export function TmDrawer(props: {
     const name = newLabel.trim();
     if (!name) return;
     setNewLabel('');
+    setLabelInput(false);
     const l = await props.onCreateLabel(name, TM_PALETTE[Math.floor(Math.random() * TM_PALETTE.length)]);
     if (l) {
       setLabels([...(task.labelIds || []), l.id]);
@@ -193,12 +213,15 @@ export function TmDrawer(props: {
   };
 
   return (
-    <aside
-      className={'tm-drawer show ' + props.mode}
-      aria-label={'Задача: ' + task.title}
-      style={{ '--dpc': prio?.color || project.color } as React.CSSProperties}
-    >
-      <div className="tm-drawer-topline" />
+    <>
+      {/* затемнение за дровером: клик закрывает, как в прототипе */}
+      <div className="tm-drawer-scrim" onClick={props.onClose} aria-hidden="true" />
+      <aside
+        className={'tm-drawer show ' + props.mode}
+        aria-label={'Задача: ' + task.title}
+        style={{ '--dpc': prio?.color || project.color } as React.CSSProperties}
+      >
+        <div className="tm-drawer-topline" />
 
       <div className="tm-drawer-head">
         {parent && (
@@ -224,7 +247,7 @@ export function TmDrawer(props: {
         <button type="button" className="btn ibtn" onClick={props.onClose} aria-label="Закрыть" title="Закрыть (Esc)">×</button>
       </div>
 
-      <div className="tm-drawer-layout">
+      <div className="tm-drawer-layout" ref={layoutRef}>
         <div className="tm-drawer-body" ref={scrollRef}>
           <textarea
             className="tm-title-ta"
@@ -321,14 +344,30 @@ export function TmDrawer(props: {
                   </span>
                 );
               })}
-              {ed && (
-                <button type="button" className="tm-sticker add" onClick={() => setStickerPop(false)} title="Метки назначаются в списке ниже">
+              {ed && !labelInput && (
+                <button type="button" className="tm-sticker add" onClick={() => setLabelInput(true)} title="Прикрепить или создать метку">
                   + метка
                 </button>
+              )}
+              {ed && labelInput && (
+                <input
+                  ref={labelInputRef}
+                  className="tm-label-new inrow"
+                  value={newLabel}
+                  placeholder="название метки (Enter)"
+                  maxLength={20}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); void addNewLabel(); }
+                    if (e.key === 'Escape') { e.preventDefault(); setNewLabel(''); setLabelInput(false); }
+                  }}
+                  onBlur={() => { if (!newLabel.trim()) setLabelInput(false); }}
+                />
               )}
             </div>
             {ed && (
               <div className="tm-label-manager">
+              {ws.labels.length > 0 && <div className="tm-sec-note">все метки команды — клик назначает/снимает</div>}
               {ws.labels.map((l) => {
                 const on = (task.labelIds || []).includes(l.id);
                 return (
@@ -340,14 +379,6 @@ export function TmDrawer(props: {
                   </span>
                 );
               })}
-              <input
-                className="tm-label-new"
-                value={newLabel}
-                placeholder="+ новая метка (Enter)"
-                maxLength={20}
-                onChange={(e) => setNewLabel(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void addNewLabel(); }}
-              />
               </div>
             )}
           </div>
@@ -630,7 +661,8 @@ export function TmDrawer(props: {
 
       {/* клик мимо попапа исполнителей закрывает его */}
       {stickerPop && <div className="tm-pop-scrim" onClick={() => setStickerPop(false)} />}
-    </aside>
+      </aside>
+    </>
   );
 }
 

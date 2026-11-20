@@ -903,9 +903,9 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
               roleLabel={roleOf(ws, view.projectId)}
               filtered={filteredByView}
               onOpen={(t) => setDrawerId(t.id)}
-              onMove={async (t, boardId, columnId) => {
+              onMove={async (t, boardId, columnId, order) => {
                 if (!guardEdit(t.projectId)) return;
-                await patchTask(t.id, { boardId, columnId });
+                await patchTask(t.id, { boardId, columnId, ...(typeof order === 'number' ? { order } : {}) });
               }}
               onPickBoard={(boardId) => setView({ kind: 'board', projectId: view.projectId, boardId })}
               onToggleDone={async (t) => {

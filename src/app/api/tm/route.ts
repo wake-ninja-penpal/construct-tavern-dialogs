@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import {
   appendSysMsg,
   canEditProject,
+  ensureDefaultLabels,
   myTeamIds,
   notifyTaskUser,
   requireTaskService,
@@ -25,6 +26,9 @@ export async function GET() {
   try {
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
+    /* дефолтные метки: если палитра команды пуста — при первом входе
+       появляются «баг/фича/дизайн/контент/техдолг/исследование» (идемпотентно) */
+    await ensureDefaultLabels()
     const [projects, tasks, labels, teams, accessRows, views, teamIds] = await Promise.all([
       db.taskProject.findMany({
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],

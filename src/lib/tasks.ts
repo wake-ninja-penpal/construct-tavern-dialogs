@@ -35,6 +35,26 @@ export const TM_KIND_COLORS: Record<string, string> = {
   done: '#8fbf7f',
 };
 
+/* метки по умолчанию (как в прототипе «Поток») — засеиваются один раз,
+   пока палитра команды пуста; свои метки пользователи создают поверх */
+export const TM_DEFAULT_LABELS: { name: string; color: string }[] = [
+  { name: 'баг', color: '#ff5470' },
+  { name: 'фича', color: '#22d3ee' },
+  { name: 'дизайн', color: '#f472b6' },
+  { name: 'контент', color: '#ffb020' },
+  { name: 'техдолг', color: '#4f8cff' },
+  { name: 'исследование', color: '#34d399' },
+];
+
+/** Идемпотентный посев дефолтных меток: только если меток в сервисе ещё нет. */
+export async function ensureDefaultLabels(): Promise<void> {
+  try {
+    const count = await db.taskLabel.count();
+    if (count > 0) return;
+    await db.taskLabel.createMany({ data: TM_DEFAULT_LABELS });
+  } catch { /* посев не критичен — создадутся вручную */ }
+}
+
 /** Форма связи задача↔нода (строго типизируем при разборе JSON). */
 export interface TaskLink {
   pid: string;

@@ -287,9 +287,30 @@ export function TmFilterPop(props: {
   );
 }
 
-/* ═══ канбан-доска ═══ */
+/* ═══ канбан-доска ═══
+   Перетягивание карточек — ПОИНТЕРНЫЙ движок как в прототипе «Поток»:
+   карточка визуально ЗАБИРАЕТСЯ из колонки (на её месте остаётся слот-заглушка,
+   рядом с курсором летит призрачная копия), позиция вставки подсвечивается,
+   порядок сохраняется дробным order. Во время drag React не перерисовывается —
+   весь визуал двигает голый DOM, коммит происходит одним PATCH при drop. */
 
-let dragTaskId: string | null = null;
+interface CardDragState {
+  el: HTMLElement;
+  task: TmTask;
+  rect: DOMRect;
+  ox: number;
+  oy: number;
+  px: number;
+  py: number;
+  sx: number;
+  sy: number;
+  started: boolean;
+  wrap: HTMLElement | null;
+  ph: HTMLElement | null;
+  cont: HTMLElement | null;
+  hint: HTMLElement | null;
+  raf: number;
+}
 
 export function BoardView(props: {
   ws: Ws;
@@ -304,7 +325,7 @@ export function BoardView(props: {
   roleLabel: string | null;
   filtered: (list: TmTask[]) => TmTask[];
   onOpen: (t: TmTask) => void;
-  onMove: (t: TmTask, boardId: string, columnId: string) => void;
+  onMove: (t: TmTask, boardId: string, columnId: string, order?: number) => void;
   onPickBoard: (boardId: string) => void;
   onToggleDone: (t: TmTask) => void;
   onQuickAdd: (columnId: string, title: string) => void;
@@ -320,8 +341,9 @@ export function BoardView(props: {
   const { ws } = props;
   const project = ws.projects.find((p) => p.id === props.projectId);
   const board = project?.boards.find((b) => b.id === props.boardId);
-  const [overCol, setOverCol] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
+  /* drag живёт в ref: никакие setState во время переноса — DOM двигаем руками */
+  const drag = useRef<CardDragState | null>(null);
+  const suppressClick = useRef(0);
 
   if (!project || !board) {
     return <div className="tm-loading">Доска не найдена</div>;
@@ -333,6 +355,181 @@ export function BoardView(props: {
   };
 
   const activeN = ws.tasks.filter((t) => t.boardId === board.id && !t.done && !t.parentId).length;
+
+  /* открыть карточку: сразу после перетягивания клик подавляется */
+  const openCard = (t: TmTask) => {
+    if (Date.now() < suppressClick.current) return;
+    props.onOpen(t);
+  };
+
+  /* позиция вставки в колонке: делим карточки серединами по вертикали */
+  const placePh = (st: CardDragState): void => {
+    if (!st.started || !st.ph) return;
+    const u = document.elementFromPoint(st.px, st.py);
+    let cont: HTMLElement | null = null;
+    if (u && u.closest) {
+      cont = u.closest<HTMLElement>('.tm-kcol-body');
+      if (!cont) {
+        const kc = u.closest<HTMLElement>('.tm-kcol');
+        cont = kc ? kc.querySelector<HTMLElement>('.tm-kcol-body') : null;
+      }
+    }
+    if (!cont || !cont.isConnected || !cont.dataset.col) return;
+    st.cont = cont;
+    const kcol = cont.closest<HTMLElement>('.tm-kcol');
+    if (st.hint !== kcol) {
+      if (st.hint) st.hint.classList.remove('drop-hint');
+      if (kcol) kcol.classList.add('drop-hint');
+      st.hint = kcol;
+    }
+    const items = Array.from(cont.querySelectorAll<HTMLElement>('.tm-card')).filter((c) => c !== st.el);
+    let idx = items.length;
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i].getBoundingClientRect();
+      if (st.py < r.top + r.height / 2) { idx = i; break; }
+    }
+    const kids = Array.from(cont.children);
+    const phIdx = kids.indexOf(st.ph);
+    const cur = phIdx < 0 ? -1 : kids.slice(0, phIdx).filter((x) => x.matches('.tm-card') && x !== st.el).length;
+    if (st.ph.parentNode !== cont || cur !== idx) {
+      const empty = cont.querySelector('.tm-kcol-empty');
+      if (empty && items.length === 0) cont.insertBefore(st.ph, empty);
+      else cont.insertBefore(st.ph, items[idx] || null);
+    }
+  };
+
+  const beginCardDrag = (e: React.PointerEvent, t: TmTask): void => {
+    if (!props.canEdit || drag.current) return;
+    if (e.pointerType !== 'mouse' || (e.button !== undefined && e.button !== 0)) return;
+    /* не тянем за кнопки/поля внутри карточки */
+    const target = e.target as Element;
+    if (target.closest('button,input,textarea,select,a')) return;
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const st: CardDragState = {
+      el,
+      task: t,
+      rect,
+      ox: e.clientX - rect.left,
+      oy: e.clientY - rect.top,
+      px: e.clientX,
+      py: e.clientY,
+      sx: e.clientX,
+      sy: e.clientY,
+      started: false,
+      wrap: null,
+      ph: null,
+      cont: null,
+      hint: null,
+      raf: 0,
+    };
+    drag.current = st;
+    let finished = false;
+
+    const loop = (): void => {
+      if (!st.started || finished) return;
+      const kb = document.querySelector('.tm-kanban');
+      if (kb) {
+        const r = kb.getBoundingClientRect();
+        if (st.px < r.left + 80) kb.scrollLeft -= Math.min(20, (r.left + 80 - st.px) / 3);
+        else if (st.px > r.right - 80) kb.scrollLeft += Math.min(20, (st.px - (r.right - 80)) / 3);
+      }
+      const sc = st.cont;
+      if (sc && sc.isConnected) {
+        const r = sc.getBoundingClientRect();
+        if (st.py < r.top + 50) sc.scrollTop -= Math.min(16, (r.top + 50 - st.py) / 3);
+        else if (st.py > r.bottom - 50) sc.scrollTop += Math.min(16, (st.py - (r.bottom - 50)) / 3);
+      }
+      placePh(st);
+      st.raf = requestAnimationFrame(loop);
+    };
+
+    const start = (): void => {
+      st.started = true;
+      document.body.classList.add('dragging');
+      const wrap = document.createElement('div');
+      wrap.className = 'tm-ghostwrap';
+      wrap.style.width = st.rect.width + 'px';
+      const g = st.el.cloneNode(true) as HTMLElement;
+      g.classList.add('tm-ghost');
+      g.style.width = st.rect.width + 'px';
+      g.style.height = st.rect.height + 'px';
+      wrap.appendChild(g);
+      document.body.appendChild(wrap);
+      st.wrap = wrap;
+      const ph = document.createElement('div');
+      ph.className = 'tm-dragph';
+      ph.style.height = st.rect.height + 'px';
+      st.el.parentNode?.insertBefore(ph, st.el);
+      st.el.style.display = 'none';
+      st.ph = ph;
+      wrap.style.transform = 'translate3d(' + (st.px - st.ox) + 'px,' + (st.py - st.oy) + 'px,0)';
+      st.raf = requestAnimationFrame(loop);
+    };
+
+    const finish = (commit: boolean): void => {
+      if (finished) return;
+      finished = true;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', cancel);
+      document.removeEventListener('keydown', escH, true);
+      cancelAnimationFrame(st.raf);
+      /* цель переноса считаем ДО уборки слота: позиция вставки = сколько
+         карточек стоит перед заглушкой в её колонке */
+      let target: { colId: string; idx: number } | null = null;
+      if (commit && st.started && st.cont && st.cont.dataset.col && st.ph) {
+        const kids = Array.from(st.cont.children);
+        const phIdx = kids.indexOf(st.ph);
+        const idx = Math.max(0, kids.slice(0, phIdx < 0 ? kids.length : phIdx).filter((x) => x.matches('.tm-card') && x !== st.el).length);
+        target = { colId: st.cont.dataset.col, idx };
+      }
+      if (st.wrap) st.wrap.remove();
+      if (st.ph) st.ph.remove();
+      st.el.style.display = '';
+      if (st.hint) { st.hint.classList.remove('drop-hint'); st.hint = null; }
+      document.body.classList.remove('dragging');
+      drag.current = null;
+      if (!st.started) return;
+      suppressClick.current = Date.now() + 260;
+      if (target) moveTaskTo(st.task, target.colId, target.idx);
+    };
+
+    const move = (ev: PointerEvent): void => {
+      st.px = ev.clientX;
+      st.py = ev.clientY;
+      if (!st.started) {
+        if (Math.hypot(ev.clientX - st.sx, ev.clientY - st.sy) < 5) return;
+        start();
+      }
+      if (st.wrap) st.wrap.style.transform = 'translate3d(' + (ev.clientX - st.ox) + 'px,' + (ev.clientY - st.oy) + 'px,0)';
+    };
+    const up = (): void => finish(true);
+    const cancel = (): void => finish(false);
+    const escH = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.stopPropagation(); ev.preventDefault(); finish(false); } };
+
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', cancel);
+    document.addEventListener('keydown', escH, true);
+  };
+
+  /* коммит переноса: колонка + позиция → дробный order между соседями */
+  const moveTaskTo = (t: TmTask, colId: string, idx: number): void => {
+    const col = board.columns.find((c) => c.id === colId);
+    if (!col) return;
+    const others = ws.tasks.filter((x) => x.columnId === colId && x.id !== t.id).sort((a, b) => a.order - b.order);
+    const curIdx = t.columnId === colId ? others.filter((x) => x.order < t.order).length : -1;
+    if (t.columnId === colId && curIdx === idx) return; /* позиция не изменилась */
+    const prev = others[idx - 1]?.order;
+    const next = others[idx]?.order;
+    let order: number;
+    if (prev !== undefined && next !== undefined) order = (prev + next) / 2;
+    else if (prev !== undefined) order = prev + 1000;
+    else if (next !== undefined) order = next - 1000;
+    else order = 1000;
+    props.onMove(t, board.id, colId, order);
+  };
 
   return (
     <div className="tm-boardwrap">
@@ -366,26 +563,13 @@ export function BoardView(props: {
         {props.canEdit && <button type="button" className="btn danger tm-viewdel" title="Удалить доску" onClick={() => props.onDeleteBoard(board)}>Удалить</button>}
       </TmViewHead>
 
-      <div className={'tm-kanban' + (dragging ? ' dragging' : '')}>
+      <div className="tm-kanban">
         {board.columns.map((col) => {
           const tasks = columnTasks(col.id);
           return (
             <section
               key={col.id}
-              className={'tm-kcol' + (overCol === col.id ? ' over' : '')}
-              onDragOver={(e) => { if (!props.canEdit) return; e.preventDefault(); setOverCol(col.id); }}
-              onDragLeave={() => setOverCol((c) => (c === col.id ? null : c))}
-              onDrop={(e) => {
-                e.preventDefault();
-                setOverCol(null);
-                setDragging(false);
-                if (!props.canEdit) return;
-                const id = dragTaskId || e.dataTransfer.getData('text/plain');
-                dragTaskId = null;
-                if (!id) return;
-                const t = ws.tasks.find((x) => x.id === id);
-                if (t) props.onMove(t, board.id, col.id);
-              }}
+              className="tm-kcol"
               aria-label={'Колонка ' + col.title}
             >
               <header className="tm-kcol-head" style={{ '--cc': col.color } as React.CSSProperties}>
@@ -403,7 +587,7 @@ export function BoardView(props: {
                   </span>
                 )}
               </header>
-              <div className="tm-kcol-body">
+              <div className="tm-kcol-body" data-col={col.id}>
                 {tasks.map((t) => (
                   <TaskCard
                     key={t.id}
@@ -411,11 +595,10 @@ export function BoardView(props: {
                     ws={ws}
                     userMap={props.userMap}
                     labels={props.labels}
-                    onOpen={props.onOpen}
+                    onOpen={openCard}
                     onToggleDone={props.onToggleDone}
-                    draggable={props.canEdit}
-                    onDragStart={() => { dragTaskId = t.id; setDragging(true); }}
-                    onDragEnd={() => { dragTaskId = null; setDragging(false); }}
+                    canDrag={props.canEdit}
+                    onDragPointerDown={beginCardDrag}
                   />
                 ))}
                 {tasks.length === 0 && <div className="tm-kcol-empty">Пусто</div>}
@@ -484,9 +667,8 @@ export function TaskCard(props: {
   labels: TmLabel[];
   onOpen: (t: TmTask) => void;
   onToggleDone: (t: TmTask) => void;
-  draggable?: boolean;
-  onDragStart?: () => void;
-  onDragEnd?: () => void;
+  canDrag?: boolean;
+  onDragPointerDown?: (e: React.PointerEvent, t: TmTask) => void;
 }) {
   const t = props.task;
   const st = t.stickers;
@@ -498,10 +680,8 @@ export function TaskCard(props: {
   const plain = mdPlain(t.description);
   return (
     <article
-      className={'tm-card' + (t.done ? ' done' : '')}
-      draggable={!!props.draggable}
-      onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; props.onDragStart?.(); }}
-      onDragEnd={() => props.onDragEnd?.()}
+      className={'tm-card' + (t.done ? ' done' : '') + (props.canDrag ? ' grab' : '')}
+      onPointerDown={props.canDrag ? (e) => props.onDragPointerDown?.(e, t) : undefined}
       onClick={() => props.onOpen(t)}
       role="button"
       tabIndex={0}
