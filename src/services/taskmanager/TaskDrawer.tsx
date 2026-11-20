@@ -156,10 +156,16 @@ export function TmDrawer(props: {
     };
   }, [props.userMap]);
 
-  /* фокус в поле правки комментария, когда оно открыто */
+  /* фокус в поле правки комментария РОВНО при открытии (не на каждый ввод) */
+  const openedMsg = useRef<string | null>(null);
   useEffect(() => {
-    if (editMsgId && editRef.current) { editRef.current.focus(); editRef.current.setSelectionRange(editDraft.length, editDraft.length); }
-  }, [editMsgId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (editMsgId && editMsgId !== openedMsg.current) {
+      openedMsg.current = editMsgId;
+      editRef.current?.focus();
+      editRef.current?.setSelectionRange(editDraft.length, editDraft.length);
+    }
+    if (!editMsgId) openedMsg.current = null;
+  }, [editMsgId]);
 
   /* чат: автоскролл к низу при новых сообщениях */
   const chatKey = task ? task.messages.map((m) => m.id).join(',') : '';
