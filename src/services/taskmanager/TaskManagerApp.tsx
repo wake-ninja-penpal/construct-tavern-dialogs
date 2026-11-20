@@ -171,6 +171,12 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     });
   }, []);
 
+  /* режим окна задачи (из настроек аккаунта и шапки дровера — один обработчик) */
+  const handleDrawerMode = useCallback((m: 'side' | 'wide' | 'full') => {
+    setDrawerMode(m);
+    try { localStorage.setItem('tm-drawer-mode', m); } catch { /* нет localStorage */ }
+  }, []);
+
   const say = useCallback((text: string, tone: 'ok' | 'warn' | 'err' = 'ok') => {
     if (toastT.current) clearTimeout(toastT.current);
     setToast({ text, tone });
@@ -1045,7 +1051,13 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
             Задача
           </button>
-          <TmAccountMenu say={say} />
+          <TmAccountMenu
+            say={say}
+            drawerMode={drawerMode}
+            onDrawerMode={handleDrawerMode}
+            rail={rail}
+            onRail={toggleRail}
+          />
         </div>
       </header>
 
@@ -1325,10 +1337,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             taskId={drawerId}
             canEdit={!!dt && canEdit(dt.projectId)}
             mode={drawerMode}
-            onMode={(m) => {
-              setDrawerMode(m);
-              try { localStorage.setItem('tm-drawer-mode', m); } catch { /* нет localStorage */ }
-            }}
+            onMode={handleDrawerMode}
             onClose={() => setDrawerId(null)}
             onPatch={patchTask}
             onDelete={deleteTask}

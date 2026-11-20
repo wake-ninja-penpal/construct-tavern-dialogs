@@ -83,8 +83,12 @@ export function TmDrawer(props: {
   const [title, setTitle] = useState(task?.title || '');
   const [titleEdit, setTitleEdit] = useState(false);
   const [desc, setDesc] = useState(task?.description || '');
-  /* описание: сначала ТЕКСТ (режим чтения), клик открывает живой редактор */
+  /* описание: сначала ТЕКСТ (режим чтения), ДВОЙНОЙ клик открывает живой редактор */
   const [descEdit, setDescEdit] = useState(false);
+  /* плотность заливки цвета: ЛОКАЛЬНОЕ значение — ползунок двигается в
+     реальном времени, сервер догоняет с debounce 250мс (жалоба: изменение
+     срабатывало только при отпускании) */
+  const [alphaPct, setAlphaPct] = useState(Math.round(((task?.colorAlpha ?? 0.2) || 0) * 100));
   const [saving, setSaving] = useState(false);
   const [stickerPop, setStickerPop] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -229,6 +233,14 @@ export function TmDrawer(props: {
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
   });
+
+  /* ползунок плотности: локально мгновенно, PATCH — с debounce 250мс */
+  const setAlpha = (v: number) => {
+    setAlphaPct(v);
+    if (!task) return;
+    if (alphaT.current) clearTimeout(alphaT.current);
+    alphaT.current = setTimeout(() => void props.onPatch(task.id, { colorAlpha: v / 100 }), 250);
+  };
 
   const sendComment = async () => {
     if (!task || !chatDraft.trim()) return;
@@ -598,9 +610,10 @@ export function TmDrawer(props: {
             </div>
           )}
 
-        {/* описание: сначала ТЕКСТ (как в читалке), клик открывает живой
-            WYSIWYG-редактор с панелью; клик мимо — сворачивает обратно */}
-        <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке</span></div>
+        {/* описание: сначала ТЕКСТ (как в читалке), ДВОЙНОЙ клик открывает
+            живой WYSIWYG-редактор с панелью — одиночный клик не мешает
+            выделять текст; клик мимо редактора — сворачивает обратно */}
+        <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке · двойной клик — правка</span></div>
         {descEdit && ed ? (
           <div className="tm-mdw-wrap">
             <div className="tm-md-bar">
@@ -624,9 +637,9 @@ export function TmDrawer(props: {
             className={'tm-desc-view md-body' + (!desc.trim() ? ' empty' : '') + (ed ? ' clickable' : '')}
             role={ed ? 'button' : undefined}
             tabIndex={ed ? 0 : undefined}
-            aria-label={ed ? 'Редактировать описание' : undefined}
-            title={ed ? 'Нажмите, чтобы редактировать описание' : undefined}
-            onClick={(e) => {
+            aria-label={ed ? 'Редактировать описание (двойной клик)' : undefined}
+            title={ed ? 'Двойной клик — редактировать описание' : undefined}
+            onDoubleClick={(e) => {
               if (!ed) return;
               /* ссылки в тексте описания работают как ссылки */
               if ((e.target as HTMLElement).closest?.('a')) return;
@@ -639,7 +652,7 @@ export function TmDrawer(props: {
           >
             {desc.trim()
               ? <div dangerouslySetInnerHTML={{ __html: mdToHtml(desc) }} />
-              : <span className="tm-desc-empty-hint">Нажмите, чтобы добавить описание…</span>}
+              : <span className="tm-desc-empty-hint">Двойной клик — добавить описание…</span>}
           </div>
         )}
           {/* шкала чек-листа описания (как в прототипе: заполненные [x] считаются) */}
@@ -748,19 +761,15 @@ export function TmDrawer(props: {
                   type="range"
                   min={4}
                   max={80}
-                  value={Math.round((task.colorAlpha ?? 0.2) * 100)}
+                  value={alphaPct}
                   aria-label="Плотность заливки"
                   disabled={!ed}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10) / 100;
-                    if (alphaT.current) clearTimeout(alphaT.current);
-                    alphaT.current = setTimeout(() => void props.onPatch(task.id, { colorAlpha: v }), 250);
-                  }}
+                  onChange={(e) => setAlpha(parseInt(e.target.value, 10))}
                 />
-                <b>{Math.round((task.colorAlpha ?? 0.2) * 100)}%</b>
+                <b>{alphaPct}%</b>
               </div>
             )}
-            <div className="tm-color-demo" style={colorVars(task.color, task.colorAlpha)}>
+            <div className="tm-color-demo" style={colorVars(task.color, alphaPct / 100)}>
               {task.title.slice(0, 42) || 'Предпросмотр карточки'}
             </div>
           </div>

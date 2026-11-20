@@ -2309,20 +2309,15 @@ body.dragging *{cursor:grabbing!important}
 .tm-fp-check{display:flex;gap:8px;align-items:center;font:500 12.5px var(--body);color:var(--tx2);cursor:pointer;padding:4px 0 10px}
 .tm-fp-foot{display:flex;justify-content:space-between;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
 
-/* колокольчик уведомлений менеджера задач */
+/* колокольчик уведомлений менеджера задач — окно ИДЕНТИЧНО «Ветвям»
+   (тот же попап .ntf-pop с иконками/датами, см. общие стили выше) */
 .tm-bell-wrap{position:relative;flex:none}
 .tm-bell{position:relative;width:34px;height:34px;border:1px solid var(--line2);background:var(--card);border-radius:9px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
 .tm-bell:hover{color:var(--tx);border-color:#3d434f}
 .tm-bell.has{color:var(--acc2)}
 .tm-bell-badge{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;border-radius:8px;background:var(--acc);color:#221604;font:700 9.5px var(--body);display:flex;align-items:center;justify-content:center;padding:0 4px}
-.tm-ntfpop{position:fixed;top:52px;right:12px;z-index:125;width:min(360px,calc(100vw - 24px));max-height:min(430px,70vh);display:flex;flex-direction:column;background:#1a1d22;border:1px solid #303540;border-radius:13px;box-shadow:var(--sh);animation:mIn .16s ease}
-.tm-ntf-list{overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:4px}
-.tm-ntf-item{display:flex;flex-direction:column;gap:2px;text-align:left;padding:8px 10px;border:none;background:none;border-radius:9px;cursor:pointer}
-.tm-ntf-item:hover{background:#262b33}
-.tm-ntf-item.unread{background:rgba(226,165,78,.07)}
-.tm-ntf-item b{font:600 12px var(--body);color:var(--tx)}
-.tm-ntf-item i{font:400 10.5px var(--body);color:var(--tx3);font-style:normal}
-.tm-ntf-empty{font:400 11.5px var(--body);color:var(--tx3);padding:14px 10px;text-align:center}
+/* в ntf-pop чуть шире: в списке есть уведомления задач менеджера */
+.tm-head .ntf-pop{min-width:320px}
 
 /* модалка команды: палитра цвета, выбор иконки, список состава */
 .tm-swatches{display:flex;gap:7px;flex-wrap:wrap;padding:2px 0}
@@ -2371,9 +2366,20 @@ body.dragging *{cursor:grabbing!important}
 .tm-acc-pick:hover{background:#262b33;color:var(--tx)}
 .tm-acc-pick i{margin-left:auto;font:400 10px var(--mono);color:var(--tx3);font-style:normal}
 
-/* сохранённые виды в сайдбаре */
-.tm-view-row{display:flex;align-items:center}
+/* сохранённые виды в сайдбаре.
+   cur — вид ПРИМЕНЁН: полная подсветка строки вида в списке (как у разделов);
+   inview — СЛАБАЯ подсветка раздела/доски, на которой работаем ПОД видом:
+   отличима от обычного выделения, чтобы не сбивать с толку. */
+.tm-view-row{display:flex;align-items:center;border-radius:9px}
 .tm-view-row .tm-nav-row{flex:1;min-width:0}
+.tm-view-row.cur{background:var(--accd)}
+.tm-view-row.cur .tm-nav-row{color:var(--tx)}
+.tm-view-row.cur .tm-nav-t{font-weight:600}
+.tm-view-row.cur .tm-nav-ico{color:var(--acc)}
+.tm-view-row.cur .tm-view-del{opacity:.7}
+.tm-nav-row.inview{background:rgba(226,165,78,.07);color:var(--tx2);box-shadow:inset 2px 0 0 rgba(226,165,78,.45)}
+.tm-nav-row.inview .tm-nav-ico{color:var(--acc2)}
+.tm-rail-item.inview{background:rgba(226,165,78,.1);color:var(--acc2);box-shadow:inset 0 2px 0 rgba(226,165,78,.45)}
 .tm-view-del{width:20px;height:20px;flex:none;border:none;background:none;color:var(--tx3);cursor:pointer;border-radius:6px;font-size:13px;opacity:0;transition:.15s;padding:0}
 .tm-view-row:hover .tm-view-del{opacity:1}
 .tm-view-del:hover{color:#e0967f;background:rgba(207,107,90,.14)}
@@ -2495,8 +2501,9 @@ body.dragging *{cursor:grabbing!important}
 .mdw.empty::before{content:attr(data-ph);color:var(--tx3);pointer-events:none;display:block;white-space:pre-wrap;font:400 12.5px/1.55 var(--body)}
 /* поле описания: высота по содержимому (мягкий потолок) */
 .tm-desc-ed{min-height:130px;max-height:420px}
-/* описание в режиме ТЕКСТА (клик открывает редактор) — тот же рендер, что в читалке */
-.tm-desc-view{position:relative;min-height:40px;padding:9px 12px;border:1px dashed #2b2f37;border-radius:10px;background:#14161a;overflow-wrap:anywhere}
+/* описание в режиме ТЕКСТА (двойной клик открывает редактор) — тот же рендер, что в читалке,
+   длинное описание прокручивается внутри блока */
+.tm-desc-view{position:relative;min-height:40px;max-height:min(420px,46vh);overflow-y:auto;padding:9px 12px;border:1px dashed #2b2f37;border-radius:10px;background:#14161a;overflow-wrap:anywhere;scrollbar-width:thin}
 .tm-desc-view.clickable{cursor:text}
 .tm-desc-view.clickable:hover{border-color:#3d434f;background:#171a1f}
 .tm-desc-view.clickable:focus-visible{outline:none;border-color:rgba(226,165,78,.45)}
@@ -2561,10 +2568,6 @@ body.dragging *{cursor:grabbing!important}
 .tm-side{position:relative;transition:width .26s cubic-bezier(.2,.8,.3,1)}
 /* подсказки rail: fixed-слой вместо ::after — не обрезается скролл-контейнером */
 .tm-rtip{position:fixed;z-index:180;background:#1a1d22;border:1px solid #303540;color:var(--tx);font:700 12px var(--body);padding:6px 11px;border-radius:9px;white-space:nowrap;pointer-events:none;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:tmPop .12s ease}
-/* негативные уведомления (отзыв доступа) — красный заголовок */
-.tm-ntf-item b.neg{color:#e0967f}
-.tm-ntf-foot{flex:none;padding:8px 10px;border-top:1px solid var(--line);display:flex;justify-content:center}
-.tm-ntf-foot .btn{height:28px;font-size:11.5px}
 /* попап аккаунта менеджера задач — оформление «Ветвей» (.acc-pop/.acc-head/.cp-act глобальные) */
 .tm-accbtn{display:flex;align-items:center;padding:0;width:34px;height:34px;justify-content:center}
 .tm-accbtn .avatar-circle{width:26px;height:26px;font:700 12px var(--body);color:#1c1503;flex:none}
@@ -2573,3 +2576,16 @@ body.dragging *{cursor:grabbing!important}
 
 /* avatar-circle глобально существует (ветви); для дровера/меню — big вариант */
 .avatar-circle.big{width:38px;height:38px;font-size:16px}
+
+/* настройки менеджера задач (окно из меню аккаунта — оформление «Ветвей») */
+.tm-set-sec{margin-bottom:16px}
+.tm-set-sec:last-child{margin-bottom:0}
+.tm-set-cap{font:600 9.5px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);margin-bottom:8px}
+.tm-set-row{display:flex;gap:6px;flex-wrap:wrap}
+.tm-set-row .btn{height:30px;font-size:12px}
+.tm-set-note{margin:8px 0 0;font:400 11.5px/1.5 var(--body);color:var(--tx3)}
+.tm-set-check{display:flex;gap:9px;align-items:center;font:500 12.5px var(--body);color:var(--tx2);cursor:pointer}
+.tm-set-check input{width:14px;height:14px;accent-color:var(--acc);flex:none}
+.tm-set-hk{display:flex;flex-direction:column;gap:5px}
+.tm-set-hk span{font:400 12px var(--body);color:var(--tx2)}
+.tm-set-hk kbd{display:inline-block;min-width:18px;text-align:center;padding:1px 6px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:6px;background:var(--card);color:var(--tx);font:600 10.5px var(--mono)}

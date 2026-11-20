@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { authLogout, avatarInitial, getAccount } from '@/vetvi/web/auth';
+import { accountUpdate, authLogout, authRefreshAccount, avatarInitial, getAccount } from '@/vetvi/web/auth';
 import { childrenOf, colorVars, firstName, fmtDeadline, initialsOf, TM_KIND_COLOR, TM_PRIO, TM_ROLE_LABEL, TM_ROLE_RANK, TM_PALETTE, TM_TEAM_ICONS, TM_SYS_COL_INFO, userColor, type TmColumn, type TmFilters, type TmLabel, type TmLink, type TmProject, type TmTask, type TmTeam } from './tmTypes';
 import { checklistStats, mdPlain } from './md';
 import { ColumnIcon } from './icons';
@@ -48,9 +48,11 @@ const ICO_BACKLOG = 'M4 7h16M4 12h10M4 17h7';
 const ICO_VIEW = 'M19 21l-7-4.5L5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z';
 
 /* строки досок и бэклога — цели перетягивания задач (data-drop-*),
-   ПКМ на любом элементе сайдбара открывает своё меню */
+   ПКМ на любом элементе сайдбара открывает своё меню.
+   inview — СЛАБАЯ подсветка: применён сохранённый вид, работаем на этой
+   доске/бэклоге, но выделение принадлежит виду (не сбивает с толку). */
 function BoardNavRow(props: {
-  projectId: string; boardId: string; title: string; count: number; active: boolean; rail: boolean;
+  projectId: string; boardId: string; title: string; count: number; active: boolean; inview?: boolean; rail: boolean;
   onOpen: () => void;
   onCtx: (x: number, y: number) => void;
   tipH?: (text: string) => TmTipHandlers;
@@ -59,7 +61,7 @@ function BoardNavRow(props: {
     return (
       <button
         type="button"
-        className={'tm-rail-item sub' + (props.active ? ' cur' : '')}
+        className={'tm-rail-item sub' + (props.active ? (props.inview ? ' inview' : ' cur') : '')}
         {...(props.tipH ? props.tipH(props.title + ' · ' + props.count) : { title: props.title + ' · ' + props.count })}
         data-drop-board={props.boardId}
         aria-label={props.title}
@@ -73,7 +75,7 @@ function BoardNavRow(props: {
   return (
     <button
       type="button"
-      className={'tm-nav-row sub' + (props.active ? ' cur' : '')}
+      className={'tm-nav-row sub' + (props.active ? (props.inview ? ' inview' : ' cur') : '')}
       data-drop-board={props.boardId}
       onClick={props.onOpen}
       onContextMenu={(e) => { e.preventDefault(); props.onCtx(e.clientX, e.clientY); }}
@@ -86,7 +88,7 @@ function BoardNavRow(props: {
 }
 
 function BacklogNavRow(props: {
-  projectId: string; count: number; active: boolean; rail: boolean;
+  projectId: string; count: number; active: boolean; inview?: boolean; rail: boolean;
   onOpen: () => void;
   onCtx: (x: number, y: number) => void;
   tipH?: (text: string) => TmTipHandlers;
@@ -95,7 +97,7 @@ function BacklogNavRow(props: {
     return (
       <button
         type="button"
-        className={'tm-rail-item sub' + (props.active ? ' cur' : '')}
+        className={'tm-rail-item sub' + (props.active ? (props.inview ? ' inview' : ' cur') : '')}
         {...(props.tipH ? props.tipH('Бэклог · ' + props.count) : { title: 'Бэклог · ' + props.count })}
         data-drop-backlog={props.projectId}
         aria-label="Бэклог"
@@ -109,7 +111,7 @@ function BacklogNavRow(props: {
   return (
     <button
       type="button"
-      className={'tm-nav-row sub' + (props.active ? ' cur' : '')}
+      className={'tm-nav-row sub' + (props.active ? (props.inview ? ' inview' : ' cur') : '')}
       data-drop-backlog={props.projectId}
       onClick={props.onOpen}
       onContextMenu={(e) => { e.preventDefault(); props.onCtx(e.clientX, e.clientY); }}
@@ -150,6 +152,11 @@ export function TmSidebar(props: {
 
   /* активный проект: тот, чья доска/бэклог открыта */
   const activePid = view.kind === 'board' || view.kind === 'backlog' ? view.projectId : undefined;
+  /* применён сохранённый вид (savedId задан): раздел под видом получает
+     СЛАБУЮ подсветку (inview) вместо полной — видно, что работаем на этой
+     доске/разделе, но используем вид (жалоба: «выделяет основную доску —
+     сбивает с толку») */
+  const inView = props.savedId != null;
 
   /* подсказки rail: fixed-слой (CSS ::after обрезался скролл-контейнером рейка) */
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -189,7 +196,7 @@ export function TmSidebar(props: {
           <button type="button" className="tm-rail-item prime" {...tipH('Развернуть панель · [')} aria-label="Развернуть панель" onClick={props.onToggleRail}>
             <Ico d="M11 19l-7-7 7-7M19 19l-7-7" size={16} />
           </button>
-          <button type="button" className={'tm-rail-item' + (view.kind === 'my' ? ' cur' : '')} {...tipH('Мои задачи · ' + props.myCount)} aria-label="Мои задачи" onClick={props.onMy}>
+          <button type="button" className={'tm-rail-item' + (view.kind === 'my' ? (inView ? ' inview' : ' cur') : '')} {...tipH('Мои задачи · ' + props.myCount)} aria-label="Мои задачи" onClick={props.onMy}>
             <Ico d={ICO_MY} size={17} />
             {props.myCount > 0 && <span className="tm-rail-cnt">{props.myCount}</span>}
           </button>
@@ -204,7 +211,7 @@ export function TmSidebar(props: {
             <span key={p.id} className="tm-rail-proj">
               <button
                 type="button"
-                className={'tm-rail-item proj' + (activePid === p.id ? ' cur' : '')}
+                className={'tm-rail-item proj' + (activePid === p.id ? (inView ? ' inview' : ' cur') : '')}
                 style={{ '--c': p.color } as React.CSSProperties}
                 {...tipH(p.title)}
                 aria-label={p.title}
@@ -226,6 +233,7 @@ export function TmSidebar(props: {
                       title={b.title}
                       count={ws.tasks.filter((t) => t.boardId === b.id && !t.done).length}
                       active={view.kind === 'board' && view.boardId === b.id}
+                      inview={inView && view.kind === 'board' && view.boardId === b.id}
                       onOpen={() => props.onBoard(p.id, b.id)}
                       onCtx={(x, y) => tmOpenMenu('board', { bid: b.id }, x, y)}
                       tipH={tipH}
@@ -236,6 +244,7 @@ export function TmSidebar(props: {
                     projectId={p.id}
                     count={ws.tasks.filter((t) => t.projectId === p.id && !t.columnId && !t.done).length}
                     active={view.kind === 'backlog'}
+                    inview={inView && view.kind === 'backlog'}
                     onOpen={() => props.onBacklog(p.id)}
                     onCtx={(x, y) => tmOpenMenu('backlog', { pid: p.id }, x, y)}
                     tipH={tipH}
@@ -287,7 +296,7 @@ export function TmSidebar(props: {
       <nav className="tm-nav" role="navigation">
         <button
           type="button"
-          className={'tm-nav-row' + (view.kind === 'my' ? ' cur' : '')}
+          className={'tm-nav-row' + (view.kind === 'my' ? (inView ? ' inview' : ' cur') : '')}
           onClick={props.onMy}
           title="Задачи, где вы исполнитель"
           onContextMenu={(e) => { e.preventDefault(); tmOpenMenu('app', { rail: '0' }, e.clientX, e.clientY); }}
@@ -309,7 +318,7 @@ export function TmSidebar(props: {
         </button>
         <button
           type="button"
-          className={'tm-nav-row' + (view.kind === 'people' || view.kind === 'user' ? ' cur' : '')}
+          className={'tm-nav-row' + (view.kind === 'people' || view.kind === 'user' ? (inView ? ' inview' : ' cur') : '')}
           onClick={props.onPeople}
           title="Люди хаба и их задачи"
           onContextMenu={(e) => { e.preventDefault(); tmOpenMenu('app', { rail: '0' }, e.clientX, e.clientY); }}
@@ -364,6 +373,7 @@ export function TmSidebar(props: {
                   title={b.title}
                   count={ws.tasks.filter((t) => t.boardId === b.id && !t.done).length}
                   active={view.kind === 'board' && view.projectId === p.id && view.boardId === b.id}
+                  inview={inView && view.kind === 'board' && view.projectId === p.id && view.boardId === b.id}
                   onOpen={() => props.onBoard(p.id, b.id)}
                   onCtx={(x, y) => tmOpenMenu('board', { bid: b.id }, x, y)}
                 />
@@ -373,6 +383,7 @@ export function TmSidebar(props: {
                 projectId={p.id}
                 count={ws.tasks.filter((t) => t.projectId === p.id && !t.columnId && !t.done).length}
                 active={view.kind === 'backlog' && view.projectId === p.id}
+                inview={inView && view.kind === 'backlog' && view.projectId === p.id}
                 onOpen={() => props.onBacklog(p.id)}
                 onCtx={(x, y) => tmOpenMenu('backlog', { pid: p.id }, x, y)}
               />
@@ -388,7 +399,11 @@ export function TmSidebar(props: {
           <div className="tm-side-empty">Настройте фильтры и сохраните вид</div>
         )}
         {ws.views.map((v) => (
-          <div key={v.id} className={'tm-view-row' + (props.savedId === v.id ? ' cur' : '')}>
+          <div
+            key={v.id}
+            className={'tm-view-row' + (props.savedId === v.id ? ' cur' : '')}
+            title={props.savedId === v.id ? 'Вид применён — активны его фильтры и раздел' : undefined}
+          >
             <button
               type="button"
               className="tm-nav-row sub"
@@ -2117,20 +2132,24 @@ export function TmBell(props: {
   const [items, setItems] = useState<NtfItem[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
+  /* применяется только самый свежий ответ опроса (гонка interval/toggle) */
+  const reqSeq = useRef(0);
   const seen = useRef<Set<string>>(new Set());
   const first = useRef(true);
   const say = props.say;
 
   const refresh = useCallback(async (markRead = false) => {
+    const seq = ++reqSeq.current;
     try {
       const r = await fetch('/api/notifications', { cache: 'no-store' });
-      if (!r.ok) return;
+      if (!r.ok) return; /* сбой опроса — прежнее состояние сохраняется */
+      if (seq !== reqSeq.current) return;
       const j = (await r.json()) as { items: NtfItem[]; unread: number };
       if (!first.current) {
         for (const n of j.items) {
           if (!n.read && !seen.current.has(n.id)) {
             const t = ntfText(n);
-            say(t.b, n.type === 'access_revoked' || n.type === 'service_denied' || n.type === 'tm_service_denied' ? 'warn' : 'ok');
+            say(t.b, NTF_NEG_TYPES.includes(n.type) ? 'warn' : 'ok');
           }
         }
       }
@@ -2152,9 +2171,14 @@ export function TmBell(props: {
     return () => { clearTimeout(t0); clearInterval(t); };
   }, [refresh]);
 
-  const openItem = async (n: NtfItem) => {
-    setOpen(false);
+  const markRead = (n: NtfItem) => {
     void fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [n.id] }) });
+    setItems((xs) => xs.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+  };
+
+  const openItem = (n: NtfItem) => {
+    setOpen(false);
+    markRead(n);
     const p = n.payload || {};
     if (p.taskId) props.onOpenTask(String(p.taskId));
   };
@@ -2170,10 +2194,14 @@ export function TmBell(props: {
     } catch { /* не критично */ }
   };
 
+  /* окно уведомлений — ИДЕНТИЧНОЕ «Ветвям»: тот же попап (collab-pop ntf-pop
+     под кнопкой-колокольчиком), те же иконки/даты/прочитанность и футер
+     «Очистить список / Закрыть»; отличие только в клике — задача открывается */
   return (
     <div className="tm-bell-wrap">
       <button
         type="button"
+        id="bellBtn"
         className={'tm-bell' + (unread > 0 ? ' has' : '')}
         title="Уведомления"
         aria-label={'Уведомления' + (unread ? ' — ' + unread + ' непрочитанных' : '')}
@@ -2185,40 +2213,112 @@ export function TmBell(props: {
       {open && (
         <>
           <div className="tm-pop-scrim" onClick={() => setOpen(false)} />
-          <div className="tm-ntfpop" role="dialog" aria-label="Уведомления">
-            <div className="tm-fp-cap">
-              <span>Уведомления</span>
-              <button type="button" className="tm-mini" onClick={() => setOpen(false)} aria-label="Закрыть">×</button>
-            </div>
-            <div className="tm-ntf-list">
+          <div className="collab-pop show ntf-pop" style={ntfPopPos()} role="dialog" aria-label="Уведомления">
+            <div className="cp-cap">Уведомления</div>
+            {!items.length && (
+              <div className="ntf-empty">Пока пусто — здесь появляются уведомления всех сервисов: доступы, задачи и комментарии</div>
+            )}
+            <div className="ntf-list">
               {items.map((n) => {
                 const t = ntfText(n);
                 const clickable = !!(n.payload || {}).taskId;
-                const neg = n.type === 'access_revoked' || n.type === 'service_denied' || n.type === 'tm_service_denied';
+                const neg = NTF_NEG_TYPES.includes(n.type);
                 return (
                   <button
                     type="button"
                     key={n.id}
-                    className={'tm-ntf-item' + (n.read ? '' : ' unread') + (clickable ? ' task' : '')}
-                    onClick={() => clickable ? void openItem(n) : void fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [n.id] }) })}
+                    className={'ntf-item' + (n.read ? '' : ' unread')}
+                    onClick={() => (clickable ? openItem(n) : markRead(n))}
                     title={clickable ? 'Открыть задачу' : undefined}
                   >
-                    <b className={neg ? ' neg' : ''}>{t.b}</b>
-                    <i>{t.i}</i>
+                    <span className={'ntf-ico' + (neg ? ' rev' : '')}><NtfIcon type={n.type} /></span>
+                    <span className="ntf-txt"><b>{t.b}</b><i>{t.i}</i></span>
                   </button>
                 );
               })}
-              {items.length === 0 && <div className="tm-ntf-empty">Пока пусто — здесь появляются уведомления всех сервисов: доступы, задачи и комментарии</div>}
             </div>
-            {items.length > 0 && (
-              <div className="tm-ntf-foot">
-                <button type="button" className="btn" onClick={() => void clearAll()}>Очистить список</button>
-              </div>
-            )}
+            <div className="cp-acts">
+              {items.length > 0 && (
+                <button type="button" className="cp-act ntf-clear" title="Удалить все уведомления" onClick={() => void clearAll()}>
+                  <IcTrashSm />Очистить список
+                </button>
+              )}
+              <button type="button" className="cp-act" onClick={() => setOpen(false)}><IcXSm />Закрыть</button>
+            </div>
           </div>
         </>
       )}
     </div>
+  );
+}
+
+/* типы уведомлений «плохих» новостей — красная иконка и тост-предупреждение */
+const NTF_NEG_TYPES = ['access_revoked', 'service_denied', 'tm_service_denied'];
+
+/* позиция окна уведомлений — под кнопкой-колокольчиком (как в «Ветвях») */
+function ntfPopPos(): React.CSSProperties {
+  if (typeof document !== 'undefined') {
+    const anchor = document.querySelector('#bellBtn');
+    if (anchor) {
+      const r = anchor.getBoundingClientRect();
+      return { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };
+    }
+  }
+  return { position: 'fixed', top: 52, right: 8 };
+}
+
+/* иконки уведомлений — те же контурные, что в попапе «Ветвей» */
+function NtfIcon({ type }: { type: string }) {
+  if (type === 'access_revoked') return <IcExitSm />;
+  if (type === 'service_granted' || type === 'service_denied' || type === 'tm_service_denied') return <IcGridSm />;
+  if (type === 'task_assigned' || type === 'task_comment' || type.startsWith('tm_')) return <IcTaskSm />;
+  return <IcShareSm />;
+}
+
+function IcShareSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+      <circle cx="18" cy="5" r="2.6" />
+      <circle cx="6" cy="12" r="2.6" />
+      <circle cx="18" cy="19" r="2.6" />
+      <path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" />
+    </svg>
+  );
+}
+
+function IcXSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+function IcTrashSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
+function IcGridSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <rect x="4" y="4" width="6.6" height="6.6" rx="1.6" />
+      <rect x="13.4" y="4" width="6.6" height="6.6" rx="1.6" />
+      <rect x="4" y="13.4" width="6.6" height="6.6" rx="1.6" />
+      <rect x="13.4" y="13.4" width="6.6" height="6.6" rx="1.6" />
+    </svg>
+  );
+}
+
+function IcTaskSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="m8.5 12 2.5 2.5 5-5" />
+    </svg>
   );
 }
 
@@ -2233,13 +2333,21 @@ function fmtNtfDate(iso: string): string {
 }
 
 /* ═══ аккаунт в шапке — оформление «Ветвей»: кнопка-аватар + попап
-   (.acc-pop/.acc-head/.cp-act — те же классы, что в «Ветвях») ═══ */
+   (.acc-pop/.acc-head/.cp-act — те же классы, что в «Ветвях»).
+   В меню НЕТ переходов в другие сервисы — только редактирование аккаунта,
+   настройки и выход (как в «Ветвях»). ═══ */
 
 export function TmAccountMenu(props: {
   say: (text: string, tone?: 'ok' | 'warn' | 'err') => void;
+  drawerMode: 'side' | 'wide' | 'full';
+  onDrawerMode: (m: 'side' | 'wide' | 'full') => void;
+  rail: boolean;
+  onRail: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [modal, setModal] = useState<'account' | 'settings' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [, tick] = useState(0);
   const acc = getAccount();
   if (!acc) return null;
   const logout = async () => {
@@ -2271,8 +2379,11 @@ export function TmAccountMenu(props: {
               </div>
             </div>
             <div className="cp-acts" style={{ borderTop: '1px solid var(--line)' }}>
-              <button type="button" className="cp-act" onClick={() => { setOpen(false); try { window.location.hash = ''; } catch { /* нет window */ } }}>
-                <IcVetvi /> Перейти в «Ветви»
+              <button type="button" className="cp-act" onClick={() => { setOpen(false); setModal('account'); }}>
+                <IcEditAcc /> Редактировать аккаунт
+              </button>
+              <button type="button" className="cp-act" onClick={() => { setOpen(false); setModal('settings'); }}>
+                <IcGearSm /> Настройки
               </button>
               <button type="button" className="cp-act acc-logout" disabled={busy} onClick={() => void logout()}>
                 <IcExitSm />{busy ? 'Выходим…' : 'Выйти'}
@@ -2281,15 +2392,183 @@ export function TmAccountMenu(props: {
           </div>
         </>
       )}
+      {modal === 'account' && (
+        <TmAccountModal
+          onClose={() => setModal(null)}
+          onSaved={() => { tick((t) => t + 1); props.say('Аккаунт обновлён', 'ok'); }}
+        />
+      )}
+      {modal === 'settings' && (
+        <TmSettingsModal
+          drawerMode={props.drawerMode}
+          onDrawerMode={props.onDrawerMode}
+          rail={props.rail}
+          onRail={props.onRail}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   );
 }
 
-function IcVetvi() {
+/* ═══ редактирование аккаунта (имя + пароль; логин неизменяем) —
+   то же окно, что в «Ветвях» (общий /api/auth/account) ═══ */
+
+function TmAccountModal(props: { onClose: () => void; onSaved: () => void }) {
+  const [acc, setAcc] = useState(getAccount());
+  const [name, setName] = useState(acc?.displayName || '');
+  const [cur, setCur] = useState('');
+  const [pwA, setPwA] = useState('');
+  const [pwB, setPwB] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const nameTouched = useRef(false);
+
+  useEffect(() => {
+    if (getAccount()) return;
+    /* дозапрос состояния сессии: логин и имя подтянутся асинхронно */
+    void authRefreshAccount().then(() => {
+      const a = getAccount();
+      if (!a) return;
+      setAcc(a);
+      if (!nameTouched.current) setName(a.displayName || a.login || '');
+    });
+  }, []);
+
+  const pwTouched = !!(cur || pwA || pwB);
+  const submit = async () => {
+    if (busy) return;
+    setErr('');
+    /* пароль меняют только всей тройкой */
+    if (pwTouched) {
+      if (!cur) { setErr('Введите текущий пароль'); return; }
+      if (pwA.length < 4) { setErr('Новый пароль — минимум 4 символа'); return; }
+      if (pwA !== pwB) { setErr('Новые пароли не совпадают'); return; }
+    }
+    setBusy(true);
+    const r = await accountUpdate({ displayName: name, currentPassword: pwTouched ? cur : undefined, newPassword: pwTouched ? pwA : undefined });
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'Не удалось сохранить'); return; }
+    /* освежить кэш аккаунта: имя/аватар в шапке обновятся без перезагрузки */
+    await authRefreshAccount();
+    props.onSaved();
+    props.onClose();
+  };
+
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-      <path d="M7.5 12h3c3.2 0 2.4-6.5 6-6.5M10.5 12c3.2 0 2.4 6.5 6 6.5" />
-      <circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <div className="modal-wrap" onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }} role="dialog" aria-label="Редактирование аккаунта">
+      <div className="m-card">
+        <h3>Редактирование аккаунта</h3>
+        <label className="i-lab">Ник (логин) — изменить нельзя</label>
+        <input className="inp" value={acc ? '@' + acc.login : '@…'} readOnly disabled aria-label="Ник аккаунта (логин)" style={{ opacity: 0.6 }} />
+        <label className="i-lab">Имя (как показывать другим)</label>
+        <input
+          className="inp"
+          value={name}
+          maxLength={60}
+          autoFocus
+          aria-label="Имя аккаунта"
+          onChange={(e) => { nameTouched.current = true; setName(e.target.value); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }}
+        />
+        <div className="acc-pw-cap">Смена пароля</div>
+        <label className="i-lab">Текущий пароль</label>
+        <input type="password" className="inp" value={cur} autoComplete="current-password" aria-label="Текущий пароль" onChange={(e) => setCur(e.target.value)} />
+        <label className="i-lab">Новый пароль</label>
+        <input type="password" className="inp" value={pwA} autoComplete="new-password" aria-label="Новый пароль" onChange={(e) => setPwA(e.target.value)} />
+        <label className="i-lab">Повторите новый пароль</label>
+        <input
+          type="password"
+          className="inp"
+          value={pwB}
+          autoComplete="new-password"
+          aria-label="Повторите новый пароль"
+          onChange={(e) => setPwB(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }}
+        />
+        {err && <div className="au-err" style={{ marginTop: 8 }}>{err}</div>}
+        <div className="m-btns">
+          <button type="button" className="btn" onClick={props.onClose}>Отмена</button>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void submit()}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ настройки менеджера задач: режим окна задачи, панель, горячие клавиши ═══ */
+
+function TmSettingsModal(props: {
+  drawerMode: 'side' | 'wide' | 'full';
+  onDrawerMode: (m: 'side' | 'wide' | 'full') => void;
+  rail: boolean;
+  onRail: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="dlg-modal show"
+      role="dialog"
+      aria-label="Настройки менеджера задач"
+      onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}
+    >
+      <div className="dlg-modal-card set-card">
+        <div className="dlg-modal-head">
+          <span className="dlg-modal-title">Настройки менеджера задач</span>
+          <button type="button" className="dlg-modal-close" title="Закрыть" onClick={props.onClose}>×</button>
+        </div>
+        <div className="dlg-modal-body">
+          <div className="tm-set-sec">
+            <div className="tm-set-cap">Окно задачи</div>
+            <div className="tm-set-row" role="group" aria-label="Режим окна задачи">
+              <button type="button" className={'btn' + (props.drawerMode === 'side' ? ' primary' : '')} onClick={() => props.onDrawerMode('side')}>Боковая панель</button>
+              <button type="button" className={'btn' + (props.drawerMode === 'wide' ? ' primary' : '')} onClick={() => props.onDrawerMode('wide')}>Большое окно</button>
+              <button type="button" className={'btn' + (props.drawerMode === 'full' ? ' primary' : '')} onClick={() => props.onDrawerMode('full')}>На весь экран</button>
+            </div>
+            <p className="tm-set-note">Как открывать задачи: в боковой панели справа, большим окном или на весь экран.</p>
+          </div>
+          <div className="tm-set-sec">
+            <div className="tm-set-cap">Панель разделов</div>
+            <label className="tm-set-check">
+              <input type="checkbox" checked={props.rail} onChange={props.onRail} />
+              Свернутая панель (только иконки с подсказками)
+            </label>
+          </div>
+          <div className="tm-set-sec">
+            <div className="tm-set-cap">Горячие клавиши</div>
+            <div className="tm-set-hk">
+              <span><kbd>N</kbd> — новая задача</span>
+              <span><kbd>/</kbd> — поиск</span>
+              <span><kbd>[</kbd> — свернуть/развернуть панель</span>
+              <span><kbd>Esc</kbd> — закрыть окно задачи</span>
+              <span><kbd>Ctrl+B</kbd> / <kbd>Ctrl+I</kbd> / <kbd>Ctrl+K</kbd> — жирный / курсив / ссылка</span>
+              <span><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> — отменить / вернуть правки текста</span>
+            </div>
+          </div>
+        </div>
+        <div className="dlg-modal-foot">
+          <span className="log-foot-info"></span>
+          <button type="button" className="btn primary" onClick={props.onClose}>Готово</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IcGearSm() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function IcEditAcc() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z" />
+      <path d="M14.5 6.5l3 3" />
     </svg>
   );
 }
