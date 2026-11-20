@@ -195,9 +195,9 @@ export function TmSidebar(props: {
           <span className="tm-rtip" style={{ left: tip.x, top: tip.y }} role="tooltip">{tip.text}</span>
         )}
         <div className="tm-rail-scroll">
-          <button type="button" className="tm-rail-item prime" {...tipH('Развернуть панель · [')} aria-label="Развернуть панель" onClick={props.onToggleRail}>
+          {/* <button type="button" className="tm-rail-item prime" {...tipH('Развернуть панель · [')} aria-label="Развернуть панель" onClick={props.onToggleRail}>
             <Ico d="M11 19l-7-7 7-7M19 19l-7-7" size={16} />
-          </button>
+          </button> */}
           <button type="button" className={'tm-rail-item' + (view.kind === 'my' ? (inView ? ' inview' : ' cur') : '')} {...tipH('Мои задачи · ' + props.myCount)} aria-label="Мои задачи" onClick={props.onMy}>
             <Ico d={ICO_MY} size={17} />
             {props.myCount > 0 && <span className="tm-rail-cnt">{props.myCount}</span>}
