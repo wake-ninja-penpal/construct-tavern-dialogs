@@ -46,10 +46,12 @@ import { ServiceIcon } from '../ServiceIcon';
 import { AccountChip } from '../ServiceScreen';
 import { BoardView, BacklogView, MyView, NodeFilterView, TmSidebar, TmTeamsView, TmPeopleView, TmFilterPop, TmAccessModal, TmTeamModal, TmSaveViewModal, TmBell, type TmFilterState } from './TaskViews';
 import { TmDrawer, TmCreateModal } from './TaskDrawer';
+import { TmMenuHost, tmOpenMenu, tmCloseMenu, tmMenuPos } from './TmMenu';
 import {
   applyFilters,
   emptyFilters,
   filterBadge,
+  firstName,
   parseLabelIds,
   parseLinks,
   parseMessages,
@@ -155,10 +157,20 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
   const [nodeFilter, setNodeFilter] = useState<{ pid: string; nid: string; title: string } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [accessProjectId, setAccessProjectId] = useState<string | null>(null);
-  const [teamModal, setTeamModal] = useState<{ team: TmTeam | null; focusMembers?: boolean } | null>(null);
+  const [teamModal, setTeamModal] = useState<{ team: TmTeam | null; mode?: 'members' | 'settings' | null } | null>(null);
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
   const toastT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* свёрнутая панель (rail, как в прототипе) — запоминается */
+  const [rail, setRail] = useState<boolean>(() => {
+    try { return localStorage.getItem('tm-rail') === '1'; } catch { return false; }
+  });
+  const toggleRail = useCallback(() => {
+    setRail((r) => {
+      try { localStorage.setItem('tm-rail', r ? '0' : '1'); } catch { /* нет localStorage */ }
+      return !r;
+    });
+  }, []);
 
   const say = useCallback((text: string, tone: 'ok' | 'warn' | 'err' = 'ok') => {
     if (toastT.current) clearTimeout(toastT.current);
@@ -298,17 +310,28 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     return () => window.removeEventListener('tm-open-task', onOpen);
   }, []);
 
-  /* ── Esc закрывает дровер ── */
+  /* ── Esc закрывает дровер; [ — сворачивает панель; N — новая задача; / — поиск ── */
   useEffect(() => {
-    if (!drawerId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      /* не мешаем вводу: если фокус в поле с открытым попапом — попапы закрываются сами */
-      setDrawerId(null);
+      const t = e.target as HTMLElement | null;
+      const typing = !!(t && t.closest && t.closest('input,textarea,select,[contenteditable="true"]'));
+      if (e.key === 'Escape') {
+        if (!drawerId) return;
+        setDrawerId(null);
+        return;
+      }
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === '[' || e.key === 'х') { e.preventDefault(); toggleRail(); return; }
+      if (e.key.toLowerCase() === 'n' || e.key.toLowerCase() === 'т') { e.preventDefault(); setCreatePreset(null); setCreateOpen(true); return; }
+      if (e.key === '/') {
+        e.preventDefault();
+        const inp = document.querySelector<HTMLInputElement>('.tm-head .tm-search input');
+        if (inp) inp.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [drawerId]);
+  }, [drawerId, toggleRail]);
 
   /* ── мутации ── */
 
@@ -491,9 +514,11 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     }
   }, [say]);
 
-  const renameColumn = useCallback(async (id: string, title: string) => {
+  /* ── колонки: правка любого поля (название у ВСЕХ — вкл. дефолтных,
+     иконка только у не-системных — сервер фильтрует), порядок, очистка ── */
+  const updateColumn = useCallback(async (id: string, data: Record<string, unknown>): Promise<boolean> => {
     try {
-      const j = await tmJson<{ item: TmColumnType }>('/api/tm/columns/' + id, { method: 'PATCH', body: JSON.stringify({ title }) });
+      const j = await tmJson<{ item: TmColumnType }>('/api/tm/columns/' + id, { method: 'PATCH', body: JSON.stringify(data) });
       setWs((w) => (w ? {
         ...w,
         projects: w.projects.map((p) => ({
@@ -501,13 +526,66 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
           boards: p.boards.map((b) => ({ ...b, columns: b.columns.map((c) => (c.id === id ? j.item : c)) })),
         })),
       } : w));
+      return true;
     } catch (e) {
-      if (e instanceof TmDenied) { say(e.msg, 'warn'); return; }
-      say(e instanceof Error ? e.message : 'Не удалось переименовать колонку', 'err');
+      if (e instanceof TmDenied) { say(e.msg, 'warn'); return false; }
+      say(e instanceof Error ? e.message : 'Не удалось сохранить колонку', 'err');
+      return false;
     }
   }, [say]);
 
-  const deleteColumn = useCallback(async (id: string) => {
+  const renameColumn = useCallback((id: string, title: string) => updateColumn(id, { title }), [updateColumn]);
+
+  /** Перестановка колонок (после DnD или «влево/вправо»): sortOrder = позиция в списке. */
+  const reorderColumns = useCallback(async (boardId: string, columnIds: string[]) => {
+    setWs((w) => {
+      if (!w) return w;
+      const rank = new Map(columnIds.map((id, i) => [id, i + 1]));
+      return {
+        ...w,
+        projects: w.projects.map((p) => ({
+          ...p,
+          boards: p.boards.map((b) => (b.id === boardId
+            ? { ...b, columns: [...b.columns].sort((x, y) => (rank.get(x.id) ?? x.sortOrder) - (rank.get(y.id) ?? y.sortOrder)).map((c) => ({ ...c, sortOrder: rank.get(c.id) ?? c.sortOrder })) }
+            : b)),
+        })),
+      };
+    });
+    for (let i = 0; i < columnIds.length; i++) {
+      void tmJson('/api/tm/columns/' + columnIds[i], { method: 'PATCH', body: JSON.stringify({ sortOrder: i + 1 }) }).catch(() => undefined);
+    }
+  }, []);
+
+  /** Сдвиг колонки влево/вправо из меню. */
+  const moveColumn = useCallback((id: string, dir: number) => {
+    if (!ws) return;
+    for (const p of ws.projects) for (const b of p.boards) {
+      const idx = b.columns.findIndex((c) => c.id === id);
+      if (idx < 0) continue;
+      const ni = idx + dir;
+      if (ni < 0 || ni >= b.columns.length) return;
+      const ids = b.columns.map((c) => c.id);
+      [ids[idx], ids[ni]] = [ids[ni], ids[idx]];
+      void reorderColumns(b.id, ids);
+      return;
+    }
+  }, [reorderColumns, ws]);
+
+  /** «Всё в бэклог»: все задачи колонки переезжают в бэклог проекта. */
+  const clearColumn = useCallback(async (id: string) => {
+    if (!ws) return;
+    const inCol = ws.tasks.filter((t) => t.columnId === id);
+    for (const t of inCol) await patchTask(t.id, { boardId: null, columnId: null });
+    say('Задачи колонки — в бэклог');
+  }, [patchTask, say, ws]);
+
+  /** Удаление колонки с выбором судьбы задач (как в прототипе): в бэклог или вместе с задачами. */
+  const deleteColumnFate = useCallback(async (id: string, fate: 'backlog' | 'delete') => {
+    if (!ws) return;
+    const inCol = ws.tasks.filter((t) => t.columnId === id);
+    if (fate === 'delete') {
+      for (const t of inCol) await deleteTask(t.id);
+    }
     try {
       await tmJson('/api/tm/columns/' + id, { method: 'DELETE' });
       setWs((w) => {
@@ -515,15 +593,15 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
         return {
           ...w,
           projects: w.projects.map((p) => ({ ...p, boards: p.boards.map((b) => ({ ...b, columns: b.columns.filter((c) => c.id !== id) })) })),
-          tasks: w.tasks.map((t) => (t.columnId === id ? { ...t, boardId: null, columnId: null } : t)),
+          tasks: w.tasks.filter((t) => t.columnId !== id),
         };
       });
-      say('Колонка удалена — задачи в бэклоге');
+      say(fate === 'delete' ? 'Колонка удалена вместе с задачами' : 'Колонка удалена — задачи в бэклоге');
     } catch (e) {
       if (e instanceof TmDenied) { say(e.msg, 'warn'); return; }
       say(e instanceof Error ? e.message : 'Не удалось удалить колонку', 'err');
     }
-  }, [say]);
+  }, [deleteTask, say, ws]);
 
   /* ── метки ── */
   const createLabel = useCallback(async (name: string, color: string): Promise<TmLabel | null> => {
@@ -664,6 +742,140 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     } catch { /* нет window */ }
   }, []);
 
+  /* ── диспетчер действий контекстных меню и поповера цвета ── */
+  const menuAct = useCallback(async (name: string, arg?: unknown): Promise<void> => {
+    const A = (arg || {}) as Record<string, string>;
+    const close = () => tmCloseMenu();
+    switch (name) {
+      case 'open-task': close(); setDrawerId(A.id || String(arg)); return;
+      case 'toggle-done': {
+        const t = ws?.tasks.find((x) => x.id === A.id);
+        if (t && ws) { close(); await toggleDone(t, ws, patchTask); }
+        return;
+      }
+      case 'color-pop': {
+        const pos = tmMenuPos();
+        tmOpenMenu('color', { id: A.id || String(arg || '') }, pos?.x || 100, pos?.y || 100);
+        return;
+      }
+      case 'color-set': await patchTask(A.id, { color: A.color || null }); return;
+      case 'color-alpha': await patchTask(A.id, { colorAlpha: parseFloat(A.alpha) }); return;
+      case 'move-task': {
+        close();
+        const t = ws?.tasks.find((x) => x.id === A.id);
+        if (!t) return;
+        if (A.columnId) await patchTask(t.id, { columnId: A.columnId });
+        else await patchTask(t.id, { boardId: null, columnId: null });
+        return;
+      }
+      case 'add-child': {
+        close(); setDrawerId(A.id);
+        window.setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('tm-focus-child')); } catch { /* нет CustomEvent */ }
+        }, 60);
+        return;
+      }
+      case 'dup-task': { close(); if (ws) { const t = ws.tasks.find((x) => x.id === A.id); if (t) await duplicateTask(t); } return; }
+      case 'del-task': {
+        close();
+        const t = ws?.tasks.find((x) => x.id === A.id);
+        if (t && window.confirm('Удалить задачу «' + t.title.slice(0, 40) + '» вместе с подзадачами?')) await deleteTask(t.id);
+        return;
+      }
+      case 'col-rename': await updateColumn(A.id, { title: A.title }); return;
+      case 'col-move': moveColumn(A.id, parseInt(A.dir, 10)); return;
+      case 'col-icon': await updateColumn(A.id, { icon: A.icon }); return;
+      case 'col-color': await updateColumn(A.id, { color: A.color }); return;
+      case 'col-clear': close(); await clearColumn(A.id); return;
+      case 'col-del': close(); await deleteColumnFate(A.id, A.fate === 'delete' ? 'delete' : 'backlog'); return;
+      case 'board-rename': await renameBoard(A.id, A.title); return;
+      case 'add-column': {
+        close();
+        const board = ws?.projects.flatMap((p) => p.boards).find((b) => b.id === A.id || b.id === String(arg));
+        const bid = board?.id || String(arg);
+        const project = ws?.projects.find((p) => p.boards.some((b) => b.id === bid));
+        if (!project) return;
+        const title = window.prompt('Название новой колонки:', '') || '';
+        if (!title.trim() || !guardEdit(project.id)) return;
+        const c = await createColumn(bid, title.trim());
+        if (c) say('Колонка добавлена');
+        return;
+      }
+      case 'new-task': {
+        close(); setCreatePreset(null); setCreateOpen(true);
+        return;
+      }
+      case 'access-project': close(); setAccessProjectId(String(arg) || A.id); return;
+      case 'del-board': {
+        close();
+        const b = ws?.projects.flatMap((p) => p.boards).find((x) => x.id === A.id);
+        if (b && window.confirm('Удалить доску «' + b.title + '»? Задачи уйдут в бэклог проекта.')) await deleteBoard(b.id);
+        return;
+      }
+      case 'open-project': {
+        close();
+        const p = ws?.projects.find((x) => x.id === String(arg));
+        if (!p) return;
+        if (p.boards[0]) setView({ kind: 'board', projectId: p.id, boardId: p.boards[0].id });
+        else setView({ kind: 'backlog', projectId: p.id });
+        return;
+      }
+      case 'add-board': {
+        close();
+        const pid = String(arg);
+        const p = ws?.projects.find((x) => x.id === pid);
+        if (!p) return;
+        const title = window.prompt('Название новой доски:', '') || '';
+        if (!title.trim() || !guardEdit(pid)) return;
+        const b = await createBoard(pid, title.trim());
+        if (b) setView({ kind: 'board', projectId: pid, boardId: b.id });
+        return;
+      }
+      case 'rename-project': {
+        close();
+        const p = ws?.projects.find((x) => x.id === String(arg));
+        if (!p) return;
+        const title = window.prompt('Название проекта:', p.title) || '';
+        if (title.trim() && title.trim() !== p.title && guardEdit(p.id)) await renameProject(p.id, title.trim());
+        return;
+      }
+      case 'del-project': {
+        close();
+        const p = ws?.projects.find((x) => x.id === String(arg));
+        if (p && window.confirm('Удалить проект «' + p.title + '» с досками и задачами? Отменить нельзя.')) await deleteProject(p.id);
+        return;
+      }
+      case 'open-backlog': close(); setView({ kind: 'backlog', projectId: String(arg) }); return;
+      case 'open-view': { close(); const v = ws?.views.find((x) => x.id === String(arg)); if (v) applySavedView(v); return; }
+      case 'del-view': close(); await deleteView(String(arg)); return;
+      case 'open-team': {
+        close();
+        const t = ws?.teams.find((x) => x.id === A.id);
+        if (t) setTeamModal({ team: t, mode: (A.mode === 'members' || A.mode === 'settings' ? A.mode : null) as 'members' | 'settings' | null });
+        return;
+      }
+      case 'del-team': {
+        close();
+        const t = ws?.teams.find((x) => x.id === String(arg));
+        if (t && window.confirm('Удалить команду «' + t.name + '»? Доступ по ней к проектам будет снят.')) await deleteTeam(t.id);
+        return;
+      }
+      case 'open-user': close(); setView({ kind: 'user', userId: String(arg) }); return;
+      case 'new-project': {
+        close();
+        const title = window.prompt('Название нового проекта:', '') || '';
+        if (!title.trim()) return;
+        const p = await createProject(title.trim());
+        if (p && p.boards[0]) setView({ kind: 'board', projectId: p.id, boardId: p.boards[0].id });
+        return;
+      }
+      case 'new-team': close(); setTeamModal({ team: null, mode: null }); return;
+      case 'toggle-rail': close(); toggleRail(); return;
+      case 'save-view': close(); setSaveViewOpen(true); return;
+      default: return;
+    }
+  }, [applySavedView, clearColumn, createBoard, createColumn, deleteBoard, deleteColumnFate, deleteProject, deleteTeam, deleteTask, deleteView, duplicateTask, guardEdit, moveColumn, patchTask, renameBoard, renameProject, say, toggleRail, updateColumn, ws]);
+
   /* ── готовые данные для представлений ── */
   const userMap = useMemo(() => {
     const m = new Map<string, TmUser>();
@@ -674,8 +886,16 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
   const matchQuery = useCallback((t: TmTask, q: string): boolean => {
     if (!q) return true;
     const s = q.toLowerCase();
-    return t.title.toLowerCase().includes(s) || (t.description || '').toLowerCase().includes(s);
-  }, []);
+    if (t.title.toLowerCase().includes(s) || (t.description || '').toLowerCase().includes(s)) return true;
+    /* как в прототипе: ищем по чатам, меткам, исполнителям и проекту */
+    if ((t.messages || []).some((m) => m.text.toLowerCase().includes(s))) return true;
+    const labelQ = s.replace(/^#/, '');
+    if ((t.labelIds || []).some((id) => (ws?.labels.find((l) => l.id === id)?.name || '').toLowerCase().includes(labelQ))) return true;
+    if (t.stickers.assignees.some((a) => a.toLowerCase().includes(s) || firstName(userMap.get(a)?.displayName, a).toLowerCase().includes(s))) return true;
+    const proj = ws?.projects.find((p) => p.id === t.projectId);
+    if (proj && proj.title.toLowerCase().includes(s)) return true;
+    return false;
+  }, [ws, userMap]);
 
   const filteredByView = useCallback((list: TmTask[]): TmTask[] => {
     return sortTasks(applyFilters(list, filters, ws?.me.login || ''), sort);
@@ -751,6 +971,8 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             savedId={savedId}
             filtersActive={badge > 0}
             myCount={myTasks.length}
+            rail={rail}
+            onToggleRail={toggleRail}
             onMy={() => { setView({ kind: 'my' }); setNodeFilter(null); }}
             onTeams={() => { setView({ kind: 'teams' }); setNodeFilter(null); }}
             onPeople={() => { setView({ kind: 'people' }); setNodeFilter(null); }}
@@ -844,8 +1066,8 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
               ws={ws}
               userMap={userMap}
               me={ws.me}
-              onNewTeam={() => setTeamModal({ team: null })}
-              onEditTeam={(t, focusMembers) => setTeamModal({ team: t, focusMembers })}
+              onNewTeam={() => setTeamModal({ team: null, mode: null })}
+              onEditTeam={(t, mode) => setTeamModal({ team: t, mode: mode ?? null })}
               onDeleteTeam={(t) => {
                 if (window.confirm('Удалить команду «' + t.name + '»? Доступ по ней к проектам будет снят.')) void deleteTeam(t.id);
               }}
@@ -927,14 +1149,9 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
                 const c = await createColumn(view.boardId, title);
                 if (c) say('Колонка добавлена');
               }}
-              onRenameColumn={(c) => {
+              onReorderColumns={(boardId, ids) => {
                 if (!guardEdit(view.projectId)) return;
-                const title = window.prompt('Название колонки:', c.title) || '';
-                if (title.trim() && title.trim() !== c.title) void renameColumn(c.id, title.trim());
-              }}
-              onDeleteColumn={(c) => {
-                if (!guardEdit(view.projectId)) return;
-                if (window.confirm('Удалить колонку «' + c.title + '»? Задачи уйдут в бэклог.')) void deleteColumn(c.id);
+                void reorderColumns(boardId, ids);
               }}
               onAddBoard={async () => {
                 if (!guardEdit(view.projectId)) return;
@@ -948,10 +1165,6 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
                 if (!guardEdit(view.projectId)) return;
                 const title = window.prompt('Название доски:', b.title) || '';
                 if (title.trim() && title.trim() !== b.title) void renameBoard(b.id, title.trim());
-              }}
-              onDeleteBoard={(b) => {
-                if (!guardEdit(view.projectId)) return;
-                if (window.confirm('Удалить доску «' + b.title + '»? Задачи уйдут в бэклог проекта.')) void deleteBoard(b.id);
               }}
               onAccess={() => setAccessProjectId(view.projectId)}
               headExtra={(
@@ -967,6 +1180,16 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
           )}
         </section>
       </div>
+
+      {/* контекстные меню (ПКМ) и поповер цвета — один хост на приложение */}
+      {ws && (
+        <TmMenuHost
+          ws={ws}
+          act={menuAct}
+          canEdit={canEdit}
+          canAdmin={canAdmin}
+        />
+      )}
 
       {/* попап фильтров — поверх интерфейса, позиция у кнопки-воронки */}
       {ws && filtersOpen && (
@@ -1053,7 +1276,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
           ws={ws}
           users={users}
           team={teamModal.team}
-          focusMembers={teamModal.focusMembers}
+          mode={teamModal.mode ?? null}
           onClose={() => setTeamModal(null)}
           onSave={saveTeam}
           onDelete={(t) => {

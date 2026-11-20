@@ -123,6 +123,134 @@ export function mdPlain(s: string): string {
     .trim();
 }
 
+/* ═══ WYSIWYG: сериализация DOM редактора обратно в markdown ═══
+   Редактор живой: пользователь видит отрисованный markdown и правит его.
+   На каждый ввод содержимое contenteditable сериализуется в markdown-исходник
+   (обратная сторона mdToHtml). HTML-экранирование не нужно — на выходе
+   ИСХОДНИК, а не разметка; безопасный рендер гарантирует mdToHtml. */
+
+function mdInlineSource(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const el = node as HTMLElement;
+  const tag = el.tagName;
+  /* служебные элементы рендера — в исходник не попадают */
+  if (el.classList.contains('mdchk') || el.classList.contains('lang')) return '';
+  const inner = (): string => {
+    let s = '';
+    for (const c of Array.from(el.childNodes)) s += mdInlineSource(c);
+    return s;
+  };
+  switch (tag) {
+    case 'BR': return '\n';
+    case 'STRONG': case 'B': {
+      const t = inner();
+      return t ? '**' + t.replace(/\*\*/g, '') + '**' : '';
+    }
+    case 'EM': case 'I': {
+      const t = inner();
+      return t ? '*' + t.replace(/^\*|\*$/g, '') + '*' : '';
+    }
+    case 'DEL': case 'S': {
+      const t = inner();
+      return t ? '~~' + t.replace(/~~/g, '') + '~~' : '';
+    }
+    case 'CODE': return '`' + (el.textContent || '').replace(/`/g, '') + '`';
+    case 'A': {
+      const t = inner();
+      const href = el.getAttribute('href') || '';
+      return t ? '[' + t + '](' + href + ')' : '';
+    }
+    case 'IMG': return '![' + (el.getAttribute('alt') || '') + '](' + (el.getAttribute('src') || '') + ')';
+    case 'UL': case 'OL': {
+      /* вложенный список внутри li — с отступом */
+      return '\n' + mdListSource(el, 1).replace(/^\n/, '');
+    }
+    case 'BLOCKQUOTE': {
+      const t = mdBlocksSource(el.childNodes);
+      return t.split('\n').map((l) => '> ' + l).join('\n');
+    }
+    default: return inner();
+  }
+}
+
+function mdListSource(list: HTMLElement, level: number): string {
+  const ordered = list.tagName === 'OL';
+  const items = Array.from(list.children).filter((c) => c.tagName === 'LI') as HTMLElement[];
+  let out = '';
+  let n = 1;
+  for (const li of items) {
+    const ind = '  '.repeat(level - 1);
+    const isTask = li.classList.contains('mdtask');
+    const chk = li.querySelector('.mdchk');
+    const marker = isTask ? (chk && chk.classList.contains('on') ? '- [x] ' : '- [ ] ') : (ordered ? (n++) + '. ' : '- ');
+    let line = '';
+    for (const c of Array.from(li.childNodes)) {
+      if (c.nodeType === Node.ELEMENT_NODE && (c as HTMLElement).tagName === 'UL') continue;
+      if (c.nodeType === Node.ELEMENT_NODE && (c as HTMLElement).tagName === 'OL') continue;
+      line += mdInlineSource(c);
+    }
+    let nested = '';
+    for (const c of Array.from(li.children)) {
+      if (c.tagName === 'UL' || c.tagName === 'OL') nested += (nested || line ? '\n' : '') + mdListSource(c as HTMLElement, level + 1);
+    }
+    out += (out ? '\n' : '') + ind + marker + line.replace(/\n/g, ' ').trim() + (nested ? '\n' + nested : '');
+  }
+  return out;
+}
+
+function mdBlocksSource(nodes: NodeList | Node[]): string {
+  const chunks: string[] = [];
+  for (const node of Array.from(nodes as Node[])) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = (node.textContent || '').trim();
+      if (t) chunks.push(t);
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const el = node as HTMLElement;
+    const tag = el.tagName;
+    if (tag === 'UL' || tag === 'OL') { chunks.push(mdListSource(el, 1)); continue; }
+    if (tag === 'HR') { chunks.push('---'); continue; }
+    if (tag === 'PRE') {
+      const code = el.querySelector('code') || el;
+      chunks.push('```\n' + (code.textContent || '') + '\n```');
+      continue;
+    }
+    if (tag === 'BLOCKQUOTE') {
+      const t = mdBlocksSource(el.childNodes);
+      chunks.push(t.split('\n').map((l) => (l ? '> ' + l : '>')).join('\n'));
+      continue;
+    }
+    if (tag === 'TABLE') {
+      const rows = Array.from(el.querySelectorAll('tr'));
+      const cells = (tr: Element) => Array.from(tr.children).map((c) => (c.textContent || '').replace(/\|/g, '\\|').trim());
+      const out: string[] = [];
+      rows.forEach((tr, i) => {
+        out.push('| ' + cells(tr).join(' | ') + ' |');
+        if (i === 0) out.push('|' + cells(tr).map(() => ' --- ').join('|') + '|');
+      });
+      chunks.push(out.join('\n'));
+      continue;
+    }
+    if (/^H[1-6]$/.test(tag)) {
+      chunks.push('#'.repeat(parseInt(tag.slice(1), 10)) + ' ' + mdInlineSource(el).replace(/\n/g, ' ').trim());
+      continue;
+    }
+    /* P / DIV / LI-в-воздухе: инлайн-содержимое */
+    const t = mdInlineSource(el).replace(/\n\n+/g, '\n');
+    if (t.trim()) chunks.push(t);
+  }
+  return chunks.filter((c) => c !== undefined).join('\n\n');
+}
+
+/** DOM contenteditable-редактора → markdown-исходник. */
+export function mdHtmlToSource(root: HTMLElement): string {
+  if (!root) return '';
+  const src = mdBlocksSource(root.childNodes);
+  return src.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 /* ── инструменты редактора (панель над textarea) ──
    Группы с разделителями — как в прототипе «Поток»:
    жирный/курсив/зачёркнутый | заголовок/цитата | списки | код/блок/ссылка/картинка/таблица/разделитель */

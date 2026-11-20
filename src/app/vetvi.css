@@ -2376,3 +2376,126 @@ body.dragging *{cursor:grabbing!important}
 }
 .tm-sticker.ro{cursor:default}
 .tm-sticker.ro:hover{border-color:var(--line2);color:var(--tx2)}
+
+/* ═══════ Менеджер задач 1.10: ПКМ-меню, rail, WYSIWYG, колонки, Ветви-флаг ═══════ */
+
+/* контекстное меню (поповер прототипа «Поток») */
+.tm-menu{position:fixed;z-index:140;min-width:232px;max-width:330px;max-height:76vh;overflow-y:auto;background:#1a1d22;border:1px solid #303540;border-radius:13px;box-shadow:0 24px 70px rgba(0,0,0,.55);padding:7px;animation:tmPop .14s cubic-bezier(.2,.9,.3,1.15);scrollbar-width:thin}
+@keyframes tmPop{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+.tm-m-title{display:flex;align-items:center;gap:8px;padding:5px 8px 8px;margin-bottom:4px;border-bottom:1px solid var(--line);font:800 12px var(--body);color:var(--tx);min-width:0}
+.tm-m-title span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tm-m-title svg{color:var(--acc);flex:none}
+.tm-m-title .tm-m-ptile{width:16px;height:16px;border-radius:5px;flex:none;box-shadow:0 0 8px currentColor}
+.tm-m-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border:none;background:none;border-radius:9px;font:600 12.5px var(--body);color:var(--tx2);cursor:pointer;transition:.13s;width:100%;text-align:left}
+.tm-m-item:hover:not(:disabled){background:var(--accd);color:var(--tx)}
+.tm-m-item:disabled{opacity:.45;cursor:default}
+.tm-m-item svg{width:14px;height:14px;color:var(--tx3);flex:none}
+.tm-m-item:hover:not(:disabled) svg{color:var(--acc2)}
+.tm-m-item.danger{color:#e0967f}
+.tm-m-item.danger svg{color:#e0967f}
+.tm-m-item.danger:hover:not(:disabled){background:rgba(207,107,90,.14)}
+.tm-m-l{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-m-sub{font:600 10px var(--mono);color:var(--tx3);flex:none}
+.tm-m-hk{margin-left:auto;font:600 10px var(--mono);color:var(--tx3);border:1px solid var(--line);border-radius:5px;padding:1px 6px;flex:none}
+.tm-m-dot{width:9px;height:9px;border-radius:3px;flex:none;box-shadow:0 0 7px currentColor}
+.tm-m-sep{height:1px;margin:6px 4px;background:var(--line)}
+.tm-m-cap{font:600 9.5px var(--mono);letter-spacing:1.4px;text-transform:uppercase;color:var(--tx3);padding:4px 8px 5px}
+.tm-m-sec{padding:2px 0 6px}
+.tm-m-inp{width:100%;background:#14161a;border:1px solid #2b2f37;border-radius:8px;color:var(--tx);font:600 12.5px var(--body);padding:7px 9px;outline:none;transition:border-color .15s}
+.tm-m-inp:focus{border-color:var(--acc)}
+.tm-m-note{margin:6px 2px 0;font:500 10.5px/1.5 var(--body);color:var(--tx3)}
+.tm-m-two{display:flex;gap:6px}
+.tm-m-two .btn{flex:1;height:30px;font-size:11.5px}
+.tm-m-icons{display:flex;flex-wrap:wrap;gap:3px}
+.tm-m-icons button{width:28px;height:26px;border:1px solid var(--line2);background:var(--card);border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:.13s}
+.tm-m-icons button:hover{color:var(--tx);border-color:#3d434f}
+.tm-m-icons button.on{border-color:var(--acc);color:var(--acc2);background:var(--accd)}
+.tm-m-swatches{display:flex;flex-wrap:wrap;gap:4px;padding:0 2px}
+.tm-m-sw{width:20px;height:20px;border-radius:7px;border:2px solid transparent;cursor:pointer;padding:0;flex:none;transition:.13s}
+.tm-m-sw:hover{transform:scale(1.14)}
+.tm-m-sw.on{border-color:var(--tx);box-shadow:0 0 0 2px rgba(226,165,78,.3)}
+.tm-m-sw.none{background:#1d2026;border:1px dashed #3d434f;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
+.tm-m-alpha{display:flex;align-items:center;gap:9px;padding:7px 2px 0}
+.tm-m-alpha input{flex:1;accent-color:var(--acc);min-width:0}
+.tm-m-alpha b{font:700 11.5px var(--body);min-width:38px;text-align:right;color:var(--tx)}
+.tm-m-demo{margin:8px 2px 2px;border-radius:9px;padding:8px 10px;border:1px solid var(--line);font:600 11.5px var(--body);color:var(--tx2)}
+
+/* rail — свёрнутый сайдбар: только иконки с всплывающими подсказками */
+.tm-side.rail{width:72px;align-items:center}
+.tm-rail-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;width:100%;padding:12px 0 10px;display:flex;flex-direction:column;align-items:center;gap:5px;scrollbar-width:none}
+.tm-rail-item{position:relative;width:44px;height:42px;flex:none;border:none;background:none;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--tx2);cursor:pointer;transition:.15s}
+.tm-rail-item:hover{background:#1d2127;color:var(--tx)}
+.tm-rail-item.cur{background:var(--accd);color:var(--acc2)}
+.tm-rail-item.prime{background:var(--accd);color:var(--acc2)}
+.tm-rail-item.sub{width:38px;height:34px;border-radius:10px;color:var(--tx3)}
+.tm-rail-item.sub.cur{color:var(--acc2)}
+.tm-rail-item.hint{background:rgba(226,165,78,.2);color:var(--acc2)}
+.tm-rail-cnt{position:absolute;top:2px;right:2px;min-width:15px;height:15px;border-radius:8px;background:var(--acc);color:#221604;font:800 9px/15px var(--body);text-align:center;padding:0 3px}
+.tm-rail-div{width:34px;height:1px;margin:6px auto;background:var(--line);flex:none}
+.tm-rail-proj{display:flex;flex-direction:column;align-items:center;gap:4px}
+.tm-rail-ptile{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#221604}
+.tm-rail-subs{display:flex;flex-direction:column;align-items:center;gap:3px}
+/* всплывающая подсказка rail (справа от иконки, как railTip прототипа) */
+.tm-rail-item::after{content:attr(data-tip);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%) translateX(-6px);background:#1a1d22;border:1px solid #303540;color:var(--tx);font:700 12px var(--body);padding:6px 11px;border-radius:9px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .14s,transform .14s;z-index:60;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.tm-rail-item:hover::after{opacity:1;transform:translateY(-50%)}
+.tm-side-foot.rail{border-top:1px solid var(--line);width:100%;display:flex;justify-content:center;padding:10px 0}
+
+/* строки досок/бэклога в сайдбаре — цели переноса задач (подсветка при DnD) */
+.tm-nav-row.drop-hint,.tm-rail-item.drop-hint{background:rgba(226,165,78,.22)!important;color:var(--acc2)!important;box-shadow:0 0 0 2px rgba(226,165,78,.4)}
+
+/* проект: цветная плитка-иконка вместо точки (как ptile прототипа) */
+.tm-proj-tile{width:20px;height:20px;border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center;color:#221604;box-shadow:0 0 8px -2px currentColor}
+
+/* шапка колонки: grip перетаскивания + иконка */
+.tm-kcol-grip{width:14px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--tx3);opacity:.4;cursor:grab;touch-action:none;transition:.15s}
+.tm-kcol-grip:hover{opacity:1;color:var(--acc2)}
+.tm-kcol-head:active .tm-kcol-grip{cursor:grabbing}
+.tm-kcol-ico{display:flex;flex:none}
+/* призрак и заглушка перетаскиваемой КОЛОНКИ */
+.tm-ghostwrap.col .tm-ghost{transform:rotate(.4deg)}
+.tm-dragph.col{border-radius:14px;box-shadow:inset 0 0 24px rgba(226,165,78,.1)}
+/* при перетягивании на сайдбар призрак сжимается в мини-копию (ghost.mini) */
+.tm-ghostwrap{transform-origin:0 0}
+.tm-ghostwrap.mini .tm-ghost{transform:scale(.42);opacity:.9}
+.tm-ghostwrap.mini .tm-ghost>*{pointer-events:none}
+
+/* счётчик на вкладке доски */
+.tm-tab-cnt{margin-left:7px;font:700 10px var(--mono);color:var(--tx3);background:#22262d;border-radius:7px;padding:1px 6px}
+.tm-tab.cur .tm-tab-cnt{color:var(--acc2);background:rgba(226,165,78,.14)}
+
+/* ═══ WYSIWYG-редактор Markdown: одно окно, результат виден сразу ═══ */
+.tm-mdw-wrap{display:flex;flex-direction:column;border:1px solid #2b2f37;border-radius:10px;overflow:hidden;background:#14161a}
+.tm-mdw-wrap .tm-md-bar{display:flex;align-items:center;gap:2px;padding:5px 6px;border-bottom:1px solid #262a31;background:#181b20;flex-wrap:wrap}
+.mdw{min-height:110px;max-height:46vh;overflow-y:auto;padding:10px 12px;outline:none;cursor:text;scrollbar-width:thin}
+.mdw.ro{cursor:default;color:var(--tx2)}
+.mdw:focus{box-shadow:inset 0 0 0 1px rgba(226,165,78,.25)}
+/* плейсхолдер пустого поля */
+.mdw.empty::before{content:attr(data-ph);color:var(--tx3);pointer-events:none;display:block;white-space:pre-wrap;font:400 12.5px/1.55 var(--body)}
+/* поле описания: высота по содержимому (мягкий потолок) */
+.tm-desc-ed{min-height:130px;max-height:420px}
+/* композер чата: растёт по тексту до трети окна (потолок задаёт maxGrow) */
+.tm-composer-ed{min-height:38px;max-height:none;height:38px;overflow:hidden;padding:8px 10px;font:12.5px/1.45 var(--body)}
+.tm-composer-ed.empty{height:38px}
+/* описание в модалке создания задачи */
+.tm-f-mdw{border:1px solid #2b2f37;border-radius:9px;overflow:hidden;background:#14161a}
+.tm-create-desc{min-height:84px;max-height:220px;font:13px/1.5 var(--body)}
+
+/* чип-переключатель блока «Ветви» в стикерах задачи */
+.tm-links-toggle{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tm-sticker.vetvi-tog{color:#9cb878;border-color:rgba(156,184,120,.4);background:rgba(156,184,120,.05)}
+.tm-sticker.vetvi-tog:hover{border-color:#9cb878;color:#b5d494}
+.tm-sticker.vetvi-tog.on{background:rgba(156,184,120,.16);border-color:#9cb878;color:#b5d494;font-weight:600}
+.tm-sticker.vetvi-tog:disabled{opacity:.5;cursor:default}
+/* кнопка «+ привязать ноды» — в стиле тегов привязанных нод, но СЕРАЯ */
+.tm-link-add{display:inline-flex;align-items:center;gap:5px;background:none;border:1px dashed #3d434f;border-radius:8px;padding:3px 9px;color:var(--tx3);font:500 11.5px var(--body);cursor:pointer;transition:.14s}
+.tm-link-add:hover{color:var(--tx2);border-color:#565e6c;background:rgba(255,255,255,.03)}
+
+/* кликабельный тег подзадачи на карточке */
+.tm-child-tag{cursor:pointer;transition:.13s}
+.tm-child-tag:hover{background:rgba(143,191,127,.18);color:#b5d494}
+
+/* ═══ фикс боковой панели: тело задачи НЕ сжимается в окошко —
+   оно живёт своей высотой, скроллится вся колонка (layout), чат ниже ═══ */
+.tm-drawer.side .tm-drawer-body{flex:none;overflow-y:visible;min-height:0}
+.tm-drawer.side .tm-drawer-chat{flex:none;max-height:300px}
+.tm-drawer.side .tm-drawer-layout{scrollbar-width:thin}

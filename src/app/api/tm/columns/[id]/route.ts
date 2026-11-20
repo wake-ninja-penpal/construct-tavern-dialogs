@@ -3,9 +3,11 @@ import { db } from '@/lib/db'
 import { canEditProject, requireTaskService } from '@/lib/tasks'
 
 /**
- * PATCH /api/tm/columns/[id] — правка колонки: название/цвет/порядок.
- * Системные колонки (locked) переименовывать нельзя — их семантика
- * (Не взяты / В работе / Выполнено) показывает прогресс на нодах «Ветвей».
+ * PATCH /api/tm/columns/[id] — правка колонки: название/цвет/иконка/порядок.
+ * Название меняется у ЛЮБОЙ колонки (в т.ч. системной — по требованию):
+ * семантика статуса у системных определяется kind, а не названием.
+ * Иконка и цвет: у системных иконка фиксированная (иконка задаёт смысл
+ * колонки на нодах «Ветвей»), цвет менять можно у всех.
  * DELETE /api/tm/columns/[id] — удалить колонку: задачи уходят в бэклог.
  */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -22,10 +24,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'Некорректные данные' }, { status: 400 })
     const data: Record<string, unknown> = {}
-    if (typeof body.title === 'string' && body.title.trim() && !col.locked) data.title = body.title.trim().slice(0, 80)
-    if (typeof body.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.color) && !col.locked) data.color = body.color
+    if (typeof body.title === 'string' && body.title.trim()) data.title = body.title.trim().slice(0, 80)
+    if (typeof body.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.color)) data.color = body.color
+    /* иконка: у системных колонок фиксированная (нельзя менять) */
+    if (typeof body.icon === 'string' && body.icon.trim() && !col.locked) data.icon = body.icon.trim().slice(0, 24)
     if (typeof body.sortOrder === 'number' && Number.isFinite(body.sortOrder)) data.sortOrder = Math.round(body.sortOrder)
-    if (!Object.keys(data).length) return NextResponse.json({ error: col.locked ? 'Системную колонку изменить нельзя' : 'Нет полей для обновления' }, { status: 400 })
+    if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
     const item = await db.taskColumn.update({ where: { id }, data })
     return NextResponse.json({ item })
   } catch {

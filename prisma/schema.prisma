@@ -138,6 +138,7 @@ model TaskColumn {
   board     TaskBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
   title     String
   color     String    @default("#8b929c")
+  icon      String    @default("columns") // иконка колонки (у дефолтных — фиксированная)
   kind      String    @default("") // new | progress | done | "" — семантическая колонка
   locked    Boolean   @default(false)
   sortOrder Int       @default(0)
@@ -156,6 +157,7 @@ model TaskItem {
   colorAlpha  Float? // плотность заливки цветом 0.04…0.8
   stickers    String    @default("{}") // JSON {assignees:[login], deadline, priority}
   links       String    @default("[]") // JSON — связи с нодами «Ветвей»
+  nodesOn     Boolean   @default(false) // блок «Связи с Ветвями» включён в этой задаче
   messages    String    @default("[]") // JSON — чат задачи: [{id,login,text,ts,system}]
   labelIds    String    @default("[]") // JSON — метки задачи [TaskLabel.id]
   done        Boolean   @default(false)

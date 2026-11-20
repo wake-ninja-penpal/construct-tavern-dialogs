@@ -39,7 +39,8 @@ import {
 } from './tmTypes';
 import type { TmUser, Ws } from './TaskManagerApp';
 import { VetviMark } from './TaskViews';
-import { MD_TOOLS, mdApplyTool, mdEditorKeyDown, mdToHtml, mdPlain } from './md';
+import { MD_TOOLS, mdToHtml } from './md';
+import { MdWysiwyg, type MdWysiwygHandle } from './MdWysiwyg';
 
 type UserMap = Map<string, TmUser>;
 export type DrawerMode = 'side' | 'wide' | 'full';
@@ -77,12 +78,6 @@ export function TmDrawer(props: {
   const [title, setTitle] = useState(task?.title || '');
   const [titleEdit, setTitleEdit] = useState(false);
   const [desc, setDesc] = useState(task?.description || '');
-  /* сплит по умолчанию — результат виден сразу при вводе (как в прототипе) */
-  const [mdMode, setMdMode] = useState<'edit' | 'split' | 'preview'>('split');
-  /* смена прав (наблюдатель): переключаемся в просмотр, правки недоступны */
-  useEffect(() => {
-    if (!props.canEdit) setMdMode('preview');
-  }, [props.canEdit]);
   const [saving, setSaving] = useState(false);
   const [stickerPop, setStickerPop] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -92,12 +87,18 @@ export function TmDrawer(props: {
   const alphaT = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef({ title: task?.title || '', desc: task?.description || '' });
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const mdAreaRef = useRef<HTMLTextAreaElement>(null);
+  const descEdRef = useRef<MdWysiwygHandle>(null);
+  const chatEdRef = useRef<MdWysiwygHandle>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
-  const chatTaRef = useRef<HTMLTextAreaElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  /* потолок поля комментария = ТРЕТЬ высоты окна задачи (пересчёт на смену режима) */
+  const [chatMax, setChatMax] = useState(120);
+  useEffect(() => {
+    const dr = drawerRef.current;
+    setChatMax(dr ? Math.max(72, Math.floor(dr.clientHeight / 3)) : 120);
+  }, [props.mode]);
 
   /* в боковой панели при открытии сразу показываем конец содержимого —
      как в прототипе: внизу оказывается чат задачи с полем ввода */
@@ -112,23 +113,21 @@ export function TmDrawer(props: {
     if (labelInput) labelInputRef.current?.focus();
   }, [labelInput]);
 
+  /* «Дочерняя задача» из контекстного меню: фокус в поле новой подзадачи */
+  useEffect(() => {
+    const onFocusChild = () => {
+      const el = document.querySelector<HTMLInputElement>('.tm-kid-add');
+      if (el) el.focus();
+    };
+    window.addEventListener('tm-focus-child', onFocusChild);
+    return () => window.removeEventListener('tm-focus-child', onFocusChild);
+  }, []);
+
   /* чат: автоскролл к низу при новых сообщениях */
   const chatKey = task ? task.messages.map((m) => m.id).join(',') : '';
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest' });
   }, [chatKey]);
-
-  /* поле комментария растёт по тексту, но не выше трети высоты окна задачи */
-  useEffect(() => {
-    const ta = chatTaRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    const dr = drawerRef.current;
-    const maxH = dr ? Math.max(72, Math.floor(dr.clientHeight / 3)) : 120;
-    const h = Math.min(ta.scrollHeight, maxH);
-    ta.style.height = Math.max(h, 38) + 'px';
-    ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
-  }, [chatDraft, props.mode]);
 
   const saveText = (nt: string, nd: string) => {
     if (!task) return;
@@ -210,9 +209,6 @@ export function TmDrawer(props: {
       props.say('Метка #' + l.name + ' создана и назначена');
     }
   };
-
-  const mdPrevHtml = mdToHtml(desc || '');
-  const hasDesc = mdPlain(desc).length > 0;
 
   const openParent = () => {
     if (!parent) return;
@@ -448,86 +444,79 @@ export function TmDrawer(props: {
           </div>
           )}
 
-          {/* связи с нодами «Ветвей» */}
-          <div className="tm-links">
-            <div className="tm-sec-cap"><VetviMark /> Связи с «Ветвями» {links.length > 0 && <b>{links.length}</b>}</div>
-            <div className="tm-link-chips">
-              {links.map((l, i) => (
-                <span className="tm-link-chip" key={l.pid + ':' + l.nid + ':' + i}>
-                  <button
-                    type="button"
-                    className="tm-link-go"
-                    title="Открыть ноду в «Ветвях»"
-                    onClick={() => {
-                      window.location.hash = (l.room ? 'room=' + encodeURIComponent(l.room) : 'project=' + encodeURIComponent(l.pid))
-                        + '&node=' + encodeURIComponent(l.nid);
-                    }}
-                  >
-                    <VetviMark /> {l.t || l.nid.slice(0, 18)}
-                  </button>
-                  {ed && <button type="button" className="tm-link-x" title="Снять связь с нодой" onClick={() => setLinks(links.filter((_, j) => j !== i))}>×</button>}
-                </span>
-              ))}
-              {ed && (
-                <button
-                  type="button"
-                  className="tm-link-add"
-                  title="Открыть «Ветви», выбрать ноды и привязать к этой задаче"
-                  onClick={() => props.onAttachNodes(task.id, task.title)}
-                >
-                  + привязать ноды из «Ветвей»
-                </button>
-              )}
-            </div>
-            {links.length === 0 && (
-              <p className="tm-hint">
-                Связи создаются из редактора «Ветви» (выделить ноды → ПКМ → «Создать задачу»)
-                или кнопкой выше: «Ветви» откроются в режиме привязки — выберите ноды, они
-                вернутся в эту задачу. Нода получит иконку прогресса.
-              </p>
+          {/* связи с нодами «Ветвей» — включаются ФЛАГОМ в задаче (не засоряем вид):
+              чип-переключатель в ряду стикеров + блок виден только когда включён */}
+          <div className="tm-links-toggle">
+            <button
+              type="button"
+              className={'tm-sticker vetvi-tog' + (task.nodesOn ? ' on' : '')}
+              disabled={!ed}
+              title={task.nodesOn ? 'Скрыть блок связей с «Ветвями»' : 'Включить блок связей с нодами «Ветвей» в этой задаче'}
+              onClick={() => { void props.onPatch(task.id, { nodesOn: !task.nodesOn }); }}
+            >
+              <VetviMark /> Ветви{task.nodesOn ? ' ✓' : ''}
+            </button>
+            {!task.nodesOn && links.length > 0 && (
+              <span className="tm-hint">есть связи ({links.length}) — включите блок, чтобы увидеть</span>
             )}
           </div>
-
-          {/* описание: markdown-редактор с панелью и просмотром (сплит по умолчанию) */}
-          <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке</span></div>
-          <div className={'tm-md ' + mdMode}>
-            <div className="tm-md-bar">
-              <MdToolbar
-                getArea={() => mdAreaRef.current}
-                disabled={!ed}
-                apply={(_id, nv) => { setDesc(nv); queueSave(title, nv); }}
-              />
-              <div className="tm-md-modes">
-                {(['edit', 'split', 'preview'] as const).map((m) => (
-                  <button key={m} type="button" className={mdMode === m ? 'on' : ''} onClick={() => setMdMode(m)}>
-                    {m === 'edit' ? 'Правка' : m === 'split' ? 'Сплит' : 'Просмотр'}
-                  </button>
+          {(task.nodesOn || links.length > 0) && (
+            <div className="tm-links">
+              <div className="tm-sec-cap"><VetviMark /> Связи с «Ветвями» {links.length > 0 && <b>{links.length}</b>}</div>
+              <div className="tm-link-chips">
+                {links.map((l, i) => (
+                  <span className="tm-link-chip" key={l.pid + ':' + l.nid + ':' + i}>
+                    <button
+                      type="button"
+                      className="tm-link-go"
+                      title="Открыть ноду в «Ветвях»"
+                      onClick={() => {
+                        window.location.hash = (l.room ? 'room=' + encodeURIComponent(l.room) : 'project=' + encodeURIComponent(l.pid))
+                          + '&node=' + encodeURIComponent(l.nid);
+                      }}
+                    >
+                      <VetviMark /> {l.t || l.nid.slice(0, 18)}
+                    </button>
+                    {ed && <button type="button" className="tm-link-x" title="Снять связь с нодой" onClick={() => setLinks(links.filter((_, j) => j !== i))}>×</button>}
+                  </span>
                 ))}
+                {ed && (
+                  <button
+                    type="button"
+                    className="tm-link-add"
+                    title="Открыть «Ветви», выбрать ноды и привязать к этой задаче"
+                    onClick={() => props.onAttachNodes(task.id, task.title)}
+                  >
+                    + привязать ноды
+                  </button>
+                )}
               </div>
+              {links.length === 0 && (
+                <p className="tm-hint">
+                  Связи создаются из редактора «Ветви» (выделить ноды → ПКМ → «Создать задачу»)
+                  или кнопкой выше: «Ветви» откроются в режиме привязки — выберите ноды, они
+                  вернутся в эту задачу. Нода получит иконку прогресса.
+                </p>
+              )}
             </div>
-            <div className="tm-md-body">
-              <textarea
-                ref={mdAreaRef}
-                className="tm-desc-ta"
-                value={desc}
-                rows={props.mode === 'side' ? 6 : 10}
-                placeholder={'## Заголовок\n\n- [ ] пункт чек-листа\n**жирный**, *курсив*, `код`, [ссылка](https://…)'}
-                aria-label="Описание задачи (Markdown)"
-                disabled={!ed}
-                onChange={(e) => { setDesc(e.target.value); queueSave(title, e.target.value); }}
-                onBlur={() => saveText(title, desc)}
-                onKeyDown={(e) => {
-                  if (!mdAreaRef.current) return;
-                  const nv = mdEditorKeyDown(mdAreaRef.current, e);
-                  if (nv !== null) { setDesc(nv); queueSave(title, nv); }
-                }}
-              />
-              <div className="tm-md-prev">
-                {hasDesc
-                  ? <div className="md-body" dangerouslySetInnerHTML={{ __html: mdPrevHtml }} />
-                  : <p className="tm-md-empty">Пусто. Напишите описание — поддерживается Markdown.</p>}
-              </div>
+          )}
+
+          {/* описание: ЖИВОЙ WYSIWYG-редактор — печатаем и сразу видим результат,
+              никаких режимов правки/просмотра и второго окна */}
+          <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке</span></div>
+          <div className="tm-mdw-wrap">
+            <div className="tm-md-bar">
+              <MdToolbar disabled={!ed} onTool={(id) => descEdRef.current?.exec(id)} />
             </div>
+            <MdWysiwyg
+              ref={descEdRef}
+              value={desc}
+              onChange={(md) => { setDesc(md); queueSave(title, md); }}
+              disabled={!ed}
+              placeholder={'## Заголовок\n\n- [ ] пункт чек-листа\n**жирный**, *курсив*, `код`, [ссылка](https://…)'}
+              className="tm-desc-ed"
+              ariaLabel="Описание задачи"
+            />
           </div>
 
           {/* подзадачи */}
@@ -721,41 +710,26 @@ export function TmDrawer(props: {
             )}
             <div ref={chatEndRef} />
           </div>
-          {/* композер: панель Markdown + ввод с живым предпросмотром */}
+          {/* композер: ЖИВОЙ WYSIWYG (панель Markdown, растёт до трети окна,
+              Enter — отправить, Shift+Enter — новая строка) */}
           <div className="tm-composer">
             <span className="tm-av" style={{ background: userColor(ws.me.login) }}>{initialsOf(ws.me.displayName, ws.me.login)}</span>
             <div className="tm-composer-box">
               <div className="tm-composer-bar">
-                <MdToolbar
-                  mini
-                  getArea={() => chatTaRef.current}
-                  apply={(_id, nv) => setChatDraft(nv)}
-                />
+                <MdToolbar mini onTool={(id) => chatEdRef.current?.exec(id)} />
                 <span className="tm-composer-hint">Enter — отправить</span>
               </div>
-              <div className={'tm-composer-split' + (chatDraft.trim() ? ' with-prev' : '')}>
-                <textarea
-                  ref={chatTaRef}
-                  rows={1}
-                  placeholder="Сообщение команде… Markdown работает, Shift+Enter — новая строка"
-                  aria-label="Новый комментарий"
-                  value={chatDraft}
-                  onChange={(e) => setChatDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendComment(); return; }
-                    if (!chatTaRef.current) return;
-                    const nv = mdEditorKeyDown(chatTaRef.current, e);
-                    if (nv !== null) setChatDraft(nv);
-                  }}
-                />
-                {chatDraft.trim() && (
-                  <div
-                    className="tm-composer-prev md-body"
-                    aria-label="Предпросмотр комментария"
-                    dangerouslySetInnerHTML={{ __html: mdToHtml(chatDraft) }}
-                  />
-                )}
-              </div>
+              <MdWysiwyg
+                ref={chatEdRef}
+                value={chatDraft}
+                onChange={setChatDraft}
+                onEnter={() => void sendComment()}
+                autoGrow
+                maxGrow={chatMax}
+                placeholder="Сообщение команде…"
+                className="tm-composer-ed"
+                ariaLabel="Новый комментарий"
+              />
             </div>
             <button type="button" className="tm-send" aria-label="Отправить" onClick={() => void sendComment()}>
               <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></svg>
@@ -782,12 +756,12 @@ function fmtWhen(iso: string): string {
 
 /* панель инструментов markdown (описание + композер чата).
    Кнопки — прямые дети flex-контейнера с разделителями между группами:
-   ровный ряд, как панель прототипа «Поток» (скрин 1). */
+   ровный ряд, как панель прототипа «Поток» (скрин 1).
+   onMouseDown+preventDefault — чтобы не терять выделение в WYSIWYG-поле. */
 function MdToolbar(props: {
   disabled?: boolean;
   mini?: boolean;
-  getArea: () => HTMLTextAreaElement | null;
-  apply: (toolId: string, newValue: string) => void;
+  onTool: (toolId: string) => void;
 }) {
   return (
     <div className={'tm-md-tools' + (props.mini ? ' mini' : '')} role="toolbar" aria-label="Инструменты Markdown">
@@ -799,11 +773,8 @@ function MdToolbar(props: {
             title={tool.title}
             aria-label={tool.title}
             disabled={props.disabled}
-            onClick={() => {
-              const area = props.getArea();
-              if (!area) return;
-              props.apply(tool.id, mdApplyTool(area, tool.id));
-            }}
+            onMouseDown={(e) => { e.preventDefault(); }}
+            onClick={() => props.onTool(tool.id)}
           >
             <ToolIcon id={tool.icon} />
           </button>
@@ -961,7 +932,15 @@ export function TmCreateModal(props: {
           </div>
           <label className="tm-f">
             <span>Описание</span>
-            <textarea rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Детали, критерии готовности… (Markdown)" />
+            <div className="tm-f-mdw">
+              <MdWysiwyg
+                value={desc}
+                onChange={setDesc}
+                placeholder="Детали, критерии готовности… (Markdown — видно сразу)"
+                className="tm-create-desc"
+                ariaLabel="Описание задачи"
+              />
+            </div>
           </label>
         </div>
         <div className="tm-modal-foot">

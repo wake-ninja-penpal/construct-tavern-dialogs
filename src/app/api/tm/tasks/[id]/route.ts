@@ -67,6 +67,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.description === 'string') data.description = body.description.slice(0, 20000)
     if (body.labelIds !== undefined) data.labelIds = sanitizeLabelIds(body.labelIds)
     if (body.links !== undefined) data.links = sanitizeLinks(body.links)
+    /* блок «Связи с Ветвями» включается флагом в самой задаче */
+    if (typeof body.nodesOn === 'boolean' && body.nodesOn !== task.nodesOn) {
+      data.nodesOn = body.nodesOn
+    }
 
     /* свой цвет задачи: строка-палитра или null (снять цвет); плотность заливки */
     if (body.color !== undefined) {
@@ -111,15 +115,22 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
     }
 
-    /* перенос между колонками/досками/бэклогом */
+    /* перенос между колонками/досками/бэклогом (в т.ч. НА ДРУГОЙ ПРОЕКТ —
+       projectId берётся из колонки цели) */
     if ('columnId' in body || 'boardId' in body) {
       const moveCol = typeof body.columnId === 'string' && body.columnId ? body.columnId : null
       const moveBoard = typeof body.boardId === 'string' && body.boardId ? body.boardId : null
       if (moveCol) {
         const col = await db.taskColumn.findUnique({ where: { id: moveCol } })
         if (!col) return NextResponse.json({ error: 'Колонка не найдена' }, { status: 400 })
+        const colBoard = await db.taskBoard.findUnique({ where: { id: col.boardId }, select: { projectId: true } })
         data.columnId = moveCol
         data.boardId = col.boardId
+        if (colBoard && colBoard.projectId !== task.projectId) {
+          data.projectId = colBoard.projectId
+          data.parentId = null /* подзадача не может жить в другом проекте */
+          sys.push('перенёс(ла) в другой проект')
+        }
         /* семантика системных колонок: позиция = статус */
         if (col.kind === 'done') {
           data.done = true
@@ -168,12 +179,36 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.messages = appendSysMsg(task.messages, user.login, sys.join(' · '))
     }
     const item = await db.taskItem.update({ where: { id }, data })
+
+    /* autoTake (как в прототипе «Поток»): назначили исполнителя задаче из
+       «Не взяты» — она немедленно переезжает в «В работе» */
+    const assignedAdded = body.stickers !== undefined && typeof data.stickers === 'string'
+      ? (JSON.parse(data.stickers) as { assignees?: string[] }).assignees?.filter((a) => !oldSt.assignees.includes(a)) || []
+      : []
+    if (assignedAdded.length && item.columnId && !('columnId' in data)) {
+      const curCol = await db.taskColumn.findUnique({ where: { id: item.columnId } })
+      if (curCol && curCol.kind === 'new' && item.boardId) {
+        const progress = await db.taskColumn.findFirst({ where: { boardId: item.boardId, kind: 'progress' } })
+        if (progress) {
+          const taken = await db.taskItem.update({
+            where: { id },
+            data: {
+              columnId: progress.id,
+              boardId: item.boardId,
+              messages: appendSysMsg(item.messages, user.login, 'перенёс(ла) в «' + progress.title + '» — назначен исполнитель'),
+            },
+          })
+          await db.taskItem.updateMany({ where: { parentId: id }, data: { columnId: progress.id, boardId: item.boardId } })
+          return NextResponse.json({ item: taken, moved: await db.taskItem.findMany({ where: { parentId: id } }) })
+        }
+      }
+    }
     /* перенос родителя: подзадачи едут вместе с ним (как placeIn потомков в прототипе) */
     let moved: TaskItem[] = []
     if ('columnId' in data || 'boardId' in data) {
       await db.taskItem.updateMany({
         where: { parentId: id },
-        data: { boardId: item.boardId, columnId: item.columnId },
+        data: { projectId: item.projectId, boardId: item.boardId, columnId: item.columnId },
       })
       moved = await db.taskItem.findMany({ where: { parentId: id } })
     }

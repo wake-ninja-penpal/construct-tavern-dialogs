@@ -13,6 +13,7 @@ export interface TmColumn {
   boardId: string;
   title: string;
   color: string;
+  icon: string;
   kind: string; // 'new' | 'progress' | 'done' | ''
   locked: boolean;
   sortOrder: number;
@@ -132,6 +133,8 @@ export interface TmTask {
   color: string | null;
   /** Плотность заливки цветом 0.04…0.8 (по умолчанию 0.2). */
   colorAlpha: number | null;
+  /** Блок «Связи с Ветвями» включён в этой задаче (иначе не показываем). */
+  nodesOn: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -167,6 +170,13 @@ export const TM_ROLE_LABEL: Record<string, string> = {
 export const TM_ROLE_RANK: Record<string, number> = { viewer: 1, editor: 2, admin: 3 };
 
 export const TM_TEAM_ICONS = ['shield', 'users', 'rocket', 'code', 'megaphone', 'star', 'flame', 'kanban'];
+
+/** Описания системных колонок (подсказка в меню колонки и title, как в прототипе). */
+export const TM_SYS_COL_INFO: Record<string, string> = {
+  new: 'Задачи, которые ещё никто не взял. Стикер исполнителя немедленно переводит их в «В работе».',
+  progress: 'Задачи в работе: назначен исполнитель, идёт работа. Прогресс виден на нодах «Ветвей».',
+  done: 'Выполненные задачи — позиция в колонке и есть статус, ничего отмечать не нужно.',
+};
 
 export function childrenOf(ws: { tasks: TmTask[] } | null, parentId: string): TmTask[] {
   if (!ws) return [];

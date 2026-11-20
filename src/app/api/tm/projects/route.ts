@@ -33,9 +33,9 @@ export async function POST(req: NextRequest) {
     if (board) {
       await db.taskColumn.createMany({
         data: [
-          { boardId: board.id, title: 'Не взяты', color: '#6d7480', kind: 'new', locked: true, sortOrder: 0 },
-          { boardId: board.id, title: 'В работе', color: '#e2a54e', kind: 'progress', locked: true, sortOrder: 1 },
-          { boardId: board.id, title: 'Выполнено', color: '#8fbf7f', kind: 'done', locked: true, sortOrder: 2 },
+          { boardId: board.id, title: 'Не взяты', color: '#6d7480', icon: 'inbox', kind: 'new', locked: true, sortOrder: 0 },
+          { boardId: board.id, title: 'В работе', color: '#e2a54e', icon: 'progress', kind: 'progress', locked: true, sortOrder: 1 },
+          { boardId: board.id, title: 'Выполнено', color: '#8fbf7f', icon: 'done', kind: 'done', locked: true, sortOrder: 2 },
         ],
       })
     }
