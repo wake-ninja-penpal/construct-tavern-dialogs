@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { canEditProject, requireTaskService } from '@/lib/tasks'
+import { canEditProject, notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/columns/[id] — правка колонки: название/цвет/иконка/порядок.
@@ -31,6 +31,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.sortOrder === 'number' && Number.isFinite(body.sortOrder)) data.sortOrder = Math.round(body.sortOrder)
     if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
     const item = await db.taskColumn.update({ where: { id }, data })
+    notifyTmChanged('column-patch')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -51,6 +52,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     if (col.locked) return NextResponse.json({ error: 'Системную колонку удалить нельзя' }, { status: 400 })
     await db.taskItem.updateMany({ where: { columnId: id }, data: { boardId: null, columnId: null } })
     await db.taskColumn.delete({ where: { id } })
+    notifyTmChanged('column-delete')
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

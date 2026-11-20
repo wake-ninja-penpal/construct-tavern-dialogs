@@ -110,3 +110,27 @@ export async function syncRoomsStatus(
     return null; /* sync недоступен — статус неизвестен */
   }
 }
+
+/** Мгновенное оповещение «данные менеджера задач изменились».
+ *
+ *  Любая мутация /api/tm/* (задачи, проекты, доски, колонки, метки, команды,
+ *  доступы, комментарии) вызывает этот push — realtime-сервер раздаёт всем
+ *  авторизованным сокетам vetvi:tm, и открытый менеджер задач СРАЗУ
+ *  перечитывает снапшот /api/tm: новый проект появляется у тех, кому выдали
+ *  доступ, задачи/переносы/комментарии обновляются у всех участников без
+ *  перезагрузки страницы. kind — необязательная пометка для логов sync.
+ *  Отправка fire-and-forget: недоступность sync не влияет на ответ API
+ *  (изменения увидят при следующей перезагрузке/опросе). */
+export function notifyTmChanged(kind?: string): void {
+  try {
+    const base = process.env.VETVI_SYNC_INTERNAL_URL || 'http://127.0.0.1:3004';
+    const key = process.env.VETVI_INTERNAL_KEY || 'vetvi-internal-key';
+    void fetch(base + '/internal/tm-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-vetvi-key': key },
+      body: JSON.stringify({ kind: kind || 'tm' }),
+    }).catch(() => { /* sync недоступен — снапшот перечитается при следующем действии */ });
+  } catch {
+    /* push необязателен: снапшот перечитается при следующем действии */
+  }
+}

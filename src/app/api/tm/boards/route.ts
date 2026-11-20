@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { canEditProject, ensureDefaultColumns, requireTaskService } from '@/lib/tasks'
+import { canEditProject, ensureDefaultColumns, notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * POST /api/tm/boards — новая доска проекта { projectId, title }.
@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
       where: { id: board.id },
       include: { columns: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] } },
     })
+    notifyTmChanged('board-create')
     return NextResponse.json({ item: full })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

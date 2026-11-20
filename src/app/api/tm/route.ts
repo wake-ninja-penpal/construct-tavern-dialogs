@@ -7,6 +7,7 @@ import {
   ensureProjectOwnerSeeds,
   myTeamIds,
   notifyTaskUser,
+  notifyTmChanged,
   requireTaskService,
   sanitizeLabelIds,
   sanitizeLinks,
@@ -166,6 +167,7 @@ export async function POST(req: NextRequest) {
         byName: by,
       })
     }
+    notifyTmChanged('task-create')
     return NextResponse.json({ item: created })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

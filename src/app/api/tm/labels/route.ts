@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * GET /api/tm/labels — все метки (общие для сервиса, как в прототипе).
@@ -26,9 +26,10 @@ export async function POST(req: NextRequest) {
     const name = body && typeof body.name === 'string' ? body.name.trim().slice(0, 20) : ''
     if (!name) return NextResponse.json({ error: 'Нужно название' }, { status: 400 })
     const dupe = await db.taskLabel.findFirst({ where: { name } })
-    if (dupe) return NextResponse.json({ item: dupe, existed: true })
+    if (dupe) return NextResponse.json({ item: dupe, existed: true }) /* дубликат — рассылка не нужна */
     const color = body && typeof body.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.color) ? body.color : '#8b7cff'
     const item = await db.taskLabel.create({ data: { name, color } })
+    notifyTmChanged('label-create')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

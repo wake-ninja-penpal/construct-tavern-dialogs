@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { canAdminProject, canEditProject, requireTaskService } from '@/lib/tasks'
+import { canAdminProject, canEditProject, notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/projects/[id] — переименование/цвет/порядок проекта
@@ -24,6 +24,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.sortOrder === 'number' && Number.isFinite(body.sortOrder)) data.sortOrder = Math.round(body.sortOrder)
     if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
     const item = await db.taskProject.update({ where: { id }, data })
+    notifyTmChanged('project-patch')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -40,6 +41,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     }
     await db.taskItem.deleteMany({ where: { projectId: id } })
     await db.taskProject.delete({ where: { id } })
+    notifyTmChanged('project-delete')
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

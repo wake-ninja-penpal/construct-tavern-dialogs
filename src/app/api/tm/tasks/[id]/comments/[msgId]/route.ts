@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import {
+  notifyTmChanged,
   parseMessages,
   projectRole,
   requireTaskService,
@@ -51,6 +52,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
           messages: JSON.stringify(list.map((m) => (m.id === msgId ? { ...m, reactions: hasAny ? reacts : undefined } : m))),
         },
       })
+      notifyTmChanged('comment-react')
       return NextResponse.json({ item })
     }
 
@@ -65,6 +67,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         where: { id },
         data: { messages: JSON.stringify(list) },
       })
+      notifyTmChanged('comment-edit')
       return NextResponse.json({ item })
     }
 
@@ -94,6 +97,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       where: { id },
       data: { messages: JSON.stringify(list.filter((m) => m.id !== msgId)) },
     })
+    notifyTmChanged('comment-delete')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

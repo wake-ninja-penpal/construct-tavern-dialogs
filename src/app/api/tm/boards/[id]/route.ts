@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { canEditProject, requireTaskService } from '@/lib/tasks'
+import { canEditProject, notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/boards/[id] — переименование/порядок доски.
@@ -24,6 +24,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.sortOrder === 'number' && Number.isFinite(body.sortOrder)) data.sortOrder = Math.round(body.sortOrder)
     if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей для обновления' }, { status: 400 })
     const item = await db.taskBoard.update({ where: { id }, data })
+    notifyTmChanged('board-patch')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -43,6 +44,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     /* задачи доски возвращаются в бэклог проекта */
     await db.taskItem.updateMany({ where: { boardId: id }, data: { boardId: null, columnId: null } })
     await db.taskBoard.delete({ where: { id } })
+    notifyTmChanged('board-delete')
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

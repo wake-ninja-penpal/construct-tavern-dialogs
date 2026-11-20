@@ -6,6 +6,7 @@ import {
   canEditProject,
   parseStickers,
   notifyTaskUser,
+  notifyTmChanged,
   requireTaskService,
   sanitizeLabelIds,
   sanitizeLinks,
@@ -199,6 +200,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
             },
           })
           await db.taskItem.updateMany({ where: { parentId: id }, data: { columnId: progress.id, boardId: item.boardId } })
+          notifyTmChanged('task-autotake')
           return NextResponse.json({ item: taken, moved: await db.taskItem.findMany({ where: { parentId: id } }) })
         }
       }
@@ -212,6 +214,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       })
       moved = await db.taskItem.findMany({ where: { parentId: id } })
     }
+    notifyTmChanged('task-patch')
     return NextResponse.json({ item, moved })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -236,6 +239,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       await db.taskItem.delete({ where: { id: pid } }).catch(() => undefined)
     }
     await deleteDeep(id)
+    notifyTmChanged('task-delete')
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

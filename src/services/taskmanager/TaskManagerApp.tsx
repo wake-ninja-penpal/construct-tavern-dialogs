@@ -184,6 +184,14 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     toastT.current = setTimeout(() => setToast(null), 3200);
   }, []);
 
+  /* ── список пользователей хаба (пикеры исполнителей/доступов) ── */
+  const loadUsers = useCallback(async () => {
+    try {
+      const r = await fetch('/api/users', { cache: 'no-store' });
+      if (r.ok) setUsers(((await r.json()) as { list: TmUser[] }).list || []);
+    } catch { /* список пользователей необязателен */ }
+  }, []);
+
   /* ── загрузка пространства ── */
   const load = useCallback(async () => {
     try {
@@ -208,19 +216,16 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
         me: j.me,
       });
       setPhase('ok');
+      /* список пользователей хаба (пикеры исполнителей/доступов) — вместе со
+         снапшотом: после «Повторить» и по realtime-обновлениям не остаёмся со
+         устаревшим/пустым списком (новые аккаунты появляются сразу) */
+      void loadUsers();
     } catch (e) {
       if (e instanceof TmDenied) throw e; /* наверх: экран «нет доступа» */
       setErrMsg(e instanceof Error ? e.message : 'Сервер недоступен');
       setPhase('err');
     }
-  }, []);
-
-  const loadUsers = useCallback(async () => {
-    try {
-      const r = await fetch('/api/users', { cache: 'no-store' });
-      if (r.ok) setUsers(((await r.json()) as { list: TmUser[] }).list || []);
-    } catch { /* список пользователей необязателен */ }
-  }, []);
+  }, [loadUsers]);
 
   /* ── первый вход: данные + разбор хеша интеграций ── */
   useEffect(() => {
@@ -315,6 +320,27 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     window.addEventListener('tm-open-task', onOpen);
     return () => window.removeEventListener('tm-open-task', onOpen);
   }, []);
+
+  /* ── realtime-синхронизация менеджера задач ──
+     Любая мутация у любого участника (задача/проект/доска/колонка/метка/
+     команда/доступ/комментарий) пушит vetvi:tm (live.ts → 'vetvi:tm-changed').
+     Открытый менеджер перечитывает снапшот /api/tm с дебаунсом: новые проекты
+     появляются у тех, кому выдали доступ, задачи и переносы видны всем сразу.
+     Состав видимого определяет сервер (роли проектов) — локально ничего
+     не угадываем. Дебаунс 400 мс собирает серии мутаций (перестановка
+     колонок шлёт по PATCH на колонку) в одну перезагрузку. */
+  const tmReloadT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const onChanged = () => {
+      if (tmReloadT.current) clearTimeout(tmReloadT.current);
+      tmReloadT.current = setTimeout(() => { void load(); }, 400);
+    };
+    window.addEventListener('vetvi:tm-changed', onChanged);
+    return () => {
+      window.removeEventListener('vetvi:tm-changed', onChanged);
+      if (tmReloadT.current) clearTimeout(tmReloadT.current);
+    };
+  }, [load]);
 
   /* ── Esc закрывает дровер; [ — сворачивает панель; N — новая задача; / — поиск ── */
   useEffect(() => {

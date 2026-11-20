@@ -308,6 +308,11 @@ export async function canAdminProject(projectId: string, login: string, teamIds?
 
 /* ── уведомления о задачах (колокольчик + мгновенный push) ── */
 
+/* Реэкспорт мгновенного push «данные менеджера задач изменились»:
+   маршруты /api/tm/* импортируют его отсюда вместе с остальными
+   helpers (само объявление — src/lib/syncNotify.ts). */
+export { notifyTmChanged } from '@/lib/syncNotify';
+
 /** Уведомление пользователю по логину: запись в БД + push через vetvi-sync.
  *  Ошибки глушатся — уведомление не должно ломать основной ответ API. */
 export async function notifyTaskUser(

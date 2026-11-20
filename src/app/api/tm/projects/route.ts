@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * POST /api/tm/projects — новый проект менеджера задач.
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     })
     /* строка доступа возвращается вместе с проектом — UI сразу считает
        создателя админом (без перезагрузки пространства) */
+    notifyTmChanged('project-create')
     return NextResponse.json({ item: full, access: accessRow })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

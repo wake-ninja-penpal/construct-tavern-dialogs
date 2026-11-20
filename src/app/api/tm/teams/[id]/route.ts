@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/teams/[id] { name?, color?, icon?, members?: [login] } —
@@ -31,6 +31,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей' }, { status: 400 })
     const item = await db.taskTeam.update({ where: { id }, data, include: { members: { orderBy: { login: 'asc' } } } })
+    notifyTmChanged('team-patch')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -43,6 +44,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     const { id } = await ctx.params
     await db.taskTeam.delete({ where: { id } }).catch(() => undefined)
+    notifyTmChanged('team-delete')
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

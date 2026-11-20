@@ -913,6 +913,28 @@ function notifyServiceEvent(userId: string): number {
   return sent
 }
 
+/* ─── менеджер задач: realtime-сигнал «данные изменились» ───
+   Web-сервер (любая мутация /api/tm/*) пушит /internal/tm-sync — всем
+   авторизованным сокетам летит vetvi:tm. Открытый менеджер задач по нему
+   перечитывает снапшот /api/tm (без перезагрузки страницы): новые проекты
+   появляются у тех, кому выдали доступ, задачи/переносы/комментарии
+   обновляются у всех участников сразу. Полезная нагрузка не нужна:
+   состав видимых проектов определяет GET /api/tm по роли в проекте. */
+function notifyTmEvent(): number {
+  let sent = 0
+  for (const set of ntfSockets.values()) {
+    for (const sock of set) {
+      try {
+        sock.emit('vetvi:tm', { ts: Date.now() })
+        sent++
+      } catch {
+        /* сокет умер — unregister сделает disconnect */
+      }
+    }
+  }
+  return sent
+}
+
 /* ─── свип ролей: доступы могут измениться, пока участник онлайн ───
    Владелец выдал/отозвал/поменял роль через окно «Поделиться» — участник
    получает актуальное право редактирования без переподключения сокета:
@@ -2006,7 +2028,8 @@ const internalServer = createServer((req, res) => {
   const isAccess = url.startsWith('/internal/access-sync') && req.method === 'POST'
   const isNotify = url.startsWith('/internal/notify') && req.method === 'POST'
   const isServices = url.startsWith('/internal/services-sync') && req.method === 'POST'
-  if (!isStatus && !isAccess && !isNotify && !isServices) {
+  const isTm = url.startsWith('/internal/tm-sync') && req.method === 'POST'
+  if (!isStatus && !isAccess && !isNotify && !isServices && !isTm) {
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: false, error: 'not found' }))
     return
@@ -2058,6 +2081,16 @@ const internalServer = createServer((req, res) => {
         const uid = String(parsed?.userId || '')
         const sent = uid && parsed?.ntf ? notifyUser(uid, parsed.ntf) : 0
         if (sent > 0) console.log(`[vetvi-sync] notify push → user ${uid.slice(0, 8)}…, sockets: ${sent}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, sent }))
+        return
+      }
+      if (isTm) {
+        /* мутация менеджера задач (любой /api/tm/* из Next.js): широковещательно
+           всем авторизованным сокетам — открытый менеджер перечитает снапшот.
+           Тело не используем (кроме опциональной пометки источника для логов). */
+        const sent = notifyTmEvent()
+        console.log(`[vetvi-sync] tm-sync → sockets: ${sent}${parsed?.kind ? ` (${String(parsed.kind)})` : ''}`)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: true, sent }))
         return

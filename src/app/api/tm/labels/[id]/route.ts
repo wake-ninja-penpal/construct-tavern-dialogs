@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * PATCH /api/tm/labels/[id] { name?, color? } — правка метки.
@@ -18,6 +18,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.color)) data.color = body.color
     if (!Object.keys(data).length) return NextResponse.json({ error: 'Нет полей' }, { status: 400 })
     const item = await db.taskLabel.update({ where: { id }, data })
+    notifyTmChanged('label-patch')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
@@ -42,6 +43,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       } catch { /* битый JSON — пропускаем */ }
     }
     await db.taskLabel.delete({ where: { id } }).catch(() => undefined)
+    notifyTmChanged('label-delete')
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

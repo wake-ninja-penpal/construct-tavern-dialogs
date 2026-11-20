@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { canEditProject, requireTaskService } from '@/lib/tasks'
+import { canEditProject, notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * POST /api/tm/columns — новая колонка доски { boardId, title, color?, kind? }.
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
     const item = await db.taskColumn.create({
       data: { boardId, title, color, sortOrder: (maxOrder._max.sortOrder ?? 0) + 1 },
     })
+    notifyTmChanged('column-create')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

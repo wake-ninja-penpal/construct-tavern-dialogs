@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireTaskService } from '@/lib/tasks'
+import { notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * GET /api/tm/teams — команды с составом (включены и в GET /api/tm; этот
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       },
       include: { members: true },
     })
+    notifyTmChanged('team-create')
     return NextResponse.json({ item })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

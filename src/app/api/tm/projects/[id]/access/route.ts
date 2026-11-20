@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { canAdminProject, notifyTaskUser, requireTaskService } from '@/lib/tasks'
+import { canAdminProject, notifyTaskUser, notifyTmChanged, requireTaskService } from '@/lib/tasks'
 
 /**
  * PUT /api/tm/projects/[id]/access { rows: [{login?|teamId?, role}] } —
@@ -83,6 +83,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       })
     }
     const items = await db.taskProjectAccess.findMany({ where: { projectId: id }, orderBy: { createdAt: 'asc' } })
+    /* критично для приватных проектов: у новых участников проект появляется
+       мгновенно (vetvi:tm → перечитывание снапшота /api/tm) */
+    notifyTmChanged('access-put')
     return NextResponse.json({ items })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

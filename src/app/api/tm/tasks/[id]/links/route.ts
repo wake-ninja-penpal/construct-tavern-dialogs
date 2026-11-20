@@ -4,6 +4,7 @@ import {
   appendSysMsg,
   canEditProject,
   parseLinks,
+  notifyTmChanged,
   requireTaskService,
   sanitizeLinks,
 } from '@/lib/tasks'
@@ -55,9 +56,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
           messages: appendSysMsg(task.messages, user.login, 'привязал(а) ноды «Ветвей»: ' + addedNames.slice(0, 6).join(', ') + (addedNames.length > 6 ? ' и ещё ' + (addedNames.length - 6) : '')),
         },
       })
+      notifyTmChanged('task-links')
       return NextResponse.json({ item, added: addedNames.length })
     }
     const item = await db.taskItem.update({ where: { id }, data: { links: sanitizeLinks(existing) } })
+    notifyTmChanged('task-links')
     return NextResponse.json({ item, added: 0 })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })

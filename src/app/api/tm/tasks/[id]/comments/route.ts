@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import {
   notifyTaskUser,
+  notifyTmChanged,
   parseMessages,
   parseStickers,
   projectRole,
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         preview,
       })
     }
+    notifyTmChanged('comment')
     return NextResponse.json({ item, message: msg })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
