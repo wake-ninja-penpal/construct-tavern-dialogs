@@ -376,6 +376,26 @@ export function LogModal({ store }: { store: VetviStore }) {
       : 'Журнал действий';
   const gone = store.logFilterNode ? !fn : store.logFilterGroup ? !fg : false;
 
+  /* сетевой режим: откат к версии НЕ выполняется сразу — создаётся запрос в
+     «Merge-запросы», который подтверждает владелец/админ (защита от случайного
+     отката общей комнаты). Локальные проекты и копии откатываются как раньше. */
+  const inRoom = !!(store.sync && store.sync.enabled && store.sync.mode === 'room' && !store.viewOnly);
+
+  /** Кнопка отката: в комнате — merge-запрос (и сразу окно мерджей),
+   *  локально — мгновенный откат с возможностью undo. */
+  const rollbackClick = (rb: { snap: string; approx: boolean }, e: LogEntry) => {
+    if (inRoom) {
+      if (store.sync && store.sync.sendRollbackRequest(rb.snap, { id: e.id, t: e.t })) {
+        store.closeModal();
+        store.openModal('merge');
+      }
+      return;
+    }
+    store.rollbackToSnapshot(rb.snap);
+    store.toast(rb.approx ? 'Проект откачен к ближайшему доступному снимку' : 'Проект откачен к моменту записи', rb.approx ? 'warn' : 'ok');
+    store.closeModal();
+  };
+
   const closeAll = () => { store.setLogFilters(null, null); store.closeModal(); };
 
   const showOnCanvas = (e: LogEntry) => {
@@ -471,25 +491,33 @@ export function LogModal({ store }: { store: VetviStore }) {
                                 type="button"
                                 className={'log-rb log-rb-proj' + (rb && rb.snap ? '' : ' dis')}
                                 title={rb && rb.snap !== null
-                                  ? (rb.approx
-                                    ? LOG_RB_APPROX + hkText('undo') + ').'
-                                    : 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').')
+                                  ? (inRoom
+                                    ? 'Немедленного отката не будет: в сетевом режиме создаётся запрос в «Merge-запросы» — его подтвердит владелец или админ комнаты (защита от случайного отката)'
+                                    : (rb.approx
+                                      ? LOG_RB_APPROX + hkText('undo') + ').'
+                                      : 'Проект вернётся к состоянию до этого изменения: ноды, связи, группы, переменные. Сам откат можно отменить (' + hkText('undo') + ').'))
                                   : (rb && rb.snap === null ? rb.reason : LOG_RB_NO_SNAP)}
                                 disabled={!rb || !rb.snap}
                                 onClick={(ev) => {
                                   ev.stopPropagation();
                                   if (!rb || !rb.snap) return;
-                                  store.rollbackToSnapshot(rb.snap);
-                                  store.toast(rb.approx ? 'Проект откачен к ближайшему доступному снимку' : 'Проект откачен к моменту записи', rb.approx ? 'warn' : 'ok');
-                                  store.closeModal();
+                                  rollbackClick(rb, e);
                                 }}
                               >
-                                {IC_RBACK} {rb && rb.snap && rb.approx ? 'Откатить к ближайшему снимку' : 'Откатить проект к этому моменту'}
+                                {IC_RBACK} {rb && rb.snap && rb.approx
+                                  ? (inRoom ? 'Запрос на откат к ближайшему снимку' : 'Откатить к ближайшему снимку')
+                                  : (inRoom ? 'Запрос на откат к этой версии' : 'Откатить проект к этому моменту')}
                               </button>
                               {/* причина видна РЯДОМ с кнопкой: подсказка у выключенной
                                   кнопки не показывается — без строки причину не увидеть */}
-                              {rb && rb.snap !== null && rb.approx && (
+                              {rb && rb.snap !== null && rb.approx && !inRoom && (
                                 <div className="log-rb-why">{LOG_RB_APPROX_SHORT}</div>
+                              )}
+                              {rb && rb.snap !== null && rb.approx && inRoom && (
+                                <div className="log-rb-why">{LOG_RB_APPROX_SHORT} В сетевом режиме откат выполняется через Merge-запрос.</div>
+                              )}
+                              {rb && rb.snap !== null && !rb.approx && inRoom && (
+                                <div className="log-rb-why">В сетевом режиме откат выполняется через Merge-запрос: владелец или админ подтвердит его в списке мерджей — защита от случайного отката.</div>
                               )}
                               {rb && rb.snap === null && (
                                 <div className="log-rb-why dis">Откат недоступен: {rb.reason}</div>

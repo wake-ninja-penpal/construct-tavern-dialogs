@@ -2096,9 +2096,13 @@ const internalServer = createServer((req, res) => {
         return
       }
       if (isStatus) {
-        /* какие из перечисленных комнат живы на сервере: строка в БД или активная
-           комната в памяти. «Вам открыли доступ» помечает офлайн-проекты и не
-           открывает их (владелец выключил сетевой режим — комната удалена). */
+        /* какие из перечисленных комнат живы на сервере. Онлайн = есть
+           СОХРАНЁННЫЙ документ: только vetvi:state создаёт строку комнаты,
+           и только с ним участник реально получит проект при входе. Активная
+           комната БЕЗ документа (владелец вошёл, публикация пропущена/ещё
+           не долетела) не считается: раньше она помечалась «онлайн» —
+           участник видел проект доступным, а открывал пустоту, и после
+           перезапуска sync комната исчезала вовсе. */
         const ids = Array.isArray(parsed?.roomIds)
           ? (parsed.roomIds as unknown[]).filter((x): x is string => isSafeRoom(x)).slice(0, 200)
           : []
@@ -2107,7 +2111,7 @@ const internalServer = createServer((req, res) => {
           let stored: unknown = null
           try { stored = qRoomExists.get(id) } catch (e) { console.error('[vetvi-sync] rooms-status db error', e) }
           const active = rooms.get(id)
-          out[id] = { online: !!stored || !!active, members: active ? active.members.size : 0 }
+          out[id] = { online: !!stored, members: active ? active.members.size : 0 }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: true, rooms: out }))

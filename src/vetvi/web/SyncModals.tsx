@@ -167,8 +167,14 @@ function ShareAccess({ store }: { store: VetviStore }) {
     setLogin('');
     setRole('editor');
     if (noExternalYet && !(sc.enabled && sc.mode === 'room')) {
-      store.toast('Первый участник добавлен — проект переведён в сетевой режим', 'ok');
-      sc.publishProject();
+      /* публикация проверяется по факту: тост только когда документ реально
+         сохранён на сервере. Раньше «переведён в сетевой режим» показывалось
+         сразу, а публикация могла тихо не состояться — участник оставался
+         офлайн до выключения/включения общего доступа. */
+      sc.publishProject((ok) => {
+        if (ok) store.toast('Первый участник добавлен — проект переведён в сетевой режим', 'ok');
+        else store.toast('Проект не удалось перевести в сетевой режим — участники пока не смогут его открыть. Проверьте соединение и переключите «Общедоступный (на сервере)».', 'warn');
+      });
     } else {
       store.toast('Доступ открыт — пользователю отправлено уведомление', 'ok');
     }
@@ -808,12 +814,21 @@ export function SyncDiffModal({ store }: { store: VetviStore }) {
   );
 }
 
-/* ═══════════ merge-запросы: копий + замен проекта (mergeModal) ═══════════ */
+/* ═══════════ merge-запросы: копий + замен проекта + откатов к версии ═══════════ */
 
 const MRG_KIND: Record<string, string> = {
   copy: 'слияние копии',
   replace: 'замена проекта',
 };
+
+/** Это заявка на откат к версии из журнала? (sendRollbackRequest:
+ *  kind replace + copyId 'rollback:…' + stats.rollback = 1) */
+function mrgIsRollback(r: MergeRequest): boolean {
+  if (r.kind !== 'replace') return false;
+  if (typeof r.copyId === 'string' && r.copyId.startsWith('rollback:')) return true;
+  const s = r.stats as Record<string, unknown> | undefined;
+  return !!(s && s.rollback === 1);
+}
 
 /** Окно списка Merge-запросов: АКТИВНЫЕ и ВЫПОЛНЕННЫЕ (контроль).
  *  Подтвердить (принять/отклонить) может владелец комнаты и админ.
@@ -870,17 +885,24 @@ export function MergeModal({ store }: { store: VetviStore }) {
         const s = r.stats || {} as Record<string, number>;
         const status = r.status || 'pending';
         const kind = r.kind === 'replace' ? 'replace' : 'copy';
+        const isRb = mrgIsRollback(r);
         return (
           <div key={r.id} className="mrg-item">
             <div className="mrg-top">
               <span className="mrg-dot" style={{ background: (r.sender && r.sender.color) || '#8b929c' }} />
               <b>{(r.sender && r.sender.name) || 'Гость'}</b>
-              <span className="mrg-kind">{MRG_KIND[kind]}</span>
+              <span className="mrg-kind">{isRb ? 'откат к версии' : MRG_KIND[kind]}</span>
               <span className="mrg-date">{syncFmtDate(r.createdAt)}</span>
               <span className={'mrg-status st-' + status}>
-                {status === 'pending' ? 'ожидает' : status === 'applied' ? 'принят' : 'отклонён'}
+                {status === 'pending' ? 'ожидает' : status === 'applied' ? (isRb ? 'применён' : 'принят') : 'отклонён'}
               </span>
             </div>
+            {isRb && typeof s.rollbackAt === 'number' && s.rollbackAt > 0 && (
+              <div className="mrg-stats">
+                <span className="mrg-chip">к версии от {syncFmtDate(new Date(s.rollbackAt).toISOString())}</span>
+              </div>
+            )}
+            {!isRb && (
             <div className="mrg-stats">
               {chip(s.addedNodes, '+ узлов')}
               {chip(s.changedNodes, '~ узлов')}
@@ -893,6 +915,7 @@ export function MergeModal({ store }: { store: VetviStore }) {
               {chip(s.addedGroups, '+ групп')}
               {chip(s.changedGroups, '~ групп')}
             </div>
+            )}
             {status !== 'pending' && (
               <div className="mrg-decided">
                 {status === 'applied' ? 'Принят' : 'Отклонён'}
@@ -907,11 +930,13 @@ export function MergeModal({ store }: { store: VetviStore }) {
                   type="button"
                   className="btn primary"
                   title={kind === 'replace'
-                    ? 'Применить версию отправителя ко всей комнате (снимок сохранится на сервере)'
+                    ? (isRb
+                      ? 'Откатить проект комнаты к выбранной версии (снимок текущего состояния сохранится на сервере)'
+                      : 'Применить версию отправителя ко всей комнате (снимок сохранится на сервере)')
                     : 'Смерджить изменения копии в проект (снимок сохранится на сервере)'}
                   onClick={() => { if (sc) { sc.decideMerge(r.id, 'apply'); setList((l) => l.map((x) => (x.id === r.id ? { ...x, status: 'applied', decidedBy: 'вы' } : x))); } }}
                 >
-                  Принять
+                  {isRb ? 'Откатить' : 'Принять'}
                 </button>
                 <button
                   type="button"

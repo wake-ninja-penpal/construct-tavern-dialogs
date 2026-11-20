@@ -64,6 +64,11 @@ interface JoinOpts {
      с проектом комнаты, открывается из комнаты без диалога — как переход по ссылке */
   viaLink?: boolean;
   _pwWrong?: boolean;
+  /* публикация своей комнаты (own): вызов с true — документ реально сохранён на
+     сервере (комната стала «онлайн» для участников), с false — опубликовать не
+     удалось (ошибка сети/роли). Включатель «Общедоступный» и выдача доступа
+     показывают честный итог, а не оптимистичный. */
+  onPublished?: (ok: boolean) => void;
 }
 
 interface SyncDoc {
@@ -305,26 +310,37 @@ export class SyncClient {
 
   /** Тихий перезаход в комнату без разрыва сокета: сервер пересчитает роль
    *  (после выдачи/отзыва доступа или legacy-claim). Документ из re-ack не
-   *  применяется — обновляется только роль/список участников. */
-  rejoin(): void {
+   *  применяется — обновляется только роль/список участников. Исключение:
+   *  лечение владельца (own) — если у комнаты ещё НЕТ сохранённого документа,
+   *  после восстановления роли публикуем свой проект (без этого комната
+   *  «висела» активной, но пустой: участники видели её онлайн, контента
+   *  не получали, а после перезапуска sync она исчезала вовсе — лечилось
+   *  только выключением/включением «Общедоступного»). */
+  rejoin(healOwn = false): void {
     const sock = this.sock;
     if (!sock || !sock.connected || !this.room || this.mode === 'copy') return;
     if (this.rejoining) return;
     this.rejoining = true;
     const me = getMe();
     const jpay: Record<string, unknown> = { roomId: this.room, user: { id: me.id, name: me.name, color: me.color }, quiet: true };
+    if (healOwn) jpay.own = true; /* лечение владельца: разрешаем открыть комнату, которой нет на диске */
     const tok = getAccountToken();
     if (tok) { jpay.token = tok; jpay.userId = me.id; }
     const jpw = this.store.syncProjPass || this.joinPass || null;
     if (jpw) jpay.password = jpw;
     const meta = this.store.doc.meta as unknown as { passHash?: string; passSalt?: string };
     if (meta && meta.passHash) jpay.pass = { salt: String(meta.passSalt || ''), hash: String(meta.passHash) };
-    sock.emit('vetvi:join', jpay, (res: { ok?: boolean; role?: string; canEdit?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[] } | null) => {
+    sock.emit('vetvi:join', jpay, (res: { ok?: boolean; role?: string; canEdit?: boolean; users?: { id: string; name: string; color: string; canEdit?: boolean }[]; doc?: SyncDoc | null } | null) => {
       this.rejoining = false;
       if (!res || !res.ok) return;
       this.applyRole(res);
       this.store.syncUsers = res.users || this.store.syncUsers;
       this.store.emit();
+      /* владелец перезашёл, а документ в комнате так и не сохранён — публикуем
+         сейчас (роль уже восстановлена, viewOnly снят) */
+      if (!res.doc && (this.role === 'owner' || this.role === 'admin') && this.mode === 'room' && !this.store.viewOnly) {
+        this.flushState(true);
+      }
     });
   }
 
@@ -414,9 +430,19 @@ export class SyncClient {
 
         const serverDoc = res.doc || null;
         if (!serverDoc) {
-          this.flushState(true);
+          /* комната без сохранённого документа: публикация обязательна — только
+             vetvi:state создаёт строку комнаты в БД (признак «онлайн» для
+             участников). Если снимок тихо пропущен — доверенные повторы. */
+          const published = this.flushState(true);
+          if (opts.own) {
+            if (published) opts.onPublished?.(true);
+            else this.retryPublish(opts);
+          }
           if (!opts.silent && !opts.own) this.store.toast('Комната открыта — отправьте ссылку соавторам');
         } else {
+          /* документ уже хранится на сервере — комната онлайн независимо от
+             того, чем закончилась эта публикация */
+          if (opts.own) opts.onPublished?.(true);
           let localJson = '';
           try { localJson = JSON.stringify(this.store.syncDocObj()); } catch { /* нет сериализации */ }
           let serverJson = '';
@@ -474,7 +500,10 @@ export class SyncClient {
             try {
               const r = await accessInit(roomId, pid, (this.store.doc.meta.name as string) || null);
               if (!r.ok || !r.role) return;
-              this.rejoin();
+              /* own: после лечения роли комната может остаться без сохранённого
+                 документа (первый join был «гостем» и публикация пропущена) —
+                 rejoin(true) перезайдёт как владелец и опубликует проект */
+              this.rejoin(true);
             } catch { /* сервер недоступен — роль придёт по свипу ролей */ }
           })();
         }
@@ -524,14 +553,17 @@ export class SyncClient {
       if (!m || m.roomId !== this.room) return;
       this.applyLive(m);
     });
-    sock.on('vetvi:merge-new', (m: { roomId?: string; sender?: { name?: string }; kind?: string }) => {
+    sock.on('vetvi:merge-new', (m: { roomId?: string; sender?: { name?: string }; kind?: string; stats?: Record<string, unknown> }) => {
       if (!m || m.roomId !== this.room) return;
       this.mergeCount = (this.mergeCount || 0) + 1;
       this.renderUI();
       const who = (m.sender && m.sender.name) || 'гостя';
-      this.store.toast(m.kind === 'replace'
-        ? who + ' просит заменить проект своей версией — окно Merge-запросов'
-        : 'Новый merge-запрос от ' + who, 'warn');
+      const isRb = m.kind === 'replace' && m.stats && m.stats.rollback === 1;
+      this.store.toast(isRb
+        ? who + ' просит откатить проект к версии из журнала — окно Merge-запросов'
+        : m.kind === 'replace'
+          ? who + ' просит заменить проект своей версией — окно Merge-запросов'
+          : 'Новый merge-запрос от ' + who, 'warn');
     });
     sock.on('vetvi:merge-decision', (m: { roomId?: string; copyId?: string; requestId?: string; status?: string; kind?: string; decidedBy?: string }) => {
       if (!m) return;
@@ -553,16 +585,28 @@ export class SyncClient {
         else this.store.toast('Запрос на замену отклонён' + who, 'warn');
         this.lastReplaceReq = null;
       }
+      /* отправленный отсюда запрос на откат: отклонение (применение придёт
+         отдельным vetvi:replaced — там свой тост) */
+      if (this.lastRollbackReq && m.requestId === this.lastRollbackReq.id) {
+        const who = m.decidedBy ? ' — решил ' + m.decidedBy : '';
+        if (m.status !== 'applied') this.store.toast('Запрос на откат отклонён' + who + ' — проект остался без изменений', 'warn');
+        this.lastRollbackReq = null;
+      }
     });
     /* подтверждённая владельцем/админом замена: применяется сразу (без
        блока расхождения) — версия уже одобрена и снимок сохранён */
-    sock.on('vetvi:replaced', (m: { roomId?: string; doc?: SyncDoc; by?: { name?: string; color?: string } | null }) => {
+    sock.on('vetvi:replaced', (m: { roomId?: string; doc?: SyncDoc; by?: { name?: string; color?: string } | null; requestId?: string }) => {
       if (!m || m.roomId !== this.room) return;
       if (!m.doc || !Array.isArray(m.doc.nodes)) return;
       if (this.applyingRemote) return;
+      /* откат из журнала (sendRollbackRequest) или обычная замена — разные тосты */
+      const isRollback = !!(m.requestId && this.lastRollbackReq && m.requestId === this.lastRollbackReq.id);
+      if (isRollback) this.lastRollbackReq = null;
       this.applyRemote(m.doc, false);
       this.store.clearSyncDiff();
-      this.store.toast('Проект заменён одобренной версией' + (m.by && m.by.name ? ' — решил ' + m.by.name : ''), 'ok');
+      this.store.toast(isRollback
+        ? 'Проект откачен к выбранной версии' + (m.by && m.by.name ? ' — решил ' + m.by.name : '')
+        : 'Проект заменён одобренной версией' + (m.by && m.by.name ? ' — решил ' + m.by.name : ''), 'ok');
     });
     sock.on('vetvi:error', (m: { message?: string }) => {
       if (m && m.message) this.store.toast(m.message, 'err');
@@ -937,10 +981,14 @@ export class SyncClient {
     this.stateT = setTimeout(() => this.flushState(false), 160);
   }
 
-  flushState(force = false): void {
-    if (!this.enabled || !this.sock || !this.sock.connected) return;
-    if (this.store.viewOnly) return; // только чтение: снапшоты не публикуем (сервер и так отклонит)
-    if (this.applyingRemote && !force) return;
+  /** Публикация снимка в комнату. Возвращает true ТОЛЬКО если снимок реально
+   *  отправлен (сохранён сервером в rooms) — false значит «тихий пропуск»
+   *  (нет соединения / только чтение / заглушка). false — сигнал владельцу
+   *  проекта: комната осталась БЕЗ документа, участники увидят офлайн. */
+  flushState(force = false): boolean {
+    if (!this.enabled || !this.sock || !this.sock.connected) return false;
+    if (this.store.viewOnly) return false; // только чтение: снапшоты не публикуем (сервер и так отклонит)
+    if (this.applyingRemote && !force) return false;
     const doc = this.store.syncDocObj();
     /* страховка: заглушку «Проект по доступу» (openShared без локальной копии) не
        публикуем — иначе она заменяет собой данные комнаты (последний дубль побеждает),
@@ -948,7 +996,7 @@ export class SyncClient {
     {
       const stubPid = (doc.meta && typeof (doc.meta as { projectId?: unknown }).projectId === 'string')
         ? String((doc.meta as { projectId?: string }).projectId) : '';
-      if (stubPid && this.store.roomStubPids.has(stubPid)) return;
+      if (stubPid && this.store.roomStubPids.has(stubPid)) return false;
     }
     /* flushSave больше не публикует, поэтому сюда попадают ТОЛЬКО реальные правки
        открытого документа (scheduleSave мутаций и явные публикации). Если открытый
@@ -969,10 +1017,34 @@ export class SyncClient {
       }
     }
     let json = '';
-    try { json = JSON.stringify(doc); } catch { return; }
-    if (json === this.lastSent && !force) return;
+    try { json = JSON.stringify(doc); } catch { return false; }
+    if (json === this.lastSent && !force) return false;
     this.lastSent = json;
-    try { this.sock.emit('vetvi:state', { roomId: this.room, doc }); } catch { /* соединение умерло */ }
+    try { this.sock.emit('vetvi:state', { roomId: this.room, doc }); } catch { /* соединение умерло */ return false; }
+    return true;
+  }
+
+  /** Доверенная публикация своей комнаты (own): после join-ack с пустым доком
+   *  снимок мог быть тихо пропущен (роль ещё «гость» до лечения, соединение
+   *  дрожит). Несколько спокойных попыток — лечащий rejoin успевает поднять
+   *  роль, и проект ВЕРОЯТНО публикуется без участия человека. Полная неудача
+   *  — честное сообщение: комната осталась без документа, участники офлайн
+   *  (раньше UI показывал «переведён в сетевой режим» в пустоту). */
+  private retryPublish(opts: JoinOpts, attempt = 0): void {
+    if (!this.enabled || this.mode !== 'room' || !this.room) { opts.onPublished?.(false); return; }
+    if (this.sock && this.sock.connected && !this.store.viewOnly) {
+      /* уже опубликовано лечащим rejoin/правкой? — считаем успехом без дубля */
+      try {
+        if (JSON.stringify(this.store.syncDocObj()) === this.lastSent) { opts.onPublished?.(true); return; }
+      } catch { /* нет сериализации — попробуем flushState */ }
+      if (this.flushState(true)) { opts.onPublished?.(true); return; }
+    }
+    if (attempt >= 4) {
+      opts.onPublished?.(false);
+      if (!opts.onPublished) this.store.toast('Проект не удалось опубликовать на сервере — участники увидят его офлайн. Выключите и включите «Общедоступный (на сервере)».', 'warn');
+      return;
+    }
+    window.setTimeout(() => this.retryPublish(opts, attempt + 1), 1800);
   }
 
   /* ═══ живые перетаскивания (троттлинг как в оригинале) ═══ */
@@ -1239,12 +1311,13 @@ export class SyncClient {
 
   /** Включить сетевой режим (переключатель в окне «Поделиться»): резервируем
    *  roomId, заявляем владение, заходим в комнату и публикуем локальный проект. */
-  publishProject(): void {
+  publishProject(onPublished?: (ok: boolean) => void): void {
     if (this.mode === 'copy') {
       this.store.toast('Это копия — поделиться можно только оригиналом проекта', 'warn');
+      onPublished?.(false);
       return;
     }
-    if (this.enabled && this.mode === 'room' && this.room) return; // уже опубликован
+    if (this.enabled && this.mode === 'room' && this.room) { onPublished?.(true); return; } // уже опубликован
     const roomId = this.shareRoomId();
     const pid = String(this.store.doc.meta.projectId || '');
     /* владелец комнаты: запись доступа СТРОГО ДО смены хеша и входа в комнату.
@@ -1259,7 +1332,7 @@ export class SyncClient {
       /* хеш меняем только когда доступ уже записан: hashchange увидит this.room
          и не устроит повторный вход по ссылке */
       this.setHash(roomId, pid);
-      this.connect(roomId, pid, { own: true, pushLocal: true });
+      this.connect(roomId, pid, { own: true, pushLocal: true, onPublished });
     })();
   }
 
@@ -1569,6 +1642,50 @@ export class SyncClient {
   /** Последний отправленный запрос на замену (id) — для тоста о решении. */
   lastReplaceReq: { id: string; at: number } | null = null;
 
+  /** Последний отправленный запрос на ОТКАТ (id) — для тостов о решении. */
+  lastRollbackReq: { id: string; at: number } | null = null;
+
+  /** Запрос на ОТКАТ комнаты к версии из журнала действий: вместо немедленного
+   *  отката создаётся merge-запрос (kind replace) — его подтвердит владелец/админ
+   *  в окне Merge-запросов, после чего сервер сам применит версию ко всей комнате
+   *  (сохранив перед этим снимок текущего состояния). Защита от случайного отката
+   *  в сетевом режиме: даже владелец отправляет запрос и подтверждает его вторым
+   *  кликом в списке мерджей. Возвращает false, если запрос не отправлен
+   *  (оффлайн/только чтение/снимок повреждён/состояние уже совпадает). */
+  sendRollbackRequest(snap: string, entry: { id: string; t: number }): boolean {
+    if (!this.enabled || !this.room) { this.store.toast('Запрос на откат доступен внутри комнаты проекта', 'warn'); return false; }
+    if (this.store.viewOnly) { this.store.toast('Только чтение: запрос на откат недоступен', 'warn'); return false; }
+    let target: Record<string, unknown> | null = null;
+    try { target = JSON.parse(snap) as Record<string, unknown>; } catch { target = null; }
+    if (!target || !Array.isArray(target.nodes)) { this.store.toast('Снимок повреждён — откат невозможен', 'warn'); return false; }
+    let cur: Record<string, unknown>;
+    try { cur = JSON.parse(JSON.stringify(this.store.syncDocObj())) as Record<string, unknown>; } catch { return false; }
+    if (JSON.stringify(cur) === JSON.stringify(target)) { this.store.toast('Проект уже в этом состоянии', 'ok'); return false; }
+    /* статистика отличий ТЕКУЩЕГО проекта от выбранной версии — карточка запроса */
+    const stats = mergeStats(cur, target) as MergeStats & Record<string, unknown>;
+    stats.rollback = 1; /* пометка «это откат» — карточка в списке мерджей */
+    stats.rollbackAt = entry.t; /* время версии из журнала */
+    const me = getMe();
+    this.opCall('vetvi:merge-send', {
+      roomId: this.room,
+      copyId: 'rollback:' + me.id, /* повторный откат того же автора обновляет заявку */
+      sender: { name: me.name, color: me.color },
+      stats,
+      doc: { current: target, base: null },
+      kind: 'replace',
+    }, (res) => {
+      if (res && res.ok) {
+        this.lastRollbackReq = { id: String(res.id || ''), at: Date.now() };
+        this.store.toast(this.canDecideMerge()
+          ? 'Запрос на откат создан — подтвердите его в «Merge-запросах»'
+          : 'Запрос на откат отправлен — его подтвердит владелец или админ комнаты', 'ok');
+      } else {
+        this.store.toast('Не удалось создать запрос на откат: ' + ((res && res.error) || 'ошибка'), 'err');
+      }
+    });
+    return true;
+  }
+
   /* ═══ push-уведомления (колокольчик) ═══ */
 
   /** Подписка на мгновенные уведомления сервера (vetvi:ntf). Отдельный
@@ -1804,10 +1921,13 @@ export interface MergeRequest {
   sender?: { name?: string; color?: string };
   createdAt?: string;
   status?: string;
-  stats?: MergeStats;
+  stats?: MergeStats & Record<string, unknown>;
   doc?: { current?: Record<string, unknown>; base?: Record<string, unknown> };
-  /** 'copy' — слияние из локальной копии; 'replace' — запрос на замену проекта. */
+  /** 'copy' — слияние из локальной копии; 'replace' — запрос на замену проекта
+   *  (в т.ч. откат к версии из журнала: copyId 'rollback:…', stats.rollback = 1). */
   kind?: 'copy' | 'replace';
+  /** идентификатор источника заявки: 'copy:…', 'replace:…', 'rollback:…' */
+  copyId?: string;
   decidedBy?: string | null;
   decidedAt?: string | null;
   [k: string]: unknown;
