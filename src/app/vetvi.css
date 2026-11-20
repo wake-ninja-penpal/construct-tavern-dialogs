@@ -2183,6 +2183,9 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-md-tools{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
 .tm-md-tools button{width:25px;height:26px;flex:none;border:none;background:none;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .tm-md-tools button:hover{background:color-mix(in srgb,var(--acc) 16%,transparent);color:var(--acc2)}
+/* активный инструмент: форматирование под кареткой/в выделении (повторный клик снимает) */
+.tm-md-tools button.on{background:rgba(226,165,78,.18);color:var(--acc2)}
+.tm-md-tools button.on:hover{background:rgba(226,165,78,.26)}
 .tm-md-tools button:disabled{opacity:.4;cursor:default}
 .tm-md-tools button:disabled:hover{background:none;color:var(--tx3)}
 .tm-md-tools button svg{width:14px;height:14px}
@@ -2234,6 +2237,13 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .md-body pre:last-child{margin-bottom:0}
 .md-body pre .lang{position:absolute;top:6px;right:9px;font:600 9px var(--mono);color:var(--tx3);text-transform:uppercase;letter-spacing:1px}
 .md-body pre code{background:none;color:#c9d1d9;border:none;padding:0;font:12px/1.55 var(--mono);display:block;white-space:pre}
+/* подсветка синтаксиса (highlightCode в md.ts): палитра «Ветвей» */
+.md-body pre code .tok-k{color:#c792ea}
+.md-body pre code .tok-s{color:#a9d69b}
+.md-body pre code .tok-c{color:#6a7381;font-style:italic}
+.md-body pre code .tok-n{color:#e2a54e}
+.md-body pre code .tok-f{color:#7fc4b0}
+.md-body pre code .tok-t{color:#e0967f}
 .md-body blockquote{margin:0 0 8px;padding:6px 12px;border-left:3px solid var(--acc);background:rgba(226,165,78,.06);border-radius:0 8px 8px 0;color:var(--tx2)}
 .md-body blockquote p:last-child{margin-bottom:0}
 .md-body table{border-collapse:collapse;margin:0 0 8px;font-size:12px;max-width:100%;display:block;overflow-x:auto}
@@ -2485,6 +2495,14 @@ body.dragging *{cursor:grabbing!important}
 .mdw.empty::before{content:attr(data-ph);color:var(--tx3);pointer-events:none;display:block;white-space:pre-wrap;font:400 12.5px/1.55 var(--body)}
 /* поле описания: высота по содержимому (мягкий потолок) */
 .tm-desc-ed{min-height:130px;max-height:420px}
+/* описание в режиме ТЕКСТА (клик открывает редактор) — тот же рендер, что в читалке */
+.tm-desc-view{position:relative;min-height:40px;padding:9px 12px;border:1px dashed #2b2f37;border-radius:10px;background:#14161a;overflow-wrap:anywhere}
+.tm-desc-view.clickable{cursor:text}
+.tm-desc-view.clickable:hover{border-color:#3d434f;background:#171a1f}
+.tm-desc-view.clickable:focus-visible{outline:none;border-color:rgba(226,165,78,.45)}
+.tm-desc-view.empty{cursor:pointer}
+.tm-desc-empty-hint{color:var(--tx3);font:400 12.5px/1.55 var(--body)}
+.tm-desc-view p:last-child,.tm-desc-view ul:last-child,.tm-desc-view ol:last-child,.tm-desc-view pre:last-child,.tm-desc-view blockquote:last-child{margin-bottom:0}
 /* композер чата: растёт по тексту до трети окна (потолок задаёт maxGrow) */
 .tm-composer-ed{min-height:38px;max-height:none;height:38px;overflow:hidden;padding:8px 10px;font:12.5px/1.45 var(--body)}
 .tm-composer-ed.empty{height:38px}

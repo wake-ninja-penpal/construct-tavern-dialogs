@@ -59,7 +59,7 @@ export function mdToHtml(src: string): string {
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
       i++;
-      out += '<pre>' + (lang ? '<span class="lang">' + esc(lang) + '</span>' : '') + '<code>' + esc(buf.join('\n')) + '</code></pre>';
+      out += '<pre>' + (lang ? '<span class="lang">' + esc(lang) + '</span>' : '') + '<code>' + highlightCode(buf.join('\n'), lang) + '</code></pre>';
       continue;
     }
     if (/^\s*$/.test(line)) { i++; continue; }
@@ -106,6 +106,140 @@ export function mdToHtml(src: string): string {
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !isBlock(lines[i])) { buf.push(lines[i]); i++; }
     if (buf.length) out += '<p>' + mdInline(esc(buf.join('\n'))).replace(/\n/g, '<br>') + '</p>';
     else i++;
+  }
+  return out;
+}
+
+/* ═══ подсветка кода по языку (лёгкий токенайзер без внешних библиотек) ═══
+   На входе исходный код, на выходе безопасный HTML с span.tok-*: ключевые
+   слова, строки, комментарии, числа, вызовы функций и html-теги. Используется
+   и в отрисовке (mdToHtml), и в живом редакторе (MdWysiwyg — переподсветка
+   блоков кода, в которых каретка не стоит). */
+
+const escTok = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c));
+
+const LANG_ALIAS: Record<string, string> = {
+  javascript: 'js', mjs: 'js', cjs: 'js', jsx: 'js', node: 'js',
+  typescript: 'ts', tsx: 'ts',
+  python3: 'py', python: 'py', py: 'py',
+  bash: 'sh', shell: 'sh', zsh: 'sh', console: 'sh', sh: 'sh',
+  yml: 'yaml', yaml: 'yaml',
+  'c++': 'cpp', 'c plus plus': 'cpp',
+  'c#': 'cs', csharp: 'cs',
+  golang: 'go',
+  ruby: 'rb',
+  html: 'html', xhtml: 'html', xml: 'html', svg: 'html', svelte: 'html', vue: 'html',
+  postgres: 'sql', postgresql: 'sql', mysql: 'sql', sqlite: 'sql',
+  dockerfile: 'sh', makefile: 'sh', dotenv: 'sh', ini: 'sh', toml: 'sh', conf: 'sh',
+  kotlin: 'java', kt: 'java',
+};
+
+const LANGS: Record<string, { kw?: string[]; hash?: boolean; tags?: boolean; clike?: boolean }> = {
+  _: { clike: true },
+  js: { clike: true, kw: ['async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally', 'for', 'function', 'get', 'if', 'import', 'in', 'instanceof', 'let', 'new', 'null', 'of', 'return', 'set', 'static', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'undefined', 'var', 'void', 'while', 'yield'] },
+  ts: { clike: true, kw: ['abstract', 'any', 'as', 'async', 'await', 'boolean', 'break', 'case', 'catch', 'class', 'const', 'continue', 'declare', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'from', 'function', 'get', 'if', 'implements', 'import', 'in', 'infer', 'instanceof', 'interface', 'keyof', 'let', 'never', 'new', 'null', 'number', 'of', 'private', 'protected', 'public', 'readonly', 'return', 'set', 'static', 'string', 'super', 'switch', 'this', 'throw', 'true', 'try', 'type', 'typeof', 'undefined', 'unknown', 'var', 'void', 'while', 'yield'] },
+  py: { hash: true, kw: ['and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'False', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'None', 'nonlocal', 'not', 'or', 'pass', 'print', 'raise', 'return', 'self', 'True', 'try', 'while', 'with', 'yield'] },
+  go: { clike: true, kw: ['break', 'case', 'chan', 'const', 'continue', 'default', 'defer', 'else', 'fallthrough', 'false', 'for', 'func', 'go', 'goto', 'if', 'import', 'interface', 'map', 'nil', 'package', 'range', 'return', 'select', 'struct', 'switch', 'true', 'type', 'var'] },
+  rust: { clike: true, kw: ['as', 'async', 'await', 'break', 'const', 'continue', 'crate', 'dyn', 'else', 'enum', 'extern', 'false', 'fn', 'for', 'if', 'impl', 'in', 'let', 'loop', 'match', 'mod', 'move', 'mut', 'pub', 'ref', 'return', 'self', 'static', 'struct', 'super', 'trait', 'true', 'type', 'unsafe', 'use', 'where', 'while'] },
+  java: { clike: true, kw: ['abstract', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final', 'finally', 'float', 'for', 'if', 'implements', 'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new', 'null', 'package', 'private', 'protected', 'public', 'return', 'short', 'static', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws', 'true', 'false', 'try', 'var', 'void', 'volatile', 'while'] },
+  cpp: { clike: true, kw: ['auto', 'bool', 'break', 'case', 'catch', 'char', 'class', 'const', 'constexpr', 'continue', 'default', 'delete', 'do', 'double', 'else', 'enum', 'explicit', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long', 'mutable', 'namespace', 'new', 'nullptr', 'operator', 'private', 'protected', 'public', 'return', 'short', 'signed', 'sizeof', 'static', 'struct', 'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile', 'while'] },
+  cs: { clike: true, kw: ['abstract', 'as', 'base', 'bool', 'break', 'byte', 'case', 'catch', 'char', 'checked', 'class', 'const', 'continue', 'decimal', 'default', 'do', 'double', 'else', 'enum', 'event', 'false', 'finally', 'float', 'for', 'foreach', 'get', 'if', 'in', 'int', 'interface', 'internal', 'is', 'lock', 'long', 'namespace', 'new', 'null', 'object', 'operator', 'out', 'override', 'params', 'private', 'protected', 'public', 'readonly', 'ref', 'return', 'set', 'sealed', 'short', 'sizeof', 'static', 'string', 'struct', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'uint', 'ulong', 'unsafe', 'ushort', 'using', 'var', 'virtual', 'void', 'while'] },
+  php: { hash: true, clike: true, kw: ['and', 'array', 'as', 'break', 'case', 'catch', 'class', 'clone', 'const', 'continue', 'default', 'do', 'echo', 'else', 'elseif', 'empty', 'extends', 'false', 'final', 'finally', 'fn', 'for', 'foreach', 'function', 'global', 'if', 'implements', 'include', 'instanceof', 'interface', 'isset', 'list', 'match', 'new', 'null', 'or', 'print', 'private', 'protected', 'public', 'require', 'return', 'static', 'switch', 'throw', 'true', 'try', 'unset', 'use', 'var', 'while', 'xor', 'yield'] },
+  rb: { hash: true, kw: ['attr_accessor', 'begin', 'break', 'case', 'class', 'def', 'defined?', 'do', 'else', 'elsif', 'end', 'ensure', 'false', 'for', 'if', 'in', 'lambda', 'module', 'new', 'next', 'nil', 'proc', 'puts', 'raise', 'require', 'rescue', 'return', 'self', 'then', 'true', 'unless', 'until', 'while', 'yield'] },
+  sql: { kw: ['add', 'all', 'alter', 'and', 'as', 'asc', 'avg', 'begin', 'between', 'boolean', 'by', 'case', 'commit', 'count', 'create', 'cross', 'database', 'date', 'delete', 'desc', 'distinct', 'drop', 'else', 'end', 'exists', 'foreign', 'from', 'full', 'group', 'having', 'in', 'index', 'inner', 'insert', 'int', 'into', 'is', 'join', 'key', 'left', 'like', 'limit', 'max', 'min', 'not', 'null', 'offset', 'on', 'or', 'order', 'outer', 'primary', 'references', 'rollback', 'select', 'set', 'sum', 'table', 'text', 'then', 'timestamp', 'transaction', 'union', 'unique', 'update', 'values', 'varchar', 'view', 'when', 'where', 'with'] },
+  sh: { hash: true, kw: ['alias', 'break', 'case', 'cd', 'continue', 'do', 'done', 'echo', 'elif', 'else', 'esac', 'eval', 'exec', 'exit', 'export', 'fi', 'for', 'function', 'if', 'in', 'local', 'readonly', 'return', 'set', 'shift', 'source', 'then', 'trap', 'true', 'false', 'unset', 'until', 'while'] },
+  json: { clike: true, kw: ['true', 'false', 'null'] },
+  css: { clike: true, kw: ['important', 'media', 'import', 'keyframes', 'font-face', 'supports', 'charset', 'layer', 'container'] },
+  html: { tags: true, clike: true },
+};
+
+/** Разметить код цветом под язык (безопасный HTML, без внешних библиотек). */
+export function highlightCode(src: string, lang: string): string {
+  const raw = String(src || '');
+  const l = LANG_ALIAS[String(lang || '').toLowerCase().trim()] || String(lang || '').toLowerCase().trim();
+  const def = LANGS[l] || LANGS._;
+  const kw = def.kw ? new Set(def.kw) : null;
+  const hashCom = !!def.hash;
+  const tags = !!def.tags;
+  const clike = !!def.clike;
+  let out = '';
+  let i = 0;
+  const n = raw.length;
+  const push = (cls: string, text: string): void => {
+    out += cls ? '<span class="tok-' + cls + '">' + escTok(text) + '</span>' : escTok(text);
+  };
+  const prevCh = (): string => (i > 0 ? raw[i - 1] : '');
+  while (i < n) {
+    const c = raw[i];
+    /* комментарии: //… /* … *\/ и <!— — —> и #… (для языков с решёткой) */
+    if (clike && c === '/' && raw[i + 1] === '/' && prevCh() !== ':') {
+      let j = raw.indexOf('\n', i);
+      if (j < 0) j = n;
+      push('c', raw.slice(i, j)); i = j; continue;
+    }
+    if (clike && c === '/' && raw[i + 1] === '*') {
+      let j = raw.indexOf('*/', i + 2);
+      j = j < 0 ? n : j + 2;
+      push('c', raw.slice(i, j)); i = j; continue;
+    }
+    if (tags && raw.startsWith('<!--', i)) {
+      let j = raw.indexOf('-->', i);
+      j = j < 0 ? n : j + 3;
+      push('c', raw.slice(i, j)); i = j; continue;
+    }
+    if (hashCom && c === '#') {
+      let j = raw.indexOf('\n', i);
+      if (j < 0) j = n;
+      push('c', raw.slice(i, j)); i = j; continue;
+    }
+    /* строки: '…' "…" `…` (с экранированием \\) */
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < n) {
+        if (raw[j] === '\\') { j += 2; continue; }
+        if (raw[j] === c) { j++; break; }
+        if (raw[j] === '\n' && c !== '`') break;
+        j++;
+      }
+      push('s', raw.slice(i, j)); i = j; continue;
+    }
+    /* html-теги: <tag …> */
+    if (tags && c === '<' && /[a-zA-Z/!]/.test(raw[i + 1] || '')) {
+      const m = /^<\/?[a-zA-Z][\w:-]*/.exec(raw.slice(i));
+      if (m) { push('t', m[0]); i += m[0].length; continue; }
+    }
+    /* числа (не внутри идентификатора) */
+    if (/\d/.test(c) && !/[\w$]/.test(prevCh())) {
+      const m = /^(?:0[xXbBoO][\da-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(raw.slice(i));
+      if (m) { push('n', m[0]); i += m[0].length; continue; }
+    }
+    /* идентификаторы: ключевое слово / вызов функции / просто слово */
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i + 1;
+      while (j < n && /[\w$]/.test(raw[j])) j++;
+      const word = raw.slice(i, j);
+      if (kw && kw.has(word)) push('k', word);
+      else if (kw) {
+        let k = j;
+        while (k < n && raw[k] === ' ') k++;
+        push(raw[k] === '(' ? 'f' : '', word);
+      } else push('', word);
+      i = j; continue;
+    }
+    /* остальной текст — группой до ближайшего «начального» символа */
+    let j = i;
+    while (j < n) {
+      const ch = raw[j];
+      if (ch === '"' || ch === "'" || ch === '`') break;
+      if (clike && ch === '/' && (raw[j + 1] === '/' || raw[j + 1] === '*')) break;
+      if (hashCom && ch === '#') break;
+      if (tags && ch === '<' && /[a-zA-Z/!]/.test(raw[j + 1] || '')) break;
+      if (/\d/.test(ch) && !/[\w$.]/.test(j > i || j > 0 ? raw[j - 1] : '')) break;
+      if (/[A-Za-z_$]/.test(ch)) break;
+      j++;
+    }
+    if (j === i) j = i + 1;
+    push('', raw.slice(i, j)); i = j;
   }
   return out;
 }
@@ -213,6 +347,21 @@ function mdListSource(list: HTMLElement, level: number): string {
   return out;
 }
 
+/* текст блока кода с учётом <br> (textContent теряет переводы строк) */
+export function codeTextOf(code: HTMLElement): string {
+  let out = '';
+  for (const node of Array.from(code.childNodes)) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const e = node as HTMLElement;
+      if (e.tagName === 'BR') { out += '\n'; continue; }
+      out += codeTextOf(e);
+    } else {
+      out += node.textContent || '';
+    }
+  }
+  return out;
+}
+
 function mdBlocksSource(nodes: NodeList | Node[]): string {
   const chunks: string[] = [];
   for (const node of Array.from(nodes as Node[])) {
@@ -228,7 +377,11 @@ function mdBlocksSource(nodes: NodeList | Node[]): string {
     if (tag === 'HR') { chunks.push('---'); continue; }
     if (tag === 'PRE') {
       const code = el.querySelector('code') || el;
-      chunks.push('```\n' + (code.textContent || '') + '\n```');
+      /* язык блока (```py) — подпись .lang обязана вернуться в исходник,
+         иначе после правки в редакторе подсветка теряется */
+      const langEl = el.querySelector<HTMLElement>(':scope > .lang');
+      const lang = (langEl?.textContent || '').trim();
+      chunks.push('```' + lang + '\n' + codeTextOf(code) + '\n```');
       continue;
     }
     if (tag === 'BLOCKQUOTE') {

@@ -947,6 +947,17 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
         if (window.confirm('Удалить комментарий' + (msg.login !== ws?.me.login ? ' участника @' + msg.login : '') + '?')) await deleteComment(A.taskId, A.msgId);
         return;
       }
+      /* ── выделенный фрагмент в WYSIWYG-редакторе (цитировать/копировать) ── */
+      case 'md-quote': {
+        close();
+        try { window.dispatchEvent(new CustomEvent('tm-quote-comment', { detail: { text: String(A.text || '') } })); } catch { /* нет CustomEvent */ }
+        return;
+      }
+      case 'md-copy-sel': {
+        close();
+        try { await navigator.clipboard.writeText(String(A.text || '')); say('Фрагмент скопирован'); } catch { say('Не удалось скопировать', 'warn'); }
+        return;
+      }
       default: return;
     }
   }, [applySavedView, clearColumn, createBoard, createColumn, deleteBoard, deleteColumnFate, deleteComment, deleteProject, deleteTeam, deleteTask, deleteView, duplicateTask, guardEdit, moveColumn, patchComment, patchTask, renameBoard, renameProject, say, toggleRail, updateColumn, ws]);

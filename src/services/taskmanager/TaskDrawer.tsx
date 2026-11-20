@@ -83,11 +83,16 @@ export function TmDrawer(props: {
   const [title, setTitle] = useState(task?.title || '');
   const [titleEdit, setTitleEdit] = useState(false);
   const [desc, setDesc] = useState(task?.description || '');
+  /* описание: сначала ТЕКСТ (режим чтения), клик открывает живой редактор */
+  const [descEdit, setDescEdit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [stickerPop, setStickerPop] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [labelInput, setLabelInput] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
+  /* активные инструменты панелей (подсветка кнопок под кареткой) */
+  const [descActive, setDescActive] = useState<string[]>([]);
+  const [chatActive, setChatActive] = useState<string[]>([]);
   /* комментарий в режиме правки + черновик правки */
   const [editMsgId, setEditMsgId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -105,8 +110,11 @@ export function TmDrawer(props: {
   /* потолок поля комментария = ТРЕТЬ высоты окна задачи (пересчёт на смену режима) */
   const [chatMax, setChatMax] = useState(120);
   useEffect(() => {
-    const dr = drawerRef.current;
-    setChatMax(dr ? Math.max(72, Math.floor(dr.clientHeight / 3)) : 120);
+    const raf = requestAnimationFrame(() => {
+      const dr = drawerRef.current;
+      setChatMax(dr ? Math.max(72, Math.floor(dr.clientHeight / 3)) : 120);
+    });
+    return () => cancelAnimationFrame(raf);
   }, [props.mode]);
 
   /* в боковой панели при открытии сразу показываем конец содержимого —
@@ -156,6 +164,20 @@ export function TmDrawer(props: {
     };
   }, [props.userMap]);
 
+  /* «цитировать в комментарий» из ПКМ-меню выделения в описании:
+     готовая цитата (> …) уезжает в композер чата */
+  useEffect(() => {
+    const onQuote = (e: Event) => {
+      const d = (e as CustomEvent<{ text: string }>).detail;
+      if (!d || !d.text) return;
+      setEditMsgId(null);
+      setChatDraft((prev) => (prev ? prev + '\n\n' : '') + d.text);
+      window.setTimeout(() => { try { chatEdRef.current?.focus(); } catch { /* нет фокуса */ } }, 30);
+    };
+    window.addEventListener('tm-quote-comment', onQuote);
+    return () => window.removeEventListener('tm-quote-comment', onQuote);
+  }, []);
+
   /* фокус в поле правки комментария РОВНО при открытии (не на каждый ввод) */
   const openedMsg = useRef<string | null>(null);
   useEffect(() => {
@@ -187,6 +209,26 @@ export function TmDrawer(props: {
     if (debounceT.current) clearTimeout(debounceT.current);
     debounceT.current = setTimeout(() => saveText(nt, nd), 600);
   };
+
+  /* свернуть редактор описания в режим текста: сначала сбрасываем отложенное
+     автосохранение (иначе клик мимо потеряет последние символы) */
+  const collapseDesc = () => {
+    if (debounceT.current) { clearTimeout(debounceT.current); debounceT.current = null; }
+    saveText(title, desc);
+    setDescEdit(false);
+  };
+
+  /* редактор описания открыт — клик мимо поля (и панели) сворачивает его */
+  useEffect(() => {
+    if (!descEdit) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (t && t.closest && t.closest('.tm-mdw-wrap')) return;
+      collapseDesc();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  });
 
   const sendComment = async () => {
     if (!task || !chatDraft.trim()) return;
@@ -556,12 +598,13 @@ export function TmDrawer(props: {
             </div>
           )}
 
-          {/* описание: ЖИВОЙ WYSIWYG-редактор — печатаем и сразу видим результат,
-              никаких режимов правки/просмотра и второго окна */}
-          <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке</span></div>
+        {/* описание: сначала ТЕКСТ (как в читалке), клик открывает живой
+            WYSIWYG-редактор с панелью; клик мимо — сворачивает обратно */}
+        <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке</span></div>
+        {descEdit && ed ? (
           <div className="tm-mdw-wrap">
             <div className="tm-md-bar">
-              <MdToolbar disabled={!ed} onTool={(id) => descEdRef.current?.exec(id)} />
+              <MdToolbar disabled={!ed} active={descActive} onTool={(id) => descEdRef.current?.exec(id)} />
             </div>
             <MdWysiwyg
               ref={descEdRef}
@@ -571,8 +614,34 @@ export function TmDrawer(props: {
               placeholder={'## Заголовок\n\n- [ ] пункт чек-листа\n**жирный**, *курсив*, `код`, [ссылка](https://…)'}
               className="tm-desc-ed"
               ariaLabel="Описание задачи"
+              onEsc={collapseDesc}
+              onActiveChange={setDescActive}
+              quoteMenu
             />
           </div>
+        ) : (
+          <div
+            className={'tm-desc-view md-body' + (!desc.trim() ? ' empty' : '') + (ed ? ' clickable' : '')}
+            role={ed ? 'button' : undefined}
+            tabIndex={ed ? 0 : undefined}
+            aria-label={ed ? 'Редактировать описание' : undefined}
+            title={ed ? 'Нажмите, чтобы редактировать описание' : undefined}
+            onClick={(e) => {
+              if (!ed) return;
+              /* ссылки в тексте описания работают как ссылки */
+              if ((e.target as HTMLElement).closest?.('a')) return;
+              setDescEdit(true);
+            }}
+            onKeyDown={(e) => {
+              if (!ed) return;
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDescEdit(true); }
+            }}
+          >
+            {desc.trim()
+              ? <div dangerouslySetInnerHTML={{ __html: mdToHtml(desc) }} />
+              : <span className="tm-desc-empty-hint">Нажмите, чтобы добавить описание…</span>}
+          </div>
+        )}
           {/* шкала чек-листа описания (как в прототипе: заполненные [x] считаются) */}
           {chk && (
             <div className="tm-checkbar-row" title={'Чек-лист: ' + chk.done + ' из ' + chk.total}>
@@ -829,7 +898,7 @@ export function TmDrawer(props: {
             <span className="tm-av" style={{ background: userColor(ws.me.login) }}>{initialsOf(ws.me.displayName, ws.me.login)}</span>
             <div className="tm-composer-box">
               <div className="tm-composer-bar">
-                <MdToolbar mini onTool={(id) => chatEdRef.current?.exec(id)} />
+                <MdToolbar mini active={chatActive} onTool={(id) => chatEdRef.current?.exec(id)} />
                 <span className="tm-composer-hint">Enter — отправить</span>
               </div>
               <MdWysiwyg
@@ -842,6 +911,7 @@ export function TmDrawer(props: {
                 placeholder="Сообщение команде…"
                 className="tm-composer-ed"
                 ariaLabel="Новый комментарий"
+                onActiveChange={setChatActive}
               />
             </div>
             <button type="button" className="tm-send" aria-label="Отправить" onClick={() => void sendComment()}>
@@ -874,6 +944,8 @@ function fmtWhen(iso: string): string {
 function MdToolbar(props: {
   disabled?: boolean;
   mini?: boolean;
+  /** Активные инструменты (под кареткой/выделением) — подсвечены. */
+  active?: string[];
   onTool: (toolId: string) => void;
 }) {
   return (
@@ -885,6 +957,8 @@ function MdToolbar(props: {
             type="button"
             title={tool.title}
             aria-label={tool.title}
+            aria-pressed={props.active ? props.active.includes(tool.id) : undefined}
+            className={props.active && props.active.includes(tool.id) ? 'on' : ''}
             disabled={props.disabled}
             onMouseDown={(e) => { e.preventDefault(); }}
             onClick={() => props.onTool(tool.id)}

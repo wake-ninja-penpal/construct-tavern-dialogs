@@ -19,7 +19,7 @@ import type { Ws } from './TaskManagerApp';
 
 /* ── модульный стор состояния меню ── */
 
-export type TmMenuKind = 'card' | 'column' | 'board' | 'project' | 'backlog' | 'view' | 'team' | 'user' | 'app' | 'color' | 'comment';
+export type TmMenuKind = 'card' | 'column' | 'board' | 'project' | 'backlog' | 'view' | 'team' | 'user' | 'app' | 'color' | 'comment' | 'mdsel';
 
 export interface TmMenuState {
   kind: TmMenuKind;
@@ -187,6 +187,7 @@ export function TmMenuHost(props: {
       {st.kind === 'user' && <UserMenu ws={ws} login={c.login || ''} act={act} />}
       {st.kind === 'app' && <AppMenu act={act} rail={c.rail === '1'} />}
       {st.kind === 'comment' && <CommentMenu ctx={c} act={act} />}
+      {st.kind === 'mdsel' && <MdSelMenu ctx={c} act={act} />}
     </div>
   );
 }
@@ -513,6 +514,19 @@ function CommentMenu(props: { ctx: Record<string, string>; act: (n: string, a?: 
       {mine && <MItem icon={<I d="M4 20l4-1L20 7l-3-3L5 16z" />} label="Редактировать" onClick={() => props.act('msg-edit', { taskId: c.taskId, msgId: c.msgId })} />}
       <MSep />
       <MItem icon={<I d="M6 6l12 12M18 6 6 18" />} label="Удалить" danger onClick={() => props.act('msg-del', { taskId: c.taskId, msgId: c.msgId, text: c.text || '' })} />
+    </>
+  );
+}
+
+/* ── меню выделенного фрагмента в WYSIWYG-редакторе: цитировать в
+   комментарий (готовая цитата "> …" уезжает в композер чата задачи) ── */
+
+function MdSelMenu(props: { ctx: Record<string, string>; act: (n: string, a?: unknown) => void }) {
+  return (
+    <>
+      <MTitle icon={<I d="M5 4h14v4H5zM5 14h9v6H5zM14 16h5v4h-5z" />} text="Выделенный фрагмент" />
+      <MItem icon={<I d="M6 17c0-4 1-7 4-10M12 17c0-4 1-7 4-10M4 17h6M10 17h6" />} label="Цитировать в комментарий" onClick={() => props.act('md-quote', { text: props.ctx.text || '' })} />
+      <MItem icon={<I d="M8 8h12v12H8zM4 4h12v3M4 4v12h3" />} label="Копировать" onClick={() => props.act('md-copy-sel', { text: props.ctx.plain || '' })} />
     </>
   );
 }
