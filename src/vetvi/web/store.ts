@@ -3719,10 +3719,20 @@ export class VetviStore {
     }
     const slot = projReadSlot(id);
     if (!slot) {
-      const left = projList().filter((e) => e.id !== id);
+      /* запись без слота РЕАЛЬНО убирается из реестра — как и обещает тост
+         (раньше список лишь фильтровался локально, и запись «висела» в
+         «Мои проекты» вечно). projSkipSaveId — чтобы flushSave при открытии
+         следующего проекта не воскресил только что удалённую запись */
+      projSkipSaveId(id);
+      const left = projDelete(id);
       this.toast('Данные проекта не найдены — запись убрана из списка', 'warn');
       this.emit();
-      if (left.length) { this.openProject(left[0].id); }
+      /* следующий из списка открываем, только если это не уже открытый проект —
+         иначе после тоста вылезает лишнее «Этот проект уже открыт» */
+      const next = left[0];
+      if (next && next.id !== String(this.doc.meta.projectId || '')) { this.openProject(next.id); }
+      else if (!next && id === String(this.doc.meta.projectId || '')) { this.createProject(); }
+      projSkipSaveId(null);
       return;
     }
     this.flushSave();

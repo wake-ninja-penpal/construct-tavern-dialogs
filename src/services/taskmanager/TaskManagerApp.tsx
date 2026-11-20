@@ -16,7 +16,8 @@
  *
  * КОМАНДЫ И ПРАВА: проекты имеют строки доступов (персональные + командные),
  * роль = максимум из них: admin (управляет доступом), editor (задачи),
- * viewer (читает и комментирует). Проект без строк — открыт всем (как было).
+ * viewer (читает и комментирует). Проект видят ТОЛЬКО его участники:
+ * создатель получает админ-строку при создании, далее — окно «Доступ».
  * Назначение исполнителя шлёт ему уведомление (колокольчик + push),
  * комментарии — тоже.
  *
@@ -122,7 +123,7 @@ export function roleOf(ws: Ws, projectId: string): 'admin' | 'editor' | 'viewer'
   const exists = ws.projects.some((p) => p.id === projectId);
   if (!exists) return null;
   const rows = ws.access.filter((r) => r.projectId === projectId);
-  if (!rows.length) return 'admin'; /* без строк — открытый проект: правят все */
+  if (!rows.length) return null; /* без строк — участников нет (сервер такой проект и не пришлёт) */
   const myTeams = new Set(ws.teams.filter((t) => t.members.some((m) => m.login === ws.me.login)).map((t) => t.id));
   let best: string | null = null;
   for (const r of rows) {
@@ -413,10 +414,17 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     }
   }, [say]);
 
-  const createProject = useCallback(async (title: string, open = true): Promise<TmProject | null> => {
+  const createProject = useCallback(async (title: string): Promise<TmProject | null> => {
     try {
-      const j = await tmJson<{ item: TmProject }>('/api/tm/projects', { method: 'POST', body: JSON.stringify({ title, open }) });
-      setWs((w) => (w ? { ...w, projects: [...w.projects, j.item] } : w));
+      /* проект приватный: сервер сразу выдаёт создателю админ-строку,
+         дальше участники добавляются в окне «Доступ» */
+      const j = await tmJson<{ item: TmProject; access: TmAccessRow }>('/api/tm/projects', { method: 'POST', body: JSON.stringify({ title }) });
+      setWs((w) => (w ? {
+        ...w,
+        projects: [...w.projects, j.item],
+        /* строка доступа создателя — сразу (иначе до перезагрузки роль «наблюдатель») */
+        access: j.access ? [...w.access, j.access] : w.access,
+      } : w));
       say('Проект создан');
       return j.item;
     } catch (e) {

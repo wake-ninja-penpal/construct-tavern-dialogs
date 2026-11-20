@@ -269,7 +269,7 @@ export function TmDrawer(props: {
         <div className="tm-drawer-scrim" onClick={props.onClose} aria-hidden="true" />
         <aside className="tm-drawer show" aria-label="Задача">
           <div className="tm-drawer-head">
-            <span className="tm-drawer-crumb">Задача не найдена</span>
+            <span className="tm-drawer-crumb">Задача не найдена (удалена или нет доступа к её проекту)</span>
             <button type="button" className="btn ibtn" onClick={props.onClose} aria-label="Закрыть">×</button>
           </div>
         </aside>
@@ -1048,7 +1048,7 @@ export function TmCreateModal(props: {
   preset: TmLink[] | null;
   onClose: () => void;
   onCreate: (payload: Record<string, unknown>) => Promise<void>;
-  onCreateProject: (title: string, open?: boolean) => Promise<unknown>;
+  onCreateProject: (title: string) => Promise<unknown>;
 }) {
   const { ws, preset } = props;
   const [title, setTitle] = useState('');

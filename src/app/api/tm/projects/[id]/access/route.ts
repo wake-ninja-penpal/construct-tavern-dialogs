@@ -4,9 +4,11 @@ import { canAdminProject, notifyTaskUser, requireTaskService } from '@/lib/tasks
 
 /**
  * PUT /api/tm/projects/[id]/access { rows: [{login?|teamId?, role}] } —
- * заменить ВСЕ строки доступов проекта (админ проекта). Пустой массив —
- * проект снова открыт всем пользователям сервиса.
- * GET — текущие строки (для модалки доступов; админ или обычный просмотр).
+ * заменить ВСЕ строки доступов проекта (админ проекта). Сохраняющий админ
+ * всегда сохраняет себе персональную админ-строку — проект без участников
+ * через это окно получить нельзя.
+ * GET — текущие строки (только админ проекта: состав участников
+ * невидимого для пользователя проекта не раскрываем).
  * Единая система уведомлений: персональные НОВЫЕ доступы (строка по логину,
  * которой раньше не было) создают tm_access_granted — колокольчик во всех
  * сервисах покажет «вам открыли доступ к проекту в менеджере задач».
@@ -16,6 +18,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     const { id } = await ctx.params
+    if (!(await canAdminProject(id, user.login))) {
+      return NextResponse.json({ error: 'Управлять доступом может только админ проекта' }, { status: 403 })
+    }
     const items = await db.taskProjectAccess.findMany({ where: { projectId: id }, orderBy: { createdAt: 'asc' } })
     return NextResponse.json({ items })
   } catch {
@@ -57,7 +62,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     await db.taskProjectAccess.deleteMany({ where: { projectId: id } })
     /* сохраняющий админ всегда сохраняет себе персональный админ-доступ:
        иначе, сняв команду или ошибившись в списке, он выкинет сам себя
-       из проекта и потеряет право управлять доступом */
+       из проекта и потеряет право управлять доступом (и сам проект —
+       участники — те, кто есть в этом списке) */
     if (!validRows.some((r) => r.login === user.login)) {
       validRows.push({ login: user.login, teamId: null, role: 'admin' })
     }

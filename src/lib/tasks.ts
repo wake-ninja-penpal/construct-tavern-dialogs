@@ -240,8 +240,10 @@ export function appendSysMsg(rawMessages: string, login: string, text: string): 
 }
 
 /* ── доступ к проектам менеджера задач (роли) ──
-   Роль = максимум из персональной и всех командных. Нет строк доступа —
-   проект открыт всем пользователям сервиса (editor). */
+   Роль = максимум из персональной и всех командных. Проект видят ТОЛЬКО
+   его участники (есть персональная или командная строка доступа): строк
+   нет вовсе — проекта для пользователя нет. Создатель получает админ-строку
+   при создании проекта, далее доступ раздаётся в окне «Доступ». */
 
 export type TmRole = 'admin' | 'editor' | 'viewer';
 
@@ -261,13 +263,14 @@ export async function myTeamIds(login: string): Promise<string[]> {
   return [...new Set(rows.map((r) => r.teamId))];
 }
 
-/** Роль в проекте по строкам доступа (rows можно передать готовые — без запроса). */
+/** Роль в проекте по строкам доступов (rows можно передать готовые — без запроса).
+ *  null — проекта для пользователя нет (участия нет — проекта не видно). */
 export function roleFromRows(
   rows: { login: string | null; teamId: string | null; role: string }[],
   login: string,
   teamIds: string[],
 ): TmRole | null {
-  if (!rows.length) return 'admin'; /* нет строк — открытый проект: правят все */
+  if (!rows.length) return null; /* нет строк — участников нет: проект невидим */
   let best: TmRole | null = null;
   for (const r of rows) {
     const mine = (r.login && r.login === login) || (r.teamId && teamIds.includes(r.teamId));
@@ -290,7 +293,8 @@ export async function projectRole(projectId: string, login: string, teamIds?: st
   return roleFromRows(rows, login, teams);
 }
 
-/** Право редактирования: создание/правка/удаление задач и перенос. */
+/** Право редактирования: создание/правка/удаление задач и перенос
+ *  (участник с ролью editor/admin). */
 export async function canEditProject(projectId: string, login: string, teamIds?: string[]): Promise<boolean> {
   const role = await projectRole(projectId, login, teamIds);
   return role === 'admin' || role === 'editor';
@@ -350,4 +354,29 @@ export async function ensureDefaultColumns(boardId: string): Promise<void> {
       { boardId, title: 'Выполнено', color: '#8fbf7f', kind: 'done', locked: true, sortOrder: 2 },
     ],
   });
+}
+
+/** Миграция старых «открытых» проектов (созданных до приватной модели):
+ *  у проекта без строк доступов админом становится автор его ранней задачи —
+ *  проект остаётся видимым только ему, дальше доступ раздаётся в окне «Доступ».
+ *  Проект без строк и без задач участников не имеет — остаётся невидимым.
+ *  Идемпотентно: проекты со строками не трогаем. */
+export async function ensureProjectOwnerSeeds(): Promise<void> {
+  try {
+    const projects = await db.taskProject.findMany({ select: { id: true } });
+    const rows = await db.taskProjectAccess.findMany({ select: { projectId: true } });
+    const withRows = new Set(rows.map((r) => r.projectId));
+    for (const p of projects) {
+      if (withRows.has(p.id)) continue;
+      const first = await db.taskItem.findFirst({
+        where: { projectId: p.id },
+        orderBy: { createdAt: 'asc' },
+        select: { createdBy: true },
+      });
+      if (!first?.createdBy) continue;
+      await db.taskProjectAccess.create({
+        data: { projectId: p.id, login: first.createdBy, role: 'admin' },
+      });
+    }
+  } catch { /* миграция не критична — повторится при следующем входе */ }
 }

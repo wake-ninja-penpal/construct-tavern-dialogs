@@ -4,6 +4,7 @@ import {
   appendSysMsg,
   canEditProject,
   ensureDefaultLabels,
+  ensureProjectOwnerSeeds,
   myTeamIds,
   notifyTaskUser,
   requireTaskService,
@@ -18,17 +19,18 @@ import {
  * виды + роли в проектах. Единый снапшот — UI держит его в памяти и шлёт
  * точечные мутации (POST/PATCH/DELETE).
  *
- * Доступ: проекты без строк доступов открыты всем; проект со строками виден
- * только тем, у кого есть персональный/командный доступ (в ответе roles:
- * null — проекта нет в списке).
+ * Доступ: проект видят ТОЛЬКО его участники — у кого есть персональная или
+ * командная строка доступа (roles: null — проекта в списке нет). Создатель
+ * получает админ-строку при создании, далее доступ раздаётся в окне «Доступ».
  */
 export async function GET() {
   try {
     const user = await requireTaskService()
     if (!user) return NextResponse.json({ error: 'Сервис недоступен' }, { status: 403 })
     /* дефолтные метки: если палитра команды пуста — при первом входе
-       появляются «баг/фича/дизайн/контент/техдолг/исследование» (идемпотентно) */
-    await ensureDefaultLabels()
+       появляются «баг/фича/дизайн/контент/техдолг/исследование» (идемпотентно);
+       миграция старых «открытых» проектов: админ-строка автору ранней задачи */
+    await Promise.all([ensureDefaultLabels(), ensureProjectOwnerSeeds()])
     const [projects, tasks, labels, teams, accessRows, views, teamIds] = await Promise.all([
       db.taskProject.findMany({
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -41,22 +43,19 @@ export async function GET() {
       db.taskView.findMany({ where: { login: user.login }, orderBy: [{ createdAt: 'asc' }] }),
       myTeamIds(user.login),
     ])
-    /* роли: projectId → admin|editor|null (viewer тоже отбрасываем — проект
-       недоступен целиком? Нет: viewer видит. Оставляем роль как есть) */
+    /* роли: projectId → admin|editor|viewer|null. Участия нет — проекта
+       для пользователя нет: он не попадает ни в список, ни в задачи */
     const roles: Record<string, string | null> = {}
     const visible: typeof projects = []
     for (const p of projects) {
       const rows = accessRows.filter((r) => r.projectId === p.id)
       let best: string | null = null
       const rank: Record<string, number> = { viewer: 1, editor: 2, admin: 3 }
-      if (!rows.length) best = 'editor'
-      else {
-        for (const r of rows) {
-          const mine = (r.login && r.login === user.login) || (r.teamId && teamIds.includes(r.teamId))
-          if (!mine) continue
-          const role = rank[r.role] ? r.role : 'viewer'
-          if (!best || rank[role] > rank[best]) best = role
-        }
+      for (const r of rows) {
+        const mine = (r.login && r.login === user.login) || (r.teamId && teamIds.includes(r.teamId))
+        if (!mine) continue
+        const role = rank[r.role] ? r.role : 'viewer'
+        if (!best || rank[role] > rank[best]) best = role
       }
       roles[p.id] = best
       if (best) visible.push(p)
