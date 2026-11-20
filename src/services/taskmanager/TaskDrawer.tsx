@@ -39,7 +39,7 @@ import {
 } from './tmTypes';
 import type { TmUser, Ws } from './TaskManagerApp';
 import { VetviMark } from './TaskViews';
-import { MD_TOOLS, checklistStats, mdToHtml } from './md';
+import { MD_TOOLS, checklistStats, mdToHtml, toggleChecklistAt } from './md';
 import { MdWysiwyg, type MdWysiwygHandle } from './MdWysiwyg';
 import { tmOpenMenu } from './TmMenu';
 
@@ -638,9 +638,29 @@ export function TmDrawer(props: {
             role={ed ? 'button' : undefined}
             tabIndex={ed ? 0 : undefined}
             aria-label={ed ? 'Редактировать описание (двойной клик)' : undefined}
-            title={ed ? 'Двойной клик — редактировать описание' : undefined}
+            title={ed ? 'Двойной клик — редактировать, клик по квадратику — отметить пункт' : undefined}
+            onClick={(e) => {
+              if (!ed) return;
+              /* квадратик чек-листа работает прямо в режиме чтения: пункт
+                 переключается и сохраняется БЕЗ входа в редактор (одиночный
+                 клик — только по квадратику; остальной текст выделяется) */
+              const chk = (e.target as HTMLElement).closest?.('.mdchk') as HTMLElement | null;
+              if (!chk) return;
+              e.stopPropagation();
+              e.preventDefault();
+              const view = e.currentTarget as HTMLElement;
+              const idx = Array.from(view.querySelectorAll('.mdchk')).indexOf(chk);
+              if (idx >= 0) {
+                const nd = toggleChecklistAt(desc, idx);
+                setDesc(nd);
+                queueSave(title, nd);
+              }
+            }}
             onDoubleClick={(e) => {
               if (!ed) return;
+              /* двойной клик по квадратику не открывает редактор (два быстрых
+                 клика — это «вкл/выкл», не правка) */
+              if ((e.target as HTMLElement).closest?.('.mdchk')) return;
               /* ссылки в тексте описания работают как ссылки */
               if ((e.target as HTMLElement).closest?.('a')) return;
               setDescEdit(true);

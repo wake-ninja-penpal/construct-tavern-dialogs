@@ -271,6 +271,20 @@ export function checklistStats(s: string): { total: number; done: number } | nul
   return total ? { total, done } : null;
 }
 
+/** Переключить N-й чекбокс описания (по порядку [ ]/[x] в исходнике).
+    Используется режимом чтения: клик по квадратику в тексте не открывает
+    редактор, а сразу меняет пункт и сохраняет описание. */
+export function toggleChecklistAt(md: string, index: number): string {
+  let i = -1;
+  return String(md || '').split('\n').map((line) => {
+    const m = line.match(/^(\s*[-*+]\s+)\[([ xX])\](\s*.*)$/);
+    if (!m) return line;
+    i++;
+    if (i !== index) return line;
+    return m[1] + (m[2].toLowerCase() === 'x' ? '[ ]' : '[x]') + m[3];
+  }).join('\n');
+}
+
 /* ═══ WYSIWYG: сериализация DOM редактора обратно в markdown ═══
    Редактор живой: пользователь видит отрисованный markdown и правит его.
    На каждый ввод содержимое contenteditable сериализуется в markdown-исходник
@@ -411,11 +425,14 @@ function mdBlocksSource(nodes: NodeList | Node[]): string {
   return chunks.filter((c) => c !== undefined).join('\n\n');
 }
 
-/** DOM contenteditable-редактора → markdown-исходник. */
+/** DOM contenteditable-редактора → markdown-исходник.
+    \u200B (zero-width space) вычищается: редактор подсаживает его в свежие
+    пустые пункты чек-листа, чтобы каретка не «убегала» в соседний пункт
+    (канонизация позиции в Chromium), пользователю он никогда не нужен. */
 export function mdHtmlToSource(root: HTMLElement): string {
   if (!root) return '';
   const src = mdBlocksSource(root.childNodes);
-  return src.replace(/\n{3,}/g, '\n\n').trim();
+  return src.replace(/\u200B/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /* ── инструменты редактора (панель над textarea) ──

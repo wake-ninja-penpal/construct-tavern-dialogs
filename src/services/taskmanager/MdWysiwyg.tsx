@@ -103,6 +103,7 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
     emitted.current = props.value;
     normalizeWidgets(box);
     refreshHighlight(box, null);
+    ensureExitLine(box);
     syncEmpty(box);
     if (props.autoGrow) growTo(box, props.maxGrow ?? 120);
   }, []);
@@ -123,6 +124,7 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
       box.innerHTML = mdToHtml(props.value || '');
       normalizeWidgets(box);
       refreshHighlight(box, null);
+      ensureExitLine(box);
       syncEmpty(box);
       if (props.autoGrow) growTo(box, props.maxGrow ?? 120);
     }
@@ -147,6 +149,7 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
     const md = mdHtmlToSource(box);
     emitted.current = md;
     normalizeWidgets(box);
+    ensureExitLine(box);
     refreshHighlight(box, document.activeElement === box ? codeUnderCaret() : null);
     syncEmpty(box);
     if (props.autoGrow) growTo(box, props.maxGrow ?? 120);
@@ -191,6 +194,7 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
     box.innerHTML = mdToHtml(md);
     normalizeWidgets(box);
     refreshHighlight(box, null);
+    ensureExitLine(box);
     syncEmpty(box);
     emitted.current = md;
     if (props.autoGrow) growTo(box, props.maxGrow ?? 120);
@@ -444,6 +448,20 @@ function syncEmpty(box: HTMLElement): void {
   box.classList.toggle('empty', empty);
 }
 
+/* строка выхода из блочного форматирования: если контент кончается блоком
+   (код/цитата/список), после него нужен пустой абзац — иначе после
+   закрытия и повторного открытия редактора из блока не выйти: кликать
+   некуда, каретка всегда попадает внутрь блока. Абзац в исходник не
+   попадает (mdHtmlToSource отбрасывает пустые), поэтому подсадка безопасна */
+function ensureExitLine(box: HTMLElement): void {
+  const last = box.lastElementChild as HTMLElement | null;
+  if (last && /^(PRE|BLOCKQUOTE|UL|OL|TABLE)$/.test(last.tagName)) {
+    const p = document.createElement('p');
+    p.appendChild(document.createElement('br'));
+    box.appendChild(p);
+  }
+}
+
 function moveCaretToEnd(box: HTMLElement): void {
   const sel = window.getSelection();
   if (!sel) return;
@@ -628,18 +646,47 @@ function placeCaretAtEnd(el: HTMLElement): void {
   sel.addRange(r);
 }
 
-/* каретка ПОСЛЕ чекбокса пункта чек-листа (текст пишется после квадратика) */
+/* каретка ПОСЛЕ чекбокса пункта чек-листа (текст пишется после квадратика).
+   Если после чекбокса нет ни одного непустого текстового узла — подселяем
+   \u200B (zero-width space): без него канонизация позиции в Chromium уводит
+   ввод В СЛЕДУЮЩИЙ пункт (позиции «(span,0)»/«(li,1)» на пустом пункте
+   схлопываются к началу ближайшего текста) — тот самый баг «через раз». */
 function placeCaretAfterMarker(li: HTMLElement): void {
   const sel = window.getSelection();
   if (!sel) return;
-  const r = document.createRange();
   const chk = li.querySelector(':scope > .mdchk');
-  const first: Node | null = chk ? chk.nextSibling : li.firstChild;
-  if (first) r.setStart(first, 0);
-  else r.setStart(li, chk ? 1 : 0);
+  const host = caretHostAfterMarker(li, chk);
+  const r = document.createRange();
+  r.setStart(host.node, host.offset);
   r.collapse(true);
   sel.removeAllRanges();
   sel.addRange(r);
+}
+
+/* первый непустой текстовый узел после чекбокса; если его нет — создаём
+   текстовый узел с \u200B и возвращаем позицию каретки внутри него */
+function caretHostAfterMarker(li: HTMLElement, chk: Element | null): { node: Node; offset: number } {
+  let n: Node | null = chk ? chk.nextSibling : li.firstChild;
+  while (n) {
+    if (n.nodeType === Node.TEXT_NODE && (n.textContent || '').length > 0) {
+      return { node: n, offset: 0 };
+    }
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      const el = n as HTMLElement;
+      if (el.tagName === 'BR') { n = n.nextSibling; continue; }
+      /* спан/стронг/ем — заглядываем внутрь: там может быть текст */
+      const inner = el.firstChild;
+      if (inner && inner.nodeType === Node.TEXT_NODE && (inner.textContent || '').length > 0) {
+        return { node: inner, offset: 0 };
+      }
+    }
+    n = n.nextSibling;
+  }
+  /* текста нет — подселяем \u200B сразу после чекбокса (или в начало пункта) */
+  const zwsp = document.createTextNode('\u200B');
+  if (chk && chk.parentNode === li) li.insertBefore(zwsp, chk.nextSibling);
+  else li.insertBefore(zwsp, li.firstChild);
+  return { node: zwsp, offset: 0 };
 }
 
 /* ── Enter внутри списка: продолжить пункт с его маркером ──
@@ -650,8 +697,9 @@ function enterInList(box: HTMLElement, li: HTMLElement, e: { preventDefault: () 
   if (!sel || !sel.rangeCount) return false;
   const range = sel.getRangeAt(0);
 
-  /* 1. Пустой пункт — выход из списка: li → p, пустой ul/ol удалить */
-  const text = (li.textContent || '').trim();
+  /* 1. Пустой пункт — выход из списка: li → p, пустой ul/ol удалить.
+     \u200B (служебный нулевой пробел каретки) пустым пунктом не считается. */
+  const text = (li.textContent || '').replace(/\u200B/g, '').trim();
   if (!text) {
     const list = li.parentElement as HTMLElement;
     const p = document.createElement('p');
@@ -1031,7 +1079,9 @@ function execTool(box: HTMLElement, toolId: string, done: () => void): void {
     }
     default: break;
   }
-  /* нормализуем: чекбоксы служебные, li.mdtask без чекбокса получает его */
+  /* нормализуем: чекбоксы служебные, li.mdtask без чекбокса получает его;
+     после блока (код/цитата/список) гарантируем пустую строку выхода */
   normalizeWidgets(box);
+  ensureExitLine(box);
   done();
 }

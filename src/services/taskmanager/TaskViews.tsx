@@ -2213,39 +2213,16 @@ export function TmBell(props: {
       {open && (
         <>
           <div className="tm-pop-scrim" onClick={() => setOpen(false)} />
-          <div className="collab-pop show ntf-pop" style={ntfPopPos()} role="dialog" aria-label="Уведомления">
-            <div className="cp-cap">Уведомления</div>
-            {!items.length && (
-              <div className="ntf-empty">Пока пусто — здесь появляются уведомления всех сервисов: доступы, задачи и комментарии</div>
-            )}
-            <div className="ntf-list">
-              {items.map((n) => {
-                const t = ntfText(n);
-                const clickable = !!(n.payload || {}).taskId;
-                const neg = NTF_NEG_TYPES.includes(n.type);
-                return (
-                  <button
-                    type="button"
-                    key={n.id}
-                    className={'ntf-item' + (n.read ? '' : ' unread')}
-                    onClick={() => (clickable ? openItem(n) : markRead(n))}
-                    title={clickable ? 'Открыть задачу' : undefined}
-                  >
-                    <span className={'ntf-ico' + (neg ? ' rev' : '')}><NtfIcon type={n.type} /></span>
-                    <span className="ntf-txt"><b>{t.b}</b><i>{t.i}</i></span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="cp-acts">
-              {items.length > 0 && (
-                <button type="button" className="cp-act ntf-clear" title="Удалить все уведомления" onClick={() => void clearAll()}>
-                  <IcTrashSm />Очистить список
-                </button>
-              )}
-              <button type="button" className="cp-act" onClick={() => setOpen(false)}><IcXSm />Закрыть</button>
-            </div>
-          </div>
+          {/* попап ТОЧЬ-В-ТОЧЬ как в «Ветвях» (NotificationsPopover): те же
+              классы collab-pop/ntf-pop, та же структура списка с иконками
+              и кнопкой «Открыть» у пунктов с задачей, подвал
+              «Очистить список»/«Закрыть» */}
+          <NtfPop
+            items={items}
+            onOpenItem={(n) => void openItem(n)}
+            onClose={() => setOpen(false)}
+            onClear={() => void clearAll()}
+          />
         </>
       )}
     </div>
@@ -2255,29 +2232,75 @@ export function TmBell(props: {
 /* типы уведомлений «плохих» новостей — красная иконка и тост-предупреждение */
 const NTF_NEG_TYPES = ['access_revoked', 'service_denied', 'tm_service_denied'];
 
-/* позиция окна уведомлений — под кнопкой-колокольчиком (как в «Ветвях») */
-function ntfPopPos(): React.CSSProperties {
+/* ── попап уведомлений — общий дизайн со «Ветвями» ──
+   Тот же DOM/CSS, что NotificationsPopover в AccountMenu.tsx: заголовок
+   УВЕДОМЛЕНИЯ, список с иконками в квадратиках (ntf-ico), жирный заголовок
+   + серая подпись (ntf-txt), кнопка «Открыть» у пунктов с задачей, подвал
+   с «Очистить список» (красный, с корзиной) и «Закрыть». */
+function NtfPop(props: {
+  items: NtfItem[];
+  onOpenItem: (n: NtfItem) => void;
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  const { items, onOpenItem, onClose, onClear } = props;
+  /* позиция — под колокольчиком, как в «Ветвях» (якорь ищется в DOM по id) */
+  let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8 };
   if (typeof document !== 'undefined') {
     const anchor = document.querySelector('#bellBtn');
     if (anchor) {
       const r = anchor.getBoundingClientRect();
-      return { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };
+      popStyle = { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };
     }
   }
-  return { position: 'fixed', top: 52, right: 8 };
-}
-
-/* иконки уведомлений — те же контурные, что в попапе «Ветвей» */
-function NtfIcon({ type }: { type: string }) {
-  if (type === 'access_revoked') return <IcExitSm />;
-  if (type === 'service_granted' || type === 'service_denied' || type === 'tm_service_denied') return <IcGridSm />;
-  if (type === 'task_assigned' || type === 'task_comment' || type.startsWith('tm_')) return <IcTaskSm />;
-  return <IcShareSm />;
-}
-
-function IcShareSm() {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+    <div
+      className="collab-pop show ntf-pop"
+      style={popStyle}
+      role="dialog"
+      aria-label="Уведомления"
+    >
+      <div className="cp-cap">Уведомления</div>
+      {!items.length && (
+        <div className="ntf-empty">Пока пусто — здесь появляются уведомления всех сервисов: доступы, задачи и комментарии</div>
+      )}
+      <div className="ntf-list">
+        {items.map((n) => {
+          const t = ntfText(n);
+          const neg = NTF_NEG_TYPES.includes(n.type);
+          const openable = !!(n.payload || {}).taskId;
+          return (
+            <div key={n.id} className={'ntf-item' + (n.read ? '' : ' unread')}>
+              <span className={'ntf-ico' + (neg ? ' rev' : '')}>
+                {n.type === 'access_revoked' || n.type === 'tm_service_denied' ? <IcExit /> : n.type === 'service_granted' || n.type === 'service_denied' ? <IcGrid /> : n.type === 'task_assigned' || n.type === 'task_comment' ? <IcTask /> : <IcShare />}
+              </span>
+              <div className="ntf-txt">
+                <b>{t.b}</b>
+                <i>{t.i}</i>
+              </div>
+              {openable && (
+                <button type="button" className="btn" onClick={() => onOpenItem(n)}>Открыть</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="cp-acts">
+        {items.length > 0 && (
+          <button type="button" className="cp-act ntf-clear" title="Удалить все уведомления" onClick={onClear}>
+            <IcTrash />Очистить список
+          </button>
+        )}
+        <button type="button" className="cp-act" onClick={onClose}><IcX />Закрыть</button>
+      </div>
+    </div>
+  );
+}
+
+/* маленькие контурные иконки попапа — копия AccountMenu.tsx (стиль SyncModals) */
+function IcShare() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="18" cy="5" r="2.6" />
       <circle cx="6" cy="12" r="2.6" />
       <circle cx="18" cy="19" r="2.6" />
@@ -2285,26 +2308,18 @@ function IcShareSm() {
     </svg>
   );
 }
-
-function IcXSm() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
-  );
-}
-
-function IcTrashSm() {
+function IcExit() {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
     </svg>
   );
 }
-
-function IcGridSm() {
+function IcGrid() {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="4" y="4" width="6.6" height="6.6" rx="1.6" />
       <rect x="13.4" y="4" width="6.6" height="6.6" rx="1.6" />
       <rect x="4" y="13.4" width="6.6" height="6.6" rx="1.6" />
@@ -2312,12 +2327,25 @@ function IcGridSm() {
     </svg>
   );
 }
-
-function IcTaskSm() {
+function IcTask() {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="4" width="16" height="16" rx="2" />
-      <path d="m8.5 12 2.5 2.5 5-5" />
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+      <path d="m8 12.2 2.7 2.7L16 9.5" />
+    </svg>
+  );
+}
+function IcX() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+function IcTrash() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
     </svg>
   );
 }

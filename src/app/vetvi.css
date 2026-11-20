@@ -2509,7 +2509,14 @@ body.dragging *{cursor:grabbing!important}
 .tm-desc-view.clickable:focus-visible{outline:none;border-color:rgba(226,165,78,.45)}
 .tm-desc-view.empty{cursor:pointer}
 .tm-desc-empty-hint{color:var(--tx3);font:400 12.5px/1.55 var(--body)}
-.tm-desc-view p:last-child,.tm-desc-view ul:last-child,.tm-desc-view ol:last-child,.tm-desc-view pre:last-child,.tm-desc-view blockquote:last-child{margin-bottom:0}
+/* после блока кода/цитаты отступ СОХРАНЯЕМ (как в редакторе): сбрасываем
+   только у абзацев и списков — иначе блоки «прилипают» к нижней рамке и
+   после закрытия редактора выглядит так, будто отступ пропал */
+.tm-desc-view p:last-child,.tm-desc-view ul:last-child,.tm-desc-view ol:last-child{margin-bottom:0}
+/* глобальный сброс .md-body pre:last-child здесь не действует: блок кода
+   в конце описания должен иметь такой же отступ снизу, как внутри текста */
+.tm-desc-view pre:last-child{margin-bottom:8px}
+.tm-desc-view .mdchk{cursor:pointer}
 /* композер чата: растёт по тексту до трети окна (потолок задаёт maxGrow) */
 .tm-composer-ed{min-height:38px;max-height:none;height:38px;overflow:hidden;padding:8px 10px;font:12.5px/1.45 var(--body)}
 .tm-composer-ed.empty{height:38px}
