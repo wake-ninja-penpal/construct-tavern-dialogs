@@ -128,6 +128,10 @@ export interface TmTask {
   done: boolean;
   completedAt: string | null;
   order: number;
+  /** Свой цвет задачи (палитра прототипа), null — цвет не задан. */
+  color: string | null;
+  /** Плотность заливки цветом 0.04…0.8 (по умолчанию 0.2). */
+  colorAlpha: number | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -149,6 +153,9 @@ export const TM_KIND_COLOR: Record<string, string> = {
 };
 
 export const TM_PALETTE = ['#e2a54e', '#8fbf7f', '#cf6b5a', '#646bd0', '#2f9e77', '#12a594', '#c951a2', '#9aa1ac'];
+
+/** Палитра цветов ЗАДАЧИ (как в прототипе «Поток», тёплые акценты). */
+export const TM_TASK_PALETTE = ['#e2a54e', '#cf6b5a', '#8fbf7f', '#12a594', '#646bd0', '#c951a2', '#2f9e77', '#9aa1ac'];
 
 /** Метки ролей проекта (как в прототипе: админ/редактор/наблюдатель). */
 export const TM_ROLE_LABEL: Record<string, string> = {
@@ -232,6 +239,12 @@ export function parseViewState(raw: string | null | undefined): TmViewState {
   } catch {
     return fallback;
   }
+}
+
+/** CSS-переменные цвета задачи для карточек/строк (как colorStyle прототипа). */
+export function colorVars(color: string | null, alpha: number | null): React.CSSProperties | undefined {
+  if (!color) return undefined;
+  return { '--tc': color, '--ta': Math.round((alpha ?? 0.2) * 100) + '%' } as React.CSSProperties;
 }
 
 /** Дедлайн — короткий формат: Сегодня / Завтра / Вчера / 12 мар. */

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { TaskItem } from '@prisma/client'
 import { db } from '@/lib/db'
 import {
   appendSysMsg,
@@ -66,6 +67,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (typeof body.description === 'string') data.description = body.description.slice(0, 20000)
     if (body.labelIds !== undefined) data.labelIds = sanitizeLabelIds(body.labelIds)
     if (body.links !== undefined) data.links = sanitizeLinks(body.links)
+
+    /* свой цвет задачи: строка-палитра или null (снять цвет); плотность заливки */
+    if (body.color !== undefined) {
+      const c = typeof body.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(body.color) ? body.color : null
+      if (c !== task.color) {
+        data.color = c
+        sys.push(c ? 'цвет задачи: ' + c : 'цвет снят')
+        if (c && task.colorAlpha == null) data.colorAlpha = 0.2
+      }
+    }
+    if (typeof body.colorAlpha === 'number' && Number.isFinite(body.colorAlpha)) {
+      const a = Math.min(0.8, Math.max(0.04, body.colorAlpha))
+      if (a !== task.colorAlpha) data.colorAlpha = a
+    }
 
     /* стикеры: дифф для истории и уведомлений */
     if (body.stickers !== undefined) {
@@ -153,7 +168,16 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.messages = appendSysMsg(task.messages, user.login, sys.join(' · '))
     }
     const item = await db.taskItem.update({ where: { id }, data })
-    return NextResponse.json({ item })
+    /* перенос родителя: подзадачи едут вместе с ним (как placeIn потомков в прототипе) */
+    let moved: TaskItem[] = []
+    if ('columnId' in data || 'boardId' in data) {
+      await db.taskItem.updateMany({
+        where: { parentId: id },
+        data: { boardId: item.boardId, columnId: item.columnId },
+      })
+      moved = await db.taskItem.findMany({ where: { parentId: id } })
+    }
+    return NextResponse.json({ item, moved })
   } catch {
     return NextResponse.json({ error: 'Внутренняя ошибка' }, { status: 500 })
   }

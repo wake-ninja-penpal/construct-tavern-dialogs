@@ -123,34 +123,39 @@ export function mdPlain(s: string): string {
     .trim();
 }
 
-/* ── инструменты редактора (панель над textarea) ── */
+/* ── инструменты редактора (панель над textarea) ──
+   Группы с разделителями — как в прототипе «Поток»:
+   жирный/курсив/зачёркнутый | заголовок/цитата | списки | код/блок/ссылка/картинка/таблица/разделитель */
 
-export const MD_TOOLS: { id: string; title: string; icon: string }[] = [
+export const MD_TOOLS: { id: string; title: string; icon: string; sep?: boolean }[] = [
   { id: 'bold', title: 'Жирный (Ctrl+B)', icon: 'bold' },
   { id: 'italic', title: 'Курсив (Ctrl+I)', icon: 'italic' },
   { id: 'strike', title: 'Зачёркнутый', icon: 'strike' },
-  { id: 'heading', title: 'Заголовок', icon: 'heading' },
+  { id: 'heading', title: 'Заголовок', icon: 'heading', sep: true },
   { id: 'quote', title: 'Цитата', icon: 'quote' },
-  { id: 'ul', title: 'Маркированный список', icon: 'list' },
+  { id: 'ul', title: 'Маркированный список', icon: 'list', sep: true },
   { id: 'ol', title: 'Нумерованный список', icon: 'list-ol' },
   { id: 'task', title: 'Чек-лист', icon: 'check-square' },
-  { id: 'code', title: 'Код', icon: 'code' },
+  { id: 'code', title: 'Код', icon: 'code', sep: true },
   { id: 'codeblock', title: 'Блок кода', icon: 'note' },
   { id: 'link', title: 'Ссылка (Ctrl+K)', icon: 'link' },
+  { id: 'image', title: 'Картинка', icon: 'image' },
   { id: 'table', title: 'Таблица', icon: 'table' },
   { id: 'hr', title: 'Разделитель', icon: 'minus' },
 ];
 
-/** Применить инструмент к textarea (переносит выделение, как в прототипе). */
-export function mdApplyTool(area: HTMLTextAreaElement, tool: string): void {
+/** Применить инструмент к textarea, вернуть НОВЫЙ текст (controlled-компоненты
+    сами обновляют состояние; выделение восстанавливается, как в прототипе). */
+export function mdApplyTool(area: HTMLTextAreaElement, tool: string): string {
   const s = area.selectionStart;
   const e = area.selectionEnd;
   const v = area.value;
   const sel = v.slice(s, e);
+  let nv = v;
   const wrap = (a: string, b: string) => {
-    area.value = v.slice(0, s) + a + (sel || 'текст') + b + v.slice(e);
+    nv = v.slice(0, s) + a + (sel || 'текст') + b + v.slice(e);
     const ns = s + a.length;
-    area.setSelectionRange(ns, ns + (sel || 'текст').length);
+    requestAnimationFrame(() => area.setSelectionRange(ns, ns + (sel || 'текст').length));
   };
   const linePrefix = (pref: string) => {
     const ls = v.lastIndexOf('\n', s - 1) + 1;
@@ -159,12 +164,13 @@ export function mdApplyTool(area: HTMLTextAreaElement, tool: string): void {
     const lines = v.slice(ls, le).split('\n');
     const has = lines.every((l) => l.startsWith(pref));
     const nl = lines.map((l, i) => (has ? l.slice(pref.length) : (pref === '1. ' ? (i + 1) + '. ' : pref) + l)).join('\n');
-    area.value = v.slice(0, ls) + nl + v.slice(le);
-    area.setSelectionRange(ls, ls + nl.length);
+    nv = v.slice(0, ls) + nl + v.slice(le);
+    requestAnimationFrame(() => area.setSelectionRange(ls, ls + nl.length));
   };
   const insert = (txt: string) => {
-    area.value = v.slice(0, s) + txt + v.slice(e);
-    area.setSelectionRange(s + txt.length, s + txt.length);
+    nv = v.slice(0, s) + txt + v.slice(e);
+    const np = s + txt.length;
+    requestAnimationFrame(() => area.setSelectionRange(np, np));
   };
   switch (tool) {
     case 'bold': wrap('**', '**'); break;
@@ -178,8 +184,60 @@ export function mdApplyTool(area: HTMLTextAreaElement, tool: string): void {
     case 'task': linePrefix('- [ ] '); break;
     case 'codeblock': insert('\n```ts\n' + (sel || '// код') + '\n```\n'); break;
     case 'link': wrap('[', '](https://)'); break;
+    case 'image': insert('![описание](https://)'); break;
     case 'table': insert('\n| Колонка | Значение |\n| --- | --- |\n| строка | данные |\n'); break;
     case 'hr': insert('\n\n---\n\n'); break;
   }
   area.focus();
+  return nv;
+}
+
+/** Клавиатура markdown-редактора (порт обработчика textarea прототипа):
+    Ctrl+B/I/K — жирный/курсив/ссылка, Tab — отступ, Enter — продолжение
+    списка (маркированный/нумерованный/чек-лист): переносит префикс на новую
+    строку, пустой пункт списка закрывает список. Возвращает НОВЫЙ текст,
+    если нажатие обработано (иначе null); действие браузера при обработке
+    предотвращается здесь же. */
+export function mdEditorKeyDown(area: HTMLTextAreaElement, e: KeyboardEvent | React.KeyboardEvent<HTMLTextAreaElement>): string | null {
+  const mod = e.ctrlKey || e.metaKey;
+  const key = e.key;
+  /* Ctrl+B / Ctrl+I / Ctrl+K */
+  if (mod && ['b', 'i', 'k'].includes(key.toLowerCase())) {
+    e.preventDefault();
+    return mdApplyTool(area, key.toLowerCase() === 'b' ? 'bold' : key.toLowerCase() === 'i' ? 'italic' : 'link');
+  }
+  /* Tab — отступ двумя пробелами */
+  if (key === 'Tab') {
+    e.preventDefault();
+    const s = area.selectionStart;
+    const nv = area.value.slice(0, s) + '  ' + area.value.slice(area.selectionEnd);
+    requestAnimationFrame(() => area.setSelectionRange(s + 2, s + 2));
+    area.focus();
+    return nv;
+  }
+  /* Enter — продолжение списка */
+  if (key === 'Enter' && !e.shiftKey && !mod) {
+    const v = area.value;
+    const s = area.selectionStart;
+    const ls = v.lastIndexOf('\n', s - 1) + 1;
+    const line = v.slice(ls, s);
+    const m = line.match(/^(\s*)(- \[[ xX]\] |[-*+] |\d+[.)] )(.*)$/);
+    if (!m) return null;
+    e.preventDefault();
+    /* пустой пункт — выйти из списка (убрать префикс строки) */
+    if (!m[3].trim()) {
+      const nv = v.slice(0, ls) + v.slice(s);
+      requestAnimationFrame(() => area.setSelectionRange(ls, ls));
+      return nv;
+    }
+    let pref = m[2];
+    if (/\d/.test(pref)) pref = (parseInt(pref, 10) + 1) + '. ';
+    if (/\[[xX]\]/.test(pref)) pref = pref.replace(/\[[xX]\]/, '[ ]');
+    const ins = '\n' + m[1] + pref;
+    const nv = v.slice(0, s) + ins + v.slice(area.selectionEnd);
+    const np = s + ins.length;
+    requestAnimationFrame(() => area.setSelectionRange(np, np));
+    return nv;
+  }
+  return null;
 }

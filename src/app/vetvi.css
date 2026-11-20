@@ -1929,9 +1929,14 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-kcol-addcol input{height:36px}
 
 /* карточка задачи */
-.tm-card{background:var(--card);border:1px solid var(--line2);border-radius:11px;padding:9px 11px;cursor:pointer;transition:.16s;user-select:none}
+.tm-card{position:relative;background:var(--card);border:1px solid var(--line2);border-radius:11px;padding:9px 11px;cursor:pointer;transition:.16s;user-select:none}
 .tm-card.grab{cursor:grab}
 .tm-card.grab:active{cursor:grabbing}
+/* свой цвет задачи (как в прототипе: заливка + полоска слева) */
+.tm-card.colored{background:color-mix(in srgb,var(--tc) var(--ta,20%),var(--card));border-color:color-mix(in srgb,var(--tc) 42%,var(--line))}
+.tm-card.colored::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:11px 0 0 11px;background:var(--tc)}
+.tm-row.colored{background:color-mix(in srgb,var(--tc) var(--ta,20%),var(--card));border-color:color-mix(in srgb,var(--tc) 42%,var(--line))}
+.tm-row.colored::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:10px 0 0 10px;background:var(--tc)}
 .tm-card:hover{border-color:#3d434f;transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.35)}
 .tm-card:active{cursor:grabbing}
 .tm-card.done{opacity:.62}
@@ -1963,7 +1968,7 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-quickadd input{width:100%;max-width:620px;height:36px;background:#14161a;border:1px solid #2b2f37;border-radius:9px;color:var(--tx);font:13px var(--body);padding:0 12px;outline:none;transition:.18s}
 .tm-quickadd input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
 .tm-rows{padding:12px 20px 0;display:flex;flex-direction:column;gap:7px;max-width:980px}
-.tm-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--card);border:1px solid var(--line2);border-radius:10px;cursor:pointer;transition:.14s}
+.tm-row{position:relative;display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--card);border:1px solid var(--line2);border-radius:10px;cursor:pointer;transition:.14s}
 .tm-row:hover{border-color:#3d434f;transform:translateX(2px)}
 .tm-row.done{opacity:.6}
 .tm-row.done .tm-row-title{text-decoration:line-through;color:var(--tx3)}
@@ -1990,8 +1995,12 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 /* содержимое не сжимается под высоту панели: панель скроллится (иначе
    markdown-редактор и прочие блоки схлопываются, как на скрине бага) */
 .tm-drawer-body > *{flex-shrink:0}
-.tm-title-ta{width:100%;resize:none;background:#14161a;border:1px solid #2b2f37;border-radius:10px;color:var(--tx);font:600 14px/1.45 var(--body);padding:9px 11px;outline:none;transition:border-color .18s}
-.tm-title-ta:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+/* название задачи: просто текст — клик открывает правку (как в прототипе) */
+.tm-title-view{margin:0;min-height:26px;font:700 18px/1.35 var(--body);color:var(--tx);word-break:break-word}
+.tm-title-view.ed{cursor:pointer;border-radius:8px;transition:background .15s;padding:1px 4px;margin:-1px -4px}
+.tm-title-view.ed:hover{background:#1d2127}
+.tm-title-edit{width:100%;background:none;border:none;border-bottom:1px solid var(--acc);border-radius:0;color:var(--tx);font:700 18px/1.35 var(--body);padding:0 0 3px;outline:none}
+.tm-drawer.wide .tm-title-view,.tm-drawer.full .tm-title-view,.tm-drawer.wide .tm-title-edit,.tm-drawer.full .tm-title-edit{font-size:23px}
 .tm-stickers{display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;position:relative}
 .tm-sticker{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;background:var(--card);border:1px solid var(--line2);border-radius:9px;color:var(--tx2);font:500 12px var(--body);cursor:pointer;transition:.14s}
 .tm-sticker:hover{border-color:#3d434f;color:var(--tx)}
@@ -2021,7 +2030,9 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-kids-progress{height:5px;border-radius:4px;background:#22262d;overflow:hidden}
 .tm-kids-progress span{display:block;height:100%;background:linear-gradient(90deg,#8fbf7f,#a9d69b);border-radius:4px;transition:width .3s}
 .tm-kids{display:flex;flex-direction:column;gap:5px}
-.tm-kid{display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--card);border:1px solid var(--line2);border-radius:8px}
+.tm-kid{position:relative;display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--card);border:1px solid var(--line2);border-radius:8px}
+.tm-kid.colored{background:color-mix(in srgb,var(--tc) var(--ta,20%),var(--card));border-color:color-mix(in srgb,var(--tc) 40%,var(--line))}
+.tm-kid.colored::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:8px 0 0 8px;background:var(--tc)}
 .tm-kid.done{opacity:.6}
 .tm-kid.done .tm-kid-title{text-decoration:line-through;color:var(--tx3)}
 .tm-kid-title{flex:1;min-width:0;background:none;border:none;color:var(--tx);font:500 12.5px var(--body);text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0}
@@ -2109,6 +2120,8 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 }
 @media(max-width:900px){
   .tm-drawer.wide,.tm-drawer.full{position:fixed;inset:0;width:auto;border:none;border-radius:0}
+  /* узкий экран: колонка чата не отнимает всё окно у содержимого задачи */
+  .tm-drawer.wide .tm-drawer-chat,.tm-drawer.full .tm-drawer-chat{max-height:46vh;border-left:none;border-top:1px solid var(--line)}
 }
 /* на телефонах боковая панель занимает весь экран (как в прототипе ≤560px) */
 @media(max-width:560px){
@@ -2148,18 +2161,34 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-sysmsg b{color:var(--tx2);font-weight:600}
 .tm-sysmsg i{font-style:normal;font:400 9px var(--mono);color:var(--tx3);opacity:.75}
 .tm-composer{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line);flex:none;align-items:flex-end}
-.tm-composer textarea{flex:1;min-height:34px;max-height:120px;resize:none;background:#14161a;border:1px solid #2b2f37;border-radius:10px;color:var(--tx);font:12.5px/1.45 var(--body);padding:8px 10px;outline:none;color-scheme:dark;transition:border-color .18s}
-.tm-composer textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+.tm-composer>.tm-av{flex:none}
+.tm-composer-box{flex:1;min-width:0;display:flex;flex-direction:column;background:#14161a;border:1px solid #2b2f37;border-radius:11px;overflow:hidden;transition:border-color .18s,box-shadow .18s}
+.tm-composer-box:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+.tm-composer-bar{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #262a31;background:#181b20}
+.tm-composer-bar .tm-md-tools{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.tm-composer-hint{margin-left:auto;flex:none;font:400 9px var(--mono);color:var(--tx3);padding-right:4px;white-space:nowrap}
+.tm-composer-split{display:flex;align-items:stretch;min-height:0}
+.tm-composer-split textarea{flex:1;min-width:0;height:38px;resize:none;background:none;border:none;color:var(--tx);font:12.5px/1.45 var(--body);padding:8px 10px;outline:none;color-scheme:dark}
+.tm-composer-prev{flex:1;min-width:0;border-left:1px solid #262a31;padding:7px 10px;font:12px/1.5 var(--body);overflow-y:auto;scrollbar-width:thin}
+.tm-drawer.side .tm-composer-split.with-prev,.tm-composer-split.stacked{flex-direction:column}
+.tm-drawer.side .tm-composer-split.with-prev .tm-composer-prev,.tm-composer-split.stacked .tm-composer-prev{border-left:none;border-top:1px solid #262a31;max-height:150px}
+@media(max-width:760px){.tm-composer-split.with-prev{flex-direction:column}.tm-composer-split.with-prev .tm-composer-prev{border-left:none;border-top:1px solid #262a31;max-width:none}}
 .tm-send{width:34px;height:34px;border:none;border-radius:10px;background:var(--acc);color:#221604;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:.15s}
 .tm-send:hover{filter:brightness(1.12)}
 
-/* markdown-редактор с панелью инструментов */
-.tm-md{display:flex;flex-direction:column;border:1px solid #2b2f37;border-radius:10px;overflow:hidden;background:#14161a}
-.tm-md-bar{display:flex;align-items:center;gap:2px;padding:4px 8px;border-bottom:1px solid #262a31;background:#181b20;flex-wrap:wrap}
-.tm-md-tools{display:flex;align-items:center;gap:2px;flex-wrap:wrap;row-gap:2px}
-.tm-md-tools button{width:26px;height:24px;border:none;background:none;border-radius:6px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center}
-.tm-md-tools button:hover{background:#262b33;color:var(--tx)}
-.tm-md-sep{width:1px;height:14px;background:#2e333c;margin:0 4px;display:inline-block;flex:none}
+/* markdown-редактор с панелью инструментов — ровный ряд кнопок с группами
+   через разделители (как панель прототипа «Поток», скрин 1) */
+.tm-md{display:flex;flex-direction:column;border:1px solid #2b2f37;border-radius:10px;overflow:hidden;background:#14161a;flex:none}
+.tm-md-bar{display:flex;align-items:center;gap:2px;padding:5px 6px;border-bottom:1px solid #262a31;background:#181b20;flex-wrap:wrap}
+.tm-md-tools{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.tm-md-tools button{width:25px;height:26px;flex:none;border:none;background:none;border-radius:7px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.tm-md-tools button:hover{background:color-mix(in srgb,var(--acc) 16%,transparent);color:var(--acc2)}
+.tm-md-tools button:disabled{opacity:.4;cursor:default}
+.tm-md-tools button:disabled:hover{background:none;color:var(--tx3)}
+.tm-md-tools button svg{width:14px;height:14px}
+.tm-md-tools.mini button{width:23px;height:21px;border-radius:6px}
+.tm-md-tools.mini button svg{width:12px;height:12px}
+.tm-md-sep{width:1px;height:17px;background:#2e333c;margin:0 3px;display:inline-block;flex:none}
 .tm-md-modes{margin-left:auto;display:flex;gap:2px;background:#121417;border-radius:7px;padding:2px}
 .tm-md-modes button{border:none;background:none;border-radius:5px;color:var(--tx3);font:600 10.5px var(--body);padding:3px 8px;cursor:pointer}
 .tm-md-modes button.on{background:var(--accd);color:var(--tx)}
@@ -2170,6 +2199,9 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-md.preview .tm-md-body{min-height:130px}
 .tm-md.split .tm-desc-ta{border:none;border-right:1px solid #262a31;border-radius:0;box-shadow:none!important;flex:1;min-height:150px}
 .tm-md.split .tm-md-prev{flex:1;overflow:auto;max-height:420px}
+/* в боковой панели сплит становится вертикальным (дверь узкая) */
+.tm-drawer.side .tm-md.split .tm-md-body{flex-direction:column}
+.tm-drawer.side .tm-md.split .tm-desc-ta{border-right:none;border-bottom:1px solid #262a31;min-height:110px}
 @media(max-width:760px){.tm-md.split .tm-md-body{flex-direction:column}.tm-md.split .tm-desc-ta{border-right:none;border-bottom:1px solid #262a31;min-height:110px}}
 .tm-md-prev{padding:9px 12px;overflow:auto;min-height:40px}
 .tm-md-empty{margin:0;font:400 11.5px var(--body);color:var(--tx3)}
@@ -2228,6 +2260,19 @@ body.dragging *{cursor:grabbing!important}
 .tm-qdates{display:flex;gap:4px;flex-basis:100%}
 .tm-qdates button{flex:1;height:24px;border:1px solid var(--line2);background:var(--card);border-radius:7px;color:var(--tx3);font:600 10px var(--body);cursor:pointer;transition:.14s}
 .tm-qdates button:hover{color:var(--tx);border-color:#3d434f}
+
+/* цвет задачи: палитра + плотность заливки + предпросмотр (как в прототипе) */
+.tm-color{display:flex;flex-direction:column;gap:8px}
+.tm-swatches{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.tm-csw{width:26px;height:26px;flex:none;border-radius:9px;border:2px solid transparent;cursor:pointer;transition:.14s;padding:0}
+.tm-csw:hover{transform:scale(1.12)}
+.tm-csw.on{border-color:var(--tx);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 30%,transparent)}
+.tm-csw.none{background:#1d2026;border:1px dashed #3d434f;display:flex;align-items:center;justify-content:center;color:var(--tx3)}
+.tm-csw:disabled{opacity:.45;cursor:default;transform:none}
+.tm-alpha-row{display:flex;align-items:center;gap:10px;max-width:340px}
+.tm-alpha-row input{flex:1;accent-color:var(--acc);min-width:0}
+.tm-alpha-row b{font:700 12px var(--body);min-width:44px;text-align:right;color:var(--tx)}
+.tm-color-demo{border-radius:10px;padding:9px 11px;border:1px solid var(--line);font:600 12px var(--body);color:var(--tx2);background:color-mix(in srgb,var(--tc,transparent) var(--ta,20%),#14161a);border-color:color-mix(in srgb,var(--tc,var(--line)) 45%,var(--line))}
 
 /* кнопки-иконки в шапке вида + попап фильтров */
 .tm-ibtn{position:relative;width:34px;height:34px;border:1px solid var(--line2);background:var(--card);border-radius:9px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}

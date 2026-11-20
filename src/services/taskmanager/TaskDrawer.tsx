@@ -19,15 +19,17 @@
  * привязаны (preset) и показываются чипами.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import {
   childrenOf,
+  colorVars,
   fmtDeadline,
   initialsOf,
   parseStickers,
   TM_PRIO,
   TM_PALETTE,
+  TM_TASK_PALETTE,
   userColor,
   firstName,
   type TmLabel,
@@ -37,7 +39,7 @@ import {
 } from './tmTypes';
 import type { TmUser, Ws } from './TaskManagerApp';
 import { VetviMark } from './TaskViews';
-import { MD_TOOLS, mdApplyTool, mdToHtml, mdPlain } from './md';
+import { MD_TOOLS, mdApplyTool, mdEditorKeyDown, mdToHtml, mdPlain } from './md';
 
 type UserMap = Map<string, TmUser>;
 export type DrawerMode = 'side' | 'wide' | 'full';
@@ -73,8 +75,10 @@ export function TmDrawer(props: {
      при монтировании: дровер монтируется с key=taskId — смена задачи
      пересоздаёт компонент (без effect-сброса состояния). */
   const [title, setTitle] = useState(task?.title || '');
+  const [titleEdit, setTitleEdit] = useState(false);
   const [desc, setDesc] = useState(task?.description || '');
-  const [mdMode, setMdMode] = useState<'edit' | 'split' | 'preview'>(props.mode === 'side' ? 'edit' : 'split');
+  /* сплит по умолчанию — результат виден сразу при вводе (как в прототипе) */
+  const [mdMode, setMdMode] = useState<'edit' | 'split' | 'preview'>('split');
   /* смена прав (наблюдатель): переключаемся в просмотр, правки недоступны */
   useEffect(() => {
     if (!props.canEdit) setMdMode('preview');
@@ -85,10 +89,13 @@ export function TmDrawer(props: {
   const [labelInput, setLabelInput] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
   const debounceT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alphaT = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef({ title: task?.title || '', desc: task?.description || '' });
   const chatEndRef = useRef<HTMLDivElement>(null);
   const mdAreaRef = useRef<HTMLTextAreaElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
+  const chatTaRef = useRef<HTMLTextAreaElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
 
@@ -105,16 +112,23 @@ export function TmDrawer(props: {
     if (labelInput) labelInputRef.current?.focus();
   }, [labelInput]);
 
-  /* сменился режим — split→edit в боковой панели */
-  useEffect(() => {
-    setMdMode((m) => (m === 'split' && props.mode === 'side' ? 'edit' : m));
-  }, [props.mode]);
-
   /* чат: автоскролл к низу при новых сообщениях */
   const chatKey = task ? task.messages.map((m) => m.id).join(',') : '';
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest' });
   }, [chatKey]);
+
+  /* поле комментария растёт по тексту, но не выше трети высоты окна задачи */
+  useEffect(() => {
+    const ta = chatTaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    const dr = drawerRef.current;
+    const maxH = dr ? Math.max(72, Math.floor(dr.clientHeight / 3)) : 120;
+    const h = Math.min(ta.scrollHeight, maxH);
+    ta.style.height = Math.max(h, 38) + 'px';
+    ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
+  }, [chatDraft, props.mode]);
 
   const saveText = (nt: string, nd: string) => {
     if (!task) return;
@@ -217,9 +231,10 @@ export function TmDrawer(props: {
       {/* затемнение за дровером: клик закрывает, как в прототипе */}
       <div className="tm-drawer-scrim" onClick={props.onClose} aria-hidden="true" />
       <aside
+        ref={drawerRef}
         className={'tm-drawer show ' + props.mode}
         aria-label={'Задача: ' + task.title}
-        style={{ '--dpc': prio?.color || project.color } as React.CSSProperties}
+        style={{ '--dpc': task.color || prio?.color || project.color } as React.CSSProperties}
       >
         <div className="tm-drawer-topline" />
 
@@ -249,15 +264,37 @@ export function TmDrawer(props: {
 
       <div className="tm-drawer-layout" ref={layoutRef}>
         <div className="tm-drawer-body" ref={scrollRef}>
-          <textarea
-            className="tm-title-ta"
-            value={title}
-            rows={2}
-            aria-label="Название задачи"
-            disabled={!ed}
-            onChange={(e) => { setTitle(e.target.value); queueSave(e.target.value, desc); }}
-            onBlur={() => saveText(title, desc)}
-          />
+          {/* название: просто текст — клик открывает правку (как в прототипе) */}
+          {titleEdit ? (
+            <input
+              autoFocus
+              className="tm-title-edit"
+              value={title}
+              aria-label="Название задачи"
+              disabled={!ed}
+              onChange={(e) => { setTitle(e.target.value); queueSave(e.target.value, desc); }}
+              onBlur={() => {
+                setTitleEdit(false);
+                if (!title.trim()) { setTitle(task.title); return; }
+                saveText(title, desc);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+                if (e.key === 'Escape') { e.preventDefault(); setTitleEdit(false); setTitle(task.title); }
+              }}
+            />
+          ) : (
+            <h1
+              className={'tm-title-view' + (ed ? ' ed' : '')}
+              onClick={ed ? () => setTitleEdit(true) : undefined}
+              title={ed ? 'Нажмите, чтобы переименовать задачу' : undefined}
+              role={ed ? 'button' : undefined}
+              tabIndex={ed ? 0 : undefined}
+              onKeyDown={ed ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTitleEdit(true); } } : undefined}
+            >
+              {title || 'Без названия'}
+            </h1>
+          )}
 
           {/* стикеры: исполнители / приоритет / дедлайн */}
           <div className="tm-stickers">
@@ -451,21 +488,15 @@ export function TmDrawer(props: {
             )}
           </div>
 
-          {/* описание: markdown-редактор с панелью и просмотром */}
+          {/* описание: markdown-редактор с панелью и просмотром (сплит по умолчанию) */}
           <div className="tm-sec-cap">Описание · Markdown <span className="tm-sec-note">видно на карточке</span></div>
           <div className={'tm-md ' + mdMode}>
             <div className="tm-md-bar">
-              <div className="tm-md-tools">
-                {MD_TOOLS.map((tool, i) => (
-                  <span key={tool.id}>
-                    {i === 3 || i === 5 || i === 8 ? <i className="tm-md-sep" /> : null}
-                    <button type="button" title={tool.title} aria-label={tool.title} disabled={!ed}
-                      onClick={() => { if (mdAreaRef.current) mdApplyTool(mdAreaRef.current, tool.id); }}>
-                      <ToolIcon id={tool.icon} />
-                    </button>
-                  </span>
-                ))}
-              </div>
+              <MdToolbar
+                getArea={() => mdAreaRef.current}
+                disabled={!ed}
+                apply={(_id, nv) => { setDesc(nv); queueSave(title, nv); }}
+              />
               <div className="tm-md-modes">
                 {(['edit', 'split', 'preview'] as const).map((m) => (
                   <button key={m} type="button" className={mdMode === m ? 'on' : ''} onClick={() => setMdMode(m)}>
@@ -486,9 +517,9 @@ export function TmDrawer(props: {
                 onChange={(e) => { setDesc(e.target.value); queueSave(title, e.target.value); }}
                 onBlur={() => saveText(title, desc)}
                 onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); if (mdAreaRef.current) mdApplyTool(mdAreaRef.current, 'bold'); }
-                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); if (mdAreaRef.current) mdApplyTool(mdAreaRef.current, 'italic'); }
-                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (mdAreaRef.current) mdApplyTool(mdAreaRef.current, 'link'); }
+                  if (!mdAreaRef.current) return;
+                  const nv = mdEditorKeyDown(mdAreaRef.current, e);
+                  if (nv !== null) { setDesc(nv); queueSave(title, nv); }
                 }}
               />
               <div className="tm-md-prev">
@@ -506,7 +537,7 @@ export function TmDrawer(props: {
           )}
           <div className="tm-kids">
             {kids.map((k) => (
-              <div className={'tm-kid' + (k.done ? ' done' : '')} key={k.id}>
+              <div className={'tm-kid' + (k.done ? ' done' : '') + (k.color ? ' colored' : '')} key={k.id} style={colorVars(k.color, k.colorAlpha)}>
                 <button
                   type="button"
                   className={'tm-donechk sm' + (k.done ? ' on' : '')}
@@ -563,6 +594,56 @@ export function TmDrawer(props: {
               }}
             />
           )}
+
+          {/* цвет задачи (как в прототипе: палитра + плотность заливки + предпросмотр) */}
+          <div className="tm-sec-cap">Цвет задачи</div>
+          <div className="tm-color">
+            <div className="tm-swatches">
+              <button
+                type="button"
+                className={'tm-csw none' + (!task.color ? ' on' : '')}
+                title="Без цвета"
+                aria-label="Убрать цвет"
+                disabled={!ed}
+                onClick={() => void props.onPatch(task.id, { color: null })}
+              >
+                <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+              </button>
+              {TM_TASK_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={'tm-csw' + (task.color === c ? ' on' : '')}
+                  style={{ background: c }}
+                  title="Цвет карточки"
+                  aria-label={'Цвет карточки ' + c}
+                  disabled={!ed}
+                  onClick={() => void props.onPatch(task.id, { color: c, colorAlpha: task.colorAlpha ?? 0.2 })}
+                />
+              ))}
+            </div>
+            {task.color && (
+              <div className="tm-alpha-row">
+                <input
+                  type="range"
+                  min={4}
+                  max={80}
+                  value={Math.round((task.colorAlpha ?? 0.2) * 100)}
+                  aria-label="Плотность заливки"
+                  disabled={!ed}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10) / 100;
+                    if (alphaT.current) clearTimeout(alphaT.current);
+                    alphaT.current = setTimeout(() => void props.onPatch(task.id, { colorAlpha: v }), 250);
+                  }}
+                />
+                <b>{Math.round((task.colorAlpha ?? 0.2) * 100)}%</b>
+              </div>
+            )}
+            <div className="tm-color-demo" style={colorVars(task.color, task.colorAlpha)}>
+              {task.title.slice(0, 42) || 'Предпросмотр карточки'}
+            </div>
+          </div>
 
           {/* мета + действия */}
           <div className="tm-meta">
@@ -640,18 +721,42 @@ export function TmDrawer(props: {
             )}
             <div ref={chatEndRef} />
           </div>
+          {/* композер: панель Markdown + ввод с живым предпросмотром */}
           <div className="tm-composer">
             <span className="tm-av" style={{ background: userColor(ws.me.login) }}>{initialsOf(ws.me.displayName, ws.me.login)}</span>
-            <textarea
-              rows={1}
-              placeholder="Сообщение команде… Markdown тоже работает (Enter — отправить)"
-              aria-label="Новый комментарий"
-              value={chatDraft}
-              onChange={(e) => setChatDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendComment(); }
-              }}
-            />
+            <div className="tm-composer-box">
+              <div className="tm-composer-bar">
+                <MdToolbar
+                  mini
+                  getArea={() => chatTaRef.current}
+                  apply={(_id, nv) => setChatDraft(nv)}
+                />
+                <span className="tm-composer-hint">Enter — отправить</span>
+              </div>
+              <div className={'tm-composer-split' + (chatDraft.trim() ? ' with-prev' : '')}>
+                <textarea
+                  ref={chatTaRef}
+                  rows={1}
+                  placeholder="Сообщение команде… Markdown работает, Shift+Enter — новая строка"
+                  aria-label="Новый комментарий"
+                  value={chatDraft}
+                  onChange={(e) => setChatDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendComment(); return; }
+                    if (!chatTaRef.current) return;
+                    const nv = mdEditorKeyDown(chatTaRef.current, e);
+                    if (nv !== null) setChatDraft(nv);
+                  }}
+                />
+                {chatDraft.trim() && (
+                  <div
+                    className="tm-composer-prev md-body"
+                    aria-label="Предпросмотр комментария"
+                    dangerouslySetInnerHTML={{ __html: mdToHtml(chatDraft) }}
+                  />
+                )}
+              </div>
+            </div>
             <button type="button" className="tm-send" aria-label="Отправить" onClick={() => void sendComment()}>
               <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></svg>
             </button>
@@ -673,6 +778,39 @@ function fmtWhen(iso: string): string {
   } catch {
     return '';
   }
+}
+
+/* панель инструментов markdown (описание + композер чата).
+   Кнопки — прямые дети flex-контейнера с разделителями между группами:
+   ровный ряд, как панель прототипа «Поток» (скрин 1). */
+function MdToolbar(props: {
+  disabled?: boolean;
+  mini?: boolean;
+  getArea: () => HTMLTextAreaElement | null;
+  apply: (toolId: string, newValue: string) => void;
+}) {
+  return (
+    <div className={'tm-md-tools' + (props.mini ? ' mini' : '')} role="toolbar" aria-label="Инструменты Markdown">
+      {MD_TOOLS.map((tool) => (
+        <Fragment key={tool.id}>
+          {tool.sep && <i className="tm-md-sep" aria-hidden="true" />}
+          <button
+            type="button"
+            title={tool.title}
+            aria-label={tool.title}
+            disabled={props.disabled}
+            onClick={() => {
+              const area = props.getArea();
+              if (!area) return;
+              props.apply(tool.id, mdApplyTool(area, tool.id));
+            }}
+          >
+            <ToolIcon id={tool.icon} />
+          </button>
+        </Fragment>
+      ))}
+    </div>
+  );
 }
 
 function msgTime(ts: number): string {
@@ -703,6 +841,7 @@ function ToolIcon({ id }: { id: string }) {
     case 'code': return <svg viewBox="0 0 24 24" {...common}><path d="M8 8l-4 4 4 4M16 8l4 4-4 4" /></svg>;
     case 'note': return <svg viewBox="0 0 24 24" {...common}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 9h8M8 13h5" /></svg>;
     case 'link': return <svg viewBox="0 0 24 24" {...common}><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1.5 1.5M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6L12.5 17.5" /></svg>;
+    case 'image': return <svg viewBox="0 0 24 24" {...common}><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="8.5" cy="10" r="1.5" /><path d="m21 15-5-5-9 9" /></svg>;
     case 'table': return <svg viewBox="0 0 24 24" {...common}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M9 10v9M15 10v9" /></svg>;
     case 'minus': return <svg viewBox="0 0 24 24" {...common}><path d="M5 12h14" /></svg>;
     default: return <svg viewBox="0 0 24 24" {...common}><circle cx="12" cy="12" r="3" /></svg>;

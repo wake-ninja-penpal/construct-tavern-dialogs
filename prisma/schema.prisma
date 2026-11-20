@@ -152,6 +152,8 @@ model TaskItem {
   parentId    String?
   title       String
   description String    @default("")
+  color       String? // свой цвет задачи (палитра прототипа), null — без цвета
+  colorAlpha  Float? // плотность заливки цветом 0.04…0.8
   stickers    String    @default("{}") // JSON {assignees:[login], deadline, priority}
   links       String    @default("[]") // JSON — связи с нодами «Ветвей»
   messages    String    @default("[]") // JSON — чат задачи: [{id,login,text,ts,system}]

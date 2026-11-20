@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { childrenOf, firstName, fmtDeadline, initialsOf, TM_KIND_COLOR, TM_PRIO, TM_ROLE_LABEL, TM_ROLE_RANK, TM_PALETTE, TM_TEAM_ICONS, userColor, type TmColumn, type TmFilters, type TmLabel, type TmLink, type TmProject, type TmTask, type TmTeam } from './tmTypes';
+import { childrenOf, colorVars, firstName, fmtDeadline, initialsOf, TM_KIND_COLOR, TM_PRIO, TM_ROLE_LABEL, TM_ROLE_RANK, TM_PALETTE, TM_TEAM_ICONS, userColor, type TmColumn, type TmFilters, type TmLabel, type TmLink, type TmProject, type TmTask, type TmTeam } from './tmTypes';
 import { mdPlain } from './md';
 import type { TmUser, Ws } from './TaskManagerApp';
 
@@ -350,7 +350,9 @@ export function BoardView(props: {
   }
 
   const columnTasks = (colId: string): TmTask[] => {
-    const inCol = ws.tasks.filter((t) => t.columnId === colId && !t.parentId && props.matchQuery(t, props.query));
+    /* подзадачи живут в колонке рядом с родителем (как в прототипе —
+       «подзадача создана — она видна и в колонке») */
+    const inCol = ws.tasks.filter((t) => t.columnId === colId && props.matchQuery(t, props.query));
     return props.filtered(inCol).sort((a, b) => a.order - b.order);
   };
 
@@ -680,14 +682,18 @@ export function TaskCard(props: {
   const plain = mdPlain(t.description);
   return (
     <article
-      className={'tm-card' + (t.done ? ' done' : '') + (props.canDrag ? ' grab' : '')}
+      className={'tm-card' + (t.done ? ' done' : '') + (t.color ? ' colored' : '') + (props.canDrag ? ' grab' : '')}
       onPointerDown={props.canDrag ? (e) => props.onDragPointerDown?.(e, t) : undefined}
       onClick={() => props.onOpen(t)}
       role="button"
       tabIndex={0}
+      style={{ '--pc': prio?.color || 'var(--line2)', ...colorVars(t.color, t.colorAlpha) } as React.CSSProperties}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); props.onOpen(t); } }}
     >
-      {t.parentId && <span className="tm-child-tag" title="Подзадача">↳ подзадача</span>}
+      {t.parentId && (() => {
+        const par = props.ws.tasks.find((x) => x.id === t.parentId);
+        return <span className="tm-child-tag" title={'Подзадача задачи «' + (par?.title || '') + '»'}>↳ подзадача · {par ? par.title : '—'}</span>;
+      })()}
       <div className="tm-card-top">
         <button
           type="button"
@@ -761,8 +767,14 @@ export function TaskRow(props: {
   const prio = st.priority ? TM_PRIO[st.priority] : null;
   const project = props.ws.projects.find((p) => p.id === t.projectId);
   return (
-    <div className={'tm-row' + (t.done ? ' done' : '')} onClick={() => props.onOpen(t)} role="button" tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); props.onOpen(t); } }}>
+    <div
+      className={'tm-row' + (t.done ? ' done' : '') + (t.color ? ' colored' : '')}
+      onClick={() => props.onOpen(t)}
+      role="button"
+      tabIndex={0}
+      style={{ '--pc': prio?.color || 'var(--line2)', ...colorVars(t.color, t.colorAlpha) } as React.CSSProperties}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); props.onOpen(t); } }}
+    >
       {props.onToggleDone && (
         <button
           type="button"
@@ -815,8 +827,9 @@ export function BacklogView(props: {
   headExtra?: React.ReactNode;
 }) {
   const project = props.ws.projects.find((p) => p.id === props.projectId);
+  /* подзадачи бэклога тоже видны — с меткой «↳ подзадача» (как в прототипе) */
   const tasks = props.filtered(
-    props.ws.tasks.filter((t) => t.projectId === props.projectId && !t.columnId && !t.parentId && props.matchQuery(t, props.query)),
+    props.ws.tasks.filter((t) => t.projectId === props.projectId && !t.columnId && props.matchQuery(t, props.query)),
   ).sort((a, b) => a.order - b.order);
   if (!project) return <div className="tm-loading">Проект не найден</div>;
   return (

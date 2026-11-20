@@ -129,6 +129,11 @@ export async function POST(req: NextRequest) {
     if (stickersObj.assignees?.length) {
       messages = appendSysMsg(messages, user.login, 'назначил(а): ' + stickersObj.assignees.join(', '))
     }
+    /* свой цвет задачи (палитра прототипа «Поток») */
+    const color = typeof body.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(body.color) ? body.color : null
+    const colorAlpha = typeof body.colorAlpha === 'number' && Number.isFinite(body.colorAlpha)
+      ? Math.min(0.8, Math.max(0.04, body.colorAlpha))
+      : (color ? 0.2 : null)
 
     const created = await db.taskItem.create({
       data: {
@@ -138,6 +143,8 @@ export async function POST(req: NextRequest) {
         parentId,
         title: title.slice(0, 200),
         description: String(body.description || '').slice(0, 20000),
+        color,
+        colorAlpha,
         stickers,
         links: sanitizeLinks(body.links),
         labelIds: sanitizeLabelIds(body.labelIds),

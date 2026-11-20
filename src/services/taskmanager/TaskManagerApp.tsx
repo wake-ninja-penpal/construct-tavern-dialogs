@@ -332,6 +332,8 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
       boardId: src.boardId,
       columnId: src.columnId,
       description: src.description,
+      color: src.color,
+      colorAlpha: src.colorAlpha,
       stickers: { ...src.stickers },
       links: (src.links || []).map((l) => ({ ...l })),
       labelIds: [...(src.labelIds || [])],
@@ -344,8 +346,11 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
 
   const patchTask = useCallback(async (id: string, patch: Record<string, unknown>): Promise<boolean> => {
     try {
-      const j = await tmJson<{ item: TmTask }>('/api/tm/tasks/' + id, { method: 'PATCH', body: JSON.stringify(patch) });
+      const j = await tmJson<{ item: TmTask; moved?: TmTask[] }>('/api/tm/tasks/' + id, { method: 'PATCH', body: JSON.stringify(patch) });
       putTask(j.item);
+      /* перенос родителя тянет подзадачи в ту же колонку (сервер их переносит
+         и возвращает список — обновляем их в состоянии) */
+      for (const m of j.moved || []) putTask(m);
       return true;
     } catch (e) {
       if (e instanceof TmDenied) {
