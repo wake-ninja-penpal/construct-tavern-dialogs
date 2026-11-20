@@ -28,7 +28,8 @@ import { getMe } from '@/vetvi/core/identity';
 import type { VetviStore } from './store';
 import { canvasApi } from './canvasApi';
 import { avatarInitial } from './auth';
-import { AccountPopover, NotificationsPopover, useNotifications } from './AccountMenu';
+import { AccountPopover, useNotifications } from './AccountMenu';
+import { NotificationsPopover } from '@/services/notifications';
 import { ServiceSwitcher } from '@/services/ServiceSwitcher';
 import { VETVI_SERVICE_KEY } from '@/services/hub';
 

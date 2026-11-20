@@ -258,31 +258,90 @@ export function mdPlain(s: string): string {
 }
 
 /** Статистика чек-листов описания: сколько пунктов [ ] / [x] в тексте.
-    Подпункты с отступом тоже считаются. null — чек-листов в тексте нет. */
+    Считает ТЕМ ЖЕ способом, каким mdToHtml рисует квадратики (в т.ч. внутри
+    цитат, нумерованные и вне блоков кода) — иначе шкала расходится с DOM.
+    null — чек-листов в тексте нет. */
 export function checklistStats(s: string): { total: number; done: number } | null {
-  let total = 0;
+  const lines = String(s || '').replace(/\r\n/g, '\n').split('\n');
+  const idxs = taskLineIndexes(s);
   let done = 0;
-  const re = /^\s*[-*+]\s+\[([ xX])\]/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(String(s || ''))) !== null) {
-    total++;
-    if (m[1].toLowerCase() === 'x') done++;
+  for (const i of idxs) {
+    if (/\[\s*[xX]\s*\]/.test(lines[i] || '')) done++;
   }
-  return total ? { total, done } : null;
+  return idxs.length ? { total: idxs.length, done } : null;
 }
 
-/** Переключить N-й чекбокс описания (по порядку [ ]/[x] в исходнике).
-    Используется режимом чтения: клик по квадратику в тексте не открывает
-    редактор, а сразу меняет пункт и сохраняет описание. */
+/* ── индексация чек-пунктов исходника (зеркало mdToHtml) ──
+   Режим чтения кликает по отрисованным квадратикам (.mdchk в DOM) и должен
+   переключать ИМЕННО ИХ строки. Раньше считался наивный регэксп «- [x]»,
+   который не видел чек-пункты в цитатах («> - [ ] …») и нумерованные
+   («1. [ ] …») — DOM-индекс уезжал относительно исходника и галочка
+   ставилась/снималась на СОСЕДНЕЙ строке. Теперь классификация строки
+   повторяет mdToHtml шаг-в-шаг: блоки кода (```), цитаты (рекурсивно,
+   «> > - [ ]») и нумерованные списки считаются одинаково в рендере и здесь. */
+
+function collectTaskLines(lines: { text: string; idx: number }[], out: number[]): void {
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].text;
+    if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (/^\s*$/.test(line)) continue;
+    /* цитата: mdToHtml собирает подряд идущие «> …» строки, срезает ОДИН
+       уровень префикса и рекурсивно разбирает содержимое */
+    if (/^\s*>/.test(line)) {
+      const buf: { text: string; idx: number }[] = [];
+      while (i < lines.length && /^\s*>/.test(lines[i].text)) {
+        buf.push({ text: lines[i].text.replace(/^\s*>\s?/, ''), idx: lines[i].idx });
+        i++;
+      }
+      i--;
+      collectTaskLines(buf, out);
+      continue;
+    }
+    const m = line.match(/^(\s*)([-*+]|\d+[.)])\s+/);
+    if (!m) continue;
+    if (/^\[([ xX])\]/.test(line.slice(m[0].length))) out.push(lines[i].idx);
+  }
+}
+
+/** Индексы строк исходника, которые mdToHtml рисует квадратиками чек-листа
+    (в порядке DOM). Используется режимом чтения и статистикой шкалы. */
+export function taskLineIndexes(md: string): number[] {
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n').map((text, idx) => ({ text, idx }));
+  const out: number[] = [];
+  collectTaskLines(lines, out);
+  return out;
+}
+
+/** Перевернуть [ ] ↔ [x] в строке чек-пункта, сохранив префиксы цитаты,
+    отступ, маркер списка и текст (нумерованные и внутри цитат тоже). */
+function flipTaskLine(line: string): string {
+  let rest = line;
+  let quote = '';
+  while (/^\s*>/.test(rest)) {
+    const qm = rest.match(/^\s*>\s?/);
+    if (!qm) break;
+    quote += qm[0];
+    rest = rest.slice(qm[0].length);
+  }
+  const m = rest.match(/^(\s*)([-*+]|\d+[.)])\s+\[([ xX])\](\s*.*)$/);
+  if (!m) return line;
+  const flipped = m[3].toLowerCase() === 'x' ? '[ ]' : '[x]';
+  return quote + m[1] + m[2] + ' ' + flipped + m[4];
+}
+
+/** Переключить N-й чекбокс описания — тот, что N-й в отрисованном DOM
+    (порядок гарантирует taskLineIndexes — зеркало mdToHtml). Используется
+    режимом чтения: клик по квадратику меняет пункт и сохраняет описание,
+    не открывая редактор. */
 export function toggleChecklistAt(md: string, index: number): string {
-  let i = -1;
-  return String(md || '').split('\n').map((line) => {
-    const m = line.match(/^(\s*[-*+]\s+)\[([ xX])\](\s*.*)$/);
-    if (!m) return line;
-    i++;
-    if (i !== index) return line;
-    return m[1] + (m[2].toLowerCase() === 'x' ? '[ ]' : '[x]') + m[3];
-  }).join('\n');
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const idxs = taskLineIndexes(md);
+  const target = idxs[index];
+  if (target === undefined) return md;
+  lines[target] = flipTaskLine(lines[target] || '');
+  return lines.join('\n');
 }
 
 /* ═══ WYSIWYG: сериализация DOM редактора обратно в markdown ═══

@@ -17,6 +17,8 @@ import { checklistStats, mdPlain } from './md';
 import { ColumnIcon } from './icons';
 import { tmOpenMenu } from './TmMenu';
 import { TmPanelTab } from './TmPanelTab';
+import { NTF_NEG_TYPES, NotificationsPopover, ntfText } from '@/services/notifications';
+import { goServiceByKey, goVetviRoom } from '../hub';
 import type { TmUser, Ws } from './TaskManagerApp';
 
 type UserMap = Map<string, TmUser>;
@@ -2077,7 +2079,10 @@ export function TmSaveViewModal(props: {
   );
 }
 
-/* ═══ колокольчик уведомлений (назначение задач, комментарии) ═══ */
+/* ═══ колокольчик уведомлений — ЕДИНЫЙ для всех сервисов ═══
+   Попап/подписи/иконки — общий модуль src/services/notifications.tsx (тот же,
+   что в «Ветвях»); клик «Открыть» ведёт к сущности: задача — дровер,
+   комната — «Ветви» (#openroom=…), сервис — сам сервис. */
 
 interface NtfItem {
   id: string;
@@ -2087,42 +2092,6 @@ interface NtfItem {
   createdAt: string;
 }
 
-/* подписи ролей в уведомлениях (как в «Ветвях») */
-const ROLE_NTF: Record<string, string> = {
-  owner: 'владелец',
-  admin: 'администратор',
-  editor: 'редактор',
-  reader: 'только чтение',
-  viewer: 'наблюдатель',
-};
-
-/* подпись для ЛЮБОГО типа уведомления — общий колокольчик всех сервисов:
-   доступы к проектам «Ветвей», доступы к сервисам, задачи и комментарии */
-function ntfText(n: NtfItem): { b: string; i: string } {
-  const p = (n.payload || {}) as Record<string, unknown>;
-  const pn = p.projectName ? ' «' + String(p.projectName) + '»' : '';
-  const sn = p.serviceName ? ' «' + String(p.serviceName) + '»' : '';
-  const tn = p.taskTitle ? ' «' + String(p.taskTitle).slice(0, 46) + '»' : '';
-  const by = p.byName ? String(p.byName) : p.granterName ? String(p.granterName) : '';
-  const when = fmtNtfDate(n.createdAt);
-  switch (n.type) {
-    case 'task_assigned': return { b: 'Вам назначили задачу' + tn, i: (by ? by + ' · ' : '') + when };
-    case 'task_comment': return { b: 'Комментарий к задаче' + tn, i: ((p.preview ? String(p.preview).slice(0, 70) + ' · ' : '') + (by ? by + ' · ' : '') + when) };
-    case 'access_granted': return { b: 'Вам открыли доступ к проекту' + pn, i: (by ? by + ' · ' : '') + (ROLE_NTF[p.role as string] || 'доступ') + ' · ' + when };
-    case 'access_revoked': return { b: 'Доступ к проекту' + pn + ' отозван', i: (by ? by + ' · ' : '') + when };
-    case 'service_granted': return { b: 'Доступ к сервису' + sn + ' открыт', i: 'Администратор · сервис появится в меню «Сервисы» · ' + when };
-    case 'service_denied': return { b: 'Доступ к сервису' + sn + ' закрыт', i: 'Администратор · сервис пропал из меню «Сервисы» · ' + when };
-    case 'tm_service_denied': return { b: 'Доступ к менеджеру задач закрыт', i: (by ? by + ' · ' : '') + when };
-    case 'tm_access_granted': return { b: 'Вам дали доступ к проекту' + pn, i: (by ? by + ' · ' : '') + (ROLE_NTF[p.role as string] || '') + ' · ' + when };
-    default: {
-      const human = String(n.type || '')
-        .replace(/[_.]/g, ' ')
-        .replace(/^tm\s/, '')
-        .trim();
-      return { b: human ? human.charAt(0).toUpperCase() + human.slice(1) : 'Уведомление', i: when };
-    }
-  }
-}
 
 export function TmBell(props: {
   me: Ws['me'];
@@ -2180,7 +2149,19 @@ export function TmBell(props: {
     setOpen(false);
     markRead(n);
     const p = n.payload || {};
-    if (p.taskId) props.onOpenTask(String(p.taskId));
+    /* единый колокольчик: переход к СУЩНОСТИ в её сервисе — задача открыётся
+       здесь, комната уведёт в «Ветви», открывшийся сервис — в сам сервис */
+    if (p.taskId) { props.onOpenTask(String(p.taskId)); return; }
+    if (p.roomId) {
+      goVetviRoom({
+        roomId: String(p.roomId),
+        projectId: p.projectId ? String(p.projectId) : null,
+        projectName: p.projectName ? String(p.projectName) : null,
+        role: p.role ? String(p.role) : null,
+      });
+      return;
+    }
+    if (n.type === 'service_granted' && p.serviceKey) goServiceByKey(String(p.serviceKey));
   };
 
   /* очистить весь список (как в «Ветвях») */
@@ -2213,11 +2194,11 @@ export function TmBell(props: {
       {open && (
         <>
           <div className="tm-pop-scrim" onClick={() => setOpen(false)} />
-          {/* попап ТОЧЬ-В-ТОЧЬ как в «Ветвях» (NotificationsPopover): те же
-              классы collab-pop/ntf-pop, та же структура списка с иконками
-              и кнопкой «Открыть» у пунктов с задачей, подвал
-              «Очистить список»/«Закрыть» */}
-          <NtfPop
+          {/* попап ЕДИНЫЙ со «Ветвями» (src/services/notifications.tsx): те же
+              классы collab-pop/ntf-pop, те же подписи всех типов, иконки и
+              подвал «Очистить список»/«Закрыть»; «Открыть» есть у задач,
+              комнат (уводит в «Ветви») и сервисов */}
+          <NotificationsPopover
             items={items}
             onOpenItem={(n) => void openItem(n)}
             onClose={() => setOpen(false)}
@@ -2229,136 +2210,6 @@ export function TmBell(props: {
   );
 }
 
-/* типы уведомлений «плохих» новостей — красная иконка и тост-предупреждение */
-const NTF_NEG_TYPES = ['access_revoked', 'service_denied', 'tm_service_denied'];
-
-/* ── попап уведомлений — общий дизайн со «Ветвями» ──
-   Тот же DOM/CSS, что NotificationsPopover в AccountMenu.tsx: заголовок
-   УВЕДОМЛЕНИЯ, список с иконками в квадратиках (ntf-ico), жирный заголовок
-   + серая подпись (ntf-txt), кнопка «Открыть» у пунктов с задачей, подвал
-   с «Очистить список» (красный, с корзиной) и «Закрыть». */
-function NtfPop(props: {
-  items: NtfItem[];
-  onOpenItem: (n: NtfItem) => void;
-  onClose: () => void;
-  onClear: () => void;
-}) {
-  const { items, onOpenItem, onClose, onClear } = props;
-  /* позиция — под колокольчиком, как в «Ветвях» (якорь ищется в DOM по id) */
-  let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8 };
-  if (typeof document !== 'undefined') {
-    const anchor = document.querySelector('#bellBtn');
-    if (anchor) {
-      const r = anchor.getBoundingClientRect();
-      popStyle = { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };
-    }
-  }
-  return (
-    <div
-      className="collab-pop show ntf-pop"
-      style={popStyle}
-      role="dialog"
-      aria-label="Уведомления"
-    >
-      <div className="cp-cap">Уведомления</div>
-      {!items.length && (
-        <div className="ntf-empty">Пока пусто — здесь появляются уведомления всех сервисов: доступы, задачи и комментарии</div>
-      )}
-      <div className="ntf-list">
-        {items.map((n) => {
-          const t = ntfText(n);
-          const neg = NTF_NEG_TYPES.includes(n.type);
-          const openable = !!(n.payload || {}).taskId;
-          return (
-            <div key={n.id} className={'ntf-item' + (n.read ? '' : ' unread')}>
-              <span className={'ntf-ico' + (neg ? ' rev' : '')}>
-                {n.type === 'access_revoked' || n.type === 'tm_service_denied' ? <IcExit /> : n.type === 'service_granted' || n.type === 'service_denied' ? <IcGrid /> : n.type === 'task_assigned' || n.type === 'task_comment' ? <IcTask /> : <IcShare />}
-              </span>
-              <div className="ntf-txt">
-                <b>{t.b}</b>
-                <i>{t.i}</i>
-              </div>
-              {openable && (
-                <button type="button" className="btn" onClick={() => onOpenItem(n)}>Открыть</button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <div className="cp-acts">
-        {items.length > 0 && (
-          <button type="button" className="cp-act ntf-clear" title="Удалить все уведомления" onClick={onClear}>
-            <IcTrash />Очистить список
-          </button>
-        )}
-        <button type="button" className="cp-act" onClick={onClose}><IcX />Закрыть</button>
-      </div>
-    </div>
-  );
-}
-
-/* маленькие контурные иконки попапа — копия AccountMenu.tsx (стиль SyncModals) */
-function IcShare() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="18" cy="5" r="2.6" />
-      <circle cx="6" cy="12" r="2.6" />
-      <circle cx="18" cy="19" r="2.6" />
-      <path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" />
-    </svg>
-  );
-}
-function IcExit() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <path d="m16 17 5-5-5-5" />
-      <path d="M21 12H9" />
-    </svg>
-  );
-}
-function IcGrid() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="4" width="6.6" height="6.6" rx="1.6" />
-      <rect x="13.4" y="4" width="6.6" height="6.6" rx="1.6" />
-      <rect x="4" y="13.4" width="6.6" height="6.6" rx="1.6" />
-      <rect x="13.4" y="13.4" width="6.6" height="6.6" rx="1.6" />
-    </svg>
-  );
-}
-function IcTask() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
-      <path d="m8 12.2 2.7 2.7L16 9.5" />
-    </svg>
-  );
-}
-function IcX() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
-  );
-}
-function IcTrash() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
-    </svg>
-  );
-}
-
-function fmtNtfDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }) + ' ' +
-      d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
 
 /* ═══ аккаунт в шапке — оформление «Ветвей»: кнопка-аватар + попап
    (.acc-pop/.acc-head/.cp-act — те же классы, что в «Ветвях»).

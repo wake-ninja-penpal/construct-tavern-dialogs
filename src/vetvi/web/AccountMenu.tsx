@@ -24,6 +24,8 @@ import {
 } from './auth';
 import { authLogout } from './auth';
 import { getStore, type VetviStore } from './store';
+import { NotificationsPopover, ntfText } from '@/services/notifications';
+import { goServiceByKey, goTaskOpen } from '@/services/hub';
 
 /* ── попап аккаунта ── */
 
@@ -77,13 +79,6 @@ interface NtfState {
   unread: number;
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  owner: 'владелец',
-  admin: 'администратор',
-  editor: 'редактор',
-  reader: 'только чтение',
-};
-
 /** Хук: опрос уведомлений + push (vetvi:ntf) + состояние попапа. Используется в TopBar.
  *
  *  Доставка — два канала: мгновенный push от сервера (grant/revoke пушит
@@ -101,15 +96,25 @@ export function useNotifications(_store: VetviStore) {
   const seenIds = useRef<Set<string>>(new Set());
   const firstLoad = useRef(true);
 
-  const toastNtf = useCallback((n: { type?: string; payload?: Record<string, unknown> }) => {
+  const toastNtf = useCallback((n: { id?: string; type?: string; payload?: Record<string, unknown>; createdAt?: string }) => {
     const st = getStore();
-    const p = (n.payload || {}) as { projectName?: string; serviceName?: string };
+    /* те же подписи, что в попапе (ntfText) — единые для всех сервисов:
+       доступы, задачи, комментарии */
+    if (n.type && n.createdAt !== undefined) {
+      const t = ntfText({ id: n.id || '', type: n.type, payload: n.payload || {}, read: false, createdAt: n.createdAt });
+      st.toast(t.b, ['access_revoked', 'service_denied', 'tm_service_denied'].includes(n.type) ? 'warn' : 'ok');
+      return;
+    }
+    const p = (n.payload || {}) as { projectName?: string; serviceName?: string; taskTitle?: string };
     const nm = p.projectName ? ` «${p.projectName}»` : '';
     const sn = p.serviceName ? ` «${p.serviceName}»` : '';
+    const tn = p.taskTitle ? ` «${p.taskTitle.slice(0, 46)}»` : '';
     if (n.type === 'access_granted') st.toast(`Вам открыли доступ к проекту${nm}`, 'ok');
     else if (n.type === 'access_revoked') st.toast(`Доступ к проекту${nm} отозван`, 'warn');
     else if (n.type === 'service_granted') st.toast(`Доступ к сервису${sn} открыт`, 'ok');
     else if (n.type === 'service_denied') st.toast(`Доступ к сервису${sn} закрыт`, 'warn');
+    else if (n.type === 'task_assigned') st.toast(`Вам назначили задачу${tn}`, 'ok');
+    else if (n.type === 'task_comment') st.toast(`Новый комментарий к задаче${tn}`, 'ok');
     else st.toast('Новое уведомление — откройте колокольчик', 'ok');
   }, []);
 
@@ -187,11 +192,20 @@ export function useNotifications(_store: VetviStore) {
     }
   }, []);
 
-  /** Открыть проект/комнату из уведомления. */
+  /** Открыть сущность из уведомления (единый колокольчик): задача — переход
+   *  в менеджер задач, комната — открыть здесь, сервис — перейти в него. */
   const openItem = (n: NotificationItem) => {
     setOpen(false);
     void notificationsRead([n.id]);
     const p = n.payload || {};
+    if (p.taskId) {
+      goTaskOpen(String(p.taskId));
+      return;
+    }
+    if (n.type === 'service_granted' && p.serviceKey) {
+      goServiceByKey(String(p.serviceKey));
+      return;
+    }
     const st = getStore();
     if (!p.roomId) { st.toast('В этом уведомлении нет комнаты', 'warn'); return; }
     if (!st.sync) return;
@@ -206,110 +220,6 @@ export function useNotifications(_store: VetviStore) {
   return { state, open, toggle, setOpen, refresh, openItem, clearAll };
 }
 
-export function NotificationsPopover(props: {
-  items: NotificationItem[];
-  onOpenItem: (n: NotificationItem) => void;
-  onClose: () => void;
-  onClear?: () => void;
-}) {
-  const { items, onOpenItem, onClose, onClear } = props;
-  let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8 };
-  if (typeof document !== 'undefined') {
-    const anchor = document.querySelector('#bellBtn');
-    if (anchor) {
-      const r = anchor.getBoundingClientRect();
-      popStyle = { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };
-    }
-  }
-  return (
-    <div
-      id="ntfPop"
-      className="collab-pop show ntf-pop"
-      style={popStyle}
-      role="dialog"
-      aria-label="Уведомления"
-    >
-      <div className="cp-cap">Уведомления</div>
-      {!items.length && (
-        <div className="ntf-empty">Пока пусто — здесь появятся уведомления об открытых вам доступах</div>
-      )}
-      <div className="ntf-list">
-        {items.map((n) => (
-          <div key={n.id} className={'ntf-item' + (n.read ? '' : ' unread')}>
-            <span className={'ntf-ico' + (n.type === 'access_revoked' || n.type === 'service_denied' ? ' rev' : '')}>
-              {n.type === 'access_revoked' ? <IcExit /> : n.type === 'service_granted' || n.type === 'service_denied' ? <IcGrid /> : <IcShare />}
-            </span>
-            <div className="ntf-txt">
-              {n.type === 'access_granted' && (
-                <>
-                  <b>
-                    Вам открыли доступ к проекту
-                    {n.payload.projectName ? <> «{n.payload.projectName}»</> : ''}
-                  </b>
-                  <i>{(n.payload.ownerName || n.payload.granterName || '') + ' · '}{ROLE_LABEL[n.payload.role || 'editor'] || 'доступ'} · {fmtNtfDate(n.createdAt)}</i>
-                </>
-              )}
-              {n.type === 'access_revoked' && (
-                <>
-                  <b>
-                    Доступ к проекту
-                    {n.payload.projectName ? <> «{n.payload.projectName}»</> : ''} отозван
-                  </b>
-                  <i>{(n.payload.ownerName || '') + ' · '}{fmtNtfDate(n.createdAt)}</i>
-                </>
-              )}
-              {n.type === 'service_granted' && (
-                <>
-                  <b>
-                    Доступ к сервису
-                    {n.payload.serviceName ? <> «{n.payload.serviceName}»</> : ''} открыт
-                  </b>
-                  <i>Администратор · сервис появится в меню «Сервисы» · {fmtNtfDate(n.createdAt)}</i>
-                </>
-              )}
-              {n.type === 'service_denied' && (
-                <>
-                  <b>
-                    Доступ к сервису
-                    {n.payload.serviceName ? <> «{n.payload.serviceName}»</> : ''} закрыт
-                  </b>
-                  <i>Администратор · сервис пропал из меню «Сервисы» · {fmtNtfDate(n.createdAt)}</i>
-                </>
-              )}
-              {!['access_granted', 'access_revoked', 'service_granted', 'service_denied'].includes(n.type) && (
-                <>
-                  <b>{String(n.type)}</b>
-                  <i>{fmtNtfDate(n.createdAt)}</i>
-                </>
-              )}
-            </div>
-            {n.type === 'access_granted' && n.payload.roomId && (
-              <button type="button" className="btn" onClick={() => onOpenItem(n)}>Открыть</button>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="cp-acts">
-        {onClear && items.length > 0 && (
-          <button type="button" className="cp-act ntf-clear" title="Удалить все уведомления" onClick={onClear}>
-            <IcTrash />Очистить список
-          </button>
-        )}
-        <button type="button" className="cp-act" onClick={onClose}><IcX />Закрыть</button>
-      </div>
-    </div>
-  );
-}
-
-function fmtNtfDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }) + ' ' +
-      d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
 
 /* позиционирование попапа под кнопкой-якорем */
 function popUnder(selector: string): React.CSSProperties {
@@ -346,40 +256,6 @@ function IcEdit() {
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m4 20 1-4L16.3 4.7a2.1 2.1 0 0 1 3 3L8 19z" />
       <path d="M14.5 6.5l3 3" />
-    </svg>
-  );
-}
-function IcShare() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="18" cy="5" r="2.6" />
-      <circle cx="6" cy="12" r="2.6" />
-      <circle cx="18" cy="19" r="2.6" />
-      <path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" />
-    </svg>
-  );
-}
-function IcX() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
-  );
-}
-function IcTrash() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
-    </svg>
-  );
-}
-function IcGrid() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="4" width="6.6" height="6.6" rx="1.6" />
-      <rect x="13.4" y="4" width="6.6" height="6.6" rx="1.6" />
-      <rect x="4" y="13.4" width="6.6" height="6.6" rx="1.6" />
-      <rect x="13.4" y="13.4" width="6.6" height="6.6" rx="1.6" />
     </svg>
   );
 }

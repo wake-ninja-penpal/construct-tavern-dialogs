@@ -124,6 +124,38 @@ export function goTaskFilter(p: { projectId: string; nodeId: string; title?: str
   window.location.hash = segs.join('&');
 }
 
+/* ── переходы из уведомлений (единый колокольчик всех сервисов) ──
+   Клик «Открыть» ведёт в СЕРВИС-владелец сущности: комната — в «Ветви»,
+   задача — в менеджер задач (#service=task-manager&ot=<id> — дровер задачи
+   откроется на входе), сервис — в сам сервис. */
+
+/** Открыть «Ветви» на комнате, к которой дали доступ (уведомление
+ *  access_granted из менеджера задач). VetviApp разберёт #openroom=… и
+ *  вызовет store.openShared (слот по roomId — или заглушка + вход в комнату). */
+export function goVetviRoom(p: { roomId: string; projectId?: string | null; projectName?: string | null; role?: string | null }): void {
+  const segs: string[] = ['openroom=' + encodeURIComponent(p.roomId)];
+  if (p.projectId) segs.push('orpid=' + encodeURIComponent(p.projectId));
+  if (p.projectName) segs.push('orpn=' + encodeURIComponent(p.projectName));
+  if (p.role) segs.push('orrole=' + encodeURIComponent(p.role));
+  window.location.hash = segs.join('&');
+}
+
+/** Открыть задачу менеджера задач из «Ветвей» (уведомление task_assigned /
+ *  task_comment): параметр ot обрабатывает TaskManagerApp на входе. */
+export function goTaskOpen(taskId: string): void {
+  window.location.hash = 'service=task-manager&ot=' + encodeURIComponent(taskId);
+}
+
+/** Перейти в сервис по ключу уведомления (service_granted): «Ветви» —
+ *  пустой хеш, остальные — #service=<key> (ключи совпадают с путями хеша). */
+export function goServiceByKey(key: string): void {
+  if (!key || key === VETVI_SERVICE_KEY) {
+    if (window.location.hash) window.location.hash = '';
+    return;
+  }
+  window.location.hash = 'service=' + encodeURIComponent(key);
+}
+
 /* ── события realtime-сервисов (доставка — src/services/live.ts) ──
    Админ включил/выключил сервис или сменил персональный доступ → sync-сервер
    пушит vetvi:services, live.ts диспатчит window-событие, слушатели

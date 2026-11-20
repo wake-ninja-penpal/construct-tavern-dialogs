@@ -177,6 +177,10 @@ export default function VetviApp() {
   const [nodeGoto, setNodeGoto] = useState<string | null>(null);
   /* режим привязки нод к задаче менеджера задач: #attach=<taskId>&at=<title> */
   const [attachTask, setAttachTask] = useState<{ id: string; title: string } | null>(null);
+  /* комната из уведомления менеджера задач (#openroom=<rid>&orpid=…&orpn=…&orrole=…):
+   * единый колокольчик — «Открыть» у access_granted уводит в «Ветви» и открывает
+   * комнату (слот по roomId — или заглушка + вход) */
+  const [roomGoto, setRoomGoto] = useState<{ roomId: string; projectId: string | null; projectName: string | null; role: string | null } | null>(null);
 
   useEffect(() => {
     /* служебный сокет сервисов: живёт и в редакторе, и на экранах сервисов —
@@ -199,6 +203,13 @@ export default function VetviApp() {
       setNodeGoto(info.params.node || null);
       /* режим привязки нод к задаче (кнопка «привязать ноды» в задаче) */
       setAttachTask(info.params.attach ? { id: info.params.attach, title: info.params.at || '' } : null);
+      /* комната из уведомления менеджера задач (единый колокольчик) */
+      setRoomGoto(info.params.openroom ? {
+        roomId: info.params.openroom,
+        projectId: info.params.orpid || null,
+        projectName: info.params.orpn || null,
+        role: info.params.orrole || null,
+      } : null);
       /* пользователь вернулся в «Ветви» из сервиса — подсказки задач могли
          измениться (задачи создали/перенесли) */
       if (!info.service) {
@@ -284,10 +295,10 @@ export default function VetviApp() {
   if (authPhase === 'loading') return <main className="rn-app" aria-label="Ветви — React-редактор" />;
   /* «Ветви» запрещены пользователю админом — вместо редактора экран «нет доступа» */
   if (vetviBlocked) return <ServiceScreen svcKey={VETVI_SERVICE_KEY} />;
-  return <VetviAppInner nodeGoto={nodeGoto} attachTask={attachTask} />;
+  return <VetviAppInner nodeGoto={nodeGoto} attachTask={attachTask} roomGoto={roomGoto} />;
 }
 
-function VetviAppInner({ nodeGoto, attachTask }: { nodeGoto: string | null; attachTask: { id: string; title: string } | null }) {
+function VetviAppInner({ nodeGoto, attachTask, roomGoto }: { nodeGoto: string | null; attachTask: { id: string; title: string } | null; roomGoto: { roomId: string; projectId: string | null; projectName: string | null; role: string | null } | null }) {
   const store = useMemo(() => getStore(), []);
   /* Каналы doc+ui: геометрические кадры (жесты холста) не перерисовывают корень —
      их подхватывает сам CanvasBoard своей подпиской, панели/модалки не трогаются. */
@@ -328,7 +339,18 @@ function VetviAppInner({ nodeGoto, attachTask }: { nodeGoto: string | null; atta
        attachTask в зависимостях: хеш могли поставить и без перемонтирования
        (Ветви уже открыты) — эффект обязан перезапуститься. */
     if (attachTask) store.startAttach(attachTask.id, attachTask.title);
-  }, [store, attachTask]);
+    /* комната из уведомления менеджера задач: открыть слот/заглушку и войти.
+       roomGoto в зависимостях — тот же принцип. */
+    if (roomGoto) {
+      store.openShared({
+        roomId: roomGoto.roomId,
+        projectId: roomGoto.projectId,
+        projectName: roomGoto.projectName,
+        role: roomGoto.role,
+      });
+      try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* нет history */ }
+    }
+  }, [store, attachTask, roomGoto]);
 
   /* попап участников закрывается кликом мимо (capture, как bindSyncUI оригинала) */
   useEffect(() => {

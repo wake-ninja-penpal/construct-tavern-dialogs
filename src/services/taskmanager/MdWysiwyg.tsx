@@ -57,6 +57,9 @@ export interface MdWysiwygHandle {
   source: () => string;
 }
 
+/* счётчик экземпляров редактора — идентификатор адресата контекстного меню */
+let ctxOwnerSeq = 0;
+
 interface Props {
   value: string;
   onChange: (md: string) => void;
@@ -84,6 +87,13 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
   const emitted = useRef<string>(props.value);
   const composing = useRef(false);
   const lastActive = useRef('');
+  /* контекстное меню форматирования: владелец стэша выделения — ТОЛЬКО этот
+     экземпляр редактора (описание и композер могут быть смонтированы вместе,
+     событие 'tm-md-tool' обязаны обработать не оба, а адресат); ctxRange —
+     выделение на момент открытия меню (клик по пункту меню его сбрасывает) */
+  const ctxOwnerRef = useRef('');
+  if (!ctxOwnerRef.current) ctxOwnerRef.current = 'mdw' + ++ctxOwnerSeq;
+  const ctxRange = useRef<Range | null>(null);
   /* свой стек отмены: снимки markdown до правки (+ группировка пачек ввода) */
   const undoRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
@@ -242,6 +252,30 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
     return () => document.removeEventListener('selectionchange', handler);
   }, []);
 
+  /* инструмент из контекстного меню ('tm-md-tool'): реагирует ТОЛЬКО владелец
+     стэша диапазона (описание/композер могут быть смонтированы одновременно).
+     Перед применением возвращаем сохранённое выделение — клик по кнопке меню
+     его сбрасывает (фокус уходит на попап). */
+  useEffect(() => {
+    const onTool = (ev: Event) => {
+      const d = (ev as CustomEvent<{ owner?: string; tool?: string }>).detail;
+      if (!d || d.owner !== ctxOwnerRef.current || !d.tool) return;
+      const box = boxRef.current;
+      if (!box || props.disabled) return;
+      box.focus();
+      if (ctxRange.current) {
+        try {
+          const sel = window.getSelection();
+          if (sel) { sel.removeAllRanges(); sel.addRange(ctxRange.current); }
+        } catch { /* диапазон устарел — инструмент сработает от каретки */ }
+      }
+      ctxRange.current = null;
+      execWithUndo(d.tool);
+    };
+    window.addEventListener('tm-md-tool', onTool);
+    return () => window.removeEventListener('tm-md-tool', onTool);
+  }, [props.disabled]);
+
   useEffect(() => {
     const box = boxRef.current;
     if (box && props.autoGrow) growTo(box, props.maxGrow ?? 120);
@@ -293,25 +327,39 @@ export const MdWysiwyg = forwardRef<MdWysiwygHandle, Props>(function MdWysiwyg(p
         emit();
       }}
       onContextMenu={(e) => {
-        /* ПКМ на выделенном фрагменте: «цитировать в комментарий» */
+        /* ПКМ в редакторе: ВСЕГДА наше меню (жалоба: «пропало контекстное меню,
+           нельзя сделать цитату») — все инструменты форматирования панели,
+           применяются к выделенному фрагменту (или каретке), плюс
+           «цитировать в комментарий»/«Копировать» при непустом выделении.
+           Диапазон выделения сохраняется: клик по пункту меню сбрасывает
+           выделение — перед применением вернём (ctxRange). */
         if (!props.quoteMenu || props.disabled) return;
-        const box = boxRef.current;
-        const sel = window.getSelection();
-        if (!box || !sel || sel.isCollapsed || !sel.anchorNode || !box.contains(sel.anchorNode)) return;
         e.preventDefault();
         e.stopPropagation();
-        const frag = sel.getRangeAt(0).cloneContents();
-        const tmp = document.createElement('div');
-        tmp.appendChild(frag);
-        /* пункты списка без обёртки ul/ol — завернуть, иначе маркеры потеряются */
-        if (tmp.querySelector('li')) {
-          const list = document.createElement(tmp.querySelector('ol') ? 'ol' : 'ul');
-          while (tmp.firstChild) list.appendChild(tmp.firstChild);
-          tmp.appendChild(list);
+        const box = boxRef.current;
+        if (!box) return;
+        const sel = window.getSelection();
+        const hasSel = !!(sel && !sel.isCollapsed && sel.anchorNode && box.contains(sel.anchorNode));
+        let quoted = '';
+        let plain = '';
+        if (hasSel && sel) {
+          const frag = sel.getRangeAt(0).cloneContents();
+          const tmp = document.createElement('div');
+          tmp.appendChild(frag);
+          /* пункты списка без обёртки ul/ol — завернуть, иначе маркеры потеряются */
+          if (tmp.querySelector('li')) {
+            const list = document.createElement(tmp.querySelector('ol') ? 'ol' : 'ul');
+            while (tmp.firstChild) list.appendChild(tmp.firstChild);
+            tmp.appendChild(list);
+          }
+          const src = mdHtmlToSource(tmp);
+          quoted = src.split('\n').map((l) => (l.trim() ? '> ' + l : '>')).join('\n');
+          plain = sel.toString();
+          ctxRange.current = sel.getRangeAt(0).cloneRange();
+        } else {
+          ctxRange.current = null;
         }
-        const src = mdHtmlToSource(tmp);
-        const quoted = src.split('\n').map((l) => (l.trim() ? '> ' + l : '>')).join('\n');
-        tmOpenMenu('mdsel', { text: quoted, plain: sel.toString() }, e.clientX, e.clientY);
+        tmOpenMenu('mdfmt', { hasSel: hasSel ? '1' : '', text: quoted, plain, owner: ctxOwnerRef.current }, e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && props.onEsc) {
@@ -718,12 +766,15 @@ function enterInList(box: HTMLElement, li: HTMLElement, e: { preventDefault: () 
   const isTask = li.classList.contains('mdtask');
 
   /* 2. Каретка в НАЧАЛЕ пункта — новый пустой пункт ВЫШЕ (текст остаётся,
-     как в обычных редакторах), каретка — в новом пункте после маркера */
+     как в обычных редакторах), каретка — в новом пункте после маркера.
+     \u200B (служебный нулевой пробел каретки) НАЧАЛОМ пункта не считается:
+     иначе сразу после создания пункта Enter давал «продолжение», и первый
+     пункт уезжал в конец списка. */
   const chkEl = li.querySelector(':scope > .mdchk');
   const probe = document.createRange();
   if (chkEl) probe.setStartAfter(chkEl); else probe.setStart(li, 0);
   probe.setEnd(range.startContainer, range.startOffset);
-  const beforeLen = probe.toString().length + probe.cloneContents().querySelectorAll('img').length;
+  const beforeLen = probe.toString().replace(/\u200B/g, '').length + probe.cloneContents().querySelectorAll('img').length;
   if (range.collapsed && beforeLen === 0) {
     const nli = document.createElement('li');
     if (isTask) {
@@ -878,7 +929,9 @@ function toggleTask(box: HTMLElement, selected: string): void {
     return;
   }
   /* нет списка: превратить текущий блок (или вставить новый список);
-     КАРЕТКА — после чекбокса (иначе текст печатается перед квадратиком) */
+     КАРЕТКА ВСЕГДА ПОСЛЕ чекбокса — раньше при пустом блоке liOfCaret
+     возвращала null и каретка оставалась ПЕРЕД квадратом: текст печатался
+     перед квадратиком, а после Enter первый пункт уезжал в конец списка */
   const ul = document.createElement('ul');
   const nli = document.createElement('li');
   nli.className = 'mdtask';
@@ -888,17 +941,20 @@ function toggleTask(box: HTMLElement, selected: string): void {
   nchk.setAttribute('aria-hidden', 'true');
   nchk.contentEditable = 'false';
   nli.appendChild(nchk);
-  /* пункт создаётся из блока с текстом — текст сохраняется (не теряем абзац) */
-  nli.appendChild(document.createTextNode(selected || (el ? el.textContent || '' : '')));
+  /* пункт создаётся из блока с текстом — текст сохраняется (не теряем абзац);
+     ПУСТОЙ текстовый узел не создаём (мешал каретке после маркера) */
+  const carried = selected || (el ? el.textContent || '' : '');
+  if (carried) nli.appendChild(document.createTextNode(carried));
   ul.appendChild(nli);
   if (el && (el.tagName === 'P' || el.tagName === 'DIV' || /^H[1-6]$/.test(el.tagName))) {
     el.replaceWith(ul);
-  } else {
-    document.execCommand('insertHTML', false, '<ul><li class="mdtask"><span class="mdchk" contenteditable="false"></span></li></ul>');
+    /* \u200B подсажется сам, если пункт пуст — каретка гарантированно после квадрата */
+    placeCaretAfterMarker(nli);
+    return;
   }
-  const placed = liOfCaret(box);
+  document.execCommand('insertHTML', false, '<ul><li class="mdtask"><span class="mdchk" contenteditable="false"></span></li></ul>');
+  const placed = liOfCaret(box) || (box.querySelector('ul > li.mdtask') as HTMLElement | null);
   if (placed && placed.classList.contains('mdtask')) placeCaretAfterMarker(placed);
-  else placeCaretAtStart(nli);
 }
 
 /* ── инлайновый код: повторный клик снимает разметку; без выделения

@@ -11,15 +11,17 @@
  * удалении колонки) живут внутри того же поповера, как в прототипе.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { TM_PALETTE, TM_SYS_COL_INFO, TM_TASK_PALETTE, type TmColumn, type TmProject, type TmTask } from './tmTypes';
 import { ColumnIcon, TM_COLUMN_ICONS } from './icons';
+import { MD_TOOLS } from './md';
+import { MdToolIcon } from './mdIcons';
 import type { Ws } from './TaskManagerApp';
 
 /* ── модульный стор состояния меню ── */
 
-export type TmMenuKind = 'card' | 'column' | 'board' | 'project' | 'backlog' | 'view' | 'team' | 'user' | 'app' | 'color' | 'comment' | 'mdsel';
+export type TmMenuKind = 'card' | 'column' | 'board' | 'project' | 'backlog' | 'view' | 'team' | 'user' | 'app' | 'color' | 'comment' | 'mdsel' | 'mdfmt';
 
 export interface TmMenuState {
   kind: TmMenuKind;
@@ -93,6 +95,9 @@ function MItem(props: {
       type="button"
       className={'tm-m-item' + (props.danger ? ' danger' : '')}
       disabled={props.disabled}
+      /* mousedown не трогаем: фокус остаётся в редакторе, выделение в
+         contenteditable не сбрасывается (важно для меню форматирования) */
+      onMouseDown={(e) => { e.preventDefault(); }}
       onClick={props.onClick}
     >
       {props.dot ? <span className="tm-m-dot" style={{ background: props.dot }} /> : props.icon}
@@ -188,6 +193,7 @@ export function TmMenuHost(props: {
       {st.kind === 'app' && <AppMenu act={act} rail={c.rail === '1'} />}
       {st.kind === 'comment' && <CommentMenu ctx={c} act={act} />}
       {st.kind === 'mdsel' && <MdSelMenu ctx={c} act={act} />}
+      {st.kind === 'mdfmt' && <MdFmtMenu ctx={c} act={act} />}
     </div>
   );
 }
@@ -527,6 +533,41 @@ function MdSelMenu(props: { ctx: Record<string, string>; act: (n: string, a?: un
       <MTitle icon={<I d="M5 4h14v4H5zM5 14h9v6H5zM14 16h5v4h-5z" />} text="Выделенный фрагмент" />
       <MItem icon={<I d="M6 17c0-4 1-7 4-10M12 17c0-4 1-7 4-10M4 17h6M10 17h6" />} label="Цитировать в комментарий" onClick={() => props.act('md-quote', { text: props.ctx.text || '' })} />
       <MItem icon={<I d="M8 8h12v12H8zM4 4h12v3M4 4v12h3" />} label="Копировать" onClick={() => props.act('md-copy-sel', { text: props.ctx.plain || '' })} />
+    </>
+  );
+}
+
+/* ── контекстное меню редактора описания (ПКМ): ВСЕ инструменты
+   форматирования панели (жирный/курсив/зачёркнутый/заголовок/цитата/
+   списки/чек-лист/код/блок кода/ссылка/картинка/таблица/разделитель),
+   применяются к выделенному фрагменту (или от каретки), плюс
+   «цитировать в комментарий» и «Копировать» при непустом выделении.
+   Адресат — владелец стэша выделения (owner): событие 'tm-md-tool'
+   обрабатывает ТОЛЬКО редактор, вызвавший меню. ── */
+
+function MdFmtMenu(props: { ctx: Record<string, string>; act: (n: string, a?: unknown) => void }) {
+  const hasSel = props.ctx.hasSel === '1';
+  const owner = props.ctx.owner || '';
+  return (
+    <>
+      <MTitle icon={<I d="M4 20l4-1L20 7l-3-3L5 16zM14 6l3 3" />} text={hasSel ? 'Форматирование выделения' : 'Форматирование'} />
+      {MD_TOOLS.map((tool) => (
+        <Fragment key={tool.id}>
+          {tool.sep && <MSep />}
+          <MItem
+            icon={<MdToolIcon id={tool.icon} />}
+            label={tool.title.replace(/\s*\(.*\)\s*$/, '')}
+            onClick={() => props.act('md-tool', { tool: tool.id, owner })}
+          />
+        </Fragment>
+      ))}
+      {hasSel && (
+        <>
+          <MSep />
+          <MItem icon={<I d="M6 17c0-4 1-7 4-10M12 17c0-4 1-7 4-10M4 17h6M10 17h6" />} label="Цитировать в комментарий" onClick={() => props.act('md-quote', { text: props.ctx.text || '' })} />
+          <MItem icon={<I d="M8 8h12v12H8zM4 4h12v3M4 4v12h3" />} label="Копировать" onClick={() => props.act('md-copy-sel', { text: props.ctx.plain || '' })} />
+        </>
+      )}
     </>
   );
 }

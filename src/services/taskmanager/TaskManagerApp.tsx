@@ -964,6 +964,13 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
         try { await navigator.clipboard.writeText(String(A.text || '')); say('Фрагмент скопирован'); } catch { say('Не удалось скопировать', 'warn'); }
         return;
       }
+      /* ── инструмент форматирования из контекстного меню редактора ──
+         событие ловит ТОЛЬКО редактор-владелец стэша выделения (owner) */
+      case 'md-tool': {
+        close();
+        try { window.dispatchEvent(new CustomEvent('tm-md-tool', { detail: { tool: String(A.tool || ''), owner: String(A.owner || '') } })); } catch { /* нет CustomEvent */ }
+        return;
+      }
       default: return;
     }
   }, [applySavedView, clearColumn, createBoard, createColumn, deleteBoard, deleteColumnFate, deleteComment, deleteProject, deleteTeam, deleteTask, deleteView, duplicateTask, guardEdit, moveColumn, patchComment, patchTask, renameBoard, renameProject, say, toggleRail, updateColumn, ws]);
