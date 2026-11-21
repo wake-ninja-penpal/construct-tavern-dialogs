@@ -2681,6 +2681,7 @@ body.dragging *{cursor:grabbing!important}
   .m-card{padding:16px}
   /* палитра нод: плотнее */
   .pal-item{margin:6px 8px 0}
+}
 
 /* ═══════════ Менеджер задач 1.19: вид доски — канбан ⇄ список задач ═══════════ */
 
@@ -2748,5 +2749,4 @@ body.dragging *{cursor:grabbing!important}
   .tm-accpop{min-width:0;max-width:calc(100vw - 24px);right:12px}
   /* переключатель сервисов: попап списка сервисов не вылезает */
   .svc-pop{left:8px !important;max-width:calc(100vw - 16px)}
-}
 }
