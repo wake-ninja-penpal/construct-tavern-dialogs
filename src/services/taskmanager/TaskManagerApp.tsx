@@ -44,7 +44,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseHash, goVetviNode } from '../hub';
 import { ServiceSwitcher } from '../ServiceSwitcher';
 import { ServiceIcon } from '../ServiceIcon';
-import { BoardView, BacklogView, MyView, NodeFilterView, TmSidebar, TmTeamsView, TmPeopleView, TmFilterPop, TmAccessModal, TmTeamModal, TmSaveViewModal, TmBell, TmAccountMenu, type TmFilterState } from './TaskViews';
+import { BoardView, BacklogView, MyView, NodeFilterView, TmSidebar, TmTeamsView, TmPeopleView, TmFilterPop, TmAccessModal, TmTeamModal, TmSaveViewModal, TmNameModal, TmBell, TmAccountMenu, type TmFilterState } from './TaskViews';
 import { TmDrawer, TmCreateModal } from './TaskDrawer';
 import { TmMenuHost, tmOpenMenu, tmCloseMenu, tmMenuPos } from './TmMenu';
 import {
@@ -58,6 +58,7 @@ import {
   parseStickers,
   parseViewState,
   sortTasks,
+  TM_PALETTE,
   TM_ROLE_RANK,
   type TmAccessRow,
   type TmFilters,
@@ -159,8 +160,31 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
   const [accessProjectId, setAccessProjectId] = useState<string | null>(null);
   const [teamModal, setTeamModal] = useState<{ team: TmTeam | null; mode?: 'members' | 'settings' | null } | null>(null);
   const [saveViewOpen, setSaveViewOpen] = useState(false);
+  /* системное окно браузера заменено модалкой: создание/переименование проекта,
+     создание доски и колонки (как в прототипе — projectModal/boardModal/columnModal) */
+  const [nameModal, setNameModal] = useState<
+    | { kind: 'project-new' }
+    | { kind: 'project-rename'; pid: string }
+    | { kind: 'board-new'; pid: string }
+    | { kind: 'board-rename'; bid: string }
+    | { kind: 'column-new'; bid: string }
+    | null
+  >(null);
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
   const toastT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* мобильный сайдбар (≤900px): выдвижная панель поверх контента + scrim,
+     как в прототипе (body.side-open). Открытие — кнопка-гамбургер в шапке. */
+  const [sideOpen, setSideOpen] = useState(false);
+  /* узкий экран (≤900px): rail-режим сайдбара отключается — панель всегда
+     развёрнутая (внутри мобильного оверлея rail не нужен, как в прототипе) */
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const upd = () => setIsNarrow(mq.matches);
+    upd();
+    mq.addEventListener('change', upd);
+    return () => mq.removeEventListener('change', upd);
+  }, []);
   /* свёрнутая панель (rail, как в прототипе) — запоминается */
   const [rail, setRail] = useState<boolean>(() => {
     try { return localStorage.getItem('tm-rail') === '1'; } catch { return false; }
@@ -348,6 +372,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
       const t = e.target as HTMLElement | null;
       const typing = !!(t && t.closest && t.closest('input,textarea,select,[contenteditable="true"]'));
       if (e.key === 'Escape') {
+        if (sideOpen) { setSideOpen(false); return; }
         if (!drawerId) return;
         setDrawerId(null);
         return;
@@ -363,7 +388,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [drawerId, toggleRail]);
+  }, [drawerId, sideOpen, toggleRail]);
 
   /* ── мутации ── */
 
@@ -440,11 +465,11 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     }
   }, [say]);
 
-  const createProject = useCallback(async (title: string): Promise<TmProject | null> => {
+  const createProject = useCallback(async (title: string, color?: string): Promise<TmProject | null> => {
     try {
       /* проект приватный: сервер сразу выдаёт создателю админ-строку,
          дальше участники добавляются в окне «Доступ» */
-      const j = await tmJson<{ item: TmProject; access: TmAccessRow }>('/api/tm/projects', { method: 'POST', body: JSON.stringify({ title }) });
+      const j = await tmJson<{ item: TmProject; access: TmAccessRow }>('/api/tm/projects', { method: 'POST', body: JSON.stringify({ title, ...(color ? { color } : {}) }) });
       setWs((w) => (w ? {
         ...w,
         projects: [...w.projects, j.item],
@@ -493,10 +518,10 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
     }
   }, [say]);
 
-  const renameProject = useCallback(async (id: string, title: string) => {
+  const renameProject = useCallback(async (id: string, title: string, color?: string) => {
     try {
-      const j = await tmJson<{ item: TmProject }>('/api/tm/projects/' + id, { method: 'PATCH', body: JSON.stringify({ title }) });
-      setWs((w) => (w ? { ...w, projects: w.projects.map((p) => (p.id === id ? { ...p, title: j.item.title } : p)) } : w));
+      const j = await tmJson<{ item: TmProject }>('/api/tm/projects/' + id, { method: 'PATCH', body: JSON.stringify({ title, ...(color ? { color } : {}) }) });
+      setWs((w) => (w ? { ...w, projects: w.projects.map((p) => (p.id === id ? { ...p, title: j.item.title, color: j.item.color } : p)) } : w));
     } catch (e) {
       if (e instanceof TmDenied) { say(e.msg, 'warn'); return; }
       say(e instanceof Error ? e.message : 'Не удалось переименовать', 'err');
@@ -869,10 +894,8 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
         const bid = board?.id || String(arg);
         const project = ws?.projects.find((p) => p.boards.some((b) => b.id === bid));
         if (!project) return;
-        const title = window.prompt('Название новой колонки:', '') || '';
-        if (!title.trim() || !guardEdit(project.id)) return;
-        const c = await createColumn(bid, title.trim());
-        if (c) say('Колонка добавлена');
+        if (!guardEdit(project.id)) return;
+        setNameModal({ kind: 'column-new', bid });
         return;
       }
       case 'new-task': {
@@ -898,19 +921,15 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
         close();
         const pid = String(arg);
         const p = ws?.projects.find((x) => x.id === pid);
-        if (!p) return;
-        const title = window.prompt('Название новой доски:', '') || '';
-        if (!title.trim() || !guardEdit(pid)) return;
-        const b = await createBoard(pid, title.trim());
-        if (b) setView({ kind: 'board', projectId: pid, boardId: b.id });
+        if (!p || !guardEdit(pid)) return;
+        setNameModal({ kind: 'board-new', pid });
         return;
       }
       case 'rename-project': {
         close();
         const p = ws?.projects.find((x) => x.id === String(arg));
-        if (!p) return;
-        const title = window.prompt('Название проекта:', p.title) || '';
-        if (title.trim() && title.trim() !== p.title && guardEdit(p.id)) await renameProject(p.id, title.trim());
+        if (!p || !guardEdit(p.id)) return;
+        setNameModal({ kind: 'project-rename', pid: p.id });
         return;
       }
       case 'del-project': {
@@ -937,10 +956,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
       case 'open-user': close(); setView({ kind: 'user', userId: String(arg) }); return;
       case 'new-project': {
         close();
-        const title = window.prompt('Название нового проекта:', '') || '';
-        if (!title.trim()) return;
-        const p = await createProject(title.trim());
-        if (p && p.boards[0]) setView({ kind: 'board', projectId: p.id, boardId: p.boards[0].id });
+        setNameModal({ kind: 'project-new' });
         return;
       }
       case 'new-team': close(); setTeamModal({ team: null, mode: null }); return;
@@ -1059,8 +1075,20 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
   const badge = filterBadge(filters);
 
   return (
-    <main className="tm-app" aria-label="Менеджер задач">
+    <main className={'tm-app' + (sideOpen ? ' side-open' : '')} aria-label="Менеджер задач">
       <header className="svc-head tm-head">
+        {/* гамбургер: виден только ≤900px (CSS), открывает мобильный сайдбар-оверлей */}
+        <button
+          type="button"
+          className="tm-burger"
+          aria-label={sideOpen ? 'Закрыть панель разделов' : 'Открыть панель разделов'}
+          aria-expanded={sideOpen}
+          onClick={() => setSideOpen((v) => !v)}
+        >
+          <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            {sideOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+          </svg>
+        </button>
         <div className="svc-head-brand">
           <ServiceSwitcher current={svcKey} />
           <span className="svc-head-ico"><ServiceIcon icon="tasks" size={18} /></span>
@@ -1090,7 +1118,7 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             onClick={() => { setCreatePreset(null); setCreateOpen(true); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            Задача
+            <span>Задача</span>
           </button>
           <TmAccountMenu
             say={say}
@@ -1103,6 +1131,12 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
       </header>
 
       <div className="tm-layout">
+        {/* мобильный scrim: клик закрывает выдвижной сайдбар (≤900px, видит только CSS) */}
+        <div
+          className="tm-side-scrim"
+          aria-hidden="true"
+          onClick={() => setSideOpen(false)}
+        />
         {ws && (
           <TmSidebar
             ws={ws}
@@ -1110,16 +1144,17 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
             savedId={savedId}
             filtersActive={badge > 0}
             myCount={myTasks.length}
-            rail={rail}
+            rail={rail && !isNarrow}
             onToggleRail={toggleRail}
             /* переход на любой раздел СБРАСЫВАЕТ фильтры сохранённого вида
-               (жалоба: «фильтр вида не сбрасывается при клике на доску») */
-            onMy={() => { setView({ kind: 'my' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
-            onTeams={() => { setView({ kind: 'teams' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
-            onPeople={() => { setView({ kind: 'people' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
-            onUser={(login) => { setView({ kind: 'user', userId: login }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
-            onBoard={(projectId, boardId) => { setView({ kind: 'board', projectId, boardId }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
-            onBacklog={(projectId) => { setView({ kind: 'backlog', projectId }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); }}
+               (жалоба: «фильтр вида не сбрасывается при клике на доску»);
+               на мобиле панель-оверлей закрывается после выбора */
+            onMy={() => { setView({ kind: 'my' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); setSideOpen(false); }}
+            onTeams={() => { setView({ kind: 'teams' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); setSideOpen(false); }}
+            onPeople={() => { setView({ kind: 'people' }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); setSideOpen(false); }}
+            onUser={(login) => { setView({ kind: 'user', userId: login }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); setSideOpen(false); }}
+            onBoard={(projectId, boardId) => { setView({ kind: 'board', projectId, boardId }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); setSideOpen(false); }}
+            onBacklog={(projectId) => { setView({ kind: 'backlog', projectId }); setNodeFilter(null); setFilters(emptyFilters()); setSavedId(null); setSideOpen(false); }}
             onOpenProject={(projectId) => {
               /* клик по проекту — сразу основная (первая) доска или бэклог */
               const p = ws.projects.find((x) => x.id === projectId);
@@ -1129,20 +1164,15 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
               setNodeFilter(null);
               setFilters(emptyFilters());
               setSavedId(null);
+              setSideOpen(false);
             }}
-            onApplyView={applySavedView}
+            onApplyView={(v) => { applySavedView(v); setSideOpen(false); }}
             onDeleteView={(id) => void deleteView(id)}
             onSaveView={() => setSaveViewOpen(true)}
-            onNewProject={async () => {
-              const title = window.prompt('Название нового проекта:', '') || '';
-              if (!title.trim()) return;
-              const p = await createProject(title.trim());
-              if (p && p.boards[0]) setView({ kind: 'board', projectId: p.id, boardId: p.boards[0].id });
-            }}
+            onNewProject={() => setNameModal({ kind: 'project-new' })}
             onRenameProject={(p) => {
               if (!guardEdit(p.id)) return;
-              const title = window.prompt('Название проекта:', p.title) || '';
-              if (title.trim() && title.trim() !== p.title) void renameProject(p.id, title.trim());
+              setNameModal({ kind: 'project-rename', pid: p.id });
             }}
             onAccessProject={(p) => setAccessProjectId(p.id)}
             onDeleteProject={(p) => {
@@ -1318,18 +1348,13 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
                 if (!guardEdit(view.projectId)) return;
                 void reorderColumns(boardId, ids);
               }}
-              onAddBoard={async () => {
+              onAddBoard={() => {
                 if (!guardEdit(view.projectId)) return;
-                const p = ws.projects.find((x) => x.id === view.projectId);
-                const title = window.prompt('Название новой доски:', '') || '';
-                if (!title.trim() || !p) return;
-                const b = await createBoard(p.id, title.trim());
-                if (b) setView({ kind: 'board', projectId: p.id, boardId: b.id });
+                setNameModal({ kind: 'board-new', pid: view.projectId });
               }}
               onRenameBoard={(b) => {
                 if (!guardEdit(view.projectId)) return;
-                const title = window.prompt('Название доски:', b.title) || '';
-                if (title.trim() && title.trim() !== b.title) void renameBoard(b.id, title.trim());
+                setNameModal({ kind: 'board-rename', bid: b.id });
               }}
               onAccess={() => setAccessProjectId(view.projectId)}
               headExtra={(
@@ -1465,6 +1490,106 @@ export function TaskManagerApp({ svcKey }: { svcKey: string }) {
           }}
         />
       )}
+
+      {/* модалка названия/цвета вместо системных окон браузера:
+         новый проект (+цвет), переименование проекта, новая доска, новая колонка */}
+      {ws && nameModal?.kind === 'project-new' && (
+        <TmNameModal
+          head="Новый проект"
+          sub="Создадим доску «Основная» с системными колонками: Не взяты → В работе → Выполнено."
+          label="Название"
+          placeholder="Например: Сюжет квеста"
+          submitText="Создать"
+          withColor
+          colorInitial={TM_PALETTE[ws.projects.length % TM_PALETTE.length]}
+          onClose={() => setNameModal(null)}
+          onSubmit={async (title, color) => {
+            setNameModal(null);
+            const p = await createProject(title, color);
+            if (p && p.boards[0]) setView({ kind: 'board', projectId: p.id, boardId: p.boards[0].id });
+          }}
+        />
+      )}
+      {ws && nameModal?.kind === 'project-rename' && (() => {
+        const p = ws.projects.find((x) => x.id === nameModal.pid);
+        if (!p) return null;
+        return (
+          <TmNameModal
+            head="Настройки проекта"
+            sub="Название и цвет проекта. Доступ участникам — кнопка «Доступ» в шапке доски."
+            label="Название"
+            initial={p.title}
+            submitText="Сохранить"
+            withColor
+            colorInitial={p.color}
+            onClose={() => setNameModal(null)}
+            onSubmit={(title, color) => {
+              setNameModal(null);
+              void renameProject(p.id, title, color);
+            }}
+          />
+        );
+      })()}
+      {ws && nameModal?.kind === 'board-new' && (() => {
+        const p = ws.projects.find((x) => x.id === nameModal.pid);
+        if (!p) return null;
+        return (
+          <TmNameModal
+            head="Новая доска"
+            sub={'В проекте «' + p.title + '». Системные колонки создаются автоматически.'}
+            label="Название"
+            placeholder="Например: Поддержка"
+            submitText="Создать доску"
+            onClose={() => setNameModal(null)}
+            onSubmit={async (title) => {
+              setNameModal(null);
+              const b = await createBoard(p.id, title);
+              if (b) setView({ kind: 'board', projectId: p.id, boardId: b.id });
+            }}
+          />
+        );
+      })()}
+      {ws && nameModal?.kind === 'board-rename' && (() => {
+        const b = ws.projects.flatMap((x) => x.boards).find((x) => x.id === nameModal.bid);
+        if (!b) return null;
+        return (
+          <TmNameModal
+            head="Переименовать доску"
+            label="Название"
+            initial={b.title}
+            submitText="Сохранить"
+            onClose={() => setNameModal(null)}
+            onSubmit={(title) => {
+              setNameModal(null);
+              void renameBoard(b.id, title);
+            }}
+          />
+        );
+      })()}
+      {ws && nameModal?.kind === 'column-new' && (() => {
+        const b = ws.projects.flatMap((x) => x.boards).find((x) => x.id === nameModal.bid);
+        if (!b) return null;
+        return (
+          <TmNameModal
+            head="Новая колонка"
+            sub={'Доска «' + b.title + '». Системные «Не взяты», «В работе» и «Выполнено» останутся на месте.'}
+            label="Название"
+            placeholder="Например: Код-ревью"
+            submitText="Создать"
+            withColor
+            colorInitial="#f472b6"
+            onClose={() => setNameModal(null)}
+            onSubmit={async (title, color) => {
+              setNameModal(null);
+              const c = await createColumn(b.id, title);
+              if (c) {
+                say('Колонка добавлена');
+                void updateColumn(c.id, { color });
+              }
+            }}
+          />
+        );
+      })()}
 
       {toast && <div className={'tm-toast ' + toast.tone} role="status">{toast.text}</div>}
     </main>

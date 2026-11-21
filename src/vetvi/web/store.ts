@@ -337,9 +337,16 @@ export class VetviStore {
     this.leftWidth = isClient
       ? Math.min(560, Math.max(240, Number(window.localStorage.getItem('vetvi-left-w')) || 300))
       : 300;
-    /* свёрнутые панели и мини-карта — личные UI-настройки (не синхронизируются) */
-    this.leftCollapsed = isClient && window.localStorage.getItem('vetvi-left-col') === '1';
-    this.rightCollapsed = isClient && window.localStorage.getItem('vetvi-right-col') === '1';
+    /* свёрнутые панели и мини-карта — личные UI-настройки (не синхронизируются).
+       Мобильный экран (≤900px): обе панели стартуют СВЁРНУТЫМИ — на мобиле они
+       оверлеи: левая — мини-рейка (раздел открывается по иконке, закрывается
+       кликом мимо), инспектор иначе перекрывает почти весь экран. */
+    this.leftCollapsed = isClient
+      ? (window.innerWidth <= 900 || window.localStorage.getItem('vetvi-left-col') === '1')
+      : false;
+    this.rightCollapsed = isClient
+      ? (window.innerWidth <= 900 || window.localStorage.getItem('vetvi-right-col') === '1')
+      : false;
     this.mmOn = isClient ? window.localStorage.getItem('vetvi-mm-on') !== '0' : true;
     /* пределы масштаба (настройки интерфейса) */
     if (isClient) {

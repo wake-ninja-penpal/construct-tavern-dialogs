@@ -6,7 +6,10 @@ import { db } from '@/lib/db';
 const ROLE_ORDER: Record<string, number> = { owner: 0, editor: 1, reader: 2 };
 
 /** GET /api/access/list?roomId=... — кто имеет доступ к комнате.
- *  Список видят владелец и редакторы (для окна «Совместный доступ»). */
+ *  Список видят ВСЕ участники комнаты (владелец, админ, редактор, читатель):
+ *  окно «Поделиться» показывает его каждому, кто открыл проект — раньше
+ *  читателям отвечало 403 и у них список выглядел пустым. Гость по ссылке
+ *  (без записи ProjectAccess) список не получает — 403 как раньше. */
 export async function GET(req: NextRequest) {
   try {
     const me = await currentUser();
@@ -20,7 +23,7 @@ export async function GET(req: NextRequest) {
     const mine = await db.projectAccess.findUnique({
       where: { roomId_userId: { roomId, userId: me.id } },
     });
-    if (!mine || (mine.role !== 'owner' && mine.role !== 'editor')) {
+    if (!mine) {
       return NextResponse.json({ error: 'Нет доступа к списку' }, { status: 403 });
     }
 

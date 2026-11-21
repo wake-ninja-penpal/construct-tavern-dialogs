@@ -2079,16 +2079,13 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
 .tm-denied{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:24px}
 .tm-denied .btn{margin-top:12px}
 
+/* гамбургер мобильного сайдбара — на десктопе скрыт */
+.tm-burger{display:none;width:36px;height:36px;flex:none;align-items:center;justify-content:center;border:1px solid #2b2f37;border-radius:9px;background:#1a1d22;color:var(--tx2);cursor:pointer;transition:.15s}
+.tm-burger:hover{color:var(--tx);border-color:#3d434f}
+/* scrim мобильного сайдбара — на десктопе скрыт */
+.tm-side-scrim{display:none}
+
 /* адаптив менеджера задач */
-@media (max-width: 900px){
-  .tm-side{width:64px}
-  .tm-side .tm-nav-t,.tm-side .tm-nav-cnt,.tm-side .tm-proj-name,.tm-side .tm-proj-acts,.tm-side .tm-nav-cap span,.tm-side .tm-side-foot span{display:none}
-  .tm-nav-cap{justify-content:center}
-  .tm-nav-row{justify-content:center;padding:9px 0}
-  .tm-nav-row.sub{padding:8px 0}
-  .tm-proj-head{justify-content:center}
-  .tm-kcol{width:min(296px,82vw)}
-}
 @media (max-width: 640px){
   .tm-row{flex-wrap:wrap;row-gap:6px}
   .tm-row-title{min-width:0;flex:1 1 100%;white-space:normal}
@@ -2098,8 +2095,6 @@ body.ptab-drag #left,body.ptab-drag #right{transition:none}
   .tm-rows,.tm-quickadd{padding-left:14px;padding-right:14px}
   .tm-kanban{padding:10px 12px 16px}
   .tm-vhead-acts{width:100%}
-  .tm-head .tm-search{min-width:120px}
-  .tm-head .tm-new{padding:0 10px}
 }
 
 /* ═══════ Менеджер задач 1.8: режимы дровера, markdown, чат, метки, фильтры, команды ═══════ */
@@ -2350,6 +2345,8 @@ body.dragging *{cursor:grabbing!important}
 
 /* модалка доступов проекта */
 .tm-modal.wide{width:min(680px,calc(100vw - 24px))}
+/* компактная модалка названия/цвета (новый проект, доска, колонка) */
+.tm-modal.sm{width:min(430px,calc(100vw - 24px))}
 .tm-modal-sub{margin:0;padding:10px 16px 0;font:400 12px/1.5 var(--body);color:var(--tx3)}
 .tm-modal-sp{flex:1}
 .tm-note{margin:10px 16px 0;padding:8px 12px;border:1px solid rgba(226,165,78,.35);background:rgba(226,165,78,.07);border-radius:9px;color:var(--acc2);font:500 11.5px var(--body)}
@@ -2596,3 +2593,92 @@ body.dragging *{cursor:grabbing!important}
 .tm-set-hk{display:flex;flex-direction:column;gap:5px}
 .tm-set-hk span{font:400 12px var(--body);color:var(--tx2)}
 .tm-set-hk kbd{display:inline-block;min-width:18px;text-align:center;padding:1px 6px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:6px;background:var(--card);color:var(--tx);font:600 10.5px var(--mono)}
+
+/* ═══════ Менеджер задач — МОБИЛЬНАЯ ВЁРСТКА (≤900px, по прототипу):
+   сайдбар превращается в выдвижную панель-оверлей с гамбургером в шапке
+   и scrim'ом; rail-режим отключается — панель развёрнутая внутри оверлея.
+   Блок стоит В КОНЦЕ файла: перекрывает базовые .tm-side выше (transition/
+   position для хлястика). ═══════ */
+@media (max-width: 900px){
+  .tm-burger{display:inline-flex}
+  .tm-head{gap:8px}
+  .tm-side{
+    position:fixed;left:0;top:0;bottom:0;width:292px;max-width:86vw;z-index:116;
+    transform:translateX(-104%);transition:transform .28s cubic-bezier(.25,.9,.3,1);
+    box-shadow:24px 0 60px rgba(0,0,0,.45);border-right:1px solid var(--line);
+  }
+  .tm-app.side-open .tm-side{transform:none}
+  /* хлястик на мобиле не нужен: панель открывает гамбургер в шапке */
+  .tm-side .ptab{display:none}
+  .tm-side-scrim{
+    display:block;position:fixed;inset:0;z-index:115;background:rgba(6,7,9,.62);
+    opacity:0;visibility:hidden;pointer-events:none;transition:.25s;
+  }
+  .tm-app.side-open .tm-side-scrim{opacity:1;visibility:visible;pointer-events:auto}
+  .tm-kcol{width:min(296px,82vw)}
+  .tm-toast{right:10px;bottom:14px}
+}
+@media (max-width: 640px){
+  /* компактная шапка: имя сервиса и текст кнопки «Задача» прячутся,
+     поиск растягивается на остаток строки */
+  .tm-head{gap:8px;padding:0 10px}
+  .tm-head .svc-head-name{display:none}
+  .tm-head .tm-new span{display:none}
+  .tm-head .tm-search{min-width:0;flex:1;max-width:none}
+  .tm-toast{max-width:calc(100vw - 20px)}
+}
+
+/* ═══════ Ветви — МОБИЛЬНАЯ ВЁРСТКА ═══════
+   ≤900px: левая панель (проекты/палитра/список) и правая (инспектор)
+   превращаются в панели-оверлеи поверх холста. Используется существующая
+   логика стора: leftCollapsed (мини-рейка 48px) и leftPeek (открытие из
+   рейки закрывается кликом мимо) — на мобиле это и есть выдвижной ящик.
+   Инспектор открывается выделением объекта, закрывается хлястиком. ═══════ */
+
+/* scrim панели-«подглядывания» (рендерит LeftPane при leftPeek) */
+.pane-scrim{position:fixed;inset:0;z-index:114;background:rgba(6,7,9,.62);animation:fadeI .2s ease}
+@keyframes fadeI{from{opacity:0}}
+
+@media (max-width: 900px){
+  /* левая панель — оверлей: мини-рейка 48px у левого края, развёрнутая —
+     до 86vw ширины; анимация ширины сохранена (задвигается плавно).
+     top:56px — рейка не накрывает топбар (z 116 > 40 у шапки) */
+  #left{
+    position:fixed;left:0;top:56px;bottom:0;z-index:116;
+    max-width:86vw;box-shadow:24px 0 60px rgba(0,0,0,.45);
+    border-right:1px solid var(--line);
+  }
+  #left:not(.mini){width:min(300px,86vw) !important}
+  #left.mini{width:48px}
+  /* тянуть панель пальцем не нужно — только раскрыть/закрыть */
+  #leftGrip{display:none}
+  /* правая панель (инспектор) — оверлей справа; ширина задаётся только в
+     развёрнутом состоянии (:not(.rcollapsed)) — иначе !important перебил бы
+     сворачивание width:0 из .rcollapsed и панель не закрывалась бы вовсе */
+  #right{
+    position:fixed;right:0;top:0;bottom:0;z-index:116;
+    box-shadow:-24px 0 60px rgba(0,0,0,.45);
+    border-left:1px solid var(--line);
+  }
+  #right:not(.rcollapsed){width:min(302px,92vw)}
+  /* топбар: компактнее */
+  #topbar{gap:6px;padding:0 10px}
+  .brand{gap:6px}
+  .brand svg{width:24px;height:24px}
+  #projName{flex:0 0 110px;font-size:12.5px}
+  /* плавающая панель инструментов холста не уезжает за экран */
+  .tool-float{max-width:calc(100vw - 12px)}
+  .tool-float .tool-scroll{max-width:calc(100vw - 60px)}
+}
+@media (max-width: 640px){
+  .brand .lg{display:none}
+  #projName{flex:0 0 88px}
+  /* статусбар: только название файла и версия */
+  #status{gap:10px;padding:0 10px;font-size:10px}
+  .st-classic{display:none}
+  #stCounts{display:none}
+  /* модалки чуть компактнее */
+  .m-card{padding:16px}
+  /* палитра нод: плотнее */
+  .pal-item{margin:6px 8px 0}
+}

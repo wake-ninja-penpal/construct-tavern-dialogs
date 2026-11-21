@@ -546,6 +546,107 @@ export function CanvasBoard(props: { store: VetviStore }) {
     return () => el.removeEventListener('wheel', onWheelNative);
   }, [store]);
 
+  /* ── мобильный тач-шим (≤ одним пальцем — мышь, двумя — пинч-зум) ──
+     Холст/ноды/группы/стрелки слушают мышь (onMouseDown + window mousemove/
+     mouseup внутри жестов). На тач-устройствах эти события не приходят —
+     мобильная версия была «только смотреть». Шим превращает касания:
+       • один палец = мышь: mousedown на цели касания (нода/группа/стрелка/
+         холст — работают все жесты: пан, рамка, перенос, нож, пины),
+         mousemove/mouseup — на window (там их ждут жесты);
+       • короткое касание без движения = click по цели (выделение ноды);
+       • два пальца = пинч-зум вокруг середины (кнопки +/- тоже работают).
+     touch-action:none на #canvas — браузер не скроллит/не зумит страницу сам;
+     долгое нажатие НЕ глушим: нативный contextmenu открывает меню ноды. */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    el.style.touchAction = 'none';
+    let single: { id: number } | null = null;
+    let sx = 0, sy = 0, moved = false;
+    let target: EventTarget | null = null;
+    let pinch: { d0: number } | null = null;
+
+    const synthMouse = (type: string, x: number, y: number): MouseEvent =>
+      new MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true, cancelable: true, view: window });
+
+    const onStart = (e: TouchEvent) => {
+      /* два пальца: пинч. Одиночный жест прерываем mouseup (жесты ждут его на window). */
+      if (e.touches.length === 2) {
+        if (single) { window.dispatchEvent(synthMouse('mouseup', sx, sy)); single = null; }
+        const a = e.touches[0], b = e.touches[1];
+        pinch = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1 };
+        e.preventDefault();
+        return;
+      }
+      if (e.touches.length !== 1 || pinch) return;
+      const t = e.touches[0];
+      const el2 = t.target as HTMLElement | null;
+      if (!el2 || !el.contains(el2)) return;
+      single = { id: t.identifier };
+      sx = t.clientX; sy = t.clientY; moved = false;
+      target = t.target;
+      /* пустой холст (canvas/world) одним пальцем = ПАН (mousedown с button=1
+         запускает startPanGesture, как средняя кнопка мыши) — привычный мобильный
+         жест; рамка выделения остаётся мышью/Space. Тап по ноде/пину/группе/
+         стрелке — обычный mousedown (перенос/связь/waypoint). */
+      const onBlank = el2 === el || el2.id === 'world' || el2.id === 'labels';
+      t.target.dispatchEvent(new MouseEvent('mousedown', {
+        clientX: t.clientX, clientY: t.clientY, button: onBlank ? 1 : 0,
+        bubbles: true, cancelable: true, view: window,
+      }));
+      e.preventDefault();
+    };
+    const onMove = (e: TouchEvent) => {
+      if (pinch) {
+        if (e.touches.length !== 2) return;
+        const a = e.touches[0], b = e.touches[1];
+        const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+        const rect = el.getBoundingClientRect();
+        store.zoomAt((a.clientX + b.clientX) / 2 - rect.left, (a.clientY + b.clientY) / 2 - rect.top, d / pinch.d0);
+        e.preventDefault();
+        return;
+      }
+      if (!single) return;
+      const t = Array.from(e.touches).find((x) => x.identifier === single!.id) || e.touches[0];
+      if (!t) return;
+      if (!moved && Math.abs(t.clientX - sx) + Math.abs(t.clientY - sy) > 8) moved = true;
+      window.dispatchEvent(synthMouse('mousemove', t.clientX, t.clientY));
+      e.preventDefault();
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (pinch) {
+        if (e.touches.length < 2) pinch = null;
+        e.preventDefault();
+        return;
+      }
+      if (!single) return;
+      const t = Array.from(e.changedTouches).find((x) => x.identifier === single!.id);
+      single = null;
+      if (!t) return;
+      window.dispatchEvent(synthMouse('mouseup', t.clientX, t.clientY));
+      /* тап без движения — клик по исходной цели (выделение ноды/кнопки);
+         тап по пустому месту — сброс выделения (пан не двигал вид) */
+      if (!moved) {
+        if (target && target !== window && target !== el) {
+          target.dispatchEvent(synthMouse('click', t.clientX, t.clientY));
+        } else {
+          store.clearSelection();
+        }
+      }
+      e.preventDefault();
+    };
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: false });
+    el.addEventListener('touchcancel', onEnd, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [store]);
+
   /* ── клики по пустому месту ── */
 
   /* пан-жест — используется и при зажатом Ctrl на нодах/группах/связях:

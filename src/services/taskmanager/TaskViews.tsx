@@ -1758,6 +1758,74 @@ export function TmPeopleView(props: {
   );
 }
 
+/* ═══ модалка названия (+цвет): создание/переименование проекта,
+   создание доски и колонки — вместо системных окон браузера (window.prompt).
+   Enter — отправить, Esc — закрыть; фокус и выделение сразу в поле. ═══ */
+
+export function TmNameModal(props: {
+  head: string;
+  sub?: string;
+  label: string;
+  initial?: string;
+  placeholder?: string;
+  submitText: string;
+  withColor?: boolean;
+  colorInitial?: string;
+  onClose: () => void;
+  onSubmit: (title: string, color: string) => void;
+}) {
+  const [title, setTitle] = useState(props.initial || '');
+  const [color, setColor] = useState(props.colorInitial || TM_PALETTE[0]);
+  const inpRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inpRef.current?.focus();
+    inpRef.current?.select();
+  }, []);
+  const submit = () => {
+    const t = title.trim();
+    if (!t) return;
+    props.onSubmit(t, color);
+  };
+  return (
+    <div className="tm-modal-scrim" role="dialog" aria-label={props.head} onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
+      <div className="tm-modal sm">
+        <div className="tm-modal-head">
+          <span>{props.head}</span>
+          <button type="button" className="btn ibtn" onClick={props.onClose} aria-label="Закрыть">×</button>
+        </div>
+        {props.sub && <p className="tm-modal-sub">{props.sub}</p>}
+        <form className="tm-modal-body" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <label className="tm-f">
+            <span>{props.label} <i>*</i></span>
+            <input
+              ref={inpRef}
+              value={title}
+              maxLength={120}
+              placeholder={props.placeholder}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); props.onClose(); } }}
+            />
+          </label>
+          {props.withColor && (
+            <div className="tm-f">
+              <span>Цвет</span>
+              <div className="tm-swatches">
+                {TM_PALETTE.map((c) => (
+                  <button key={c} type="button" className={'tm-swatch' + (c === color ? ' on' : '')} style={{ background: c }} onClick={() => setColor(c)} aria-label={'Цвет ' + c} />
+                ))}
+              </div>
+            </div>
+          )}
+        </form>
+        <div className="tm-modal-foot">
+          <button type="button" className="btn" onClick={props.onClose}>Отмена</button>
+          <button type="button" className="btn primary" disabled={!title.trim()} onClick={submit}>{props.submitText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══ модалка доступов проекта (команды + люди с ролями) ═══ */
 
 interface AccessDraft { key: string; login: string | null; teamId: string | null; role: string }

@@ -194,14 +194,25 @@ export function LeftPane(props: { store: VetviStore }) {
      Контент обёрнут в .l-body (overflow:hidden — панель «задвигается» плавно),
      хлястик .ptab живёт СНАРУЖИ блока и от перерисовки контента не страдает. ── */
   const mini = store.leftCollapsed;
+  /* мобильный scrim (≤900px видит только CSS): панель, развёрнутая из мини-рейки
+     (peek), закрывается кликом по затемнению — как клик мимо панели */
+  const peekScrim = !mini && store.leftPeek;
 
   return (
-    <aside
-      id="left"
-      className={mini ? 'mini' : undefined}
-      style={mini ? undefined : { width: store.leftWidth }}
-      aria-label="Панель проекта"
-    >
+    <>
+      {peekScrim && (
+        <div
+          className="pane-scrim"
+          aria-hidden="true"
+          onClick={() => store.setLeftCollapsed(true)}
+        />
+      )}
+      <aside
+        id="left"
+        className={mini ? 'mini' : undefined}
+        style={mini ? undefined : { width: store.leftWidth }}
+        aria-label="Панель проекта"
+      >
       <div className="l-body">
         {mini ? (
           <nav className="ltabs" role="tablist">
@@ -262,7 +273,8 @@ export function LeftPane(props: { store: VetviStore }) {
         }}
       />
       {crop && <CropModal store={store} req={crop} onClose={closeCrop} />}
-    </aside>
+      </aside>
+    </>
   );
 }
 

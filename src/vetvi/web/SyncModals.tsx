@@ -74,6 +74,9 @@ function ShareAccess({ store }: { store: VetviStore }) {
   const [items, setItems] = useState<AccessListItem[]>([]);
   const [meRole, setMeRole] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  /* список недоступен (гость без записи ProjectAccess / сервер недоступен) —
+     честное сообщение вместо вводящего в заблуждение «Пока никого…» */
+  const [failed, setFailed] = useState(false);
   const [login, setLogin] = useState('');
   const [users, setUsers] = useState<UserLite[]>([]);
   const [focused, setFocused] = useState(false);
@@ -88,13 +91,14 @@ function ShareAccess({ store }: { store: VetviStore }) {
       if (r.ok) {
         setItems(r.items);
         setMeRole((prev) => prev || r.meRole || null);
+        setFailed(false);
         setLoaded(true);
         return;
       }
       /* запись владельца могла ещё не сохраниться (гонка init/join) —
          пара тихих повторов, прежде чем показать «список недоступен» */
       if (attempt < 2) window.setTimeout(() => reload(attempt + 1), 800);
-      else setLoaded(true);
+      else { setFailed(true); setLoaded(true); }
     });
   };
   useEffect(() => {
@@ -211,9 +215,17 @@ function ShareAccess({ store }: { store: VetviStore }) {
     <div className="share-acc">
       <div className="sp-cap">Участники проекта</div>
       {!loaded && <div className="sa-empty">Загрузка участников…</div>}
-      {loaded && !items.length && <div className="sa-empty">Пока никого — найдите пользователя по имени или нику ниже</div>}
+      {loaded && !items.length && (
+        /* владелец — приглашение к поиску; гость по ссылке (без записи доступа)
+           и сбой сервера — честное сообщение вместо «Пока никого…» */
+        failed ? <div className="sa-empty">Список участников недоступен{isOwner ? ' — проверьте соединение' : ' — вы вошли по ссылке как гость'}</div>
+        : isOwner ? <div className="sa-empty">Пока никого — найдите пользователя по имени или нику ниже</div>
+        : <div className="sa-empty">Участники проекта: пока только владелец</div>
+      )}
       {!isPub && items.some((it) => it.role !== 'owner') && (
-        <div className="sa-empty">Сетевой режим выключен — участники серые и открыть проект не могут. Включите «Общедоступный (на сервере)» ниже, чтобы вернуть им доступ.</div>
+        <div className="sa-empty">{isOwner
+          ? 'Сетевой режим выключен — участники серые и открыть проект не могут. Включите «Общедоступный (на сервере)» ниже, чтобы вернуть им доступ.'
+          : 'Сетевой режим выключен владельцем — участники серые и открыть проект не могут.'}</div>
       )}
       <div className="sa-list">
         {items.map((it) => (
@@ -298,7 +310,9 @@ function ShareAccess({ store }: { store: VetviStore }) {
       )}
       {isOwner && users.length === 0 && loaded && <div className="sa-empty">Зарегистрированных пользователей пока нет — аккаунты создаются по ссылкам-приглашениям</div>}
       <p style={{ fontSize: '11px', color: 'var(--tx3)', margin: '8px 0 0' }}>
-        Участник получит уведомление и увидит проект в своём списке. Открыть его можно, когда проект на сервере: первый добавленный участник сам включает сетевой режим.
+        {isOwner
+          ? 'Участник получит уведомление и увидит проект в своём списке. Открыть его можно, когда проект на сервере: первый добавленный участник сам включает сетевой режим.'
+          : 'Состав участников виден всем, у кого открыт проект. Управлять доступами, ссылкой и паролем может владелец.'}
       </p>
     </div>
   );
@@ -399,7 +413,7 @@ export function ShareModal({ store }: { store: VetviStore }) {
             </span>
           </label>
           )}
-          {linkMode !== 'off' && (
+          {linkMode !== 'off' ? (
             <>
               <div className="share-link">
                 <input ref={inpRef} readOnly value={u} onClick={(e) => (e.currentTarget as HTMLInputElement).select()} aria-label="Ссылка комнаты" />
@@ -425,15 +439,23 @@ export function ShareModal({ store }: { store: VetviStore }) {
                   : 'Пользователи по ссылке увидят проект в режиме «только чтение»; участники из списка редактируют.'}
               </p>
             </>
+          ) : (
+            /* не-владельцу раньше секция просто исчезала — теперь честное сообщение:
+               ссылку закрывает владелец, войти можно через свой список проектов */
+            <div className="sp-st">Ссылка отключена владельцем проекта — войти можно через свой список проектов («Открыть проект»).</div>
           )}
         </div>
       )}
 
-      {/* пароль комнаты — смысл имеет только в сетевом режиме */}
+      {/* пароль комнаты — смысл имеет только в сетевом режиме; управляет им
+          ВЛАДЕЛЕЦ: раньше у читателя/редактора отображались кнопки смены,
+          которые сервер всё равно отклонял */}
       {isPublic && !isCopy && (
         <div className="share-pass">
           <div className="sp-cap">Пароль проекта</div>
-          {pwSet ? (
+          {!isOwner ? (
+            <div className="sp-st">{pwSet ? 'Установлен владельцем — вход в комнату по паролю.' : 'Не установлен — по ссылке войдут все, но правка доступна только участникам из списка.'}</div>
+          ) : pwSet ? (
             <>
               <div className="sp-st">Установлен — вход в комнату по паролю: новый участник введёт его при подключении по ссылке.</div>
               <div className="sp-acts">
