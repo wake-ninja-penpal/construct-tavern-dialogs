@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { hkText } from '@/vetvi/core/hotkeys';
 import { getMe } from '@/vetvi/core/identity';
@@ -39,6 +40,11 @@ const TOOLBLOCK_LS = 'vetvi-toolblock-v3';
 const GAP = 12; // отступ плавающей панели от краёв экрана/панелей
 const TOPBAR_H_FALLBACK = 56;
 const MAGNET = 56; // радиус магнита: ближе этого расстояния до места крепления панель «прилипает»
+/** мобильная ширина: блок кнопок холста не влезает в шапку — он всегда
+ *  плавающий (у нижнего края), а магнит «шапка» отключён */
+function isMobileWidth(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth <= 760;
+}
 
 type ToolEdge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -69,16 +75,21 @@ function loadToolDock(): ToolDock {
         return JSON.stringify({ float: true, edge, along: edge === 'top' || edge === 'bottom' ? cx : cy });
       } catch { return null; }
     })());
-    if (!raw) return def;
+    if (!raw) return isMobileWidth() ? { float: true, edge: 'bottom', along: GAP } : def;
     const d = JSON.parse(raw as string) as Partial<ToolDock>;
-    if (!d || typeof d !== 'object') return def;
+    if (!d || typeof d !== 'object') return isMobileWidth() ? { float: true, edge: 'bottom', along: GAP } : def;
     const edge: ToolEdge = d.edge === 'bottom' || d.edge === 'left' || d.edge === 'right' ? d.edge : 'top';
     /* свободная позиция (v3): панель в произвольной точке холста */
     if (d.float && d.free && Number.isFinite(Number(d.x)) && Number.isFinite(Number(d.y))) {
       return { float: true, edge, along: Number(d.along) || def.along, free: true, x: Number(d.x), y: Number(d.y) };
     }
-    return { float: !!d.float, edge, along: Number(d.along) || def.along };
-  } catch { return def; }
+    const parsed: ToolDock = { float: !!d.float, edge, along: Number(d.along) || def.along };
+    /* мобильные экраны: блок в шапке скрыт (кнопки проекта ушли в бургер),
+       инструменты холста ДОЛЖНЫ быть на экране — плавающая панель у нижнего края;
+       сохранённая плавающая позиция уважается */
+    if (isMobileWidth() && !parsed.float) return { float: true, edge: 'bottom', along: GAP };
+    return parsed;
+  } catch { return isMobileWidth() ? { float: true, edge: 'bottom', along: GAP } : def; }
 }
 
 function saveToolDock(d: ToolDock): void {
@@ -161,6 +172,11 @@ export function TopBar(props: { store: VetviStore }) {
   const [saveOpen, setSaveOpen] = useState(false);
   const [savePos, setSavePos] = useState<{ left: number; top: number } | null>(null);
   const saveRef = useRef<HTMLDivElement>(null);
+  /* бургер-меню (мобильная версия): все кнопки проекта из шапки, которые
+     не помещаются на узком экране; панель — портал вне шапки (поверх всего) */
+  const [burgerOpen, setBurgerOpen] = useState(false);
+  const [burgerPos, setBurgerPos] = useState<{ left: number; top: number } | null>(null);
+  const burgerRef = useRef<HTMLButtonElement>(null);
   /* подпись статуса составной кнопки «Поделиться»: fixed-плашка рядом с кнопкой
      (поверх всего — скролл-контейнер шапки её не обрезает и не раздувает скролл) */
   const [statusPop, setStatusPop] = useState<{ x: number; y: number } | null>(null);
@@ -408,8 +424,10 @@ export function TopBar(props: { store: VetviStore }) {
 
     /* ── магнит: места крепления — шапка и четыре края холста ──
        в радиусе MAGNET от линии крепления панель «прилипает» к ней,
-       дальше от всех мест крепления — свободно следует за курсором */
-    const dHeader = e.clientY - topbarH; /* ≤0 — курсор над шапкой */
+       дальше от всех мест крепления — свободно следует за курсором.
+       На мобильных магнит шапки отключён: блок в шапке скрыт (бургер),
+       панель холста всегда остаётся плавающей. */
+    const dHeader = isMobileWidth() ? Infinity : e.clientY - topbarH; /* ≤0 — курсор над шапкой */
     const edges: Array<{ e: ToolEdge; v: number }> = [
       { e: 'top', v: Math.abs(e.clientY - cTop) },
       { e: 'bottom', v: Math.abs(e.clientY - cBottom) },
@@ -473,9 +491,21 @@ export function TopBar(props: { store: VetviStore }) {
     setToolMagnet(null);
     if (!d || !d.moved) return;
     const topbarH = document.getElementById('topbar')?.offsetHeight || TOPBAR_H_FALLBACK;
-    /* отпустили над шапкой (или магнит держал за шапку) — блок встаёт на своё место */
-    if (d.snap === 'header' || d.pos.y <= topbarH) {
+    /* отпустили над шапкой (или магнит держал за шапку) — блок встаёт на своё место;
+       на мобильных шапка исключена — блок уходит к нижнему краю холста */
+    if (d.snap === 'header' || (!isMobileWidth() && d.pos.y <= topbarH)) {
       const next: ToolDock = { float: false, edge: 'top', along: 0 };
+      setToolDock(next);
+      saveToolDock(next);
+      return;
+    }
+    if (isMobileWidth() && d.pos.y <= topbarH) {
+      const st = reservedStrips();
+      const el = floatRef.current;
+      const r = el ? rectOf(el) : null;
+      const len = r ? r.width : d.len;
+      const along = clamp((d.pos.x || 0) - d.grabAlong, st.left + GAP, Math.max(st.left + GAP, window.innerWidth - st.right - GAP - len));
+      const next: ToolDock = { float: true, edge: 'bottom', along, free: false };
       setToolDock(next);
       saveToolDock(next);
       return;
@@ -562,10 +592,12 @@ export function TopBar(props: { store: VetviStore }) {
         setSaveOpen(false);
         setSavePos(null);
       }
+      /* бургер закрывается кликом мимо (пункты закрывают его сами) */
+      if (burgerOpen && !t.closest('.tb-burger-pop') && !t.closest('#tbBurger')) setBurgerOpen(false);
     };
     document.addEventListener('pointerdown', onDoc, true);
     return () => document.removeEventListener('pointerdown', onDoc, true);
-  }, [store, store.accPop, ntf.open, ntf.setOpen, saveOpen]);
+  }, [store, store.accPop, ntf.open, ntf.setOpen, saveOpen, burgerOpen]);
 
   const zoomStep = (factor: number) => {
     const r = canvasApi.current?.getRect();
@@ -865,8 +897,34 @@ export function TopBar(props: { store: VetviStore }) {
       <div className="spacer" />
 
       {/* правый прижатый блок: поиск, уведомления, аккаунт — всегда у края шапки,
-          никуда не сдвигаются и не уезжают за экран */}
+          никуда не сдвигаются и не уезжают за экран. На мобильных здесь ещё и
+          БУРГЕР: все кнопки проекта из шапки ушли в его панель */}
       <div className="tb-right">
+        <button
+          type="button"
+          className="btn ibtn tb-burger"
+          id="tbBurger"
+          ref={burgerRef}
+          title="Меню проекта"
+          aria-label="Меню проекта"
+          aria-haspopup="menu"
+          aria-expanded={burgerOpen}
+          onClick={() => {
+            const next = !burgerOpen;
+            if (next) {
+              const el = burgerRef.current;
+              if (el) {
+                const r = el.getBoundingClientRect();
+                const W = window.innerWidth;
+                /* панель у правого края экрана (левый край — в границах экрана) */
+                setBurgerPos({ left: Math.max(8, Math.min(r.right - 258, W - 266)), top: r.bottom + 8 });
+              }
+            }
+            setBurgerOpen(next);
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
+        </button>
         <button type="button" className="btn" id="bSearch" title={'Поиск по проекту (' + hkText('search') + ')'} onClick={() => store.openModal('search')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
         </button>
@@ -948,6 +1006,82 @@ export function TopBar(props: { store: VetviStore }) {
         Импорт текстов (JSON)…
       </div>
     </div>
+
+    {/* бургер-панель (мобильная версия): все кнопки проекта из шапки — новый/
+        открыть/сохранить/экспорт/играть/копии/журнал/merge/поделиться.
+        Портал ВНЕ шапки (как меню сохранения и попап сервисов) — поверх
+        плавающей панели инструментов и холста; положение — под кнопкой. */}
+    {burgerOpen && createPortal(
+      <div
+        className="collab-pop show tb-burger-pop"
+        role="menu"
+        aria-label="Меню проекта"
+        style={burgerPos ? { position: 'fixed', left: burgerPos.left, top: burgerPos.top } : undefined}
+      >
+        <div className="cp-cap">Проект</div>
+        <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.createProject(); }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          Новый проект
+        </button>
+        <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.openModal('projects'); }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+          Открыть проект
+        </button>
+        <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.setPlayerStart(null, false); store.openModal('player'); }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" /></svg>
+          Режим новеллы
+        </button>
+        {(sc && sc.enabled && store.syncMode !== 'copy') && store.syncMergeCount > 0 && (
+          <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.openModal('merge'); }}>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="2.6" /><circle cx="6" cy="6" r="2.6" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
+            Merge-запросы ({store.syncMergeCount})
+          </button>
+        )}
+        <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.openModal('copies'); }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+          Локальные копии
+        </button>
+        <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.setLogFilters(null, null); store.openModal('log'); }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6" /><path d="M12 7.4V12l3.2 2" /></svg>
+          Журнал действий
+        </button>
+        <button
+          type="button"
+          className="cp-act"
+          role="menuitem"
+          onClick={() => {
+            setBurgerOpen(false);
+            if (store.syncMode === 'copy') store.openModal('copyBar');
+            else if (sc) sc.shareProject();
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.4 13.4 7.2 4.2M15.6 6.4 8.4 10.6" /></svg>
+          Поделиться проектом
+        </button>
+
+        <div className="cp-cap" style={{ marginTop: 6 }}>Сохранение</div>
+        <button type="button" className="cp-act" role="menuitem" onClick={() => { setBurgerOpen(false); store.saveAs(); }}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
+          Сохранить (JSON)
+        </button>
+        <button
+          type="button"
+          className="cp-act"
+          role="menuitem"
+          onClick={(e) => {
+            /* меню сохранения открывается ПОД пунктом бургера (панель закрывается) */
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setBurgerOpen(false);
+            setSavePos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 274)), top: r.bottom + 6 });
+            setSaveOpen(true);
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 3h11l4 4v14H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /><path d="m6 15 6 0" /></svg>
+          Экспорт и импорт…
+        </button>
+      </div>,
+      document.body,
+    )}
 
     {/* плавающая панель инструментов: у любого края холста — горизонтальная
         (сверху/снизу) или вертикальная (слева/справа), либо в свободной позиции —

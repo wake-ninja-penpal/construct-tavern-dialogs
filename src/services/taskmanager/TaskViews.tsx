@@ -570,6 +570,10 @@ interface CardDragState {
   /** цель в сайдбаре (доска/бэклог) — задача улетает туда целиком */
   sb: HTMLElement | null;
   raf: number;
+  /** touch-перетаскивание: старт по долгому нажатию (мобильная версия) */
+  touch: boolean;
+  /** таймер долгого нажатия (touch) — отменяется при скролле/отжатии */
+  lpTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface ColDragState {
@@ -586,6 +590,8 @@ interface ColDragState {
   wrap: HTMLElement | null;
   ph: HTMLElement | null;
   raf: number;
+  /** touch-перетаскивание за грип (touch-action:none — скролл не мешает) */
+  touch: boolean;
 }
 
 export function BoardView(props: {
@@ -620,6 +626,14 @@ export function BoardView(props: {
   const drag = useRef<CardDragState | null>(null);
   const colDrag = useRef<ColDragState | null>(null);
   const suppressClick = useRef(0);
+  /* вид доски: канбан (колонки) или список (строки по колонкам) — запоминается */
+  const [mode, setMode] = useState<'kanban' | 'list'>(() => {
+    try { return localStorage.getItem('tm-board-view') === 'list' ? 'list' : 'kanban'; } catch { return 'kanban'; }
+  });
+  const switchMode = (m: 'kanban' | 'list') => {
+    setMode(m);
+    try { localStorage.setItem('tm-board-view', m); } catch { /* нет localStorage */ }
+  };
 
   if (!project || !board) {
     return <div className="tm-loading">Доска не найдена</div>;
@@ -692,7 +706,10 @@ export function BoardView(props: {
 
   const beginCardDrag = (e: React.PointerEvent, t: TmTask): void => {
     if (!props.canEdit || drag.current || colDrag.current) return;
-    if (e.pointerType !== 'mouse' || (e.button !== undefined && e.button !== 0)) return;
+    /* мышь — левая кнопка; touch — долгое нажатие (~380 мс) без движения:
+       короткий тап открывает карточку, свайп скроллит колонку, удержание — DnD */
+    const isTouch = e.pointerType === 'touch';
+    if (e.pointerType === 'pen' || (!isTouch && e.button !== undefined && e.button !== 0)) return;
     /* не тянем за кнопки/поля внутри карточки */
     const target = e.target as Element;
     if (target.closest('button,input,textarea,select,a')) return;
@@ -703,7 +720,8 @@ export function BoardView(props: {
       task: t,
       rect,
       ox: e.clientX - rect.left,
-      oy: e.clientY - rect.top,
+      /* touch: призрак держится НАД пальцем (он закрывает карточку) */
+      oy: isTouch ? Math.min(e.clientY - rect.top, 30) : e.clientY - rect.top,
       px: e.clientX,
       py: e.clientY,
       sx: e.clientX,
@@ -715,6 +733,8 @@ export function BoardView(props: {
       hint: null,
       sb: null,
       raf: 0,
+      touch: isTouch,
+      lpTimer: null,
     };
     drag.current = st;
     let finished = false;
@@ -767,6 +787,9 @@ export function BoardView(props: {
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', cancel);
       document.removeEventListener('keydown', escH, true);
+      document.removeEventListener('touchmove', touchMove);
+      document.removeEventListener('contextmenu', ctxOff, true);
+      if (st.lpTimer) { clearTimeout(st.lpTimer); st.lpTimer = null; }
       cancelAnimationFrame(st.raf);
       /* цель переноса считаем ДО уборки слота: позиция вставки = сколько
          карточек стоит перед заглушкой в её колонке */
@@ -807,7 +830,9 @@ export function BoardView(props: {
       st.px = ev.clientX;
       st.py = ev.clientY;
       if (!st.started) {
-        if (Math.hypot(ev.clientX - st.sx, ev.clientY - st.sy) < 5) return;
+        /* touch: DnD стартует ТОЛЬКО по долгому нажатию (lpTimer) — движение
+           до старта это скролл, не перенос; мышь — прежний порог 5px */
+        if (st.touch || Math.hypot(ev.clientX - st.sx, ev.clientY - st.sy) < 5) return;
         start();
       }
       if (st.wrap) st.wrap.style.transform = 'translate3d(' + (ev.clientX - st.ox) + 'px,' + (ev.clientY - st.oy) + 'px,0)';
@@ -815,17 +840,46 @@ export function BoardView(props: {
     const up = (): void => finish(true);
     const cancel = (): void => finish(false);
     const escH = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.stopPropagation(); ev.preventDefault(); finish(false); } };
+    /* touch: после старта DnD гасим скролл браузера — иначе он перехватит
+       жест и оборвёт перенос (pointercancel); до старта ждем (это скролл) */
+    const touchMove = (ev: TouchEvent): void => {
+      if (!st.started) return;
+      ev.preventDefault();
+    };
+    /* Android: долгое нажатие вызывает системное contextmenu — во время
+       переноса оно подавляется (иначе поверх DnD откроется меню карточки) */
+    const ctxOff = (ev: MouseEvent): void => {
+      if (!st.started) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
 
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
     document.addEventListener('pointercancel', cancel);
     document.addEventListener('keydown', escH, true);
+    if (st.touch) {
+      document.addEventListener('touchmove', touchMove, { passive: false });
+      document.addEventListener('contextmenu', ctxOff, true);
+      /* долгое нажатие запускает перенос; если до этого палец уехал дальше
+         12px — жест считается скроллом, таймер отменяется */
+      st.lpTimer = setTimeout(() => {
+        st.lpTimer = null;
+        if (finished || st.started) return;
+        if (Math.hypot(st.px - st.sx, st.py - st.sy) > 12) return;
+        start();
+        if (st.wrap) st.wrap.style.transform = 'translate3d(' + (st.px - st.ox) + 'px,' + (st.py - st.oy) + 'px,0)';
+      }, 380);
+    }
   };
 
-  /* ═══ перетягивание КОЛОНОК (grip в шапке, порядок сохраняется) ═══ */
+  /* ═══ перетягивание КОЛОНОК (grip в шапке, порядок сохраняется) ═══
+     touch: грип — отдельная ручка с touch-action:none, скролл ей не мешает,
+     поэтому DnD стартует сразу за движением пальца (без долгого нажатия) */
   const beginColDrag = (e: React.PointerEvent, colId: string): void => {
     if (!props.canEdit || colDrag.current || drag.current) return;
-    if (e.pointerType === 'touch' || (e.button !== undefined && e.button !== 0)) return;
+    const isTouch = e.pointerType === 'touch';
+    if (e.pointerType === 'pen' || (!isTouch && e.button !== undefined && e.button !== 0)) return;
     const el = (e.currentTarget as HTMLElement).closest<HTMLElement>('.tm-kcol');
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -834,7 +888,7 @@ export function BoardView(props: {
       colId,
       rect,
       ox: e.clientX - rect.left,
-      oy: e.clientY - rect.top,
+      oy: isTouch ? Math.min(e.clientY - rect.top, 22) : e.clientY - rect.top,
       px: e.clientX,
       py: e.clientY,
       sx: e.clientX,
@@ -843,6 +897,7 @@ export function BoardView(props: {
       wrap: null,
       ph: null,
       raf: 0,
+      touch: isTouch,
     };
     colDrag.current = st;
     let finished = false;
@@ -968,6 +1023,29 @@ export function BoardView(props: {
         title={board.title}
         sub={project.title + ' · ' + activeN + ' активных · ПКМ — меню' + (!props.canEdit ? ' · наблюдатель' : '')}
       >
+        {/* переключатель вида доски: канбан / список (ТМ запоминает выбор) */}
+        <div className="tm-mode" role="group" aria-label="Вид доски">
+          <button
+            type="button"
+            className={'tm-mode-btn' + (mode === 'kanban' ? ' on' : '')}
+            title="Канбан-доска"
+            aria-label="Вид: канбан-доска"
+            aria-pressed={mode === 'kanban'}
+            onClick={() => switchMode('kanban')}
+          >
+            <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><rect x="3.5" y="4.5" width="6.4" height="15" rx="2" /><rect x="14.1" y="4.5" width="6.4" height="9" rx="2" /></svg>
+          </button>
+          <button
+            type="button"
+            className={'tm-mode-btn' + (mode === 'list' ? ' on' : '')}
+            title="Список задач"
+            aria-label="Вид: список задач"
+            aria-pressed={mode === 'list'}
+            onClick={() => switchMode('list')}
+          >
+            <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth="2.6" /></svg>
+          </button>
+        </div>
         {props.headExtra}
         <div className="tm-tabs" role="tablist" aria-label="Доски проекта">
           {project.boards.map((b) => {
@@ -1007,6 +1085,8 @@ export function BoardView(props: {
         </button>
       </TmViewHead>
 
+      {/* КАНБАН: колонки с карточками (переключатель вида — в шапке представления) */}
+      {mode === 'kanban' ? (
       <div
         className="tm-kanban"
         onContextMenu={(e) => {
@@ -1108,6 +1188,54 @@ export function BoardView(props: {
           </div>
         )}
       </div>
+      ) : (
+      /* СПИСОК: те же колонки и задачи строками (удобно на мобильном и для
+         обзорного просмотра); порядок и содержимое — как в канбане */
+      <div className="tm-boardlist" role="list" aria-label="Список задач доски">
+        {board.columns.map((col) => {
+          const tasks = columnTasks(col.id);
+          const sysDef = col.kind ? TM_SYS_COL_INFO[col.kind] : null;
+          return (
+            <section key={col.id} className="tm-blist-col" role="listitem" aria-label={'Колонка ' + col.title}>
+              <header className="tm-blist-head" style={{ '--cc': col.color } as React.CSSProperties}>
+                <span className="tm-kcol-ico" style={{ color: col.color }}><ColumnIcon id={col.icon} size={13} /></span>
+                <span className="tm-blist-title" title={sysDef || col.title}>{col.title}{col.locked && <i title="Системная колонка — задаёт статус задач">🔒</i>}</span>
+                <span className="tm-blist-cnt">{tasks.filter((t) => !t.done).length}</span>
+              </header>
+              <div className="tm-rows tm-blist-rows">
+                {tasks.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    ws={ws}
+                    userMap={props.userMap}
+                    labels={props.labels}
+                    onOpen={openCard}
+                    onToggleDone={props.onToggleDone}
+                  />
+                ))}
+                {tasks.length === 0 && <div className="tm-blist-empty">Пусто</div>}
+              </div>
+              {props.canEdit && (
+                <footer className="tm-blist-add">
+                  <input
+                    placeholder="+ задача (Enter)"
+                    aria-label={'Новая задача в колонку ' + col.title}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      const v = (e.target as HTMLInputElement).value.trim();
+                      if (!v) return;
+                      (e.target as HTMLInputElement).value = '';
+                      props.onQuickAdd(col.id, v);
+                    }}
+                  />
+                </footer>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      )}
     </div>
   );
 }
@@ -1318,6 +1446,9 @@ interface RowDragState {
   wrap: HTMLElement | null;
   sb: HTMLElement | null;
   raf: number;
+  /** touch-перетаскивание: старт по долгому нажатию (мобильная версия) */
+  touch: boolean;
+  lpTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export function BacklogView(props: {
@@ -1344,10 +1475,12 @@ export function BacklogView(props: {
   ).sort((a, b) => a.order - b.order);
   if (!project) return <div className="tm-loading">Проект не найден</div>;
 
-  /* перенос строки из бэклога: тот же принцип, что DnD карточек на сайдбар */
+  /* перенос строки из бэклога: тот же принцип, что DnD карточек на сайдбар.
+     touch — долгое нажатие запускает перенос, свайп скроллит список (мобайл) */
   const beginRowDrag = (e: React.PointerEvent, t: TmTask): void => {
     if (!props.canEdit || !(props.onDropBoard || props.onDropBacklog)) return;
-    if (e.pointerType !== 'mouse' || (e.button !== undefined && e.button !== 0)) return;
+    const isTouch = e.pointerType === 'touch';
+    if (e.pointerType === 'pen' || (!isTouch && e.button !== undefined && e.button !== 0)) return;
     const target = e.target as Element;
     if (target.closest('button,input,textarea,select,a')) return;
     const el = e.currentTarget as HTMLElement;
@@ -1357,7 +1490,7 @@ export function BacklogView(props: {
       task: t,
       rect,
       ox: Math.min(60, e.clientX - rect.left),
-      oy: Math.min(18, e.clientY - rect.top),
+      oy: Math.min(isTouch ? 30 : 18, e.clientY - rect.top),
       px: e.clientX,
       py: e.clientY,
       sx: e.clientX,
@@ -1366,6 +1499,8 @@ export function BacklogView(props: {
       wrap: null,
       sb: null,
       raf: 0,
+      touch: isTouch,
+      lpTimer: null,
     };
     let finished = false;
 
@@ -1410,6 +1545,9 @@ export function BacklogView(props: {
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', cancel);
       document.removeEventListener('keydown', escH, true);
+      document.removeEventListener('touchmove', touchMove);
+      document.removeEventListener('contextmenu', ctxOff, true);
+      if (st.lpTimer) { clearTimeout(st.lpTimer); st.lpTimer = null; }
       cancelAnimationFrame(st.raf);
       const sb = commit && st.started ? st.sb : null;
       const side = sb
@@ -1430,7 +1568,8 @@ export function BacklogView(props: {
       st.px = ev.clientX;
       st.py = ev.clientY;
       if (!st.started) {
-        if (Math.hypot(ev.clientX - st.sx, ev.clientY - st.sy) < 5) return;
+        /* touch: старт только по долгому нажатию — движение до старта это скролл */
+        if (st.touch || Math.hypot(ev.clientX - st.sx, ev.clientY - st.sy) < 5) return;
         start();
       }
       if (st.wrap) st.wrap.style.transform = 'translate3d(' + (ev.clientX - st.ox) + 'px,' + (ev.clientY - st.oy) + 'px,0)';
@@ -1438,11 +1577,33 @@ export function BacklogView(props: {
     const up = (): void => finish(true);
     const cancel = (): void => finish(false);
     const escH = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.stopPropagation(); ev.preventDefault(); finish(false); } };
+    /* touch: после старта DnD гасим скролл (иначе браузер оборвёт перенос) */
+    const touchMove = (ev: TouchEvent): void => {
+      if (!st.started) return;
+      ev.preventDefault();
+    };
+    /* Android: долгое нажатие вызывает системное contextmenu — подавляем во время переноса */
+    const ctxOff = (ev: MouseEvent): void => {
+      if (!st.started) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
 
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
     document.addEventListener('pointercancel', cancel);
     document.addEventListener('keydown', escH, true);
+    if (st.touch) {
+      document.addEventListener('touchmove', touchMove, { passive: false });
+      document.addEventListener('contextmenu', ctxOff, true);
+      st.lpTimer = setTimeout(() => {
+        st.lpTimer = null;
+        if (finished || st.started) return;
+        if (Math.hypot(st.px - st.sx, st.py - st.sy) > 12) return;
+        start();
+        if (st.wrap) st.wrap.style.transform = 'translate3d(' + (st.px - st.ox) + 'px,' + (st.py - st.oy) + 'px,0)';
+      }, 380);
+    }
   };
 
   return (

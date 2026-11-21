@@ -94,13 +94,20 @@ export function NotificationsPopover(props: {
   onClear?: () => void;
 }) {
   const { items, onOpenItem, onClose, onClear } = props;
-  /* позиция — под колокольчиком (якорь ищется в DOM по id) */
-  let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8 };
+  /* позиция — под колокольчиком (якорь ищется в DOM по id).
+     Узкие экраны (мобильная версия): попап НЕ вылезает за левый край —
+     правый край держится под колокольчиком, но левый край не левее 8px,
+     а ширина не больше «экран − 16px» (колокольчик мог встать не у края). */
+  let popStyle: React.CSSProperties = { position: 'fixed', top: 52, right: 8, maxWidth: 'calc(100vw - 16px)' };
   if (typeof document !== 'undefined') {
     const anchor = document.querySelector('#bellBtn');
     if (anchor) {
       const r = anchor.getBoundingClientRect();
-      popStyle = { position: 'fixed', top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right), left: 'auto' };
+      const W = window.innerWidth;
+      let right = Math.max(8, W - r.right);
+      /* левый край попапа = W − right − ширина(≤340): держим его ≥ 8px */
+      if (right > W - 348) right = Math.max(8, W - 348);
+      popStyle = { position: 'fixed', top: r.bottom + 8, right, left: 'auto', maxWidth: Math.min(340, W - 16) };
     }
   }
   return (

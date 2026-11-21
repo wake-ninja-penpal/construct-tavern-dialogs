@@ -2668,7 +2668,7 @@ body.dragging *{cursor:grabbing!important}
   #projName{flex:0 0 110px;font-size:12.5px}
   /* плавающая панель инструментов холста не уезжает за экран */
   .tool-float{max-width:calc(100vw - 12px)}
-  .tool-float .tool-scroll{max-width:calc(100vw - 60px)}
+  .tool-float .float-scroll{max-width:calc(100vw - 60px)}
 }
 @media (max-width: 640px){
   .brand .lg{display:none}
@@ -2681,4 +2681,72 @@ body.dragging *{cursor:grabbing!important}
   .m-card{padding:16px}
   /* палитра нод: плотнее */
   .pal-item{margin:6px 8px 0}
+
+/* ═══════════ Менеджер задач 1.19: вид доски — канбан ⇄ список задач ═══════════ */
+
+.tm-mode{display:inline-flex;gap:2px;background:#121417;border-radius:8px;padding:2px;flex:none}
+.tm-mode-btn{width:28px;height:26px;border:none;background:none;border-radius:6px;color:var(--tx3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.14s;padding:0}
+.tm-mode-btn:hover{color:var(--tx);background:rgba(255,255,255,.06)}
+.tm-mode-btn.on{background:var(--accd);color:var(--tx)}
+/* список задач: те же колонки, но строки (удобно на мобильном и для обзора) */
+.tm-boardlist{flex:1;min-height:0;overflow-y:auto;padding:10px 20px 20px;display:flex;flex-direction:column;gap:14px;scrollbar-width:thin}
+.tm-blist-col{display:flex;flex-direction:column;gap:8px;max-width:980px}
+.tm-blist-head{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:9px;background:color-mix(in srgb,var(--cc,var(--acc)) 10%,transparent);border:1px solid color-mix(in srgb,var(--cc,var(--acc)) 30%,transparent)}
+.tm-blist-title{font:700 12.5px var(--body);color:var(--tx)}
+.tm-blist-title i{font-style:normal;font-size:10px}
+.tm-blist-cnt{margin-left:auto;font:600 11px var(--mono);color:var(--tx3)}
+.tm-blist-rows{padding:0;max-width:none;gap:6px}
+.tm-blist-empty{font:400 12px var(--body);color:var(--tx3);padding:9px 12px;border:1px dashed var(--line2);border-radius:9px}
+.tm-blist-add input{width:100%;height:32px;background:#14161a;border:1px solid #2b2f37;border-radius:8px;color:var(--tx);font:12.5px var(--body);padding:0 10px;outline:none;transition:.18s}
+.tm-blist-add input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--accd)}
+
+/* touch-перетаскивание: карточкам/строкам нельзя давать системный коллаут
+   (долгое нажатие запускает DnD, а не выделение/меню iOS) */
+.tm-card,.tm-row{-webkit-touch-callout:none}
+
+/* ═══════════ «Ветви» 1.19: бургер-меню шапки (мобильная версия) ═══════════ */
+
+/* кнопка бургера — только на узких экранах (ниже: media) */
+.tb-burger{display:none;flex:none}
+/* панель бургера: самостоятельный fixed-попап (portal в body, поверх холста
+   и плавающей панели инструментов) в стиле collab-pop; .cp-act/.cp-cap глобальные */
+.tb-burger-pop{position:fixed;z-index:120;display:none;min-width:258px;max-width:calc(100vw - 16px);max-height:calc(100vh - 76px);overflow-y:auto;scrollbar-width:thin;background:#1b1e24;border:1px solid #303540;border-radius:12px;padding:8px;box-shadow:var(--sh)}
+.tb-burger-pop.show{display:block;animation:ctxIn .16s cubic-bezier(.2,.9,.3,1.2)}
+.tb-burger-pop .cp-act{width:100%;text-align:left;justify-content:flex-start;white-space:nowrap}
+.tb-burger-pop .cp-cap{padding:6px 10px 4px}
+
+/* ≤760px: кнопки проекта (tb-fixed) уходят в бургер, блок кнопок холста —
+   в плавающую панель (её позицию по умолчанию задаёт TopBar по isMobileWidth);
+   панели/топбар/статусбар уже оформлены блоком ≤900px выше */
+@media (max-width:760px){
+  #topbar > .tb-fixed{display:none}
+  #topbar > .tool-block{display:none}
+  .tb-burger{display:inline-flex;align-items:center;justify-content:center}
+  .tb-right{gap:6px}
+  .tb-right .btn{padding-left:8px;padding-right:8px}
+  .tool-float .float-scroll{max-width:calc(100vw - 46px);gap:7px}
+
+  /* модальные окна — по ширине экрана: диалоги, поиск, журнал, патч, настройки
+     (базовый min-width:420px вылезал за экран телефона) */
+  .dlg-modal-card{min-width:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 20px)}
+  .patch-card,.search-card,.log-card,.set-card{width:100%;max-width:none}
+  .dlg-modal-head{padding:12px 14px}
+  .dlg-modal-body{padding:12px 13px}
+  .dlg-modal-foot{padding:10px 13px}
+  .note-modal-card{width:calc(100vw - 16px)}
+  .search-hit{padding-left:20px}
+  .search-more{padding-left:20px}
+  .log-who{max-width:92px}
+}
+
+/* ≤520px: меню и попапы — в границах самых узких экранов */
+@media (max-width:520px){
+  /* уведомления: базовый min-width 300–320px не помещается на самых узких экранах */
+  .ntf-pop,.tm-head .ntf-pop{min-width:0;max-width:calc(100vw - 16px)}
+  /* контекстные меню и попап ТМ */
+  .tm-menu{max-width:calc(100vw - 16px)}
+  .tm-accpop{min-width:0;max-width:calc(100vw - 24px);right:12px}
+  /* переключатель сервисов: попап списка сервисов не вылезает */
+  .svc-pop{left:8px !important;max-width:calc(100vw - 16px)}
+}
 }
